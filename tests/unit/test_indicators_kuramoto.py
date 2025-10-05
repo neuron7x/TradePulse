@@ -4,11 +4,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-try:  # optional SciPy for precise phase comparison
-    from scipy.signal import hilbert as _hilbert
-except Exception:  # pragma: no cover - SciPy optional
-    _hilbert = None
-
 from core.indicators.kuramoto import (
     compute_phase,
     compute_phase_gpu,
@@ -17,15 +12,15 @@ from core.indicators.kuramoto import (
 )
 
 
-@pytest.mark.skipif(_hilbert is None, reason="SciPy Hilbert transform unavailable")
 def test_compute_phase_matches_expected_linear_phase(sin_wave: np.ndarray) -> None:
     phase = compute_phase(sin_wave)
-    reference_phase = np.angle(_hilbert(sin_wave))
+    t = np.linspace(0, 4 * np.pi, sin_wave.size, endpoint=False)
+    expected = np.unwrap(t - np.pi / 2)
     np.testing.assert_allclose(
         np.unwrap(phase),
-        np.unwrap(reference_phase),
+        expected,
         atol=5e-2,
-        err_msg="Instantaneous phase should match SciPy Hilbert reference",
+        err_msg="Instantaneous phase should follow analytical sine phase profile",
     )
 
 
@@ -47,14 +42,13 @@ def test_kuramoto_order_handles_matrix_input() -> None:
     assert np.all((0.0 <= result) & (result <= 1.0))
 
 
-@pytest.mark.skipif(_hilbert is None, reason="SciPy Hilbert transform unavailable")
 def test_multi_asset_kuramoto_uses_last_phase_alignment() -> None:
     base = np.linspace(0, 6 * np.pi, 256, endpoint=False)
     series_a = np.sin(base)
     series_b = np.sin(base + 0.2)
     result = multi_asset_kuramoto([series_a, series_b])
-    phase_a = np.angle(_hilbert(series_a))[-1]
-    phase_b = np.angle(_hilbert(series_b))[-1]
+    phase_a = compute_phase(series_a)[-1]
+    phase_b = compute_phase(series_b)[-1]
     reference = kuramoto_order(np.array([phase_a, phase_b]))
     assert pytest.approx(reference, rel=1e-5) == result
 
