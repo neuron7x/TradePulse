@@ -12,9 +12,23 @@ def entropy(series: np.ndarray, bins: int = 30) -> float:
     x = np.asarray(series, dtype=float)
     if x.size == 0:
         return 0.0
-    counts, _ = np.histogram(x, bins=bins, density=True)
-    p = counts[counts > 0]
-    p = p / p.sum()
+
+    finite = np.isfinite(x)
+    if not finite.all():
+        x = x[finite]
+    if x.size == 0:
+        return 0.0
+
+    scale = np.max(np.abs(x))
+    if scale and np.isfinite(scale):
+        x = x / scale
+
+    counts, _ = np.histogram(x, bins=bins, density=False)
+    total = counts.sum(dtype=float)
+    if total == 0:
+        return 0.0
+
+    p = counts[counts > 0] / total
     return float(-(p * np.log(p)).sum())
 
 

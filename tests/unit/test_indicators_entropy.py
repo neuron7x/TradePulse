@@ -25,6 +25,24 @@ def test_entropy_degenerate_distribution_near_zero() -> None:
     assert result < 1e-9
 
 
+def test_entropy_handles_extreme_values_and_non_finite() -> None:
+    series = np.array(
+        [
+            0.0,
+            0.0,
+            1.0,
+            np.finfo(float).max,
+            -np.finfo(float).max / 10,
+            np.nan,
+            np.inf,
+            -np.inf,
+        ]
+    )
+    result = entropy(series, bins=16)
+    assert np.isfinite(result)
+    assert result >= 0.0
+
+
 def test_entropy_of_empty_series_is_zero() -> None:
     assert entropy(np.array([])) == 0.0
 
