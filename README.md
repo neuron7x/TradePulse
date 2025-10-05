@@ -28,7 +28,7 @@ After pushing to GitHub, replace with dynamic badges (example):
 - [Quick Start](#швидкий-старт)
 - [Usage / Examples](#використання-cli-та-api)
 - [Configurations](#конфігурації)
-- [Results & Screenshots](#приклади-результатів)
+- [Results & Screenshots](#results--screenshots-fpm-a-evidence)
 - [Architecture](#архітектура-та-пайплайн)
 - [Docker](#docker)
 - [CI/CD & Quality](#тести-та-якість)
@@ -115,6 +115,29 @@ CI складається з:
 - `codeql-analysis.yml`, `sbom-scan.yml`, `publish-image.yml` (cosign),
 - `benchmarks.yml`, `integration.yml`, `data-sanity.yml`,
 - `buf.yml`, `gen-drift.yml`, `release-drafter.yml`, `auto-merge.yml`, `pr-labeler.yml`, `todo.yml`.
+
+## Results & Screenshots (FPM-A evidence)
+
+**External evidence (reproducible studies):**  
+HMM+MPC (regime-aware) vs Buy&Hold — daily data, 1998–2015, transaction costs included:
+
+| Index    | Annualized Return | Std Dev | Sharpe | Max Drawdown |
+|----------|-------------------|---------|--------|--------------|
+| MSCI World | **0.076** vs 0.056 | **0.12** vs 0.18 | **0.65** vs 0.30 | **0.26** vs 0.57 |
+| S&P 500   | **0.110** vs 0.108 | **0.14** vs 0.16 | **0.79** vs 0.68 | **0.36** vs 0.55 |
+| TOPIX     | **0.044** vs 0.025 | **0.17** vs 0.24 | **0.26** vs 0.10 | **0.48** vs 0.72 |
+| DAX       | 0.066 vs **0.073** | **0.16** vs 0.22 | **0.41** vs 0.33 | **0.39** vs 0.73 |
+| FTSE      | 0.051 vs **0.078** | **0.14** vs 0.15 | 0.36 vs **0.54** | **0.36** vs 0.48 |
+| MSCI EM   | **0.119** vs 0.072 | **0.18** vs 0.27 | **0.66** vs 0.27 | **0.38** vs 0.65 |
+
+**Markov-switching allocation (out-of-sample):** ~**41%** vol reduction; **+0.185–2.016%** annualized excess return after costs.
+
+> Screenshots to add (from TradePulse backtests):
+> 1) Phase probabilities over time (HMM/jump model)  
+> 2) Equity curve & drawdown (FPM-A vs baseline)  
+> 3) Turnover & trade delay stress test (T+1)  
+> 4) Turbulence/Absorption Ratio spikes vs risk-exposure
+
 
 ## Конфігурація
 - Загальні параметри → `configs/default.yaml`.
