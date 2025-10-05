@@ -46,9 +46,14 @@ def test_dynamic_proto_roundtrip(tmp_path) -> None:
 
     pool = descriptor_pool.DescriptorPool()
     pool.Add(file_desc)
-    factory = message_factory.MessageFactory(pool)
     trade_descriptor = pool.FindMessageTypeByName("tradepulse.market.v1.Trade")
-    TradeMessage = factory.GetPrototype(trade_descriptor)
+
+    get_message_class = getattr(message_factory, "GetMessageClass", None)
+    if get_message_class is not None:
+        TradeMessage = get_message_class(trade_descriptor)
+    else:  # pragma: no cover - exercised by older protobuf releases
+        factory = message_factory.MessageFactory(pool)
+        TradeMessage = factory.GetPrototype(trade_descriptor)
 
     trade_obj = TradeMessage(symbol="BTCUSDT", price=27500.5, quantity=1.25)
     serialized = trade_obj.SerializeToString()
