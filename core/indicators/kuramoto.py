@@ -1,57 +1,137 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
+from typing import Sequence
+
 import numpy as np
+
+from .base import ArrayLike, BaseBlock, BaseFeature
+
 try:
     from scipy.signal import hilbert
 except Exception:  # fallback if SciPy not installed
     hilbert = None
 
-def compute_phase(x: np.ndarray) -> np.ndarray:
-    """Compute instantaneous phase via Hilbert transform.
-    If SciPy unavailable, fall back to angle of analytic signal via FFT trick.
-    Args:
-        x: 1D array of samples.
-    Returns:
-        phases in radians in [-pi, pi].
-    """
-    x = np.asarray(x, dtype=float)
-    if x.ndim != 1:
-        raise ValueError("compute_phase expects 1D array")
-    if hilbert is not None:
-        a = hilbert(x)
-    else:
-        # crude analytic signal via FFT (imag as Hilbert by signum in freq)
-        n = x.size
-        X = np.fft.rfft(x, n)
-        H = np.zeros_like(X)
-        if n % 2 == 0:
-            H[1:-1] = 2
+__all__ = [
+    "PhaseFeature",
+    "KuramotoOrderFeature",
+    "MultiAssetKuramotoBlock",
+    "compute_phase",
+    "kuramoto_order",
+    "multi_asset_kuramoto",
+    "compute_phase_gpu",
+]
+
+
+class PhaseFeature(BaseFeature):
+    """Estimate the instantaneous phase of a 1-D signal."""
+
+    def __init__(self, backend: str = "auto") -> None:
+        backend = backend.lower()
+        if backend not in {"auto", "hilbert", "fft"}:
+            raise ValueError("backend must be 'auto', 'hilbert' or 'fft'")
+        super().__init__(
+            name="phase",
+            params={"backend": backend},
+            description="Analytic signal phase computed via Hilbert transform or FFT fallback.",
+        )
+        self._backend = backend
+
+    def transform(self, series: ArrayLike) -> np.ndarray:
+        x = self.coerce_vector(series, allow_empty=False)
+        backend = self._backend
+        if backend == "auto":
+            backend = "hilbert" if hilbert is not None else "fft"
+
+        if backend == "hilbert":
+            if hilbert is None:
+                raise RuntimeError("SciPy is required for the Hilbert backend")
+            analytic = hilbert(x)
         else:
-            H[1:] = 2
-        a = np.fft.irfft(X * H, n)
-        a = x + 1j * a
-    return np.angle(a)
+            n = x.size
+            X = np.fft.rfft(x, n)
+            H = np.zeros_like(X)
+            if n % 2 == 0:
+                H[1:-1] = 2
+            else:
+                H[1:] = 2
+            imag = np.fft.irfft(X * H, n)
+            analytic = x + 1j * imag
+        return np.angle(analytic)
 
-def kuramoto_order(phases: np.ndarray) -> float:
-    """Kuramoto order parameter R = |mean(exp(iθ))| for a set of phases.
-    Args:
-        phases: array of shape (N,) or (N,T). If 1D, compute for one time slice;
-                if 2D, compute per-column over N oscillators.
-    Returns:
-        float if 1D else np.ndarray of shape (T,).
-    """
-    z = np.exp(1j * phases)
-    if z.ndim == 1:
-        return float(np.abs(np.mean(z)))
-    return np.abs(np.mean(z, axis=0)).astype(float)
 
-def multi_asset_kuramoto(series_list: list[np.ndarray]) -> float:
-    """Compute Kuramoto R across multiple synchronized assets (same length).
-    Each series is transformed to phase, then R over assets for the last time step.
-    """
-    phases = [compute_phase(s) for s in series_list]
-    last_phases = np.array([p[-1] for p in phases])
-    return kuramoto_order(last_phases)
+class KuramotoOrderFeature(BaseFeature):
+    """Kuramoto order parameter :math:`R` from a collection of phases."""
+
+    def __init__(self, axis: int | None = None) -> None:
+        super().__init__(
+            name="kuramoto_order",
+            params={"axis": axis},
+            description="Magnitude of the mean phase vector across oscillators.",
+        )
+        self._axis = axis
+
+    def transform(self, phases: ArrayLike | np.ndarray) -> float | np.ndarray:
+        z = np.exp(1j * np.asarray(phases, dtype=float))
+        if z.ndim == 0:
+            return float(np.abs(z))
+        if z.ndim == 1:
+            return float(np.abs(np.mean(z)))
+        if z.ndim == 2:
+            axis = 0 if self._axis is None else self._axis
+            return np.abs(np.mean(z, axis=axis)).astype(float)
+        raise ValueError("KuramotoOrderFeature expects 1-D or 2-D input")
+
+
+class MultiAssetKuramotoBlock(BaseBlock):
+    """Compute instantaneous phases and Kuramoto order across assets."""
+
+    def __init__(
+        self,
+        phase_feature: PhaseFeature | None = None,
+        order_feature: KuramotoOrderFeature | None = None,
+    ) -> None:
+        self._phase_feature = phase_feature or PhaseFeature()
+        self._order_feature = order_feature or KuramotoOrderFeature()
+        super().__init__(
+            name="multi_asset_kuramoto",
+            features=(self._phase_feature, self._order_feature),
+            description=(
+                "Transforms synchronised price series to instantaneous phases "
+                "and aggregates them via the Kuramoto order parameter."
+            ),
+        )
+
+    def transform(self, series_list: Sequence[ArrayLike]) -> dict[str, np.ndarray | float]:
+        if not series_list:
+            raise ValueError("MultiAssetKuramotoBlock requires at least one series")
+        phases = [self._phase_feature.transform(series) for series in series_list]
+        last_phases = np.array([phase[-1] for phase in phases], dtype=float)
+        order_value = self._order_feature.transform(last_phases)
+        return {
+            self._phase_feature.name: phases,
+            self._order_feature.name: order_value,
+        }
+
+
+def compute_phase(x: ArrayLike) -> np.ndarray:
+    """Functional wrapper for :class:`PhaseFeature`."""
+
+    return PhaseFeature().transform(x)
+
+
+def kuramoto_order(phases: ArrayLike | np.ndarray) -> float | np.ndarray:
+    """Functional wrapper for :class:`KuramotoOrderFeature`."""
+
+    return KuramotoOrderFeature().transform(phases)
+
+
+def multi_asset_kuramoto(series_list: Sequence[ArrayLike]) -> float:
+    """Functional wrapper for :class:`MultiAssetKuramotoBlock`."""
+
+    block = MultiAssetKuramotoBlock()
+    result = block.transform(series_list)
+    return float(result["kuramoto_order"])
 
 
 # Optional GPU acceleration via CuPy (if available)
@@ -60,13 +140,13 @@ try:
 except Exception:
     cp = None
 
-def compute_phase_gpu(x):
+
+def compute_phase_gpu(x: ArrayLike) -> np.ndarray:
     """GPU phase via CuPy Hilbert transform if CuPy is available; else falls back."""
+
     if cp is None:
-        from .kuramoto import compute_phase as _cpu
-        return _cpu(np.asarray(x))
+        return PhaseFeature().transform(x)
     x_gpu = cp.asarray(x, dtype=cp.float32)
-    # simple Hilbert via FFT sign filter on GPU
     n = x_gpu.size
     X = cp.fft.rfft(x_gpu, n)
     H = cp.zeros_like(X)
@@ -75,6 +155,6 @@ def compute_phase_gpu(x):
     else:
         H[1:] = 2
     a = cp.fft.irfft(X * H, n)
-    a = x_gpu + 1j * a
-    ph = cp.angle(a)
+    analytic = x_gpu + 1j * a
+    ph = cp.angle(analytic)
     return cp.asnumpy(ph)
