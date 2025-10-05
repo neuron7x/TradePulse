@@ -1,0 +1,7 @@
+[run]
+source = core,backtest,execution
+omit = */__init__.py
+
+[report]
+show_missing = True
+precision = 2
