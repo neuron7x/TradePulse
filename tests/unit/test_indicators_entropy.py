@@ -2,8 +2,14 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
-from core.indicators.entropy import delta_entropy, entropy
+from core.indicators.entropy import (
+    DeltaEntropyFeature,
+    EntropyFeature,
+    delta_entropy,
+    entropy,
+)
 
 
 def test_entropy_uniform_distribution_matches_log_bins(uniform_series: np.ndarray) -> None:
@@ -34,3 +40,21 @@ def test_delta_entropy_detects_spread_change() -> None:
     series = np.concatenate([first, second])
     result = delta_entropy(series, window=80)
     assert result > 0.0, "Delta entropy should increase when distribution widens"
+
+
+def test_entropy_feature_wraps_indicator(uniform_series: np.ndarray) -> None:
+    feature = EntropyFeature(bins=15, name="custom_entropy")
+    outcome = feature.transform(uniform_series)
+    assert outcome.name == "custom_entropy"
+    assert outcome.metadata == {"bins": 15}
+    expected = entropy(uniform_series, bins=15)
+    assert outcome.value == pytest.approx(expected, rel=1e-12)
+
+
+def test_delta_entropy_feature_metadata(peaked_series: np.ndarray) -> None:
+    feature = DeltaEntropyFeature(window=40, bins_range=(5, 25))
+    outcome = feature.transform(peaked_series)
+    assert outcome.name == "delta_entropy"
+    assert outcome.metadata == {"window": 40, "bins_range": (5, 25)}
+    expected = delta_entropy(peaked_series, window=40, bins_range=(5, 25))
+    assert outcome.value == pytest.approx(expected, rel=1e-12)
