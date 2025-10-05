@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+version: '3.9'
+services:
+  tradepulse:
+    build: .
+    ports: ["8001:8001"]
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports: ["9090:9090"]

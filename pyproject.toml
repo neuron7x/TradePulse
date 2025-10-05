@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: MIT
+[project]
+name = "tradepulse"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = ["numpy","pandas","networkx","scipy"]
+description = "TradePulse core indicators and tooling"
+readme = "README.md"
+authors = [{name="TradePulse"}]
+
+[project.scripts]
+tradepulse = "interfaces.cli:main"

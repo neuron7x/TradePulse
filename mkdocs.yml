@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: MIT
+site_name: TradePulse
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Indicators: indicators.md
+  - Agent: agent.md
+  - Backtest: backtest.md
+  - Execution: execution.md
+markdown_extensions:
+  - admonition
+  - codehilite
+  - tables
+  - toc:
+      permalink: true
