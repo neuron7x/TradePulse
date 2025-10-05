@@ -1,6 +1,12 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
+from typing import Any, Sequence
+
 import numpy as np
+
+from .base import BaseFeature, FeatureResult
+
 try:
     from scipy.signal import hilbert
 except Exception:  # fallback if SciPy not installed
@@ -45,7 +51,7 @@ def kuramoto_order(phases: np.ndarray) -> float:
         return float(np.abs(np.mean(z)))
     return np.abs(np.mean(z, axis=0)).astype(float)
 
-def multi_asset_kuramoto(series_list: list[np.ndarray]) -> float:
+def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Compute Kuramoto R across multiple synchronized assets (same length).
     Each series is transformed to phase, then R over assets for the last time step.
     """
@@ -78,3 +84,36 @@ def compute_phase_gpu(x):
     a = x_gpu + 1j * a
     ph = cp.angle(a)
     return cp.asnumpy(ph)
+
+
+class KuramotoOrderFeature(BaseFeature):
+    """Feature wrapper for the Kuramoto order parameter."""
+
+    def __init__(self, *, name: str | None = None) -> None:
+        super().__init__(name or "kuramoto_order")
+
+    def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
+        value = kuramoto_order(data)
+        return FeatureResult(name=self.name, value=value, metadata={})
+
+
+class MultiAssetKuramotoFeature(BaseFeature):
+    """Feature computing the Kuramoto order across multiple synchronized assets."""
+
+    def __init__(self, *, name: str | None = None) -> None:
+        super().__init__(name or "multi_asset_kuramoto")
+
+    def transform(self, data: Sequence[np.ndarray], **_: Any) -> FeatureResult:
+        value = multi_asset_kuramoto(data)
+        metadata = {"assets": len(data)}
+        return FeatureResult(name=self.name, value=value, metadata=metadata)
+
+
+__all__ = [
+    "compute_phase",
+    "compute_phase_gpu",
+    "kuramoto_order",
+    "multi_asset_kuramoto",
+    "KuramotoOrderFeature",
+    "MultiAssetKuramotoFeature",
+]

@@ -1,10 +1,60 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
+from typing import Any, Iterable
+
 import numpy as np
-import networkx as nx
+
+from .base import BaseFeature, FeatureResult
+
 try:
+    import networkx as nx
+except Exception:  # pragma: no cover - fallback for lightweight environments
+    class _SimpleGraph:
+        def __init__(self) -> None:
+            self._adj: dict[int, set[int]] = {}
+
+        def add_node(self, node: int) -> None:
+            self._adj.setdefault(int(node), set())
+
+        def add_edge(self, u: int, v: int, weight: float | None = None) -> None:
+            self.add_node(int(u))
+            self.add_node(int(v))
+            self._adj[int(u)].add(int(v))
+            self._adj[int(v)].add(int(u))
+
+        def neighbors(self, node: int) -> Iterable[int]:
+            return tuple(self._adj.get(int(node), ()))
+
+        def degree(self, node: int) -> int:
+            return len(self._adj.get(int(node), ()))
+
+        def number_of_edges(self) -> int:
+            return sum(len(neigh) for neigh in self._adj.values()) // 2
+
+        def edges(self) -> Iterable[tuple[int, int]]:
+            seen: set[tuple[int, int]] = set()
+            for u, neigh in self._adj.items():
+                for v in neigh:
+                    edge = (min(u, v), max(u, v))
+                    if edge not in seen:
+                        seen.add(edge)
+                        yield edge
+
+        def has_edge(self, u: int, v: int) -> bool:
+            return int(v) in self._adj.get(int(u), set())
+
+        def number_of_nodes(self) -> int:
+            return len(self._adj)
+
+    class _NXModule:  # pragma: no cover
+        Graph = _SimpleGraph
+
+    nx = _NXModule()  # type: ignore[assignment]
+
+try:  # pragma: no cover - SciPy optional
     from scipy.spatial.distance import wasserstein_distance as W1
-except Exception:
+except Exception:  # pragma: no cover
     W1 = None
 
 
@@ -56,4 +106,27 @@ def _w1_fallback(a, b):
     a = a / (a.sum() + 1e-12); b = b / (b.sum() + 1e-12)
     cdfa = _np.cumsum(a); cdfb = _np.cumsum(b)
     return float(_np.abs(cdfa - cdfb).sum()) / len(a)
+
+
+class MeanRicciFeature(BaseFeature):
+    """Feature computing mean Ollivier–Ricci curvature of a price graph."""
+
+    def __init__(self, delta: float = 0.005, *, name: str | None = None) -> None:
+        super().__init__(name or "mean_ricci")
+        self.delta = float(delta)
+
+    def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
+        G = build_price_graph(data, delta=self.delta)
+        value = mean_ricci(G)
+        metadata = {"delta": self.delta, "nodes": G.number_of_nodes()}
+        return FeatureResult(name=self.name, value=value, metadata=metadata)
+
+
+__all__ = [
+    "build_price_graph",
+    "local_distribution",
+    "ricci_curvature_edge",
+    "mean_ricci",
+    "MeanRicciFeature",
+]
 
