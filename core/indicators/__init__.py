@@ -12,7 +12,26 @@ from .kuramoto import (
     kuramoto_order,
     multi_asset_kuramoto,
 )
+from .multiscale_kuramoto import (
+    MultiScaleKuramoto,
+    MultiScaleKuramotoFeature,
+    MultiScaleResult,
+    TimeFrame,
+    WaveletWindowSelector,
+)
 from .ricci import MeanRicciFeature, build_price_graph, local_distribution, mean_ricci, ricci_curvature_edge
+from .temporal_ricci import (
+    GraphSnapshot,
+    PriceLevelGraphBuilder,
+    TemporalRicciAnalyzer,
+    TemporalRicciResult,
+)
+from .kuramoto_ricci_composite import (
+    CompositeSignal,
+    KuramotoRicciComposite,
+    MarketPhase,
+    TradePulseCompositeEngine,
+)
 
 __all__ = [
     "BaseBlock",
@@ -37,5 +56,18 @@ __all__ = [
     "ricci_curvature_edge",
     "mean_ricci",
     "MeanRicciFeature",
+    "MultiScaleKuramoto",
+    "MultiScaleKuramotoFeature",
+    "MultiScaleResult",
+    "TimeFrame",
+    "WaveletWindowSelector",
+    "GraphSnapshot",
+    "PriceLevelGraphBuilder",
+    "TemporalRicciAnalyzer",
+    "TemporalRicciResult",
+    "CompositeSignal",
+    "KuramotoRicciComposite",
+    "MarketPhase",
+    "TradePulseCompositeEngine",
 ]
 
