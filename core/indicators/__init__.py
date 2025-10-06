@@ -12,6 +12,13 @@ from .kuramoto import (
     kuramoto_order,
     multi_asset_kuramoto,
 )
+from .multiscale_kuramoto import (
+    MultiScaleKuramoto,
+    MultiScaleKuramotoFeature,
+    MultiScaleResult,
+    TimeFrame,
+    WaveletWindowSelector,
+)
 from .ricci import MeanRicciFeature, build_price_graph, local_distribution, mean_ricci, ricci_curvature_edge
 
 __all__ = [
@@ -32,6 +39,11 @@ __all__ = [
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
     "MultiAssetKuramotoFeature",
+    "MultiScaleKuramoto",
+    "MultiScaleKuramotoFeature",
+    "MultiScaleResult",
+    "TimeFrame",
+    "WaveletWindowSelector",
     "build_price_graph",
     "local_distribution",
     "ricci_curvature_edge",
