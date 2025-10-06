@@ -1,14 +1,7 @@
-# SPDX-License-Identifier: MIT
-"""Indicator package exports."""
-
-from .base import BaseBlock, BaseFeature, FeatureBlock, FeatureResult, FunctionalFeature
-from .entropy import DeltaEntropyFeature, EntropyFeature, delta_entropy, entropy
-from .hurst import HurstFeature, hurst_exponent
+from .base import BaseBlock, BaseFeature, FeatureBlock
 from .kuramoto import (
     KuramotoOrderFeature,
     MultiAssetKuramotoFeature,
-    compute_phase,
-    compute_phase_gpu,
     kuramoto_order,
     multi_asset_kuramoto,
 )
@@ -37,16 +30,8 @@ LEGACY_EXPORTS = [
     "BaseBlock",
     "BaseFeature",
     "FeatureBlock",
-    "FeatureResult",
-    "FunctionalFeature",
-    "entropy",
-    "delta_entropy",
-    "EntropyFeature",
-    "DeltaEntropyFeature",
-    "hurst_exponent",
-    "HurstFeature",
-    "compute_phase",
-    "compute_phase_gpu",
+    "KuramotoOrderFeature",
+    "MultiAssetKuramotoFeature",
     "kuramoto_order",
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
