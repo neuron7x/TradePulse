@@ -56,15 +56,27 @@ __all__ = [
     "ricci_curvature_edge",
     "mean_ricci",
     "MeanRicciFeature",
+]
+
+# Multi-scale Kuramoto exports
+__all__ += [
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
     "MultiScaleResult",
     "TimeFrame",
     "WaveletWindowSelector",
+]
+
+# Temporal Ricci exports
+__all__ += [
     "GraphSnapshot",
     "PriceLevelGraphBuilder",
     "TemporalRicciAnalyzer",
     "TemporalRicciResult",
+]
+
+# Composite indicator exports
+__all__ += [
     "CompositeSignal",
     "KuramotoRicciComposite",
     "MarketPhase",
