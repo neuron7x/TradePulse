@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+import pandas as pd
 
 from core.indicators.kuramoto import (
     KuramotoOrderFeature,
@@ -13,6 +14,12 @@ from core.indicators.kuramoto import (
     compute_phase_gpu,
     kuramoto_order,
     multi_asset_kuramoto,
+)
+from core.indicators.multiscale_kuramoto import (
+    MultiScaleKuramoto,
+    MultiScaleKuramotoFeature,
+    TimeFrame,
+    WaveletWindowSelector,
 )
 
 
@@ -133,3 +140,59 @@ def test_multi_asset_kuramoto_feature_reports_asset_count(sin_wave: np.ndarray) 
     assert outcome.metadata == {"assets": 2}
     expected = multi_asset_kuramoto(data)
     assert outcome.value == pytest.approx(expected, rel=1e-12)
+
+
+def _synth_dataframe(periods: int = 4096) -> pd.DataFrame:
+    idx = pd.date_range("2024-01-01", periods=periods, freq="1min")
+    t = np.arange(periods)
+    price = (
+        100
+        + 5 * np.sin(2 * np.pi * t / 240)
+        + 2 * np.sin(2 * np.pi * t / 1024)
+        + 0.25 * np.random.default_rng(0).normal(size=periods)
+    )
+    return pd.DataFrame({"close": price}, index=idx)
+
+
+def test_multiscale_kuramoto_analyzer_reports_consensus_metrics() -> None:
+    df = _synth_dataframe()
+    analyzer = MultiScaleKuramoto(
+        timeframes=(TimeFrame.M1, TimeFrame.M5, TimeFrame.M15),
+        use_adaptive_window=False,
+        base_window=128,
+    )
+    result = analyzer.analyze(df)
+    assert 0.0 <= result.consensus_R <= 1.0
+    assert result.dominant_scale in result.timeframe_results or result.dominant_scale is None
+    assert result.adaptive_window == 128
+    assert set(result.timeframe_results.keys()) == {TimeFrame.M1, TimeFrame.M5, TimeFrame.M15}
+    assert 0.0 <= result.cross_scale_coherence <= 1.0
+
+
+def test_multiscale_feature_metadata_contains_timeframe_scores() -> None:
+    df = _synth_dataframe()
+    feature = MultiScaleKuramotoFeature(
+        analyzer=MultiScaleKuramoto(
+            timeframes=(TimeFrame.M1, TimeFrame.M5),
+            use_adaptive_window=False,
+            base_window=96,
+        ),
+        name="kuramoto_multi",
+    )
+    outcome = feature.transform(df)
+    assert outcome.name == "kuramoto_multi"
+    assert 0.0 <= outcome.value <= 1.0
+    assert outcome.metadata["adaptive_window"] == 96
+    assert outcome.metadata["timeframes"] == ["M1", "M5"]
+    assert "R_M1" in outcome.metadata and "R_M5" in outcome.metadata
+
+
+def test_wavelet_selector_falls_back_without_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
+    selector = WaveletWindowSelector(min_window=32, max_window=256)
+    prices = np.sin(np.linspace(0, 6 * np.pi, 300))
+
+    import core.indicators.multiscale_kuramoto as module
+
+    monkeypatch.setattr(module, "_signal", None)
+    fallback = selector.select_window(prices)
+    assert fallback == int(np.sqrt(32 * 256))
