@@ -25,7 +25,7 @@ def test_kuramoto_order_bounded(data):
     phases = np.array(data, dtype=float)
     value = kuramoto_order(phases)
     tolerance = 1e-8
-    assert value >= -tolerance, f"Kuramoto order parameter {value} below 0 beyond tolerance"
-    assert value <= 1.0 or np.isclose(value, 1.0, atol=tolerance), (
-        f"Kuramoto order parameter {value} exceeds 1.0 beyond tolerance"
+    # Floating-point tolerance for Kuramoto order parameter
+    assert -tolerance <= value <= 1.0 + tolerance, (
+        f"Kuramoto order parameter {value} out of bounds [-{tolerance}, {1.0 + tolerance}]"
     )
