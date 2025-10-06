@@ -51,23 +51,23 @@ LEGACY_EXPORTS = [
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
     "MultiAssetKuramotoFeature",
-    "build_price_graph",
-    "local_distribution",
-    "ricci_curvature_edge",
-    "mean_ricci",
-    "MeanRicciFeature",
-]
-
-ADDITIONAL_EXPORTS = [
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
     "MultiScaleResult",
     "TimeFrame",
     "WaveletWindowSelector",
+    "build_price_graph",
+    "local_distribution",
+    "ricci_curvature_edge",
+    "mean_ricci",
+    "MeanRicciFeature",
     "GraphSnapshot",
     "PriceLevelGraphBuilder",
     "TemporalRicciAnalyzer",
     "TemporalRicciResult",
+]
+
+ADDITIONAL_EXPORTS = [
     "CompositeSignal",
     "KuramotoRicciComposite",
     "MarketPhase",
