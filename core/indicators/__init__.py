@@ -36,50 +36,37 @@ from .kuramoto_ricci_composite import (
 __all__ = [
     "BaseBlock",
     "BaseFeature",
+    "CompositeSignal",
+    "DeltaEntropyFeature",
+    "EntropyFeature",
     "FeatureBlock",
     "FeatureResult",
     "FunctionalFeature",
-    "entropy",
-    "delta_entropy",
-    "EntropyFeature",
-    "DeltaEntropyFeature",
-    "hurst_exponent",
+    "GraphSnapshot",
     "HurstFeature",
-    "compute_phase",
-    "compute_phase_gpu",
-    "kuramoto_order",
-    "multi_asset_kuramoto",
     "KuramotoOrderFeature",
-    "MultiAssetKuramotoFeature",
-    "build_price_graph",
-    "local_distribution",
-    "ricci_curvature_edge",
-    "mean_ricci",
+    "KuramotoRicciComposite",
+    "MarketPhase",
     "MeanRicciFeature",
-]
-
-# Multi-scale Kuramoto exports
-__all__ += [
+    "MultiAssetKuramotoFeature",
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
     "MultiScaleResult",
-    "TimeFrame",
-    "WaveletWindowSelector",
-]
-
-# Temporal Ricci exports
-__all__ += [
-    "GraphSnapshot",
     "PriceLevelGraphBuilder",
     "TemporalRicciAnalyzer",
     "TemporalRicciResult",
-]
-
-# Kuramoto–Ricci composite exports
-__all__ += [
-    "CompositeSignal",
-    "KuramotoRicciComposite",
-    "MarketPhase",
+    "TimeFrame",
     "TradePulseCompositeEngine",
+    "WaveletWindowSelector",
+    "build_price_graph",
+    "compute_phase",
+    "compute_phase_gpu",
+    "delta_entropy",
+    "entropy",
+    "hurst_exponent",
+    "kuramoto_order",
+    "local_distribution",
+    "mean_ricci",
+    "multi_asset_kuramoto",
+    "ricci_curvature_edge",
 ]
-
