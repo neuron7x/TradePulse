@@ -21,6 +21,6 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
       - name: Run unit and integration tests with coverage
-        run: pytest --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing
+        run: pytest --cov=. --cov-report=xml --cov-report=term-missing
       - name: Run property-based tests
         run: pytest tests/property --hypothesis-show-statistics
