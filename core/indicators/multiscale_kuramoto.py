@@ -169,6 +169,18 @@ class MultiScaleKuramoto:
         )
         return result
 
+    def _kuramoto_order_parameter(self, phases: np.ndarray) -> tuple[float, float]:
+        """Return the Kuramoto order parameter ``R`` and mean phase ``ψ``."""
+
+        values = np.asarray(phases, dtype=float)
+        if values.size == 0:
+            return 0.0, 0.0
+
+        complex_order = np.mean(np.exp(1j * values))
+        R = float(np.clip(np.abs(complex_order), 0.0, 1.0))
+        psi = float(np.angle(complex_order))
+        return R, psi
+
     def _select_window(self, prices: np.ndarray) -> int:
         if not self.use_adaptive_window:
             return self.base_window
@@ -189,9 +201,9 @@ class MultiScaleKuramoto:
         psi_values: List[float] = []
         for end in range(window, phases.size + 1):
             window_phases = phases[end - window : end]
-            complex_r = np.mean(np.exp(1j * window_phases))
-            r_values.append(float(np.abs(complex_r)))
-            psi_values.append(float(np.angle(complex_r)))
+            R, psi = self._kuramoto_order_parameter(window_phases)
+            r_values.append(R)
+            psi_values.append(psi)
 
         R_current = r_values[-1] if r_values else 0.0
         psi_current = psi_values[-1] if psi_values else 0.0

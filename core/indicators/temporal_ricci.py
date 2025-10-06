@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -57,6 +57,30 @@ class TemporalRicciResult:
     graph_snapshots: List[GraphSnapshot]
     structural_stability: float
     edge_persistence: float
+
+
+class OllivierRicciCurvature:
+    """Light-weight Ollivier--Ricci curvature calculator for graphs."""
+
+    def __init__(self, alpha: float = 0.5) -> None:
+        self.alpha = float(alpha)
+
+    def compute_edge_curvature(self, graph: "nx.Graph", edge: Tuple[int, int]) -> float:
+        if len(edge) != 2:
+            raise ValueError("edge must contain exactly two node identifiers")
+        u, v = (int(edge[0]), int(edge[1]))
+        if graph.has_edge(u, v):
+            return float(ricci_curvature_edge(graph, u, v))
+        if graph.has_edge(v, u):
+            return float(ricci_curvature_edge(graph, v, u))
+        return 0.0
+
+    def compute_all_curvatures(self, graph: "nx.Graph") -> Mapping[Tuple[int, int], float]:
+        curvatures: Dict[Tuple[int, int], float] = {}
+        for u, v in graph.edges():
+            edge = (min(int(u), int(v)), max(int(u), int(v)))
+            curvatures[edge] = self.compute_edge_curvature(graph, edge)
+        return curvatures
 
 
 class PriceLevelGraphBuilder:
@@ -364,6 +388,7 @@ def _safe_entropy(p: np.ndarray, q: np.ndarray) -> float:
 
 
 __all__ = [
+    "OllivierRicciCurvature",
     "GraphSnapshot",
     "TemporalRicciResult",
     "PriceLevelGraphBuilder",
