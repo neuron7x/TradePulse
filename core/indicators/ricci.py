@@ -17,6 +17,10 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def add_node(self, node: int) -> None:
             self._adj.setdefault(int(node), set())
 
+        def add_nodes_from(self, nodes: Iterable[int]) -> None:
+            for node in nodes:
+                self.add_node(int(node))
+
         def add_edge(self, u: int, v: int, weight: float | None = None) -> None:
             self.add_node(int(u))
             self.add_node(int(v))
@@ -26,8 +30,13 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def neighbors(self, node: int) -> Iterable[int]:
             return tuple(self._adj.get(int(node), ()))
 
-        def degree(self, node: int) -> int:
+        def degree(self, node: int | None = None) -> Iterable[tuple[int, int]] | int:
+            if node is None:
+                return tuple((n, len(neigh)) for n, neigh in self._adj.items())
             return len(self._adj.get(int(node), ()))
+
+        def nodes(self) -> Iterable[int]:
+            return tuple(self._adj.keys())
 
         def number_of_edges(self) -> int:
             return sum(len(neigh) for neigh in self._adj.values()) // 2
