@@ -33,7 +33,8 @@ from .kuramoto_ricci_composite import (
     TradePulseCompositeEngine,
 )
 
-__all__ = [
+
+_LEGACY_EXPORTS = [
     "BaseBlock",
     "BaseFeature",
     "FeatureBlock",
@@ -56,6 +57,9 @@ __all__ = [
     "ricci_curvature_edge",
     "mean_ricci",
     "MeanRicciFeature",
+]
+
+_ADVANCED_EXPORTS = [
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
     "MultiScaleResult",
@@ -70,3 +74,5 @@ __all__ = [
     "MarketPhase",
     "TradePulseCompositeEngine",
 ]
+
+__all__ = list(dict.fromkeys([*_LEGACY_EXPORTS, *_ADVANCED_EXPORTS]))
