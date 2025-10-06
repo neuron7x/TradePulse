@@ -74,6 +74,4 @@ ADDITIONAL_EXPORTS = [
     "TradePulseCompositeEngine",
 ]
 
-__all__ = LEGACY_EXPORTS + [
-    name for name in ADDITIONAL_EXPORTS if name not in LEGACY_EXPORTS
-]
+__all__ = list(dict.fromkeys(LEGACY_EXPORTS + ADDITIONAL_EXPORTS))
