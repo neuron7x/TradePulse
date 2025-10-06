@@ -33,7 +33,7 @@ from .kuramoto_ricci_composite import (
     TradePulseCompositeEngine,
 )
 
-__all__ = [
+_LEGACY_EXPORTS = [
     "BaseBlock",
     "BaseFeature",
     "FeatureBlock",
@@ -56,6 +56,9 @@ __all__ = [
     "ricci_curvature_edge",
     "mean_ricci",
     "MeanRicciFeature",
+]
+
+_ADVANCED_EXPORTS = [
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
     "MultiScaleResult",
@@ -69,4 +72,8 @@ __all__ = [
     "KuramotoRicciComposite",
     "MarketPhase",
     "TradePulseCompositeEngine",
+]
+
+__all__ = _LEGACY_EXPORTS + [
+    name for name in _ADVANCED_EXPORTS if name not in _LEGACY_EXPORTS
 ]
