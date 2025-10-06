@@ -19,13 +19,7 @@ from .multiscale_kuramoto import (
     TimeFrame,
     WaveletWindowSelector,
 )
-from .ricci import (
-    MeanRicciFeature,
-    build_price_graph,
-    local_distribution,
-    mean_ricci,
-    ricci_curvature_edge,
-)
+from .ricci import MeanRicciFeature, build_price_graph, local_distribution, mean_ricci, ricci_curvature_edge
 from .temporal_ricci import (
     GraphSnapshot,
     PriceLevelGraphBuilder,
