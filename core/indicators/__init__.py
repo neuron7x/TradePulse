@@ -61,6 +61,7 @@ __all__ = sorted(
         "delta_entropy",
         "entropy",
         "hurst_exponent",
+        "kuramoto_order",
         "local_distribution",
         "mean_ricci",
         "multi_asset_kuramoto",
