@@ -29,6 +29,7 @@ kuramoto:
     detrend: true
     method: "linear"  # linear, constant, or none
 
+
 # Temporal Ricci Configuration
 ricci:
   # Graph construction
@@ -52,6 +53,7 @@ ricci:
     derivative_window: 2       # Window for computing metric changes
     jump_threshold: 0.3        # Threshold for transition detection
     sigmoid_steepness: 10      # Steepness of sigmoid function
+
 
 # Composite Indicator Configuration
 composite:
@@ -114,6 +116,7 @@ composite:
       entry_signal: 0.0          # Stay out
       exit_urgency: 0.5
 
+
 # Integration Settings
 integration:
   # Data requirements
@@ -138,6 +141,7 @@ integration:
     save_history: true
     history_path: "outputs/signal_history.csv"
 
+
 # Backtesting Integration
 backtest:
   # Signal-to-trade conversion
@@ -157,6 +161,7 @@ backtest:
     min_confidence: 0.5
     stop_loss_multiplier: 1.5     # SL based on risk_multiplier
     take_profit_multiplier: 2.0
+
 
 # Monitoring & Alerts
 monitoring:
@@ -199,6 +204,7 @@ monitoring:
       - entry_signal
       - exit_signal
 
+
 # Feature Engineering (for ML integration)
 features:
   # Derived features from composite
@@ -214,7 +220,7 @@ features:
       - topological_transition_score
       - structural_stability
       - edge_persistence
-    
+      
     composite_features:
       - phase_encoded          # One-hot encoding of phase
       - confidence
@@ -226,6 +232,7 @@ features:
   normalization:
     method: "robust"           # standard, minmax, robust
     rolling_window: 500
+
 
 # Experimental Settings
 experimental:
@@ -244,6 +251,7 @@ experimental:
     enabled: false
     update_thresholds: false         # Adaptive threshold learning
     strategy_evolution: false        # Genetic programming
+
 
 # Version & Metadata
 metadata:
