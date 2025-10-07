@@ -32,6 +32,12 @@ class LightGraph:
     def num_edges(self) -> int:
         return len(self.edges())
 
+    def number_of_nodes(self) -> int:
+        return self.n
+
+    def number_of_edges(self) -> int:
+        return self.num_edges()
+
     def is_connected(self) -> bool:
         if self.n == 0: return True
         # BFS
@@ -192,27 +198,40 @@ class TemporalRicciAnalyzer:
         return float(np.mean(vals))
 
     def _transition_score(self) -> float:
-        if len(self.history) < 3: return 0.0
+        if len(self.history) < 3:
+            return 0.0
         metrics = []
-        for s in self.history:
-            E = s.graph.num_edges()
-            # average degree over active nodes
-            degs = [len(s.graph.neighbors(i)) for i in range(s.graph.n)]
-            active = [d for d in degs if d > 0]
-            avg_deg = float(np.mean(active)) if active else 0.0
-            metrics.append([E, avg_deg, s.avg_curvature])
-        M = np.array(metrics, dtype=float)
-        D = np.abs(np.diff(M, axis=0))
-        # normalize per column
-        maxd = D.max(axis=0)
-        maxd[maxd == 0] = 1.0
-        Dn = D / maxd
-        last2 = Dn[-2:,:] if len(Dn) >= 2 else Dn
-        avg_jump = float(np.mean(last2))
-        # sigmoid
-        beta = 10.0
-        score = 1.0 / (1.0 + np.exp(-beta * (avg_jump - 0.3)))
-        return float(score)
+        for snapshot in self.history:
+            edge_count = snapshot.graph.num_edges()
+            degrees = [len(snapshot.graph.neighbors(i)) for i in range(snapshot.graph.n)]
+            active = [deg for deg in degrees if deg > 0]
+            avg_degree = float(np.mean(active)) if active else 0.0
+            metrics.append([edge_count, avg_degree, snapshot.avg_curvature])
+        matrix = np.array(metrics, dtype=float)
+        diffs = np.abs(np.diff(matrix, axis=0))
+        if diffs.size == 0:
+            return 0.0
+        max_per_feature = diffs.max(axis=0)
+        max_per_feature[max_per_feature == 0] = 1.0
+        normalized = diffs / max_per_feature
+        avg_jump = float(np.mean(normalized))
+        beta = 8.0
+        score = 1.0 / (1.0 + np.exp(-beta * (avg_jump - 0.15)))
+        curvatures = np.array([snap.avg_curvature for snap in self.history], dtype=float)
+        if curvatures.size >= 2:
+            curvature_component = float(np.clip(np.std(np.diff(curvatures)), 0.0, 1.0))
+        else:
+            curvature_component = 0.0
+        vol_series = [np.std(np.diff(snap.price_levels)) for snap in self.history if len(snap.price_levels) >= 2]
+        if len(vol_series) >= 2:
+            if len(vol_series) > 2:
+                volatility_component = float(np.clip(np.mean(vol_series[-2:]) - np.mean(vol_series[:-2]), 0.0, 1.0))
+            else:
+                volatility_component = float(np.clip(vol_series[-1] - vol_series[0], 0.0, 1.0))
+        else:
+            volatility_component = 0.0
+        combined = score + 0.2 * curvature_component + 0.2 * volatility_component
+        return float(np.clip(combined, 0.0, 1.0))
 
     def _stability(self) -> float:
         if len(self.history) < 2: return 1.0
@@ -243,6 +262,8 @@ class TemporalRicciAnalyzer:
             step = max(1, (N - self.window_size) // (self.n_snapshots - 1))
         for i in range(0, max(1, N - self.window_size + 1), step):
             seg = df.iloc[i:i+self.window_size]
+            if len(seg) < self.window_size:
+                continue
             prices = seg[price_col].astype(float).values
             volumes = seg[volume_col].astype(float).values if (volume_col and volume_col in seg.columns) else None
             ts = seg.index[-1]
@@ -253,3 +274,8 @@ class TemporalRicciAnalyzer:
         stab = self._stability()
         pers = self._persistence()
         return TemporalRicciResult(temporal_curvature=k_temporal, topological_transition_score=trans, graph_snapshots=list(self.history), structural_stability=stab, edge_persistence=pers)
+
+# Backwards compatible aliases
+OllivierRicciCurvature = OllivierRicciCurvatureLite
+PriceLevelGraphBuilder = PriceLevelGraph
+
