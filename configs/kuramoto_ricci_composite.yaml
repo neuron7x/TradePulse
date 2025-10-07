@@ -3,6 +3,8 @@ kuramoto:
   timeframes: [60, 300, 900, 3600]
   adaptive_window:
     enabled: true
+    min_window: 64
+    max_window: 512
     base_window: 200
 
 ricci:
