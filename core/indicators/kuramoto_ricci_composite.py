@@ -1,7 +1,7 @@
 
 import numpy as np
 import pandas as pd
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional
 
@@ -30,6 +30,7 @@ class CompositeSignal:
     risk_multiplier: float
     dominant_timeframe_sec: Optional[int]
     timestamp: pd.Timestamp
+    skipped_timeframes: list[str] = field(default_factory=list)
 
 class KuramotoRicciComposite:
     def __init__(self, R_strong_emergent: float = 0.8, R_proto_emergent: float = 0.4,
@@ -114,7 +115,10 @@ class KuramotoRicciComposite:
             phase=phase, confidence=conf, kuramoto_R=R, consensus_R=R,
             cross_scale_coherence=coh, static_ricci=static_ricci, temporal_ricci=kt,
             topological_transition=trans, entry_signal=entry, exit_signal=exit_u,
-            risk_multiplier=risk, dominant_timeframe_sec=kres.dominant_scale_sec, timestamp=ts
+            risk_multiplier=risk,
+            dominant_timeframe_sec=(kres.dominant_scale.seconds if kres.dominant_scale else None),
+            timestamp=ts,
+            skipped_timeframes=[str(tf) for tf in kres.skipped_timeframes],
         )
 
     def to_dict(self, s: CompositeSignal) -> Dict:
@@ -123,8 +127,24 @@ class KuramotoRicciComposite:
             "entry_signal": s.entry_signal, "exit_signal": s.exit_signal, "risk_multiplier": s.risk_multiplier,
             "kuramoto_R": s.kuramoto_R, "consensus_R": s.consensus_R, "coherence": s.cross_scale_coherence,
             "static_ricci": s.static_ricci, "temporal_ricci": s.temporal_ricci, "topological_transition": s.topological_transition,
-            "dominant_timeframe_sec": s.dominant_timeframe_sec
+            "dominant_timeframe_sec": s.dominant_timeframe_sec, "skipped_timeframes": s.skipped_timeframes,
         }
+
+    # Backwards-compatible wrappers for legacy API expectations
+    def _determine_phase(self, R: float, temporal_ricci: float, transition_score: float, static_ricci: float) -> MarketPhase:
+        return self._phase(R, temporal_ricci, transition_score, static_ricci)
+
+    def _compute_confidence(self, phase: MarketPhase, coherence: float, transition_score: float, R: float) -> float:
+        return self._confidence(phase, coherence, transition_score, R)
+
+    def _generate_entry_signal(self, phase: MarketPhase, R: float, temporal_ricci: float, transition_score: float, confidence: float) -> float:
+        return self._entry(phase, R, temporal_ricci, confidence)
+
+    def _generate_exit_signal(self, phase: MarketPhase, transition_score: float, R: float) -> float:
+        return self._exit(phase, transition_score, R)
+
+    def _compute_risk_multiplier(self, phase: MarketPhase, confidence: float, coherence: float) -> float:
+        return self._risk(phase, confidence, coherence)
 
 class TradePulseCompositeEngine:
     def __init__(self, kuramoto_config: Optional[Dict] = None, ricci_config: Optional[Dict] = None, composite_config: Optional[Dict] = None):
@@ -144,3 +164,7 @@ class TradePulseCompositeEngine:
     def get_signal_dataframe(self) -> pd.DataFrame:
         if not self.history: return pd.DataFrame()
         return pd.DataFrame([self.c.to_dict(s) for s in self.history])
+
+    @property
+    def signal_history(self) -> list[CompositeSignal]:
+        return self.history

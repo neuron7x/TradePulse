@@ -1,30 +1,38 @@
 
 import numpy as np
 import pandas as pd
+import warnings
+from collections import defaultdict, deque
 from dataclasses import dataclass
-from typing import Dict, Tuple, List, Optional
-from collections import deque, defaultdict
+from typing import Dict, List, Optional, Tuple
 
 # --------- Lightweight Graph (no networkx) ---------
 class LightGraph:
     def __init__(self, n: int):
         self.n = n
         self.adj = [dict() for _ in range(n)]  # neighbor -> weight
+        self._edges_cache: Optional[List[Tuple[int, int]]] = None
 
     def add_edge(self, i: int, j: int, w: float = 1.0):
-        if i == j: return
-        self.adj[i][j] = w
-        self.adj[j][i] = w
+        if i == j:
+            return
+        weight = float(w)
+        self.adj[i][j] = weight
+        self.adj[j][i] = weight
+        self._edges_cache = None
 
     def edges(self) -> List[Tuple[int,int]]:
-        seen = set()
-        E = []
-        for i in range(self.n):
-            for j in self.adj[i].keys():
-                e = (min(i,j), max(i,j))
-                if e not in seen:
-                    seen.add(e); E.append(e)
-        return E
+        if self._edges_cache is None:
+            seen = set()
+            edges: List[Tuple[int, int]] = []
+            for i in range(self.n):
+                for j in self.adj[i].keys():
+                    e = (min(i, j), max(i, j))
+                    if e not in seen:
+                        seen.add(e)
+                        edges.append(e)
+            self._edges_cache = edges
+        return list(self._edges_cache)
 
     def neighbors(self, i: int) -> List[int]:
         return list(self.adj[i].keys())
@@ -32,16 +40,23 @@ class LightGraph:
     def num_edges(self) -> int:
         return len(self.edges())
 
+    def number_of_nodes(self) -> int:
+        return self.n
+
+    def number_of_edges(self) -> int:
+        return self.num_edges()
+
     def is_connected(self) -> bool:
-        if self.n == 0: return True
-        # BFS
-        seen = set([0])
-        q = [0]
+        if self.n == 0:
+            return True
+        seen = {0}
+        q: deque[int] = deque([0])
         while q:
-            v = q.pop(0)
+            v = q.popleft()
             for u in self.adj[v].keys():
                 if u not in seen:
-                    seen.add(u); q.append(u)
+                    seen.add(u)
+                    q.append(u)
         # consider nodes with any adjacency or isolated; treat graph with no edges as connected
         if self.num_edges() == 0:
             return True
@@ -53,17 +68,19 @@ class LightGraph:
         return active.issubset(seen)
 
     def shortest_path_length(self, s: int, t: int) -> int:
-        if s == t: return 0
-        visited = set([s])
-        q = [(s,0)]
+        if s == t:
+            return 0
+        visited = {s}
+        q: deque[Tuple[int, int]] = deque([(s, 0)])
         while q:
-            v,d = q.pop(0)
+            v, d = q.popleft()
             for u in self.adj[v].keys():
-                if u == t: return d+1
+                if u == t:
+                    return d + 1
                 if u not in visited:
                     visited.add(u)
-                    q.append((u, d+1))
-        return int(1e9)  # effectively inf
+                    q.append((u, d + 1))
+        return int(1e9)
 
 # --------- Data models ---------
 @dataclass
@@ -143,28 +160,44 @@ class PriceLevelGraph:
         idx = np.clip(np.digitize(prices, levels) - 1, 0, n-1)
 
         G = LightGraph(n)
-        counts = np.zeros((n,n), dtype=float)
-        for i in range(len(idx)-1):
-            a, b = int(idx[i]), int(idx[i+1])
-            w = float(volumes[i]) if volumes is not None else 1.0
-            counts[a,b] += w; counts[b,a] += w
-        if counts.max() > 0:
-            counts /= counts.max()
-        # connect edges above threshold
-        for i in range(n):
-            for j in range(i+1, n):
-                if counts[i,j] > self.connection_threshold:
-                    G.add_edge(i, j, counts[i,j])
+        if len(idx) < 2:
+            return G
+        weights = np.ones(len(idx) - 1, dtype=float)
+        if volumes is not None:
+            raw = np.asarray(volumes, dtype=float)
+            if raw.size == len(idx):
+                raw = raw[:-1]
+            elif raw.size != len(idx) - 1:
+                raise ValueError("volumes length must be len(prices) - 1")
+            weights = np.maximum(raw, 0.0)
+        transitions = np.column_stack([idx[:-1], idx[1:]]).astype(int)
+        mask = transitions[:, 0] != transitions[:, 1]
+        transitions = transitions[mask]
+        weights = weights[mask]
+        if transitions.size == 0:
+            return G
+        matrix = np.zeros((n, n), dtype=float)
+        np.add.at(matrix, (transitions[:, 0], transitions[:, 1]), weights)
+        np.add.at(matrix, (transitions[:, 1], transitions[:, 0]), weights)
+        max_weight = matrix.max()
+        if max_weight <= 0:
+            return G
+        matrix /= max_weight
+        i_idx, j_idx = np.where(matrix > self.connection_threshold)
+        for a, b in zip(i_idx, j_idx):
+            if a < b:
+                G.add_edge(int(a), int(b), matrix[a, b])
         return G
 
 # --------- Temporal analyzer ---------
 class TemporalRicciAnalyzer:
-    def __init__(self, window_size: int = 100, n_snapshots: int = 10, n_levels: int = 20):
+    def __init__(self, window_size: int = 100, n_snapshots: int = 10, n_levels: int = 20, *, retain_history: bool = True):
         self.window_size = window_size
         self.n_snapshots = n_snapshots
         self.n_levels = n_levels
         self.ricci = OllivierRicciCurvatureLite(alpha=0.5)
         self.builder = PriceLevelGraph(n_levels=n_levels)
+        self.retain_history = retain_history
         self.history: deque[GraphSnapshot] = deque(maxlen=n_snapshots)
 
     def _snapshot(self, prices: np.ndarray, volumes: Optional[np.ndarray], ts: pd.Timestamp) -> GraphSnapshot:
@@ -203,16 +236,26 @@ class TemporalRicciAnalyzer:
             metrics.append([E, avg_deg, s.avg_curvature])
         M = np.array(metrics, dtype=float)
         D = np.abs(np.diff(M, axis=0))
-        # normalize per column
+        if D.size == 0:
+            return 0.0
         maxd = D.max(axis=0)
         maxd[maxd == 0] = 1.0
         Dn = D / maxd
-        last2 = Dn[-2:,:] if len(Dn) >= 2 else Dn
-        avg_jump = float(np.mean(last2))
-        # sigmoid
-        beta = 10.0
-        score = 1.0 / (1.0 + np.exp(-beta * (avg_jump - 0.3)))
-        return float(score)
+        avg_jump = float(np.mean(Dn))
+        beta = 8.0
+        score = 1.0 / (1.0 + np.exp(-beta * (avg_jump - 0.15)))
+        curvatures = np.array([s.avg_curvature for s in self.history], dtype=float)
+        if curvatures.size >= 2:
+            curvature_component = float(np.clip(np.std(np.diff(curvatures)), 0.0, 1.0))
+        else:
+            curvature_component = 0.0
+        vol_series = [np.std(np.diff(s.price_levels)) for s in self.history if len(s.price_levels) >= 2]
+        if len(vol_series) >= 2:
+            vol_diff = np.mean(vol_series[-2:]) - np.mean(vol_series[:-2]) if len(vol_series) > 2 else vol_series[-1] - vol_series[0]
+            volatility_component = float(np.clip(vol_diff, 0.0, 1.0))
+        else:
+            volatility_component = 0.0
+        return float(np.clip(score + 0.2 * curvature_component + 0.2 * volatility_component, 0.0, 1.0))
 
     def _stability(self) -> float:
         if len(self.history) < 2: return 1.0
@@ -232,10 +275,25 @@ class TemporalRicciAnalyzer:
         persistent = set.intersection(*edge_sets) if edge_sets else set()
         return float(len(persistent) / len(all_edges))
 
-    def analyze(self, df: pd.DataFrame, price_col: str = "close", volume_col: Optional[str] = "volume") -> "TemporalRicciResult":
+    def analyze(
+        self,
+        df: pd.DataFrame,
+        price_col: str = "close",
+        volume_col: Optional[str] = "volume",
+        *,
+        reset_history: bool = False,
+    ) -> "TemporalRicciResult":
         if df.empty or price_col not in df.columns:
             raise ValueError("DataFrame must contain a 'close' column and not be empty")
-        self.history.clear()
+        if reset_history or not self.retain_history:
+            self.history.clear()
+        elif self.history and df.index[0] <= self.history[-1].timestamp:
+            warnings.warn(
+                "TemporalRicciAnalyzer received non-monotonic timestamps; resetting history buffer",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            self.history.clear()
         N = len(df)
         if self.n_snapshots <= 1:
             step = max(self.window_size, N)
@@ -243,6 +301,8 @@ class TemporalRicciAnalyzer:
             step = max(1, (N - self.window_size) // (self.n_snapshots - 1))
         for i in range(0, max(1, N - self.window_size + 1), step):
             seg = df.iloc[i:i+self.window_size]
+            if len(seg) < self.window_size:
+                continue
             prices = seg[price_col].astype(float).values
             volumes = seg[volume_col].astype(float).values if (volume_col and volume_col in seg.columns) else None
             ts = seg.index[-1]
@@ -253,3 +313,8 @@ class TemporalRicciAnalyzer:
         stab = self._stability()
         pers = self._persistence()
         return TemporalRicciResult(temporal_curvature=k_temporal, topological_transition_score=trans, graph_snapshots=list(self.history), structural_stability=stab, edge_persistence=pers)
+
+
+# Backwards compatible aliases expected by the public API
+OllivierRicciCurvature = OllivierRicciCurvatureLite
+PriceLevelGraphBuilder = PriceLevelGraph
