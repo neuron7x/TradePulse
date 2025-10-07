@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Iterable
+import warnings
 
 import numpy as np
 
@@ -12,10 +13,10 @@ try:
 except Exception:  # pragma: no cover - fallback for lightweight environments
     class _SimpleGraph:
         def __init__(self) -> None:
-            self._adj: dict[int, set[int]] = {}
+            self._adj: dict[int, dict[int, float]] = {}
 
         def add_node(self, node: int) -> None:
-            self._adj.setdefault(int(node), set())
+            self._adj.setdefault(int(node), {})
 
         def add_nodes_from(self, nodes: Iterable[int]) -> None:
             for node in nodes:
@@ -24,16 +25,20 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def add_edge(self, u: int, v: int, weight: float | None = None) -> None:
             self.add_node(int(u))
             self.add_node(int(v))
-            self._adj[int(u)].add(int(v))
-            self._adj[int(v)].add(int(u))
+            w = float(weight if weight is not None else 1.0)
+            self._adj[int(u)][int(v)] = w
+            self._adj[int(v)][int(u)] = w
 
         def neighbors(self, node: int) -> Iterable[int]:
             return tuple(self._adj.get(int(node), ()))
 
-        def degree(self, node: int | None = None) -> Iterable[tuple[int, int]] | int:
+        def degree(self, node: int | None = None, weight: str | None = None) -> Iterable[tuple[int, float]] | float:
             if node is None:
+                if weight:
+                    return tuple((n, sum(neigh.values())) for n, neigh in self._adj.items())
                 return tuple((n, len(neigh)) for n, neigh in self._adj.items())
-            return len(self._adj.get(int(node), ()))
+            neigh = self._adj.get(int(node), {})
+            return sum(neigh.values()) if weight else len(neigh)
 
         def nodes(self) -> Iterable[int]:
             return tuple(self._adj.keys())
@@ -41,20 +46,50 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def number_of_edges(self) -> int:
             return sum(len(neigh) for neigh in self._adj.values()) // 2
 
-        def edges(self) -> Iterable[tuple[int, int]]:
+        def edges(self, data: bool = False) -> Iterable[tuple[int, int] | tuple[int, int, dict[str, float]]]:
             seen: set[tuple[int, int]] = set()
             for u, neigh in self._adj.items():
                 for v in neigh:
                     edge = (min(u, v), max(u, v))
                     if edge not in seen:
                         seen.add(edge)
-                        yield edge
+                        if data:
+                            yield (edge[0], edge[1], {"weight": neigh[v]})
+                        else:
+                            yield edge
 
         def has_edge(self, u: int, v: int) -> bool:
             return int(v) in self._adj.get(int(u), set())
 
         def number_of_nodes(self) -> int:
             return len(self._adj)
+
+        def shortest_path_length(self, source: int, target: int, weight: str | None = None) -> float:
+            import heapq
+
+            if source == target:
+                return 0.0
+            distances = {source: 0.0}
+            heap: list[tuple[float, int]] = [(0.0, source)]
+            while heap:
+                dist, node = heapq.heappop(heap)
+                if node == target:
+                    return dist
+                if dist > distances.get(node, float("inf")):
+                    continue
+                for neigh, w in self._adj.get(node, {}).items():
+                    step = w if weight else 1.0
+                    nd = dist + step
+                    if nd < distances.get(neigh, float("inf")):
+                        distances[neigh] = nd
+                        heapq.heappush(heap, (nd, neigh))
+            return float("inf")
+
+        def get_edge_data(self, u: int, v: int, default: dict[str, float] | None = None) -> dict[str, float] | None:
+            weight = self._adj.get(int(u), {}).get(int(v))
+            if weight is None:
+                return default
+            return {"weight": weight}
 
     class _NXModule:  # pragma: no cover
         Graph = _SimpleGraph
@@ -75,8 +110,9 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
     G = nx.Graph()
     for i, lv in enumerate(levels):
         G.add_node(int(lv))
-        if i>0:
-            G.add_edge(int(levels[i-1]), int(lv), weight=1.0)
+        if i > 0:
+            weight = float(abs(prices[i] - prices[i - 1])) + 1.0
+            G.add_edge(int(levels[i - 1]), int(lv), weight=weight)
     return G
 
 def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
@@ -84,9 +120,15 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     neigh = [n for n in G.neighbors(node)]
     if not neigh:
         return np.array([1.0])
-    deg = np.array([G.degree(n) for n in neigh], dtype=float)
-    p = deg / deg.sum()
-    return p
+    weights = []
+    for n in neigh:
+        data = G.get_edge_data(node, n, default={"weight": 1.0})
+        weights.append(float(data.get("weight", 1.0)))
+    w_arr = np.asarray(weights, dtype=float)
+    total = w_arr.sum()
+    if total == 0:
+        return np.full(len(neigh), 1.0 / len(neigh))
+    return w_arr / total
 
 def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     """Ollivier–Ricci curvature κ(x,y) = 1 - W1(μ_x, μ_y)/d(x,y) for unweighted graphs."""
@@ -98,7 +140,18 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     m = max(len(mu_x), len(mu_y))
     a = np.pad(mu_x, (0, m-len(mu_x)))
     b = np.pad(mu_y, (0, m-len(mu_y)))
-    d_xy = 1.0  # unweighted graph
+    if hasattr(G, "shortest_path_length"):
+        d_xy = G.shortest_path_length(x, y, weight="weight")
+    else:  # pragma: no cover - networkx path
+        d_xy = nx.shortest_path_length(G, x, y, weight="weight")
+    if not np.isfinite(d_xy) or d_xy <= 0:
+        return 0.0
+    if W1 is None:
+        warnings.warn(
+            "SciPy unavailable; using discrete Wasserstein approximation for Ricci curvature",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     dist = W1(a, b) if W1 is not None else _w1_fallback(a, b)
     return float(1.0 - dist / d_xy)
 
