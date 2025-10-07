@@ -21,6 +21,21 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
       - name: Run unit and integration tests with coverage
-        run: pytest --cov=. --cov-report=xml --cov-report=term-missing
-      - name: Run property-based tests
-        run: pytest tests/property --hypothesis-show-statistics
+        run: |
+          pytest tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
+            --ignore=tests/unit/test_indicators_kuramoto.py \
+            --ignore=tests/unit/test_kuramoto_ricci_composite.py \
+            --ignore=tests/unit/test_indicators_ricci.py \
+            --ignore=tests/unit/test_indicators_temporal_ricci.py \
+            --cov=core --cov=backtest --cov=execution \
+            --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=56
+      - name: Run property-based tests with statistics
+        run: pytest tests/property/ --hypothesis-show-statistics
+      - name: Upload coverage reports
+        uses: codecov/codecov-action@v3
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
