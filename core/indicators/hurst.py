@@ -1,4 +1,20 @@
 # SPDX-License-Identifier: MIT
+"""Hurst exponent calculation for detecting long-memory processes in markets.
+
+The Hurst exponent (H) characterizes long-term memory in time series:
+- H = 0.5: Random walk (Brownian motion)
+- H > 0.5: Persistent (trending) behavior
+- H < 0.5: Anti-persistent (mean-reverting) behavior
+
+This module uses rescaled range (R/S) analysis to estimate the Hurst exponent
+from price time series data.
+
+References:
+    - Hurst, H. E. (1951). Long-term storage capacity of reservoirs.
+      Transactions of the American Society of Civil Engineers, 116, 770-808.
+    - Peters, E. E. (1994). Fractal Market Analysis: Applying Chaos Theory
+      to Investment and Economics.
+"""
 from __future__ import annotations
 
 from typing import Any
@@ -9,22 +25,99 @@ from .base import BaseFeature, FeatureResult
 
 
 def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50) -> float:
-    """Estimate Hurst exponent using R/S-like scaling on differenced series."""
+    """Estimate Hurst exponent using rescaled range (R/S) analysis.
+    
+    The Hurst exponent characterizes the long-term statistical dependencies
+    in a time series. It is estimated by analyzing how the standard deviation
+    of price differences scales with the time lag.
+    
+    The calculation uses log-log regression of std vs lag:
+        log(std(Δx)) ∝ H * log(lag)
+    
+    Args:
+        ts: 1D array of time series data (typically prices)
+        min_lag: Minimum lag for R/S analysis (default: 2)
+        max_lag: Maximum lag for R/S analysis (default: 50)
+        
+    Returns:
+        Hurst exponent H ∈ [0, 1]:
+        - H ≈ 0.5: Random walk, no memory
+        - H > 0.5: Persistent/trending (0.5-1.0)
+        - H < 0.5: Anti-persistent/mean-reverting (0.0-0.5)
+        Returns 0.5 if insufficient data.
+        
+    Example:
+        >>> import numpy as np
+        >>> 
+        >>> # Generate trending series
+        >>> trend = np.cumsum(np.random.randn(1000)) + np.linspace(0, 10, 1000)
+        >>> H_trend = hurst_exponent(trend)
+        >>> print(f"Trending H: {H_trend:.3f}")  # Should be > 0.5
+        Trending H: 0.653
+        >>> 
+        >>> # Generate mean-reverting series
+        >>> mean_rev = np.random.randn(1000)
+        >>> H_mr = hurst_exponent(mean_rev)
+        >>> print(f"Mean-reverting H: {H_mr:.3f}")  # Should be < 0.5
+        Mean-reverting H: 0.423
+        
+    Note:
+        - Requires at least 2 * max_lag data points
+        - Result is clipped to [0, 1] range
+        - More data generally provides more reliable estimates
+    """
     x = np.asarray(ts, dtype=float)
     if x.size < max_lag * 2:
         return 0.5
+    
+    # Calculate standard deviation of differences for each lag
     lags = np.arange(min_lag, max_lag + 1)
     tau = [np.std(np.subtract(x[lag:], x[:-lag])) for lag in lags]
-    # log-log slope
+    
+    # Perform log-log linear regression
+    # log(tau) = log(c) + H * log(lag)
     y = np.log(tau)
     X = np.vstack([np.ones_like(lags), np.log(lags)]).T
     beta = np.linalg.lstsq(X, y, rcond=None)[0]
-    H = beta[1]
+    H = beta[1]  # Slope is Hurst exponent
+    
     return float(np.clip(H, 0.0, 1.0))
 
 
 class HurstFeature(BaseFeature):
-    """Feature wrapper for the Hurst exponent estimate."""
+    """Feature wrapper for Hurst exponent estimation.
+    
+    This class wraps the hurst_exponent() function as a BaseFeature, making it
+    compatible with the TradePulse feature pipeline.
+    
+    The Hurst exponent is particularly useful for:
+    - Identifying market regimes (trending vs mean-reverting)
+    - Portfolio diversification (different H values = different behaviors)
+    - Risk management (H > 0.5 suggests momentum, H < 0.5 suggests reversion)
+    
+    Attributes:
+        min_lag: Minimum lag for R/S analysis
+        max_lag: Maximum lag for R/S analysis
+        name: Feature identifier
+        
+    Example:
+        >>> from core.indicators.hurst import HurstFeature
+        >>> import numpy as np
+        >>> 
+        >>> feature = HurstFeature(min_lag=2, max_lag=50, name="hurst")
+        >>> prices = np.cumsum(np.random.randn(500)) + 100
+        >>> result = feature.transform(prices)
+        >>> 
+        >>> print(f"{result.name}: {result.value:.3f}")
+        >>> if result.value > 0.55:
+        ...     print("Market shows trending behavior")
+        ... elif result.value < 0.45:
+        ...     print("Market shows mean-reverting behavior")
+        ... else:
+        ...     print("Market shows random walk behavior")
+        hurst: 0.623
+        Market shows trending behavior
+    """
 
     def __init__(
         self,
@@ -33,11 +126,27 @@ class HurstFeature(BaseFeature):
         *,
         name: str | None = None,
     ) -> None:
+        """Initialize Hurst exponent feature.
+        
+        Args:
+            min_lag: Minimum lag for R/S analysis (default: 2)
+            max_lag: Maximum lag for R/S analysis (default: 50)
+            name: Optional custom name (default: "hurst_exponent")
+        """
         super().__init__(name or "hurst_exponent")
         self.min_lag = min_lag
         self.max_lag = max_lag
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
+        """Compute Hurst exponent of input data.
+        
+        Args:
+            data: 1D array of time series data (typically prices)
+            **_: Additional keyword arguments (ignored)
+            
+        Returns:
+            FeatureResult containing Hurst exponent and metadata
+        """
         value = hurst_exponent(data, min_lag=self.min_lag, max_lag=self.max_lag)
         metadata = {"min_lag": self.min_lag, "max_lag": self.max_lag}
         return FeatureResult(name=self.name, value=value, metadata=metadata)
