@@ -24,4 +24,8 @@ def test_entropy_non_negative(data):
 def test_kuramoto_order_bounded(data):
     phases = np.array(data, dtype=float)
     value = kuramoto_order(phases)
-    assert 0.0 <= value <= 1.0
+    tolerance = 1e-8
+    # Floating-point tolerance for Kuramoto order parameter
+    assert -tolerance <= value <= 1.0 + tolerance, (
+        f"Kuramoto order parameter {value} out of bounds [-{tolerance}, {1.0 + tolerance}]"
+    )
