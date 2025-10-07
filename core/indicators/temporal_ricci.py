@@ -1,397 +1,255 @@
-# SPDX-License-Identifier: MIT
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from dataclasses import dataclass
+from typing import Dict, Tuple, List, Optional
+from collections import deque, defaultdict
 
-from . import ricci as _ricci
+# --------- Lightweight Graph (no networkx) ---------
+class LightGraph:
+    def __init__(self, n: int):
+        self.n = n
+        self.adj = [dict() for _ in range(n)]  # neighbor -> weight
 
-mean_ricci = _ricci.mean_ricci
-ricci_curvature_edge = _ricci.ricci_curvature_edge
-nx = _ricci.nx
+    def add_edge(self, i: int, j: int, w: float = 1.0):
+        if i == j: return
+        self.adj[i][j] = w
+        self.adj[j][i] = w
 
-try:  # pragma: no cover - SciPy is optional
-    from scipy.spatial.distance import jensenshannon as _jsd
-except Exception:  # pragma: no cover
-    _jsd = None
+    def edges(self) -> List[Tuple[int,int]]:
+        seen = set()
+        E = []
+        for i in range(self.n):
+            for j in self.adj[i].keys():
+                e = (min(i,j), max(i,j))
+                if e not in seen:
+                    seen.add(e); E.append(e)
+        return E
 
+    def neighbors(self, i: int) -> List[int]:
+        return list(self.adj[i].keys())
 
+    def num_edges(self) -> int:
+        return len(self.edges())
+
+    def is_connected(self) -> bool:
+        if self.n == 0: return True
+        # BFS
+        seen = set([0])
+        q = [0]
+        while q:
+            v = q.pop(0)
+            for u in self.adj[v].keys():
+                if u not in seen:
+                    seen.add(u); q.append(u)
+        # consider nodes with any adjacency or isolated; treat graph with no edges as connected
+        if self.num_edges() == 0:
+            return True
+        # Only consider nodes that participate in at least one edge
+        active = set()
+        for i in range(self.n):
+            if self.adj[i]:
+                active.add(i)
+        return active.issubset(seen)
+
+    def shortest_path_length(self, s: int, t: int) -> int:
+        if s == t: return 0
+        visited = set([s])
+        q = [(s,0)]
+        while q:
+            v,d = q.pop(0)
+            for u in self.adj[v].keys():
+                if u == t: return d+1
+                if u not in visited:
+                    visited.add(u)
+                    q.append((u, d+1))
+        return int(1e9)  # effectively inf
+
+# --------- Data models ---------
 @dataclass
 class GraphSnapshot:
-    """Snapshot of a price-level graph at a specific timestamp."""
-
-    graph: "nx.Graph"
-    timestamp: np.datetime64
+    graph: LightGraph
+    timestamp: pd.Timestamp
     price_levels: np.ndarray
-    ricci_curvatures: Dict[Tuple[int, int], float]
+    ricci_curvatures: Dict[Tuple[int,int], float]
     avg_curvature: float
-
-    def edge_set(self) -> set[Tuple[int, int]]:
-        return {tuple(sorted(edge)) for edge in self.graph.edges()}
-
-    def degree_distribution(self) -> np.ndarray:
-        try:
-            degree_items = list(self.graph.degree())  # type: ignore[arg-type]
-        except TypeError:  # Fallback graph returns callable without iteration support
-            nodes = getattr(self.graph, "nodes", lambda: tuple())()
-            degree_items = [(node, self.graph.degree(node)) for node in nodes]
-        degrees = np.array([deg for _, deg in degree_items], dtype=float)
-        if degrees.size == 0:
-            return np.array([1.0])
-        total = degrees.sum()
-        if total == 0.0:
-            return np.array([1.0])
-        distribution = degrees / total
-        return distribution
-
 
 @dataclass
 class TemporalRicciResult:
-    """Temporal Ricci curvature analysis result."""
-
     temporal_curvature: float
     topological_transition_score: float
     graph_snapshots: List[GraphSnapshot]
     structural_stability: float
     edge_persistence: float
 
+# --------- Ollivier-Ricci (proxy without SciPy) ---------
+class OllivierRicciCurvatureLite:
+    """
+    κ(x,y) ≈ 1 - TV(μ_x, μ_y) / d(x,y),
+    where TV(p,q)=0.5 * ||p-q||_1; d is unweighted shortest-path length.
+    This is a computationally cheap proxy of Ollivier curvature.
+    """
+    def __init__(self, alpha: float = 0.5):
+        self.alpha = alpha
 
-class OllivierRicciCurvature:
-    """Light-weight Ollivier--Ricci curvature calculator for graphs."""
+    def _lazy_rw(self, G: LightGraph, node: int) -> Dict[int, float]:
+        neigh = G.neighbors(node)
+        if not neigh:
+            return {node: 1.0}
+        dist = {node: self.alpha}
+        p = (1.0 - self.alpha) / len(neigh)
+        for v in neigh:
+            dist[v] = p
+        return dist
 
-    def __init__(self, alpha: float = 0.5) -> None:
-        self.alpha = float(alpha)
+    def edge_curvature(self, G: LightGraph, edge: Tuple[int,int]) -> float:
+        x, y = edge
+        mu_x = self._lazy_rw(G, x)
+        mu_y = self._lazy_rw(G, y)
 
-    def compute_edge_curvature(self, graph: "nx.Graph", edge: Tuple[int, int]) -> float:
-        if len(edge) != 2:
-            raise ValueError("edge must contain exactly two node identifiers")
-        u, v = (int(edge[0]), int(edge[1]))
-        if graph.has_edge(u, v):
-            return float(ricci_curvature_edge(graph, u, v))
-        if graph.has_edge(v, u):
-            return float(ricci_curvature_edge(graph, v, u))
-        return 0.0
+        # align supports
+        support = sorted(set(mu_x.keys()) | set(mu_y.keys()))
+        px = np.array([mu_x.get(k,0.0) for k in support], dtype=float)
+        py = np.array([mu_y.get(k,0.0) for k in support], dtype=float)
 
-    def compute_all_curvatures(self, graph: "nx.Graph") -> Mapping[Tuple[int, int], float]:
-        curvatures: Dict[Tuple[int, int], float] = {}
-        for u, v in graph.edges():
-            edge = (min(int(u), int(v)), max(int(u), int(v)))
-            curvatures[edge] = self.compute_edge_curvature(graph, edge)
-        return curvatures
+        # total variation distance
+        tv = 0.5 * np.abs(px - py).sum()
 
+        dxy = G.shortest_path_length(x, y)
+        if dxy <= 0 or dxy >= 1e9:
+            return 0.0
+        kappa = 1.0 - (tv / dxy)
+        return float(kappa)
 
-class PriceLevelGraphBuilder:
-    """Construct a graph that represents transitions between price levels."""
+    def all_curvatures(self, G: LightGraph) -> Dict[Tuple[int,int], float]:
+        curv = {}
+        for e in G.edges():
+            curv[e] = self.edge_curvature(G, e)
+        return curv
 
+# --------- Build graph from price levels ---------
+class PriceLevelGraph:
     def __init__(self, n_levels: int = 20, connection_threshold: float = 0.1):
-        self.n_levels = int(n_levels)
-        self.connection_threshold = float(connection_threshold)
+        self.n_levels = n_levels
+        self.connection_threshold = connection_threshold
 
-    def build(
-        self,
-        prices: np.ndarray,
-        volumes: Optional[np.ndarray] = None,
-    ) -> "nx.Graph":
-        if nx is None:  # pragma: no cover - safeguard for environments without networkx
-            raise RuntimeError("networkx is required for temporal Ricci analysis")
+    def build(self, prices: np.ndarray, volumes: Optional[np.ndarray] = None) -> LightGraph:
+        prices = np.asarray(prices, dtype=float)
+        n = self.n_levels
+        pmin, pmax = float(prices.min()), float(prices.max())
+        if pmax == pmin:
+            pmax = pmin + 1e-6
+        levels = np.linspace(pmin, pmax, n)
+        idx = np.clip(np.digitize(prices, levels) - 1, 0, n-1)
 
-        values = np.asarray(prices, dtype=float)
-        if values.size < 2:
-            G = nx.Graph()
-            for node in range(self.n_levels):
-                G.add_node(node)
-            return G
-
-        price_min = float(values.min())
-        price_max = float(values.max())
-        if np.isclose(price_min, price_max):
-            price_max = price_min + 1e-6
-
-        levels = np.linspace(price_min, price_max, self.n_levels)
-        indices = np.digitize(values, levels, right=False) - 1
-        indices = np.clip(indices, 0, self.n_levels - 1)
-
-        transition_counts = np.zeros((self.n_levels, self.n_levels), dtype=float)
-        weights = (
-            np.asarray(volumes, dtype=float)
-            if volumes is not None
-            else np.ones(values.size - 1, dtype=float)
-        )
-
-        for idx in range(values.size - 1):
-            i = int(indices[idx])
-            j = int(indices[idx + 1])
-            w = float(weights[idx])
-            transition_counts[i, j] += w
-            transition_counts[j, i] += w
-
-        G = nx.Graph()
-        for node in range(self.n_levels):
-            G.add_node(node)
-
-        max_count = float(transition_counts.max())
-        if max_count <= 0:
-            return G
-
-        transition_counts /= max_count
-        for i in range(self.n_levels):
-            for j in range(i + 1, self.n_levels):
-                weight = transition_counts[i, j]
-                if weight > self.connection_threshold:
-                    G.add_edge(i, j, weight=weight)
-
+        G = LightGraph(n)
+        counts = np.zeros((n,n), dtype=float)
+        for i in range(len(idx)-1):
+            a, b = int(idx[i]), int(idx[i+1])
+            w = float(volumes[i]) if volumes is not None else 1.0
+            counts[a,b] += w; counts[b,a] += w
+        if counts.max() > 0:
+            counts /= counts.max()
+        # connect edges above threshold
+        for i in range(n):
+            for j in range(i+1, n):
+                if counts[i,j] > self.connection_threshold:
+                    G.add_edge(i, j, counts[i,j])
         return G
 
-
+# --------- Temporal analyzer ---------
 class TemporalRicciAnalyzer:
-    """Temporal Ricci curvature analysis with topological transition detection."""
+    def __init__(self, window_size: int = 100, n_snapshots: int = 10, n_levels: int = 20):
+        self.window_size = window_size
+        self.n_snapshots = n_snapshots
+        self.n_levels = n_levels
+        self.ricci = OllivierRicciCurvatureLite(alpha=0.5)
+        self.builder = PriceLevelGraph(n_levels=n_levels)
+        self.history: deque[GraphSnapshot] = deque(maxlen=n_snapshots)
 
-    def __init__(
-        self,
-        window_size: int = 256,
-        n_snapshots: int = 10,
-        n_levels: int = 20,
-        connection_threshold: float = 0.1,
-    ) -> None:
-        if n_snapshots < 1:
-            raise ValueError("n_snapshots must be at least 1")
+    def _snapshot(self, prices: np.ndarray, volumes: Optional[np.ndarray], ts: pd.Timestamp) -> GraphSnapshot:
+        G = self.builder.build(prices, volumes)
+        curv = self.ricci.all_curvatures(G)
+        avg_k = float(np.mean(list(curv.values()))) if curv else 0.0
+        return GraphSnapshot(graph=G, timestamp=ts, price_levels=prices, ricci_curvatures=curv, avg_curvature=avg_k)
 
-        self.window_size = int(window_size)
-        self.n_snapshots = int(n_snapshots)
-        self.builder = PriceLevelGraphBuilder(
-            n_levels=n_levels, connection_threshold=connection_threshold
-        )
-
-    def analyze(
-        self,
-        df: Optional[pd.DataFrame] = None,
-        *,
-        price_series: Optional[np.ndarray] = None,
-        volume_series: Optional[np.ndarray] = None,
-        price_col: str = "close",
-        volume_col: Optional[str] = "volume",
-    ) -> TemporalRicciResult:
-
-        if nx is None:
-            raise RuntimeError("networkx is required for temporal Ricci analysis")
-
-        if df is not None:
-            data = df
-            if not isinstance(data.index, pd.DatetimeIndex):
-                data = data.copy()
-                data.index = pd.to_datetime(data.index)
-            prices = data[price_col].to_numpy()
-            volumes = data[volume_col].to_numpy() if volume_col and volume_col in data else None
-            timestamps = data.index.to_numpy()
-        else:
-            if price_series is None:
-                raise ValueError("Either df or price_series must be provided")
-            prices = np.asarray(price_series, dtype=float)
-            volumes = (
-                np.asarray(volume_series, dtype=float)
-                if volume_series is not None
-                else None
-            )
-            timestamps = np.arange(prices.size, dtype=int)
-
-        if prices.size < self.window_size or self.window_size <= 1:
-            empty_result = TemporalRicciResult(
-                temporal_curvature=0.0,
-                topological_transition_score=0.0,
-                graph_snapshots=[],
-                structural_stability=1.0,
-                edge_persistence=1.0,
-            )
-            return empty_result
-
-        starts = self._snapshot_starts(prices.size)
-        snapshots: List[GraphSnapshot] = []
-
-        for start in starts:
-            end = start + self.window_size
-            window_prices = prices[start:end]
-            window_volumes = volumes[start : end - 1] if volumes is not None else None
-            timestamp = timestamps[end - 1]
-
-            graph = self.builder.build(window_prices, window_volumes)
-            curvatures = {
-                tuple(sorted((u, v))): ricci_curvature_edge(graph, u, v)
-                for u, v in graph.edges()
-            }
-            avg_curvature = mean_ricci(graph)
-
-            snapshot = GraphSnapshot(
-                graph=graph,
-                timestamp=timestamp,
-                price_levels=window_prices,
-                ricci_curvatures=curvatures,
-                avg_curvature=avg_curvature,
-            )
-            snapshots.append(snapshot)
-
-        temporal_curvature = self._temporal_curvature(snapshots)
-        transition_score = self._transition_score(snapshots)
-        stability = self._structural_stability(snapshots)
-        persistence = self._edge_persistence(snapshots)
-
-        return TemporalRicciResult(
-            temporal_curvature=temporal_curvature,
-            topological_transition_score=transition_score,
-            graph_snapshots=snapshots,
-            structural_stability=stability,
-            edge_persistence=persistence,
-        )
-
-    def _snapshot_starts(self, length: int) -> Sequence[int]:
-        if length <= self.window_size:
-            return [0]
-
-        step = max(1, (length - self.window_size) // max(1, self.n_snapshots - 1))
-        starts = list(range(0, length - self.window_size + 1, step))
-        if starts[-1] != length - self.window_size:
-            starts.append(length - self.window_size)
-        if len(starts) > self.n_snapshots:
-            starts = starts[: self.n_snapshots]
-            if starts[-1] != length - self.window_size:
-                starts[-1] = length - self.window_size
-        return starts
-
-    def _temporal_curvature(self, snapshots: Sequence[GraphSnapshot]) -> float:
-        if len(snapshots) < 2:
-            return 0.0
-
-        changes: List[float] = []
-        for prev, curr in zip(snapshots[:-1], snapshots[1:]):
-            edges_prev = prev.edge_set()
-            edges_curr = curr.edge_set()
-            union = edges_prev | edges_curr
-            symmetric = union - (edges_prev & edges_curr)
-            if not union:
-                edge_change = 0.0
+    def _temporal_curvature(self) -> float:
+        if len(self.history) < 2: return 0.0
+        vals = []
+        for i in range(len(self.history)-1):
+            a = self.history[i]
+            b = self.history[i+1]
+            # normalized edge symmetric difference
+            Ea, Eb = set(a.graph.edges()), set(b.graph.edges())
+            union = len(Ea | Eb)
+            if union == 0:
+                ged_norm = 0.0
             else:
-                edge_change = len(symmetric) / len(union)
+                sym = len(Ea ^ Eb)
+                ged_norm = sym / union
+            delta_k = abs(b.avg_curvature - a.avg_curvature)
+            vals.append(-(ged_norm + delta_k))  # more negative -> more change
+        return float(np.mean(vals))
 
-            delta_kappa = abs(curr.avg_curvature - prev.avg_curvature)
-            changes.append(-(edge_change + delta_kappa))
-
-        return float(np.mean(changes)) if changes else 0.0
-
-    def _transition_score(self, snapshots: Sequence[GraphSnapshot]) -> float:
-        if len(snapshots) < 3:
-            return 0.0
-
+    def _transition_score(self) -> float:
+        if len(self.history) < 3: return 0.0
         metrics = []
-        edge_changes: List[float] = []
-        curvature_jumps: List[float] = []
-        for snap in snapshots:
-            n_edges = snap.graph.number_of_edges()
-            n_nodes = snap.graph.number_of_nodes()
-            avg_degree = 2.0 * n_edges / n_nodes if n_nodes > 0 else 0.0
-            avg_kappa = snap.avg_curvature
-            entropy = self._degree_entropy(snap)
-            metrics.append([n_edges, avg_degree, avg_kappa, entropy])
+        for s in self.history:
+            E = s.graph.num_edges()
+            # average degree over active nodes
+            degs = [len(s.graph.neighbors(i)) for i in range(s.graph.n)]
+            active = [d for d in degs if d > 0]
+            avg_deg = float(np.mean(active)) if active else 0.0
+            metrics.append([E, avg_deg, s.avg_curvature])
+        M = np.array(metrics, dtype=float)
+        D = np.abs(np.diff(M, axis=0))
+        # normalize per column
+        maxd = D.max(axis=0)
+        maxd[maxd == 0] = 1.0
+        Dn = D / maxd
+        last2 = Dn[-2:,:] if len(Dn) >= 2 else Dn
+        avg_jump = float(np.mean(last2))
+        # sigmoid
+        beta = 10.0
+        score = 1.0 / (1.0 + np.exp(-beta * (avg_jump - 0.3)))
+        return float(score)
 
-        for prev, curr in zip(snapshots[:-1], snapshots[1:]):
-            edges_prev = prev.edge_set()
-            edges_curr = curr.edge_set()
-            union = edges_prev | edges_curr
-            if not union:
-                edge_changes.append(0.0)
-            else:
-                symmetric = union - (edges_prev & edges_curr)
-                edge_changes.append(len(symmetric) / len(union))
-            curvature_jumps.append(abs(curr.avg_curvature - prev.avg_curvature))
+    def _stability(self) -> float:
+        if len(self.history) < 2: return 1.0
+        sims = []
+        for i in range(len(self.history)-1):
+            Ea = set(self.history[i].graph.edges())
+            Eb = set(self.history[i+1].graph.edges())
+            if len(Ea | Eb) == 0: sims.append(1.0)
+            else: sims.append(len(Ea & Eb) / len(Ea | Eb))
+        return float(np.mean(sims))
 
-        metrics_arr = np.asarray(metrics, dtype=float)
-        diffs = np.abs(np.diff(metrics_arr, axis=0))
-        if not np.isfinite(diffs).any():
-            return 0.0
+    def _persistence(self) -> float:
+        if len(self.history) < 2: return 1.0
+        edge_sets = [set(s.graph.edges()) for s in self.history]
+        all_edges = set().union(*edge_sets) if edge_sets else set()
+        if not all_edges: return 1.0
+        persistent = set.intersection(*edge_sets) if edge_sets else set()
+        return float(len(persistent) / len(all_edges))
 
-        max_vals = np.max(diffs, axis=0)
-        max_vals[max_vals == 0.0] = 1.0
-        normalized = diffs / max_vals
-        jump = np.linalg.norm(normalized, axis=1) / np.sqrt(normalized.shape[1])
-        jump_score = float(np.mean(jump)) if jump.size > 0 else 0.0
-        structure_score = float(np.mean(edge_changes)) if edge_changes else 0.0
-        curvature_score = (
-            float(1.0 - np.exp(-np.mean(curvature_jumps))) if curvature_jumps else 0.0
-        )
-        score = 0.5 * jump_score + 0.3 * structure_score + 0.2 * curvature_score
-        return float(np.clip(score, 0.0, 1.0))
-
-    def _structural_stability(self, snapshots: Sequence[GraphSnapshot]) -> float:
-        if len(snapshots) < 2:
-            return 1.0
-
-        similarities: List[float] = []
-        for prev, curr in zip(snapshots[:-1], snapshots[1:]):
-            edges_prev = prev.edge_set()
-            edges_curr = curr.edge_set()
-            if not edges_prev and not edges_curr:
-                similarities.append(1.0)
-                continue
-            union = edges_prev | edges_curr
-            if not union:
-                similarities.append(1.0)
-                continue
-            intersection = edges_prev & edges_curr
-            similarities.append(len(intersection) / len(union))
-
-        return float(np.mean(similarities)) if similarities else 1.0
-
-    def _edge_persistence(self, snapshots: Sequence[GraphSnapshot]) -> float:
-        if len(snapshots) < 2:
-            return 1.0
-
-        edge_sets = [snap.edge_set() for snap in snapshots if snap.edge_set()]
-        if not edge_sets:
-            return 1.0
-
-        persistent = set.intersection(*edge_sets)
-        union = set.union(*edge_sets)
-        if not union:
-            return 1.0
-
-        return float(len(persistent) / len(union))
-
-    def _degree_entropy(self, snapshot: GraphSnapshot) -> float:
-        degrees = snapshot.degree_distribution()
-        if degrees.size <= 1:
-            return 0.0
-
-        if _jsd is not None:
-            base = np.full_like(degrees, 1.0 / degrees.size)
-            divergence = float(_jsd(degrees, base, base=2.0))
+    def analyze(self, df: pd.DataFrame, price_col: str = "close", volume_col: Optional[str] = "volume") -> "TemporalRicciResult":
+        if df.empty or price_col not in df.columns:
+            raise ValueError("DataFrame must contain a 'close' column and not be empty")
+        self.history.clear()
+        N = len(df)
+        if self.n_snapshots <= 1:
+            step = max(self.window_size, N)
         else:
-            divergence = float(self._jensen_shannon_fallback(degrees))
-        return divergence
-
-    @staticmethod
-    def _jensen_shannon_fallback(p: np.ndarray) -> float:
-        probs = np.asarray(p, dtype=float)
-        probs = probs / (probs.sum() + 1e-12)
-        uniform = np.full_like(probs, 1.0 / probs.size)
-        m = 0.5 * (probs + uniform)
-        kl_pm = _safe_entropy(probs, m)
-        kl_um = _safe_entropy(uniform, m)
-        return 0.5 * (kl_pm + kl_um) / np.log(2.0)
-
-
-def _safe_entropy(p: np.ndarray, q: np.ndarray) -> float:
-    mask = (p > 0) & (q > 0)
-    if not np.any(mask):
-        return 0.0
-    return float(np.sum(p[mask] * np.log(p[mask] / q[mask])))
-
-
-__all__ = [
-    "OllivierRicciCurvature",
-    "GraphSnapshot",
-    "TemporalRicciResult",
-    "PriceLevelGraphBuilder",
-    "TemporalRicciAnalyzer",
-]
-
+            step = max(1, (N - self.window_size) // (self.n_snapshots - 1))
+        for i in range(0, max(1, N - self.window_size + 1), step):
+            seg = df.iloc[i:i+self.window_size]
+            prices = seg[price_col].astype(float).values
+            volumes = seg[volume_col].astype(float).values if (volume_col and volume_col in seg.columns) else None
+            ts = seg.index[-1]
+            snap = self._snapshot(prices, volumes, ts)
+            self.history.append(snap)
+        k_temporal = self._temporal_curvature()
+        trans = self._transition_score()
+        stab = self._stability()
+        pers = self._persistence()
+        return TemporalRicciResult(temporal_curvature=k_temporal, topological_transition_score=trans, graph_snapshots=list(self.history), structural_stability=stab, edge_persistence=pers)
