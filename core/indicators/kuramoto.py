@@ -26,16 +26,17 @@ def compute_phase(x: np.ndarray) -> np.ndarray:
     if hilbert is not None:
         a = hilbert(x)
     else:
-        # crude analytic signal via FFT (imag as Hilbert by signum in freq)
+        # Analytic signal via frequency-domain Hilbert transform.
         n = x.size
-        X = np.fft.rfft(x, n)
-        H = np.zeros_like(X)
+        X = np.fft.fft(x)
+        H = np.zeros(n)
         if n % 2 == 0:
-            H[1:-1] = 2
+            H[0] = H[n // 2] = 1
+            H[1 : n // 2] = 2
         else:
-            H[1:] = 2
-        a = np.fft.irfft(X * H, n)
-        a = x + 1j * a
+            H[0] = 1
+            H[1 : (n + 1) // 2] = 2
+        a = np.fft.ifft(X * H)
     return np.angle(a)
 
 def kuramoto_order(phases: np.ndarray) -> float:
@@ -72,16 +73,17 @@ def compute_phase_gpu(x):
         from .kuramoto import compute_phase as _cpu
         return _cpu(np.asarray(x))
     x_gpu = cp.asarray(x, dtype=cp.float32)
-    # simple Hilbert via FFT sign filter on GPU
+    # Analytic signal via the same FFT approach as the CPU fallback.
     n = x_gpu.size
-    X = cp.fft.rfft(x_gpu, n)
-    H = cp.zeros_like(X)
+    X = cp.fft.fft(x_gpu)
+    H = cp.zeros(n, dtype=cp.float32)
     if n % 2 == 0:
-        H[1:-1] = 2
+        H[0] = H[n // 2] = 1
+        H[1 : n // 2] = 2
     else:
-        H[1:] = 2
-    a = cp.fft.irfft(X * H, n)
-    a = x_gpu + 1j * a
+        H[0] = 1
+        H[1 : (n + 1) // 2] = 2
+    a = cp.fft.ifft(X * H)
     ph = cp.angle(a)
     return cp.asnumpy(ph)
 
