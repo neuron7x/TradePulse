@@ -2,12 +2,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from typing import Union
 
 import numpy as np
 import pandas as pd
 
 
-ArrayLike = np.ndarray | pd.Series | Sequence[float] | Iterable[float]
+ArrayLike = Union[np.ndarray, pd.Series, Sequence[float], Iterable[float]]
 
 
 def normalize_df(df: pd.DataFrame, timestamp_col: str = "ts") -> pd.DataFrame:

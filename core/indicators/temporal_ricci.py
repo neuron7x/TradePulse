@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 class LightGraph:
     def __init__(self, n: int):
         self.n = n
-        self.adj = [dict() for _ in range(n)]  # neighbor -> weight
+        self.adj: List[Dict[int, float]] = [dict() for _ in range(n)]  # neighbor -> weight
         self._edges_cache: Optional[List[Tuple[int, int]]] = None
 
     def add_edge(self, i: int, j: int, w: float = 1.0):

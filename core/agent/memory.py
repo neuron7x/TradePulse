@@ -15,7 +15,8 @@ class StrategySignature:
     instability: float
 
     def key(self, precision: int = 4) -> Tuple[float, float, float, float, float]:
-        return tuple(round(value, precision) for value in (self.R, self.delta_H, self.kappa_mean, self.entropy, self.instability))
+        rounded = tuple(round(value, precision) for value in (self.R, self.delta_H, self.kappa_mean, self.entropy, self.instability))
+        return (rounded[0], rounded[1], rounded[2], rounded[3], rounded[4])
 
 
 @dataclass
@@ -24,10 +25,10 @@ class StrategyRecord:
     signature: Union[StrategySignature, Tuple[float, float, float, float, float]]
     score: float
     ts: float = field(default_factory=time.time)
-
+    
     def __post_init__(self) -> None:
         if not isinstance(self.signature, StrategySignature):
-            self.signature = StrategySignature(*self.signature)
+            object.__setattr__(self, 'signature', StrategySignature(*self.signature))
 
 
 class StrategyMemory:
@@ -41,11 +42,10 @@ class StrategyMemory:
         return math.exp(-self.lmb * age) * record.score
 
     def add(self, name: str, signature: Union[StrategySignature, Tuple[float, float, float, float, float]], score: float) -> None:
-        if not isinstance(signature, StrategySignature):
-            signature = StrategySignature(*signature)
-        key = signature.key()
+        sig = signature if isinstance(signature, StrategySignature) else StrategySignature(*signature)
+        key = sig.key()
         existing_index = next((i for i, rec in enumerate(self._records) if rec.signature.key() == key), None)
-        record = StrategyRecord(name=name, signature=signature, score=score)
+        record = StrategyRecord(name=name, signature=sig, score=score)
         if existing_index is None:
             self._records.append(record)
         elif score > self._records[existing_index].score:
@@ -76,7 +76,5 @@ class StrategyMemory:
         for record in values:
             if not isinstance(record, StrategyRecord):
                 raise TypeError("records setter expects StrategyRecord instances")
-            if not isinstance(record.signature, StrategySignature):
-                record = StrategyRecord(record.name, record.signature, record.score, record.ts)
             converted.append(record)
         self._records = converted
