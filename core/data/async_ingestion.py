@@ -224,8 +224,9 @@ async def merge_streams(*streams: AsyncIterator[Ticker]) -> AsyncIterator[Ticker
     Yields:
         Ticks from all streams in arrival order
     """
-    pending_tasks = {
-        asyncio.create_task(anext(stream)): stream 
+    from typing import Any
+    pending_tasks: Dict[Any, AsyncIterator[Ticker]] = {
+        asyncio.create_task(anext(stream)): stream  # type: ignore[arg-type]
         for stream in streams
     }
     
@@ -242,7 +243,7 @@ async def merge_streams(*streams: AsyncIterator[Ticker]) -> AsyncIterator[Ticker
                 yield tick
                 
                 # Schedule next read from this stream
-                pending_tasks[asyncio.create_task(anext(stream))] = stream
+                pending_tasks[asyncio.create_task(anext(stream))] = stream  # type: ignore[arg-type]
             except StopAsyncIteration:
                 # Stream exhausted, don't reschedule
                 pass

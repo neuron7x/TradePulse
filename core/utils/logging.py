@@ -54,10 +54,10 @@ class StructuredLogger:
         
     def _log(self, level: int, msg: str, **kwargs: Any) -> None:
         """Internal logging method with structured fields."""
-        extra = {"correlation_id": self.correlation_id}
+        extra_data: Dict[str, Any] = {"correlation_id": self.correlation_id}
         if kwargs:
-            extra["extra_fields"] = kwargs
-        self.logger.log(level, msg, extra=extra)
+            extra_data["extra_fields"] = kwargs
+        self.logger.log(level, msg, extra=extra_data)
         
     def debug(self, msg: str, **kwargs: Any) -> None:
         """Log debug message with structured fields."""
@@ -146,13 +146,13 @@ def configure_logging(
     
     # Set formatter
     if use_json:
-        formatter = JSONFormatter()
+        json_formatter: logging.Formatter = JSONFormatter()
+        handler.setFormatter(json_formatter)
     else:
         formatter = logging.Formatter(
             "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
         )
-    
-    handler.setFormatter(formatter)
+        handler.setFormatter(formatter)
     root_logger.addHandler(handler)
 
 

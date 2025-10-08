@@ -97,28 +97,28 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
         
     # Handle Dict types
     if origin is dict or typ is dict:
-        schema = {"type": "object"}
+        result_schema: Dict[str, Any] = {"type": "object"}
         if args and len(args) == 2:
             # Dict[str, int] etc
             value_schema = _type_to_schema(args[1])
-            schema["additionalProperties"] = value_schema
-        return schema
+            result_schema["additionalProperties"] = value_schema
+        return result_schema
         
     # Handle List/Sequence types
     if origin is list or origin is tuple or typ is list:
-        schema = {"type": "array"}
+        list_schema: Dict[str, Any] = {"type": "array"}
         if args:
             items_schema = _type_to_schema(args[0])
-            schema["items"] = items_schema
-        return schema
+            list_schema["items"] = items_schema
+        return list_schema
         
     # Handle Mapping types
     if hasattr(typ, "__origin__") and "Mapping" in str(typ.__origin__):
-        schema = {"type": "object"}
+        mapping_schema: Dict[str, Any] = {"type": "object"}
         if args and len(args) == 2:
             value_schema = _type_to_schema(args[1])
-            schema["additionalProperties"] = value_schema
-        return schema
+            mapping_schema["additionalProperties"] = value_schema
+        return mapping_schema
         
     # Default to Any
     return {}
