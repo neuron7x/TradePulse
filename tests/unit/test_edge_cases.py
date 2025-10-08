@@ -256,11 +256,22 @@ class TestNumericalStability:
         
         try:
             score = strategy.simulate_performance(df)
-            # May return finite or nan/inf depending on implementation
-            assert isinstance(score, float)
+            assert np.isfinite(score)
         except (ValueError, TypeError, OverflowError):
             # Acceptable to raise error for invalid data
             pass
+
+    def test_strategy_returns_zero_for_all_missing_prices(self) -> None:
+        """Strategy should fail gracefully when all prices are missing."""
+        strategy = Strategy(name="missing", params={})
+        df = pd.DataFrame({"close": [np.nan, np.nan, np.nan]})
+
+        score = strategy.simulate_performance(df)
+
+        assert score == 0.0
+        assert strategy.params["last_equity_curve"] == []
+        assert strategy.params["max_drawdown"] == 0.0
+        assert strategy.params["trades"] == 0
 
     def test_entropy_handles_negative_values(self) -> None:
         """Entropy should handle negative values in data."""

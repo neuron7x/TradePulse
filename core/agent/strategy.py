@@ -43,34 +43,74 @@ class Strategy:
         """Deterministic walk-forward score using rolling mean-reversion logic."""
 
         self.validate_params()
+
+        def _update_diagnostics(equity_curve: np.ndarray, positions: np.ndarray) -> None:
+            if equity_curve.size == 0:
+                self.params["last_equity_curve"] = []
+                self.params["max_drawdown"] = 0.0
+                self.params["trades"] = 0
+                return
+
+            peak = np.maximum.accumulate(np.concatenate([[0.0], equity_curve]))[1:]
+            drawdown = equity_curve - peak
+            self.params["last_equity_curve"] = equity_curve.tolist()
+            self.params["max_drawdown"] = float(drawdown.min()) if drawdown.size else 0.0
+            self.params["trades"] = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
+
         if data is None:
             series = pd.Series(np.linspace(100.0, 101.0, 256), dtype=float)
         else:
             series = _to_price_series(data)
-        returns = series.pct_change().dropna()
+
+        series = series.astype(float)
+        if isinstance(series.index, pd.DatetimeIndex):
+            series = series[~series.index.duplicated(keep="last")].sort_index()
+        series = series.replace([np.inf, -np.inf], np.nan)
+        if series.isna().all():
+            self.score = 0.0
+            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+            return self.score
+        series = series.ffill().bfill()
+
+        returns = series.pct_change(fill_method=None)
+        returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+        if returns.empty:
+            self.score = 0.0
+            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+            return self.score
+
         lookback = int(self.params.get("lookback", 20))
         threshold = float(self.params.get("threshold", 0.5))
         risk_budget = float(self.params.get("risk_budget", 1.0))
+        effective_lookback = max(1, min(lookback, len(returns)))
 
-        rolling_mean = returns.rolling(window=lookback).mean().fillna(0.0)
-        rolling_vol = returns.rolling(window=lookback).std(ddof=0).replace(0, np.nan).bfill().fillna(1e-6)
-        zscore = rolling_mean / rolling_vol
-        signal = np.where(zscore > threshold, -1, np.where(zscore < -threshold, 1, 0))
-        position = np.concatenate([[0], signal[:-1]]) * risk_budget
+        rolling_mean = returns.rolling(window=effective_lookback, min_periods=effective_lookback).mean().fillna(0.0)
+        rolling_vol = (
+            returns.rolling(window=effective_lookback, min_periods=1)
+            .std(ddof=0)
+            .replace(0.0, np.nan)
+            .ffill()
+            .bfill()
+            .fillna(1e-6)
+        )
+        zscore = (rolling_mean / rolling_vol).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+        signal = np.where(zscore > threshold, -1.0, np.where(zscore < -threshold, 1.0, 0.0))
+        if signal.size:
+            position = np.concatenate(([0.0], signal[:-1])) * risk_budget
+        else:
+            position = np.array([], dtype=float)
+
         pnl = position * returns.to_numpy()
         equity = np.cumsum(pnl)
+        _update_diagnostics(equity, position)
         if equity.size == 0:
             self.score = 0.0
             return self.score
-        peak = np.maximum.accumulate(np.concatenate([[0.0], equity]))[1:]
-        drawdown = equity - peak
+
         sharpe = np.mean(pnl) / (np.std(pnl) + 1e-9)
         terminal = equity[-1]
         raw_score = terminal + 0.5 * sharpe
         self.score = float(np.clip(raw_score, -1.0, 2.0))
-        self.params["last_equity_curve"] = equity.tolist()
-        self.params["max_drawdown"] = float(drawdown.min())
-        self.params["trades"] = int(np.count_nonzero(np.diff(position)))
         return self.score
 
 @dataclass
