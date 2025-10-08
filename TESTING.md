@@ -12,6 +12,16 @@ TradePulse employs a comprehensive testing strategy that includes:
 - **Fuzz Tests**: Test robustness with malformed and edge-case data
 - **Performance Tests**: Test behavior with large datasets (planned)
 
+### Dependency Matrix
+
+| Layer              | Required Packages                                               | Notes |
+| ------------------ | --------------------------------------------------------------- | ----- |
+| Runtime            | `numpy`, `pandas`, `scipy`, `PyYAML`                             | PyYAML is mandatory for YAML-driven CLI workflows and configuration fixtures. |
+| Test-only          | `pytest`, `pytest-cov`, `hypothesis`, `faker`, `pytest-benchmark` | Install via `requirements-dev.txt`; Hypothesis is treated as a first-class dependency and should be present in local and CI runs. |
+| Tooling & linting  | `ruff`, `mypy`, `pre-commit`                                     | Executed through `make lint` and enforced in CI. |
+
+> **Tip:** When creating ephemeral CI environments, install both `requirements.txt` and `requirements-dev.txt` to avoid the historical `ModuleNotFoundError: No module named 'yaml'` failure.
+
 ## Test Structure
 
 ```
@@ -72,6 +82,18 @@ Run with coverage report:
 ```bash
 pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=term-missing
 ```
+
+### Integration Workflow Quickstart
+
+Execute the following sequence on every feature branch before opening a pull request:
+
+1. `pytest -q` – fast validation of unit, integration, property, and fuzz suites.
+2. `pytest --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-fail-under=98` – enforces the published coverage threshold.
+3. `python -m interfaces.cli backtest configs/backtests/sample.yaml` – exercises YAML parsing and CLI wiring.
+4. `make lint` – runs ruff, mypy, gofmt, eslint, and prettier (where applicable).
+5. `make docs` – ensures MkDocs builds with updated navigation and references.
+
+These steps mirror the [Quality Assurance Playbook](docs/quality-assurance.md) and help catch dependency regressions early.
 
 Generate HTML coverage report:
 ```bash

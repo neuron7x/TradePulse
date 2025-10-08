@@ -109,8 +109,14 @@ class OllivierRicciCurvatureLite:
     def __init__(self, alpha: float = 0.5):
         self.alpha = alpha
 
+    def _iter_neighbors(self, G: LightGraph, node: int) -> list[int]:
+        neighbors_iter = G.neighbors(node)
+        if isinstance(neighbors_iter, list):
+            return neighbors_iter
+        return list(neighbors_iter)
+
     def _lazy_rw(self, G: LightGraph, node: int) -> Dict[int, float]:
-        neigh = G.neighbors(node)
+        neigh = self._iter_neighbors(G, node)
         if not neigh:
             return {node: 1.0}
         dist = {node: self.alpha}
@@ -118,6 +124,27 @@ class OllivierRicciCurvatureLite:
         for v in neigh:
             dist[v] = p
         return dist
+
+    def _shortest_path_length(self, G: LightGraph, source: int, target: int) -> int:
+        if hasattr(G, "shortest_path_length"):
+            try:
+                return int(G.shortest_path_length(source, target))  # type: ignore[attr-defined]
+            except TypeError:
+                pass
+
+        from collections import deque
+
+        visited = {source}
+        queue: deque[tuple[int, int]] = deque([(source, 0)])
+        while queue:
+            node, dist = queue.popleft()
+            for nbr in self._iter_neighbors(G, node):
+                if nbr == target:
+                    return dist + 1
+                if nbr not in visited:
+                    visited.add(nbr)
+                    queue.append((nbr, dist + 1))
+        return int(1e9)
 
     def edge_curvature(self, G: LightGraph, edge: Tuple[int,int]) -> float:
         x, y = edge
@@ -132,7 +159,7 @@ class OllivierRicciCurvatureLite:
         # total variation distance
         tv = 0.5 * np.abs(px - py).sum()
 
-        dxy = G.shortest_path_length(x, y)
+        dxy = self._shortest_path_length(G, x, y)
         if dxy <= 0 or dxy >= 1e9:
             return 0.0
         kappa = 1.0 - (tv / dxy)
@@ -143,6 +170,13 @@ class OllivierRicciCurvatureLite:
         for e in G.edges():
             curv[e] = self.edge_curvature(G, e)
         return curv
+
+    # Backwards-compatible API expected by the test-suite ---------------------
+    def compute_edge_curvature(self, G: LightGraph, edge: Tuple[int, int]) -> float:
+        return self.edge_curvature(G, edge)
+
+    def compute_all_curvatures(self, G: LightGraph) -> Dict[Tuple[int, int], float]:
+        return self.all_curvatures(G)
 
 # --------- Build graph from price levels ---------
 class PriceLevelGraph:
