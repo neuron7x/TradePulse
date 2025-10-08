@@ -85,11 +85,13 @@ while new code can access rich metrics without type casts. 【F:core/agent/strat
 
 Key fields:
 
-- `equity_curve`, `pnl`, and `positions` as float lists
-- `max_drawdown` (absolute) and `max_drawdown_pct` (relative to peak equity)
-- Trade quality metrics: `trades`, `turnover`, `hit_rate`
-- Risk/return signals: `sharpe`, `terminal_value`, `exposure`, `average_gain`,
-  `average_loss`
+- `equity_curve`, `pnl`, and `positions` as float lists (first equity point is 1.0)
+- Drawdown analytics: `max_drawdown` (absolute), `max_drawdown_pct` (relative),
+  and `terminal_value`
+- Trade quality metrics: `trades`, `turnover`, `hit_rate`, `sample_size`
+- Risk signals: `sharpe`, `sortino`, `volatility`, `exposure`, `value_at_risk`,
+  `conditional_value_at_risk`
+- Return decomposition: `average_gain`, `average_loss`, `profit_factor`
 
 The diagnostics structure is safe to serialise as JSON and can be fed directly
 into dashboards or stored in experiment tracking tables.
@@ -123,7 +125,8 @@ bandit.update(arm, reward=0.42)
 - Keep market feature engineering consistent with `StrategySignature` to ensure
   memory lookups deduplicate comparable environments.
 - Use `Strategy.diagnostics` for typed metrics and fall back to `Strategy.params`
-  keys (`last_equity_curve`, `max_drawdown`, `trades`, `sharpe`, `hit_rate`, …)
+  keys (`last_equity_curve`, `max_drawdown`, `sortino`, `volatility`,
+  `profit_factor`, `value_at_risk`, …)
   when maintaining legacy integrations.
 - When introducing new agent behaviours (e.g., reinforcement learning), extend
   this document and link to the relevant modules so the portal stays aligned

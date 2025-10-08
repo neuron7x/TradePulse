@@ -80,12 +80,37 @@ def test_strategy_simulate_performance_populates_diagnostics() -> None:
     assert diagnostics is not None
     assert isinstance(diagnostics.trades, int)
     assert strategy.params["last_equity_curve"] == diagnostics.equity_curve
-    assert strategy.params["max_drawdown"] == diagnostics.max_drawdown
+    assert strategy.params["max_drawdown"] == pytest.approx(diagnostics.max_drawdown)
     assert strategy.params["sharpe"] == pytest.approx(diagnostics.sharpe)
+    assert strategy.params["sortino"] == pytest.approx(diagnostics.sortino)
+    assert strategy.params["volatility"] == pytest.approx(diagnostics.volatility)
     assert strategy.params["hit_rate"] == pytest.approx(diagnostics.hit_rate)
     assert strategy.params["turnover"] == pytest.approx(diagnostics.turnover)
+    assert strategy.params["profit_factor"] == pytest.approx(diagnostics.profit_factor)
+    assert strategy.params["value_at_risk"] == pytest.approx(diagnostics.value_at_risk)
+    assert strategy.params["conditional_value_at_risk"] == pytest.approx(
+        diagnostics.conditional_value_at_risk
+    )
     assert strategy.params["terminal_value"] == pytest.approx(diagnostics.terminal_value)
+    assert strategy.params["sample_size"] == diagnostics.sample_size
+    assert diagnostics.equity_curve[0] == pytest.approx(1.0)
+    assert diagnostics.sample_size > 0
     assert -1.0 <= score <= 2.0
+
+
+def test_strategy_risk_penalty_reduces_score() -> None:
+    strategy = Strategy(name="risk", params={"lookback": 8, "threshold": 0.2})
+    cliff = pd.Series(np.linspace(100.0, 40.0, 256))
+
+    raw = strategy.simulate_performance(cliff)
+    diagnostics = strategy.diagnostics
+    assert diagnostics is not None
+    baseline = (diagnostics.terminal_value - 1.0) + 0.5 * diagnostics.sharpe
+    penalty = 0.1 * min(diagnostics.value_at_risk, diagnostics.conditional_value_at_risk)
+    expected = np.clip(baseline - penalty, -1.0, 2.0)
+    assert raw == pytest.approx(expected)
+    assert diagnostics.value_at_risk >= 0.0
+    assert diagnostics.conditional_value_at_risk >= diagnostics.value_at_risk
 
 
 def test_pi_agent_detects_instability_and_repair() -> None:

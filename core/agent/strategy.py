@@ -10,7 +10,12 @@ import pandas as pd
 
 @dataclass(slots=True)
 class StrategyDiagnostics:
-    """Snapshot of diagnostic metrics captured during the last simulation."""
+    """Snapshot of diagnostic metrics captured during the last simulation.
+
+    The snapshot keeps a lightweight representation (lists of floats) so it can
+    be serialised by simple configuration stores while still exposing
+    risk-aware analytics to orchestrators.
+    """
 
     equity_curve: list[float]
     positions: list[float]
@@ -19,12 +24,18 @@ class StrategyDiagnostics:
     max_drawdown_pct: float
     trades: int
     sharpe: float
+    sortino: float
+    volatility: float
     terminal_value: float
     exposure: float
     turnover: float
     hit_rate: float
     average_gain: float
     average_loss: float
+    profit_factor: float
+    value_at_risk: float
+    conditional_value_at_risk: float
+    sample_size: int
 
     def as_params(self) -> Dict[str, Any]:
         """Return a dictionary compatible with ``Strategy.params`` updates."""
@@ -35,17 +46,29 @@ class StrategyDiagnostics:
             "max_drawdown_pct": self.max_drawdown_pct,
             "trades": self.trades,
             "sharpe": self.sharpe,
+            "sortino": self.sortino,
+            "volatility": self.volatility,
             "terminal_value": self.terminal_value,
             "exposure": self.exposure,
             "turnover": self.turnover,
             "hit_rate": self.hit_rate,
             "average_gain": self.average_gain,
             "average_loss": self.average_loss,
+            "profit_factor": self.profit_factor,
+            "value_at_risk": self.value_at_risk,
+            "conditional_value_at_risk": self.conditional_value_at_risk,
+            "sample_size": self.sample_size,
         }
 
     @staticmethod
     def _safe_mean(values: np.ndarray) -> float:
         return float(values.mean()) if values.size else 0.0
+
+    @staticmethod
+    def _finite(value: float) -> float:
+        if math.isnan(value) or math.isinf(value):
+            return 0.0
+        return float(value)
 
     @classmethod
     def from_arrays(
@@ -59,24 +82,26 @@ class StrategyDiagnostics:
         pnl = np.asarray(pnl, dtype=float)
 
         if equity_curve.size:
-            peak = np.maximum.accumulate(np.concatenate(([0.0], equity_curve)))[1:]
+            peak = np.maximum.accumulate(equity_curve)
             drawdown = equity_curve - peak
-            max_drawdown = float(drawdown.min()) if drawdown.size else 0.0
-            denom = np.where(np.abs(peak) < 1e-9, 1.0, np.abs(peak))
-            max_drawdown_pct = float(
-                np.max((peak - equity_curve) / denom) if denom.size else 0.0
+            safe_peak = np.where(np.abs(peak) < 1e-9, 1.0, peak)
+            drawdown_pct = drawdown / safe_peak
+            max_drawdown = float(np.abs(drawdown.min())) if drawdown.size else 0.0
+            max_drawdown_pct = (
+                float(np.abs(drawdown_pct.min())) if drawdown_pct.size else 0.0
             )
             terminal_value = float(equity_curve[-1])
         else:
-            peak = np.array([], dtype=float)
-            drawdown = np.array([], dtype=float)
             max_drawdown = 0.0
             max_drawdown_pct = 0.0
             terminal_value = 0.0
 
         trades = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
-        std = float(pnl.std()) if pnl.size else 0.0
-        sharpe = float(pnl.mean() / (std + 1e-9)) if pnl.size else 0.0
+        volatility = float(pnl.std(ddof=0)) if pnl.size else 0.0
+        sharpe = float(pnl.mean() / (volatility + 1e-9)) if pnl.size else 0.0
+        downside = pnl[pnl < 0.0]
+        downside_std = float(downside.std(ddof=0)) if downside.size else 0.0
+        sortino = float(pnl.mean() / (downside_std + 1e-9)) if pnl.size else 0.0
         exposure = float(np.mean(np.abs(positions))) if positions.size else 0.0
         turnover = (
             float(np.sum(np.abs(np.diff(positions)))) if positions.size > 1 else 0.0
@@ -87,21 +112,45 @@ class StrategyDiagnostics:
         hit_rate = float(wins.size / total_trades) if total_trades else 0.0
         average_gain = cls._safe_mean(wins)
         average_loss = cls._safe_mean(losses)
+        profit_factor = (
+            float(wins.sum() / (np.abs(losses.sum()) + 1e-9)) if pnl.size else 0.0
+        )
+
+        if pnl.size:
+            var_threshold = float(np.percentile(pnl, 5))
+            if var_threshold >= 0.0:
+                value_at_risk = 0.0
+                conditional_value_at_risk = 0.0
+            else:
+                value_at_risk = float(-var_threshold)
+                tail = pnl[pnl <= var_threshold]
+                conditional_value_at_risk = (
+                    float(np.abs(tail.mean())) if tail.size else value_at_risk
+                )
+        else:
+            value_at_risk = 0.0
+            conditional_value_at_risk = 0.0
 
         return cls(
             equity_curve=equity_curve.tolist(),
             positions=positions.tolist(),
             pnl=pnl.tolist(),
-            max_drawdown=max_drawdown,
-            max_drawdown_pct=max_drawdown_pct,
+            max_drawdown=cls._finite(max_drawdown),
+            max_drawdown_pct=cls._finite(max_drawdown_pct),
             trades=trades,
-            sharpe=sharpe,
-            terminal_value=terminal_value,
-            exposure=exposure,
-            turnover=turnover,
-            hit_rate=hit_rate,
-            average_gain=average_gain,
-            average_loss=average_loss,
+            sharpe=cls._finite(sharpe),
+            sortino=cls._finite(sortino),
+            volatility=cls._finite(volatility),
+            terminal_value=cls._finite(terminal_value),
+            exposure=cls._finite(exposure),
+            turnover=cls._finite(turnover),
+            hit_rate=cls._finite(hit_rate),
+            average_gain=cls._finite(average_gain),
+            average_loss=cls._finite(average_loss),
+            profit_factor=cls._finite(profit_factor),
+            value_at_risk=cls._finite(value_at_risk),
+            conditional_value_at_risk=cls._finite(conditional_value_at_risk),
+            sample_size=int(pnl.size),
         )
 
 
@@ -195,16 +244,21 @@ class Strategy:
             position = np.array([], dtype=float)
 
         pnl = position * returns.to_numpy()
-        equity = np.cumsum(pnl)
-        _update_diagnostics(equity, position, pnl)
-        if equity.size == 0:
+        cumulative = np.cumsum(pnl)
+        equity_curve = (
+            np.concatenate(([1.0], 1.0 + cumulative)) if cumulative.size else np.array([1.0])
+        )
+
+        _update_diagnostics(equity_curve, position, pnl)
+        diagnostics = self.diagnostics
+        if diagnostics is None or diagnostics.sample_size == 0:
             self.score = 0.0
             return self.score
 
-        sharpe = np.mean(pnl) / (np.std(pnl) + 1e-9)
-        terminal = equity[-1]
-        raw_score = terminal + 0.5 * sharpe
-        self.score = float(np.clip(raw_score, -1.0, 2.0))
+        terminal_return = diagnostics.terminal_value - 1.0
+        raw_score = terminal_return + 0.5 * diagnostics.sharpe
+        risk_penalty = 0.1 * min(diagnostics.value_at_risk, diagnostics.conditional_value_at_risk)
+        self.score = float(np.clip(raw_score - risk_penalty, -1.0, 2.0))
         return self.score
 
 @dataclass

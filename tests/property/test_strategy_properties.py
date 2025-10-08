@@ -114,7 +114,7 @@ class TestStrategyProperties:
         assert "trades" in strategy.params
         assert isinstance(strategy.params["max_drawdown"], float)
         assert isinstance(strategy.params["trades"], int)
-        assert strategy.params["max_drawdown"] <= 0.0
+        assert strategy.params["max_drawdown"] >= 0.0
         assert strategy.params["trades"] >= 0
 
 

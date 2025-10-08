@@ -106,8 +106,8 @@ import hierarchy is considered an architectural violation.
    (Ricci curvature, Kuramoto order, entropy, etc.). Outputs are cached with a
    deterministic hash so walk-forward splits remain reproducible.
 3. **Strategy Simulation** – `Strategy` instances evaluate features against
-   trading rules. Diagnostics capture equity curves, drawdowns, and instability
-   alerts, even when data windows collapse.
+   trading rules. Diagnostics capture equity curves, drawdowns, VaR/CVaR, and
+   instability alerts even when data windows collapse.
 4. **Execution Planning** – The execution module converts signals into orders,
    performs position sizing, and checks heat/VAR limits before orders leave the
    process.
