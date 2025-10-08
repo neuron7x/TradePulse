@@ -22,11 +22,11 @@ from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar, cast
 
-from .base import FeatureInput, FeatureResult
+from .base import FeatureResult
 
 # Try to import prometheus_client
 try:
-    from prometheus_client import Counter, Histogram, Gauge
+    from prometheus_client import Counter, Gauge, Histogram
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
@@ -50,35 +50,35 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 class StructuredLogger:
     """Structured JSON logger for feature transformations.
-    
+
     Provides structured logging with automatic metadata extraction,
     trace IDs, and JSON formatting for log aggregation systems.
-    
+
     Example:
         >>> logger = StructuredLogger("indicators")
         >>> logger.info("transform_start", feature="kuramoto", data_size=1000)
     """
-    
+
     def __init__(self, name: str, level: int = logging.INFO) -> None:
         """Initialize structured logger.
-        
+
         Args:
             name: Logger name (usually module or component name)
             level: Logging level (default: INFO)
         """
         self._logger = logging.getLogger(name)
         self._logger.setLevel(level)
-        
+
         # Configure JSON formatter if no handlers exist
         if not self._logger.handlers:
             handler = logging.StreamHandler()
             handler.setFormatter(self._create_json_formatter())
             self._logger.addHandler(handler)
-    
+
     @staticmethod
     def _create_json_formatter() -> logging.Formatter:
         """Create JSON formatter for structured logging."""
-        
+
         class JSONFormatter(logging.Formatter):
             def format(self, record: logging.LogRecord) -> str:
                 log_data = {
@@ -90,19 +90,19 @@ class StructuredLogger:
                     "function": record.funcName,
                     "line": record.lineno,
                 }
-                
+
                 # Add exception info if present
                 if record.exc_info:
                     log_data["exception"] = self.formatException(record.exc_info)
-                
+
                 # Add custom fields
                 if hasattr(record, "extra_fields"):
                     log_data.update(record.extra_fields)
-                
+
                 return json.dumps(log_data)
-        
+
         return JSONFormatter()
-    
+
     def _log(
         self,
         level: int,
@@ -111,7 +111,7 @@ class StructuredLogger:
         **fields: Any,
     ) -> None:
         """Internal logging method with structured fields.
-        
+
         Args:
             level: Logging level
             event: Event name/message
@@ -121,29 +121,29 @@ class StructuredLogger:
         extra_fields = {"event": event, **fields}
         if trace_id:
             extra_fields["trace_id"] = trace_id
-        
+
         self._logger.log(
             level,
             event,
             extra={"extra_fields": extra_fields},
         )
-    
+
     def debug(self, event: str, trace_id: Optional[str] = None, **fields: Any) -> None:
         """Log debug message."""
         self._log(logging.DEBUG, event, trace_id, **fields)
-    
+
     def info(self, event: str, trace_id: Optional[str] = None, **fields: Any) -> None:
         """Log info message."""
         self._log(logging.INFO, event, trace_id, **fields)
-    
+
     def warning(self, event: str, trace_id: Optional[str] = None, **fields: Any) -> None:
         """Log warning message."""
         self._log(logging.WARNING, event, trace_id, **fields)
-    
+
     def error(self, event: str, trace_id: Optional[str] = None, **fields: Any) -> None:
         """Log error message."""
         self._log(logging.ERROR, event, trace_id, **fields)
-    
+
     def critical(self, event: str, trace_id: Optional[str] = None, **fields: Any) -> None:
         """Log critical message."""
         self._log(logging.CRITICAL, event, trace_id, **fields)
@@ -151,46 +151,46 @@ class StructuredLogger:
 
 class IndicatorMetrics:
     """Prometheus metrics for indicator transformations.
-    
+
     Tracks key metrics:
     - Transform latency (histogram)
     - Transform count (counter)
     - Active transforms (gauge)
     - Error count (counter)
-    
+
     Example:
         >>> metrics = IndicatorMetrics()
         >>> with metrics.measure_transform("kuramoto"):
         ...     result = compute_indicator(data)
     """
-    
+
     def __init__(self, prefix: str = "tradepulse_indicator") -> None:
         """Initialize metrics collector.
-        
+
         Args:
             prefix: Metric name prefix
         """
         self.prefix = prefix
-        
+
         if PROMETHEUS_AVAILABLE:
             self.transform_latency = Histogram(
                 f"{prefix}_transform_latency_seconds",
                 "Feature transformation latency",
                 ["feature_name"],
             )
-            
+
             self.transform_count = Counter(
                 f"{prefix}_transform_total",
                 "Total feature transformations",
                 ["feature_name", "status"],
             )
-            
+
             self.active_transforms = Gauge(
                 f"{prefix}_active_transforms",
                 "Currently executing transforms",
                 ["feature_name"],
             )
-            
+
             self.error_count = Counter(
                 f"{prefix}_errors_total",
                 "Total transformation errors",
@@ -202,17 +202,17 @@ class IndicatorMetrics:
             self.transform_count = None
             self.active_transforms = None
             self.error_count = None
-    
+
     @contextmanager
     def measure_transform(self, feature_name: str):
         """Context manager to measure transform duration.
-        
+
         Args:
             feature_name: Name of the feature being transformed
-            
+
         Yields:
             None
-            
+
         Example:
             >>> with metrics.measure_transform("entropy"):
             ...     result = entropy(data)
@@ -220,10 +220,10 @@ class IndicatorMetrics:
         if not PROMETHEUS_AVAILABLE:
             yield
             return
-        
+
         start = time.time()
         self.active_transforms.labels(feature_name=feature_name).inc()
-        
+
         try:
             yield
             duration = time.time() - start
@@ -246,23 +246,23 @@ class IndicatorMetrics:
             raise
         finally:
             self.active_transforms.labels(feature_name=feature_name).dec()
-    
+
     def record_success(self, feature_name: str, duration: float) -> None:
         """Record successful transformation.
-        
+
         Args:
             feature_name: Name of the feature
             duration: Transform duration in seconds
         """
         if not PROMETHEUS_AVAILABLE:
             return
-        
+
         self.transform_latency.labels(feature_name=feature_name).observe(duration)
         self.transform_count.labels(
             feature_name=feature_name,
             status="success"
         ).inc()
-    
+
     def record_error(
         self,
         feature_name: str,
@@ -270,7 +270,7 @@ class IndicatorMetrics:
         duration: float
     ) -> None:
         """Record failed transformation.
-        
+
         Args:
             feature_name: Name of the feature
             error_type: Type of error that occurred
@@ -278,7 +278,7 @@ class IndicatorMetrics:
         """
         if not PROMETHEUS_AVAILABLE:
             return
-        
+
         self.transform_latency.labels(feature_name=feature_name).observe(duration)
         self.transform_count.labels(
             feature_name=feature_name,
@@ -297,10 +297,10 @@ _default_metrics = IndicatorMetrics()
 
 def get_logger(name: Optional[str] = None) -> StructuredLogger:
     """Get or create a structured logger.
-    
+
     Args:
         name: Logger name (uses default if None)
-        
+
     Returns:
         Structured logger instance
     """
@@ -311,7 +311,7 @@ def get_logger(name: Optional[str] = None) -> StructuredLogger:
 
 def get_metrics() -> IndicatorMetrics:
     """Get the default metrics collector.
-    
+
     Returns:
         Metrics collector instance
     """
@@ -323,16 +323,16 @@ def with_observability(
     metrics: Optional[IndicatorMetrics] = None,
 ) -> Callable[[F], F]:
     """Decorator to add observability to transform functions.
-    
+
     Automatically logs and measures any function that returns a FeatureResult.
-    
+
     Args:
         logger: Optional logger (uses default if None)
         metrics: Optional metrics collector (uses default if None)
-        
+
     Returns:
         Decorated function with observability
-        
+
     Example:
         >>> @with_observability()
         ... def compute_indicator(data):
@@ -340,27 +340,27 @@ def with_observability(
     """
     _logger = logger or _default_logger
     _metrics = metrics or _default_metrics
-    
+
     def decorator(func: F) -> F:
         @wraps(func)
         def sync_wrapper(*args: Any, **kwargs: Any) -> FeatureResult:
             feature_name = kwargs.get("name", func.__name__)
-            
+
             # Extract trace_id if available in kwargs
             trace_id = kwargs.get("trace_id")
-            
+
             _logger.info(
                 "transform_start",
                 trace_id=trace_id,
                 feature=feature_name,
                 function=func.__name__,
             )
-            
+
             start = time.time()
             try:
                 with _metrics.measure_transform(feature_name):
                     result = func(*args, **kwargs)
-                
+
                 duration = time.time() - start
                 _logger.info(
                     "transform_complete",
@@ -369,7 +369,7 @@ def with_observability(
                     duration_seconds=duration,
                     status=result.status.value,
                 )
-                
+
                 return result
             except Exception as e:
                 duration = time.time() - start
@@ -382,31 +382,31 @@ def with_observability(
                     duration_seconds=duration,
                 )
                 raise
-        
+
         @wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> FeatureResult:
             feature_name = kwargs.get("name", func.__name__)
             trace_id = kwargs.get("trace_id")
-            
+
             _logger.info(
                 "transform_start",
                 trace_id=trace_id,
                 feature=feature_name,
                 function=func.__name__,
             )
-            
+
             start = time.time()
             try:
                 # Note: Can't use context manager with async, manually track
                 if PROMETHEUS_AVAILABLE:
                     _metrics.active_transforms.labels(feature_name=feature_name).inc()
-                
+
                 result = await func(*args, **kwargs)
-                
+
                 duration = time.time() - start
                 if PROMETHEUS_AVAILABLE:
                     _metrics.record_success(feature_name, duration)
-                
+
                 _logger.info(
                     "transform_complete",
                     trace_id=trace_id or result.trace_id,
@@ -414,13 +414,13 @@ def with_observability(
                     duration_seconds=duration,
                     status=result.status.value,
                 )
-                
+
                 return result
             except Exception as e:
                 duration = time.time() - start
                 if PROMETHEUS_AVAILABLE:
                     _metrics.record_error(feature_name, type(e).__name__, duration)
-                
+
                 _logger.error(
                     "transform_error",
                     trace_id=trace_id,
@@ -433,14 +433,14 @@ def with_observability(
             finally:
                 if PROMETHEUS_AVAILABLE:
                     _metrics.active_transforms.labels(feature_name=feature_name).dec()
-        
+
         # Return appropriate wrapper based on function type
         import inspect
         if inspect.iscoroutinefunction(func):
             return cast(F, async_wrapper)
         else:
             return cast(F, sync_wrapper)
-    
+
     return decorator
 
 

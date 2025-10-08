@@ -1,10 +1,12 @@
 
-import numpy as np
-import pandas as pd
 import warnings
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+
+import numpy as np
+import pandas as pd
+
 
 # --------- Lightweight Graph (no networkx) ---------
 class LightGraph:

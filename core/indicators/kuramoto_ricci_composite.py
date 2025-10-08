@@ -1,12 +1,14 @@
 
-import numpy as np
-import pandas as pd
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, Optional
 
+import numpy as np
+import pandas as pd
+
 from .multiscale_kuramoto import MultiScaleKuramoto, MultiScaleResult
 from .temporal_ricci import TemporalRicciAnalyzer, TemporalRicciResult
+
 
 class MarketPhase(Enum):
     CHAOTIC = "chaotic"

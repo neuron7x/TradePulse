@@ -23,7 +23,6 @@ from enum import Enum
 from typing import (
     Any,
     Callable,
-    Generic,
     Iterable,
     Mapping,
     MutableSequence,
@@ -57,7 +56,7 @@ ResultT = TypeVar("ResultT")
 
 class ErrorPolicy(str, Enum):
     """Policy for handling errors during feature transformation."""
-    
+
     RAISE = "raise"  # Raise exception immediately
     WARN = "warn"  # Log warning and return None
     SKIP = "skip"  # Skip silently and return None
@@ -66,7 +65,7 @@ class ErrorPolicy(str, Enum):
 
 class ExecutionStatus(str, Enum):
     """Status of feature transformation execution."""
-    
+
     SUCCESS = "success"
     FAILED = "failed"
     SKIPPED = "skipped"
@@ -77,9 +76,9 @@ class ExecutionStatus(str, Enum):
 if BaseModel is not None:
     class FeatureResultModel(BaseModel):
         """Validated payload returned by feature transformers."""
-        
+
         model_config = ConfigDict(arbitrary_types_allowed=True)
-        
+
         name: str = Field(..., description="Feature name/identifier")
         value: Any = Field(..., description="Computed feature value")
         metadata: dict[str, Any] = Field(
@@ -106,7 +105,7 @@ if BaseModel is not None:
             default_factory=dict,
             description="Audit trail: input hash, version, parameters"
         )
-        
+
         @field_validator("name")
         @classmethod
         def validate_name(cls, v: str) -> str:
@@ -122,7 +121,7 @@ else:
 @dataclass(slots=True)
 class FeatureResult:
     """Canonical payload returned by every feature transformer.
-    
+
     This is the lightweight version. For strict validation, use FeatureResultModel.
     """
 
@@ -134,7 +133,7 @@ class FeatureResult:
     trace_id: str = field(default_factory=lambda: str(uuid4()))
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     provenance: dict[str, Any] = field(default_factory=dict)
-    
+
     def to_model(self) -> FeatureResultModel:
         """Convert to validated pydantic model if available."""
         if FeatureResultModel is None:
@@ -149,11 +148,11 @@ class FeatureResult:
             timestamp=self.timestamp,
             provenance=self.provenance,
         )
-    
+
     def is_success(self) -> bool:
         """Check if transformation was successful."""
         return self.status == ExecutionStatus.SUCCESS
-    
+
     def is_failed(self) -> bool:
         """Check if transformation failed."""
         return self.status == ExecutionStatus.FAILED
@@ -162,14 +161,14 @@ class FeatureResult:
 # Protocol definitions for extensibility
 class PreProcessor(Protocol):
     """Protocol for preprocessing feature inputs before transformation."""
-    
+
     def process(self, data: FeatureInput, **kwargs: Any) -> FeatureInput:
         """Preprocess input data before feature transformation.
-        
+
         Args:
             data: Raw input data
             **kwargs: Additional parameters
-            
+
         Returns:
             Preprocessed data ready for transformation
         """
@@ -178,14 +177,14 @@ class PreProcessor(Protocol):
 
 class PostProcessor(Protocol):
     """Protocol for postprocessing feature results after transformation."""
-    
+
     def process(self, result: FeatureResult, **kwargs: Any) -> FeatureResult:
         """Postprocess result after feature transformation.
-        
+
         Args:
             result: Raw transformation result
             **kwargs: Additional parameters
-            
+
         Returns:
             Postprocessed result
         """
@@ -194,14 +193,14 @@ class PostProcessor(Protocol):
 
 class FeatureTransformer(Protocol):
     """Protocol defining the core feature transformation interface."""
-    
+
     def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Transform input data into a feature result.
-        
+
         Args:
             data: Input data to transform
             **kwargs: Additional transformation parameters
-            
+
         Returns:
             Feature result containing computed value and metadata
         """
@@ -210,11 +209,11 @@ class FeatureTransformer(Protocol):
 
 class BaseFeature(ABC):
     """Structural contract for every indicator/feature transformer.
-    
+
     All features must implement the transform method to convert input data
     into a FeatureResult. Features support preprocessing and postprocessing
     via optional processor hooks.
-    
+
     Attributes:
         name: Feature identifier
         error_policy: How to handle transformation errors
@@ -231,7 +230,7 @@ class BaseFeature(ABC):
         postprocessor: Optional[PostProcessor] = None,
     ) -> None:
         """Initialize feature with name and optional processors.
-        
+
         Args:
             name: Feature name (defaults to class name)
             error_policy: Policy for handling errors
@@ -250,15 +249,15 @@ class BaseFeature(ABC):
     @abstractmethod
     def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Produce a feature result from raw input.
-        
+
         Args:
             data: Input data to transform
             **kwargs: Additional parameters
-            
+
         Returns:
             FeatureResult with computed value and metadata
         """
-    
+
     def _apply_preprocessor(
         self, data: FeatureInput, **kwargs: Any
     ) -> FeatureInput:
@@ -266,7 +265,7 @@ class BaseFeature(ABC):
         if self.preprocessor is not None:
             return self.preprocessor.process(data, **kwargs)
         return data
-    
+
     def _apply_postprocessor(
         self, result: FeatureResult, **kwargs: Any
     ) -> FeatureResult:
@@ -278,11 +277,11 @@ class BaseFeature(ABC):
 
 class BaseBlock(ABC):
     """Composable container that orchestrates a homogeneous list of features.
-    
+
     Blocks can contain features or other blocks, enabling fractal composition
     of indicator pipelines. All registered features are executed sequentially
     or in parallel depending on the block implementation.
-    
+
     Attributes:
         name: Block identifier
         features: Immutable tuple of registered features
@@ -295,7 +294,7 @@ class BaseBlock(ABC):
         name: Optional[str] = None,
     ) -> None:
         """Initialize block with optional feature list.
-        
+
         Args:
             features: Initial features to register
             name: Block name (defaults to class name)
@@ -310,7 +309,7 @@ class BaseBlock(ABC):
 
     def register(self, feature: BaseFeature) -> None:
         """Register a single feature.
-        
+
         Args:
             feature: Feature to register
         """
@@ -318,7 +317,7 @@ class BaseBlock(ABC):
 
     def extend(self, features: Iterable[BaseFeature]) -> None:
         """Register multiple features.
-        
+
         Args:
             features: Features to register
         """
@@ -331,11 +330,11 @@ class BaseBlock(ABC):
     @abstractmethod
     def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
         """Execute the block over the input and return a feature mapping.
-        
+
         Args:
             data: Input data for all features
             **kwargs: Additional parameters passed to features
-            
+
         Returns:
             Mapping of feature names to computed values
         """
@@ -343,18 +342,18 @@ class BaseBlock(ABC):
 
 class FeatureBlock(BaseBlock):
     """Minimal block that executes its child features sequentially.
-    
+
     This is the default block implementation that runs all registered
     features one after another and collects their results.
     """
 
     def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
         """Execute all features sequentially.
-        
+
         Args:
             data: Input data for all features
             **kwargs: Additional parameters passed to features
-            
+
         Returns:
             Mapping of feature names to computed values
         """
@@ -367,10 +366,10 @@ class FeatureBlock(BaseBlock):
 
 class FunctionalFeature(BaseFeature):
     """Adapter that wraps a plain function into the feature interface.
-    
+
     This allows using simple functions as features without defining
     a full class. Useful for quick prototyping and functional composition.
-    
+
     Example:
         >>> def mean_price(data): return np.mean(data)
         >>> feature = FunctionalFeature(mean_price, name="mean")
@@ -386,7 +385,7 @@ class FunctionalFeature(BaseFeature):
         **kwargs: Any,
     ) -> None:
         """Initialize functional feature.
-        
+
         Args:
             func: Function to wrap (signature: func(data, **kwargs) -> value)
             name: Feature name (defaults to function name)
@@ -399,11 +398,11 @@ class FunctionalFeature(BaseFeature):
 
     def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Transform by calling wrapped function.
-        
+
         Args:
             data: Input data
             **kwargs: Additional parameters passed to function
-            
+
         Returns:
             FeatureResult with function output as value
         """

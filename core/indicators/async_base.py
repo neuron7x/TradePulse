@@ -18,22 +18,19 @@ from .base import (
     ErrorPolicy,
     FeatureInput,
     FeatureResult,
-    MetadataDict,
-    PostProcessor,
-    PreProcessor,
 )
 
 
 class AsyncPreProcessor(Protocol):
     """Protocol for async preprocessing of feature inputs."""
-    
+
     async def process(self, data: FeatureInput, **kwargs: Any) -> FeatureInput:
         """Preprocess input data asynchronously.
-        
+
         Args:
             data: Raw input data
             **kwargs: Additional parameters
-            
+
         Returns:
             Preprocessed data ready for transformation
         """
@@ -42,14 +39,14 @@ class AsyncPreProcessor(Protocol):
 
 class AsyncPostProcessor(Protocol):
     """Protocol for async postprocessing of feature results."""
-    
+
     async def process(self, result: FeatureResult, **kwargs: Any) -> FeatureResult:
         """Postprocess result asynchronously.
-        
+
         Args:
             result: Raw transformation result
             **kwargs: Additional parameters
-            
+
         Returns:
             Postprocessed result
         """
@@ -58,14 +55,14 @@ class AsyncPostProcessor(Protocol):
 
 class AsyncFeatureTransformer(Protocol):
     """Protocol defining async feature transformation interface."""
-    
+
     async def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Transform input data asynchronously.
-        
+
         Args:
             data: Input data to transform
             **kwargs: Additional transformation parameters
-            
+
         Returns:
             Feature result containing computed value and metadata
         """
@@ -74,10 +71,10 @@ class AsyncFeatureTransformer(Protocol):
 
 class BaseFeatureAsync(ABC):
     """Async version of BaseFeature.
-    
+
     All async features must implement the async transform method.
     Features can optionally have async preprocessors and postprocessors.
-    
+
     Attributes:
         name: Feature identifier
         error_policy: How to handle transformation errors
@@ -94,7 +91,7 @@ class BaseFeatureAsync(ABC):
         postprocessor: Optional[AsyncPostProcessor] = None,
     ) -> None:
         """Initialize async feature.
-        
+
         Args:
             name: Feature name (defaults to class name)
             error_policy: Policy for handling errors
@@ -113,15 +110,15 @@ class BaseFeatureAsync(ABC):
     @abstractmethod
     async def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Produce a feature result asynchronously.
-        
+
         Args:
             data: Input data to transform
             **kwargs: Additional parameters
-            
+
         Returns:
             FeatureResult with computed value and metadata
         """
-    
+
     async def _apply_preprocessor(
         self, data: FeatureInput, **kwargs: Any
     ) -> FeatureInput:
@@ -129,7 +126,7 @@ class BaseFeatureAsync(ABC):
         if self.preprocessor is not None:
             return await self.preprocessor.process(data, **kwargs)
         return data
-    
+
     async def _apply_postprocessor(
         self, result: FeatureResult, **kwargs: Any
     ) -> FeatureResult:
@@ -141,10 +138,10 @@ class BaseFeatureAsync(ABC):
 
 class BaseBlockAsync(ABC):
     """Async version of BaseBlock.
-    
+
     Async blocks orchestrate async features and can execute them
     sequentially or concurrently depending on the implementation.
-    
+
     Attributes:
         name: Block identifier
         features: Immutable tuple of registered async features
@@ -157,7 +154,7 @@ class BaseBlockAsync(ABC):
         name: Optional[str] = None,
     ) -> None:
         """Initialize async block.
-        
+
         Args:
             features: Initial async features to register
             name: Block name (defaults to class name)
@@ -172,7 +169,7 @@ class BaseBlockAsync(ABC):
 
     def register(self, feature: BaseFeatureAsync) -> None:
         """Register a single async feature.
-        
+
         Args:
             feature: Async feature to register
         """
@@ -180,7 +177,7 @@ class BaseBlockAsync(ABC):
 
     def extend(self, features: Iterable[BaseFeatureAsync]) -> None:
         """Register multiple async features.
-        
+
         Args:
             features: Async features to register
         """
@@ -193,11 +190,11 @@ class BaseBlockAsync(ABC):
     @abstractmethod
     async def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
         """Execute the block asynchronously.
-        
+
         Args:
             data: Input data for all features
             **kwargs: Additional parameters passed to features
-            
+
         Returns:
             Mapping of feature names to computed values
         """
@@ -205,18 +202,18 @@ class BaseBlockAsync(ABC):
 
 class FeatureBlockAsync(BaseBlockAsync):
     """Async block that executes features sequentially.
-    
+
     This is the default async block that runs features one after
     another using async/await.
     """
 
     async def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
         """Execute all features sequentially with async/await.
-        
+
         Args:
             data: Input data for all features
             **kwargs: Additional parameters passed to features
-            
+
         Returns:
             Mapping of feature names to computed values
         """
@@ -229,28 +226,28 @@ class FeatureBlockAsync(BaseBlockAsync):
 
 class FeatureBlockConcurrent(BaseBlockAsync):
     """Async block that executes features concurrently.
-    
+
     Uses asyncio.gather to run all features in parallel,
     significantly improving performance when features are I/O bound.
     """
 
     async def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
         """Execute all features concurrently.
-        
+
         Args:
             data: Input data for all features
             **kwargs: Additional parameters passed to features
-            
+
         Returns:
             Mapping of feature names to computed values
         """
         import asyncio
-        
+
         # Execute all features concurrently
         results = await asyncio.gather(
             *[feature.transform(data, **kwargs) for feature in self.features]
         )
-        
+
         # Collect results
         outputs: dict[str, Any] = {}
         for result in results:
@@ -260,7 +257,7 @@ class FeatureBlockConcurrent(BaseBlockAsync):
 
 class AsyncFeatureAdapter(BaseFeatureAsync):
     """Adapter to run sync features in async context.
-    
+
     Wraps a synchronous feature and executes it in an async executor,
     allowing sync features to be used in async pipelines.
     """
@@ -271,7 +268,7 @@ class AsyncFeatureAdapter(BaseFeatureAsync):
         **kwargs: Any,
     ) -> None:
         """Initialize async adapter for sync feature.
-        
+
         Args:
             sync_feature: Synchronous feature to wrap
             **kwargs: Additional arguments passed to BaseFeatureAsync
@@ -281,16 +278,16 @@ class AsyncFeatureAdapter(BaseFeatureAsync):
 
     async def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Execute sync feature in async executor.
-        
+
         Args:
             data: Input data
             **kwargs: Additional parameters
-            
+
         Returns:
             FeatureResult from sync feature
         """
         import asyncio
-        
+
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
             None,
