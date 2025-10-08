@@ -4,7 +4,8 @@ from __future__ import annotations
 import csv
 import logging
 from dataclasses import dataclass
-from typing import Callable, Iterable, Optional
+from pathlib import Path
+from typing import Callable, Iterable, Optional, Protocol
 
 try:
     from binance.websocket.spot.websocket_client import SpotWebsocketClient as BinanceWS
@@ -43,14 +44,31 @@ class BinanceStreamHandle:
         self.close()
 
 
+class _TickerHandler(Protocol):
+    def __call__(self, tick: Ticker) -> None: ...
+
+
 class DataIngestor:
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
         self.api_key = api_key
         self.api_secret = api_secret
 
-    def historical_csv(self, path: str, on_tick: Callable[[Ticker], None], *, required_fields: Iterable[str] = ("ts", "price")) -> None:
+    @staticmethod
+    def _normalise_path(path: str | Path) -> Path:
+        if isinstance(path, Path):
+            return path
+        return Path(path)
+
+    def historical_csv(
+        self,
+        path: str | Path,
+        on_tick: _TickerHandler,
+        *,
+        required_fields: Iterable[str] = ("ts", "price"),
+    ) -> None:
+        file_path = self._normalise_path(path)
         missing: list[str] = []
-        with open(path, "r", encoding="utf-8") as f:
+        with file_path.open("r", encoding="utf-8", newline="") as f:
             reader = csv.DictReader(f)
             if reader.fieldnames is None:
                 raise ValueError("CSV file must include a header row")
@@ -58,12 +76,20 @@ class DataIngestor:
             if missing:
                 raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
             for row_number, row in enumerate(reader, start=2):
+                if not row:
+                    continue
                 try:
-                    ts = float(row["ts"])
-                    price = float(row["price"])
+                    ts_raw = row.get("ts")
+                    price_raw = row.get("price")
+                    if ts_raw is None or price_raw is None:
+                        raise ValueError("row is missing required values")
+                    ts = float(ts_raw)
+                    price = float(price_raw)
                     volume = float(row.get("volume", 0.0) or 0.0)
                 except (TypeError, ValueError) as exc:
-                    logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
+                    logger.warning(
+                        "Skipping malformed row %s in %s: %s", row_number, file_path, exc
+                    )
                     continue
                 on_tick(Ticker(ts=ts, price=price, volume=volume))
 

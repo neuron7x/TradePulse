@@ -19,10 +19,24 @@ def test_historical_csv_reads_rows(tmp_path: Path) -> None:
         writer.writerow({"ts": "2", "price": "101", "volume": "6"})
     ingestor = DataIngestor()
     records: list[Ticker] = []
-    ingestor.historical_csv(str(csv_path), records.append)
+    ingestor.historical_csv(csv_path, records.append)
     assert len(records) == 2
     assert records[0].price == 100.0
     assert records[1].volume == 6.0
+
+
+def test_historical_csv_skips_blank_rows(tmp_path: Path) -> None:
+    csv_path = tmp_path / "blank_rows.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
+        writer.writeheader()
+        writer.writerow({"ts": "", "price": "", "volume": ""})
+        writer.writerow({"ts": "3", "price": "103", "volume": "7"})
+    ingestor = DataIngestor()
+    records: list[Ticker] = []
+    ingestor.historical_csv(csv_path, records.append)
+    assert len(records) == 1
+    assert records[0].price == 103.0
 
 
 def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -185,6 +185,13 @@ This document summarizes the comprehensive documentation, security, and monitori
 - Social links and versioning
 - Copyright information
 
+**docs/ARCHITECTURE.md - Repository Design Blueprint**
+- Documented guiding principles (contracts-first, deterministic pipelines)
+- Layered architecture covering data, strategy, execution, and tooling
+- Directory topology map with import rules and responsibilities
+- Data flow narrative from ingestion to order routing
+- Configuration, testing, and contribution checklists for architectural changes
+
 ### ✅ Phase 4: API Documentation & Docstrings (Partial - In Progress)
 
 **core/indicators/entropy.py - Comprehensive Docstrings**
