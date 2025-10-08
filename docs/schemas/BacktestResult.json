@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "BacktestResult",
+  "description": "Result from a backtest run. Contains profit/loss, maximum drawdown, and number of trades.",
+  "properties": {
+    "pnl": {
+      "type": "number"
+    },
+    "max_dd": {
+      "type": "number"
+    },
+    "trades": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "pnl",
+    "max_dd",
+    "trades"
+  ]
+}
