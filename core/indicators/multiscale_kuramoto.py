@@ -172,7 +172,8 @@ class MultiScaleKuramoto:
 
     def _window_for_series(self, values: np.ndarray) -> int:
         if self.use_adaptive_window:
-            return int(self.selector.select_window(values))
+            values_list = values.tolist()
+            return int(self.selector.select_window(values_list))
         return self.base_window
 
     def analyze(self, df: pd.DataFrame, *, price_col: str = "close") -> MultiScaleResult:
@@ -244,7 +245,11 @@ class MultiScaleKuramotoFeature(BaseFeature):
         self.analyzer = analyzer or MultiScaleKuramoto()
 
     def transform(self, data: pd.DataFrame, **kwargs: object) -> FeatureResult:
-        result = self.analyzer.analyze(data, **kwargs)
+        # Extract price_col if passed
+        price_col = kwargs.get("price_col", "close")
+        if not isinstance(price_col, str):
+            price_col = "close"
+        result = self.analyzer.analyze(data, price_col=price_col)
         metadata: Dict[str, object] = {
             "adaptive_window": result.adaptive_window,
             "timeframes": [tf.name for tf in result.timeframe_results.keys()],

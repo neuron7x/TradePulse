@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, MutableSequence, Sequence
 
+from core.utils.metrics import get_metrics_collector
+
 FeatureInput = Any
 
 
@@ -37,6 +39,20 @@ class BaseFeature(ABC):
     @abstractmethod
     def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Produce a feature result from raw input."""
+        
+    def transform_with_metrics(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
+        """Transform with automatic metrics collection."""
+        metrics = get_metrics_collector()
+        feature_type = kwargs.get("feature_type", "generic")
+        
+        with metrics.measure_feature_transform(self.name, feature_type):
+            result = self.transform(data, **kwargs)
+            
+        # Record the feature value if it's numeric
+        if isinstance(result.value, (int, float)):
+            metrics.record_feature_value(self.name, float(result.value))
+            
+        return result
 
 
 class BaseBlock(ABC):

@@ -12,7 +12,10 @@ class EpsilonGreedy:
     def select(self) -> str:
         if random.random() < self.epsilon:
             return random.choice(list(self.Q.keys()))
-        return max(self.Q, key=self.Q.get)
+        arms = list(self.Q.keys())
+        if not arms:
+            raise ValueError("No arms available")
+        return max(arms, key=lambda a: self.Q[a])
 
     def update(self, arm: str, reward: float):
         self.N[arm] += 1

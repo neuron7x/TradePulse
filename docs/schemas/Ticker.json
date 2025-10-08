@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "title": "Ticker",
+  "description": "Market data tick with timestamp, price, and volume information.",
+  "properties": {
+    "ts": {
+      "type": "number"
+    },
+    "price": {
+      "type": "number"
+    },
+    "volume": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "ts",
+    "price"
+  ]
+}

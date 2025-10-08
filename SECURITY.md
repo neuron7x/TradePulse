@@ -15,33 +15,72 @@ We actively support the following versions with security updates:
 
 ### Disclosure Process
 
-1. **Report**: Send details to **security@tradepulse.local**
+1. **Report**: Send details to **security@tradepulse.local** or via [GitHub Security Advisories](https://github.com/neuron7x/TradePulse/security/advisories/new)
    - Include description of vulnerability
    - Steps to reproduce
    - Potential impact
    - Suggested fix (if any)
+   - Proof of concept (if available)
+   - Your contact information
 
 2. **Acknowledgment**: We will acknowledge receipt within 48 hours
 
 3. **Investigation**: We will investigate and provide updates every 5 business days
+   - Initial triage: 24-48 hours
+   - Impact assessment: 3-5 business days
+   - Regular status updates
 
 4. **Resolution**: 
-   - Accepted vulnerabilities will be fixed in priority order
+   - Critical vulnerabilities: Fixed within 7 days
+   - High severity: Fixed within 30 days
+   - Medium/Low severity: Fixed within 90 days
    - You will be credited in release notes (unless you prefer to remain anonymous)
-   - We aim to release fixes within 90 days of disclosure
 
 5. **Disclosure**: After a fix is released, we will publish a security advisory
+   - CVE assignment if applicable
+   - Public disclosure 7 days after patch release
+   - Coordinated with reporter
+
+### Severity Classification
+
+| Severity | Description | Response Time |
+|----------|-------------|---------------|
+| Critical | Remote code execution, authentication bypass | 7 days |
+| High | Data exposure, privilege escalation | 30 days |
+| Medium | DoS, information disclosure | 90 days |
+| Low | Minor issues with minimal impact | 180 days |
 
 ### What to Report
 
 We're interested in any type of security issue, including:
 - Authentication/authorization bypasses
 - Data exposure or leakage
-- Injection vulnerabilities (SQL, command, etc.)
+- Injection vulnerabilities (SQL, command, code injection)
 - Cross-site scripting (XSS) in web interfaces
 - Denial of service vulnerabilities
 - Cryptographic issues
-- Dependency vulnerabilities with exploits
+- Dependency vulnerabilities with known exploits
+- API security issues
+- Secrets or credentials in code
+- Insecure defaults or configurations
+
+### What NOT to Report
+
+The following are **not** considered security vulnerabilities:
+- Vulnerabilities in dependencies without a proof of exploit
+- Missing security headers without demonstrated impact
+- Issues requiring physical access
+- Social engineering attacks
+- Missing best practices without security impact
+- Issues in deprecated or EOL dependencies
+
+### Bug Bounty Program
+
+We currently do not offer monetary rewards for security findings. However, we recognize and credit all valid security reports publicly (with permission).
+
+### Hall of Fame
+
+We maintain a [Security Hall of Fame](SECURITY_HALL_OF_FAME.md) recognizing security researchers who have responsibly disclosed vulnerabilities.
 
 ---
 
