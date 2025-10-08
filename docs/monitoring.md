@@ -1,0 +1,807 @@
+# Monitoring Guide
+
+This guide covers monitoring, logging, alerting, and observability for TradePulse in both development and production environments.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Metrics](#metrics)
+- [Logging](#logging)
+- [Alerting](#alerting)
+- [Prometheus Integration](#prometheus-integration)
+- [Grafana Dashboards](#grafana-dashboards)
+- [Tracing](#tracing)
+- [Production Best Practices](#production-best-practices)
+
+---
+
+## Overview
+
+TradePulse provides comprehensive observability through:
+
+- **Metrics**: Prometheus-compatible metrics for quantitative monitoring
+- **Logs**: Structured logging for debugging and audit trails
+- **Alerts**: Automated alerting for critical conditions
+- **Dashboards**: Grafana dashboards for visualization
+- **Tracing**: Distributed tracing for performance analysis (planned)
+
+### Key Principles
+
+1. **Observability First**: Instrument code as you write it
+2. **Structured Logging**: Use structured formats (JSON) for easy parsing
+3. **Actionable Alerts**: Only alert on conditions requiring human action
+4. **Retention Policies**: Balance storage costs with debugging needs
+
+---
+
+## Metrics
+
+### Metric Types
+
+TradePulse uses Prometheus metric types:
+
+#### Counters
+Monotonically increasing values (never decrease):
+```python
+from prometheus_client import Counter
+
+trades_executed = Counter(
+    'tradepulse_trades_executed_total',
+    'Total number of trades executed',
+    ['symbol', 'direction']
+)
+
+# Usage
+trades_executed.labels(symbol='BTCUSD', direction='buy').inc()
+```
+
+#### Gauges
+Values that can go up and down:
+```python
+from prometheus_client import Gauge
+
+open_positions = Gauge(
+    'tradepulse_open_positions',
+    'Number of currently open positions',
+    ['symbol']
+)
+
+# Usage
+open_positions.labels(symbol='BTCUSD').set(5)
+open_positions.labels(symbol='BTCUSD').inc()
+open_positions.labels(symbol='BTCUSD').dec()
+```
+
+#### Histograms
+Distribution of values (e.g., latencies):
+```python
+from prometheus_client import Histogram
+
+order_latency = Histogram(
+    'tradepulse_order_latency_seconds',
+    'Time taken to execute orders',
+    ['exchange', 'order_type'],
+    buckets=[0.01, 0.05, 0.1, 0.5, 1.0, 5.0, 10.0]
+)
+
+# Usage
+import time
+start = time.time()
+execute_order()
+order_latency.labels(
+    exchange='binance',
+    order_type='market'
+).observe(time.time() - start)
+```
+
+#### Summaries
+Similar to histograms, but calculate quantiles on client:
+```python
+from prometheus_client import Summary
+
+trade_pnl = Summary(
+    'tradepulse_trade_pnl',
+    'Profit/loss per trade',
+    ['strategy', 'symbol']
+)
+
+# Usage
+trade_pnl.labels(strategy='momentum', symbol='BTCUSD').observe(150.50)
+```
+
+### Core Metrics
+
+#### Trading Metrics
+```python
+# Trades
+trades_executed_total       # Counter: Total trades executed
+trade_errors_total          # Counter: Failed trades
+trade_pnl_usd               # Summary: P&L per trade
+trade_latency_seconds       # Histogram: Order execution time
+
+# Positions
+open_positions_count        # Gauge: Current open positions
+position_value_usd          # Gauge: Total position value
+position_exposure_percent   # Gauge: Portfolio exposure
+
+# Risk
+portfolio_value_usd         # Gauge: Current portfolio value
+drawdown_percent            # Gauge: Current drawdown
+risk_per_trade_percent      # Gauge: Risk per trade
+```
+
+#### System Metrics
+```python
+# Performance
+indicator_computation_seconds  # Histogram: Time to compute indicators
+backtest_duration_seconds      # Histogram: Backtest execution time
+data_ingestion_rate           # Gauge: Ticks/bars per second
+
+# Health
+service_up                    # Gauge: Service health (1=up, 0=down)
+last_heartbeat_timestamp      # Gauge: Last heartbeat time
+error_rate                    # Counter: Errors per component
+```
+
+#### Data Quality Metrics
+```python
+# Data
+data_gaps_total              # Counter: Missing data points
+invalid_prices_total         # Counter: Invalid price data
+data_staleness_seconds       # Gauge: Time since last update
+```
+
+### Implementing Metrics in Python
+
+```python
+# metrics.py
+from prometheus_client import Counter, Gauge, Histogram, Summary, generate_latest
+import time
+from typing import Optional
+from contextlib import contextmanager
+
+# Define metrics
+trades_counter = Counter(
+    'tradepulse_trades_total',
+    'Total trades executed',
+    ['symbol', 'direction', 'strategy']
+)
+
+position_gauge = Gauge(
+    'tradepulse_open_positions',
+    'Open positions',
+    ['symbol']
+)
+
+latency_histogram = Histogram(
+    'tradepulse_indicator_latency_seconds',
+    'Indicator computation latency',
+    ['indicator_name']
+)
+
+# Helper functions
+@contextmanager
+def measure_time(metric: Histogram, **labels):
+    """Context manager for measuring execution time."""
+    start = time.time()
+    try:
+        yield
+    finally:
+        metric.labels(**labels).observe(time.time() - start)
+
+# Usage in code
+def execute_trade(symbol: str, direction: str, strategy: str):
+    """Execute a trade and record metrics."""
+    try:
+        # Execute trade logic
+        result = _do_execute_trade(symbol, direction)
+        
+        # Record success
+        trades_counter.labels(
+            symbol=symbol,
+            direction=direction,
+            strategy=strategy
+        ).inc()
+        
+        return result
+    except Exception as e:
+        # Record error
+        error_counter.labels(error_type=type(e).__name__).inc()
+        raise
+
+def compute_indicator(prices, name: str):
+    """Compute indicator and measure latency."""
+    with measure_time(latency_histogram, indicator_name=name):
+        return _compute_indicator_impl(prices)
+```
+
+### Exposing Metrics
+
+```python
+# Start Prometheus metrics server
+from prometheus_client import start_http_server
+
+# Start on port 8000
+start_http_server(8000)
+
+# Metrics available at http://localhost:8000/metrics
+```
+
+---
+
+## Logging
+
+### Structured Logging
+
+Use Python's `logging` module with JSON formatting:
+
+```python
+import logging
+import json
+from datetime import datetime
+
+class JSONFormatter(logging.Formatter):
+    """Format logs as JSON."""
+    
+    def format(self, record):
+        log_data = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+            'module': record.module,
+            'function': record.funcName,
+            'line': record.lineno
+        }
+        
+        # Add exception info if present
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+        
+        # Add custom fields
+        if hasattr(record, 'extra_fields'):
+            log_data.update(record.extra_fields)
+        
+        return json.dumps(log_data)
+
+# Configure logging
+logger = logging.getLogger('tradepulse')
+handler = logging.StreamHandler()
+handler.setFormatter(JSONFormatter())
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+```
+
+### Log Levels
+
+Use appropriate log levels:
+
+```python
+# DEBUG: Detailed diagnostic information
+logger.debug('Computed indicator', extra={
+    'extra_fields': {
+        'indicator': 'kuramoto',
+        'value': 0.85,
+        'window': 200
+    }
+})
+
+# INFO: General informational messages
+logger.info('Trade executed', extra={
+    'extra_fields': {
+        'symbol': 'BTCUSD',
+        'direction': 'buy',
+        'quantity': 0.1,
+        'price': 50000.0
+    }
+})
+
+# WARNING: Warning messages for potentially problematic situations
+logger.warning('High latency detected', extra={
+    'extra_fields': {
+        'latency_ms': 5000,
+        'threshold_ms': 1000,
+        'exchange': 'binance'
+    }
+})
+
+# ERROR: Error messages for recoverable errors
+logger.error('Trade execution failed', extra={
+    'extra_fields': {
+        'symbol': 'BTCUSD',
+        'error': str(e),
+        'attempt': 3
+    }
+})
+
+# CRITICAL: Critical messages for non-recoverable errors
+logger.critical('Database connection lost', extra={
+    'extra_fields': {
+        'database': 'trades',
+        'host': 'localhost'
+    }
+})
+```
+
+### Log Categories
+
+#### Trading Logs
+```python
+trade_logger = logging.getLogger('tradepulse.trading')
+
+# Log all trades
+trade_logger.info('ORDER_PLACED', extra={'extra_fields': {
+    'order_id': '12345',
+    'symbol': 'BTCUSD',
+    'direction': 'buy',
+    'quantity': 0.1,
+    'price': 50000.0,
+    'order_type': 'limit'
+}})
+
+trade_logger.info('ORDER_FILLED', extra={'extra_fields': {
+    'order_id': '12345',
+    'fill_price': 49950.0,
+    'commission': 0.1
+}})
+```
+
+#### System Logs
+```python
+sys_logger = logging.getLogger('tradepulse.system')
+
+sys_logger.info('SERVICE_START', extra={'extra_fields': {
+    'service': 'execution_engine',
+    'version': '1.0.0'
+}})
+
+sys_logger.warning('HIGH_MEMORY_USAGE', extra={'extra_fields': {
+    'memory_mb': 2048,
+    'threshold_mb': 1500
+}})
+```
+
+#### Audit Logs
+```python
+audit_logger = logging.getLogger('tradepulse.audit')
+
+audit_logger.info('CONFIG_CHANGED', extra={'extra_fields': {
+    'user': 'admin',
+    'parameter': 'risk_per_trade',
+    'old_value': 0.01,
+    'new_value': 0.02
+}})
+```
+
+### Log Aggregation
+
+For production, use log aggregation tools:
+
+- **ELK Stack** (Elasticsearch, Logstash, Kibana)
+- **Loki** (with Grafana)
+- **Splunk**
+- **Datadog**
+
+Example Loki configuration:
+```yaml
+# promtail-config.yml
+server:
+  http_listen_port: 9080
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: tradepulse
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: tradepulse
+          __path__: /var/log/tradepulse/*.log
+```
+
+---
+
+## Alerting
+
+### Alert Rules
+
+Define alerts for critical conditions:
+
+```yaml
+# prometheus-alerts.yml
+groups:
+  - name: tradepulse_trading
+    interval: 30s
+    rules:
+      # High error rate
+      - alert: HighTradeErrorRate
+        expr: rate(tradepulse_trade_errors_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "High trade error rate"
+          description: "Error rate is {{ $value }} trades/sec"
+      
+      # Large drawdown
+      - alert: LargeDrawdown
+        expr: tradepulse_drawdown_percent > 10
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Large drawdown detected"
+          description: "Drawdown is {{ $value }}%"
+      
+      # Service down
+      - alert: ServiceDown
+        expr: up{job="tradepulse"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TradePulse service is down"
+          description: "Service {{ $labels.instance }} is down"
+      
+      # High latency
+      - alert: HighOrderLatency
+        expr: histogram_quantile(0.95, tradepulse_order_latency_seconds_bucket) > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High order execution latency"
+          description: "95th percentile latency is {{ $value }}s"
+      
+      # Stale data
+      - alert: StaleMarketData
+        expr: time() - tradepulse_last_data_timestamp > 300
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Market data is stale"
+          description: "No data received for 5+ minutes"
+```
+
+### Alert Manager Configuration
+
+```yaml
+# alertmanager.yml
+global:
+  resolve_timeout: 5m
+
+route:
+  group_by: ['alertname', 'cluster']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 12h
+  receiver: 'default'
+  routes:
+    - match:
+        severity: critical
+      receiver: pagerduty
+      continue: true
+    - match:
+        severity: warning
+      receiver: slack
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'alerts@tradepulse.local'
+  
+  - name: 'slack'
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#tradepulse-alerts'
+        title: 'TradePulse Alert'
+        text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+  
+  - name: 'pagerduty'
+    pagerduty_configs:
+      - service_key: 'YOUR_PAGERDUTY_KEY'
+
+inhibit_rules:
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+```
+
+---
+
+## Prometheus Integration
+
+### Installation
+
+```bash
+# Using Docker Compose
+docker compose up prometheus
+
+# Or download binary
+wget https://github.com/prometheus/prometheus/releases/download/v2.45.0/prometheus-2.45.0.linux-amd64.tar.gz
+tar xvfz prometheus-*.tar.gz
+cd prometheus-*
+./prometheus --config.file=prometheus.yml
+```
+
+### Configuration
+
+```yaml
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+# Alert manager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load alert rules
+rule_files:
+  - "prometheus-alerts.yml"
+
+# Scrape configurations
+scrape_configs:
+  # TradePulse Python services
+  - job_name: 'tradepulse-python'
+    static_configs:
+      - targets: ['localhost:8000']
+        labels:
+          service: 'execution-engine'
+  
+  # TradePulse Go services
+  - job_name: 'tradepulse-go'
+    static_configs:
+      - targets: 
+          - 'localhost:8001'  # VPIN service
+          - 'localhost:8002'  # Orderbook service
+          - 'localhost:8003'  # Regime service
+        labels:
+          service: 'analytics'
+  
+  # Node exporter (system metrics)
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+  
+  # Container metrics
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['localhost:8080']
+```
+
+### Querying Metrics
+
+```promql
+# Total trades in last hour
+sum(increase(tradepulse_trades_total[1h]))
+
+# Average order latency by exchange
+avg(tradepulse_order_latency_seconds) by (exchange)
+
+# Error rate
+rate(tradepulse_trade_errors_total[5m])
+
+# 95th percentile latency
+histogram_quantile(0.95, rate(tradepulse_order_latency_seconds_bucket[5m]))
+
+# Current drawdown
+tradepulse_drawdown_percent
+
+# Trades per symbol
+sum(tradepulse_trades_total) by (symbol)
+```
+
+---
+
+## Grafana Dashboards
+
+### Installation
+
+```bash
+# Using Docker Compose
+docker compose up grafana
+
+# Access at http://localhost:3000
+# Default credentials: admin/admin
+```
+
+### Dashboard Configuration
+
+```json
+{
+  "dashboard": {
+    "title": "TradePulse Overview",
+    "panels": [
+      {
+        "title": "Trades per Minute",
+        "targets": [
+          {
+            "expr": "rate(tradepulse_trades_total[1m]) * 60"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "Current Drawdown",
+        "targets": [
+          {
+            "expr": "tradepulse_drawdown_percent"
+          }
+        ],
+        "type": "singlestat"
+      },
+      {
+        "title": "Order Latency (p95)",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(tradepulse_order_latency_seconds_bucket[5m]))"
+          }
+        ],
+        "type": "graph"
+      },
+      {
+        "title": "Open Positions by Symbol",
+        "targets": [
+          {
+            "expr": "tradepulse_open_positions"
+          }
+        ],
+        "type": "bargauge"
+      }
+    ]
+  }
+}
+```
+
+### Key Dashboards
+
+#### Trading Dashboard
+- Real-time P&L
+- Trade count and volume
+- Win rate and Sharpe ratio
+- Open positions
+- Recent trades table
+
+#### System Dashboard
+- CPU and memory usage
+- Service uptime
+- Error rates
+- API latency
+- Database connections
+
+#### Risk Dashboard
+- Current drawdown
+- Portfolio value
+- Exposure by symbol
+- Risk metrics
+- VaR and CVaR
+
+---
+
+## Tracing
+
+### OpenTelemetry Integration (Planned)
+
+```python
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor
+from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+
+# Initialize tracer
+trace.set_tracer_provider(TracerProvider())
+tracer = trace.get_tracer(__name__)
+
+# Configure Jaeger exporter
+jaeger_exporter = JaegerExporter(
+    agent_host_name="localhost",
+    agent_port=6831,
+)
+trace.get_tracer_provider().add_span_processor(
+    BatchSpanProcessor(jaeger_exporter)
+)
+
+# Use in code
+with tracer.start_as_current_span("execute_trade"):
+    with tracer.start_as_current_span("compute_indicators"):
+        indicators = compute_all_indicators(prices)
+    
+    with tracer.start_as_current_span("generate_signal"):
+        signal = generate_signal(indicators)
+    
+    with tracer.start_as_current_span("place_order"):
+        result = place_order(signal)
+```
+
+---
+
+## Production Best Practices
+
+### 1. Metrics Cardinality
+
+**Avoid high-cardinality labels:**
+```python
+# Bad: user_id as label (millions of unique values)
+metric.labels(user_id=user_id).inc()
+
+# Good: Use log aggregation for high cardinality
+logger.info('trade_executed', extra={'user_id': user_id})
+```
+
+### 2. Retention Policies
+
+```yaml
+# prometheus.yml
+storage:
+  tsdb:
+    retention.time: 30d
+    retention.size: 50GB
+```
+
+### 3. Monitoring the Monitors
+
+- Monitor Prometheus itself
+- Set up alerting for monitoring failures
+- Have redundant monitoring systems
+
+### 4. Performance
+
+- Use appropriate metric types
+- Batch metric updates when possible
+- Don't create metrics in hot loops
+- Use sampling for high-frequency events
+
+### 5. Security
+
+- Protect metrics endpoints with authentication
+- Use TLS for Prometheus scraping
+- Limit access to Grafana dashboards
+- Sanitize labels to prevent injection
+
+### 6. Documentation
+
+- Document all custom metrics
+- Explain alert thresholds
+- Maintain runbooks for alerts
+- Keep dashboard descriptions updated
+
+---
+
+## Quick Start Checklist
+
+- [ ] Start Prometheus and Grafana
+- [ ] Instrument your code with metrics
+- [ ] Configure log formatters
+- [ ] Set up alert rules
+- [ ] Create Grafana dashboards
+- [ ] Test alerts in staging
+- [ ] Set up on-call rotation
+- [ ] Document runbooks
+
+---
+
+## References
+
+- [Prometheus Documentation](https://prometheus.io/docs/)
+- [Grafana Documentation](https://grafana.com/docs/)
+- [Prometheus Best Practices](https://prometheus.io/docs/practices/)
+- [Google SRE Book - Monitoring](https://sre.google/sre-book/monitoring-distributed-systems/)
+- [The Four Golden Signals](https://sre.google/sre-book/monitoring-distributed-systems/#xref_monitoring_golden-signals)
+
+---
+
+**Last Updated**: 2025-01-01

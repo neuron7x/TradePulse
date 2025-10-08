@@ -1,16 +1,114 @@
 # SPDX-License-Identifier: MIT
 site_name: TradePulse
+site_description: Advanced algorithmic trading framework with geometric market indicators
+site_author: TradePulse Contributors
+site_url: https://tradepulse.github.io
+
+repo_name: neuron7x/TradePulse
+repo_url: https://github.com/neuron7x/TradePulse
+
 theme:
   name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+  icon:
+    repo: fontawesome/brands/github
+
 nav:
   - Home: index.md
-  - Indicators: indicators.md
-  - Agent: agent.md
-  - Backtest: backtest.md
-  - Execution: execution.md
+  - Getting Started:
+      - Quick Start: quickstart.md
+      - Docker Quick Start: docker-quickstart.md
+      - Installation: quickstart.md
+      - FAQ: faq.md
+      - Troubleshooting: troubleshooting.md
+  - Core Concepts:
+      - Architecture: ARCHITECTURE.md
+      - Indicators: indicators.md
+      - Agent System: agent.md
+      - Backtesting: backtest.md
+      - Execution: execution.md
+      - FPM-A Framework: FPM-A.md
+  - Developer Guides:
+      - Extending TradePulse: extending.md
+      - Integration API: integration-api.md
+      - Developer Scenarios: scenarios.md
+      - Testing Guide: ../TESTING.md
+      - Contributing: ../CONTRIBUTING.md
+  - Operations:
+      - Monitoring: monitoring.md
+      - Security: ../SECURITY.md
+      - Deployment: deployment.md
+  - Reference:
+      - API Reference: integration-api.md
+      - Indicators Reference: indicators.md
+      - Examples: examples/
+
 markdown_extensions:
   - admonition
-  - codehilite
+  - codehilite:
+      guess_lang: false
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:materialx.emoji.twemoji
+      emoji_generator: !!python/name:materialx.emoji.to_svg
   - tables
   - toc:
       permalink: true
+      toc_depth: 3
+  - attr_list
+  - md_in_html
+  - def_list
+
+plugins:
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+  - minify:
+      minify_html: true
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/neuron7x/TradePulse
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/tradepulse/
+  version:
+    provider: mike
+
+extra_css:
+  - stylesheets/extra.css
+
+copyright: Copyright &copy; 2024 TradePulse Contributors
