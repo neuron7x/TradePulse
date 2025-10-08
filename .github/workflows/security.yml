@@ -69,7 +69,7 @@ jobs:
     
     - name: Check for known vulnerabilities with Safety
       run: |
-        safety check --json --output safety-report.json || true
+        safety check --output=json > safety-report.json || true
         safety check
     
     - name: Audit dependencies with pip-audit
