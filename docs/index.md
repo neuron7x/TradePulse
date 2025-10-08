@@ -10,7 +10,8 @@ focused document so contributors can quickly find the details they need.
 ## Architecture Overview
 
 - **High-level system design** – see [`docs/ARCHITECTURE.md`](ARCHITECTURE.md)
-  for component boundaries, data flow, and deployment topologies.
+  for repository layering rules, component boundaries, and deployment
+  topologies.
 - **FPM-A phase/regime model** – the methodology that powers TradePulse’s
   adaptive agents is described in [`docs/FPM-A.md`](FPM-A.md), including phase
   catalogues, orchestration contracts, and reproducible benchmarks.
@@ -55,4 +56,4 @@ focused document so contributors can quickly find the details they need.
 
 ---
 
-**Last updated:** 2025-10-08
+**Last updated:** 2025-10-08 (repository design refresh)

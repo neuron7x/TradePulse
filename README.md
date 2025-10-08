@@ -66,6 +66,8 @@ See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructi
 - **Fractal Modular Architecture (FPM-A)**: Clean separation of concerns
 - **Microservices Ready**: Go engines for performance-critical components
 - **Python Execution Loop**: Flexible strategy development and backtesting
+- **Repository Design Guide**: Layer responsibilities and quality gates are
+  documented in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ---
 
@@ -83,6 +85,8 @@ See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructi
 - [Backtesting](docs/backtest.md) - Walk-forward simulation and testing
 - [Execution](docs/execution.md) - Order execution and risk management
 - [Agent System](docs/agent.md) - Genetic algorithm strategy optimization
+- [Architecture & Repository Design](docs/ARCHITECTURE.md) - Structural
+  blueprint, layering rules, and contribution checklist
 
 ### Developer Guides
 - [Contributing](CONTRIBUTING.md) - Contribution guidelines and workflow
