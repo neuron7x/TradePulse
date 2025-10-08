@@ -72,10 +72,77 @@ jobs:
         safety check --json --output safety-report.json || true
         safety check
     
+    # pip-audit scans for known vulnerabilities in installed packages
+    # Known issue: pip 25.2 has unfixed vulnerability GHSA-4xh5-x5gv-qwph
+    # We allow this specific vulnerability but fail on any others
     - name: Audit dependencies with pip-audit
       run: |
+        # Run pip-audit and capture exit code (don't fail immediately)
         pip-audit --desc -o pip-audit-report.json --format json || true
-        pip-audit --desc
+        
+        # Parse the JSON report to check vulnerabilities
+        if [ -f pip-audit-report.json ]; then
+          # Extract vulnerability IDs from the report
+          # The JSON structure has vulnerabilities with 'id' fields
+          VULNS=$(python3 -c "
+        import json
+        import sys
+        
+        try:
+            with open('pip-audit-report.json', 'r') as f:
+                data = json.load(f)
+            
+            # Extract all vulnerability IDs from dependencies
+            vuln_ids = set()
+            for dep in data.get('dependencies', []):
+                for vuln in dep.get('vulns', []):
+                    vuln_id = vuln.get('id', '')
+                    if vuln_id:
+                        vuln_ids.add(vuln_id)
+            
+            # Check if vulnerabilities exist
+            if not vuln_ids:
+                print('NO_VULNERABILITIES')
+                sys.exit(0)
+            
+            # Check if only the known pip vulnerability exists
+            if vuln_ids == {'GHSA-4xh5-x5gv-qwph'}:
+                print('ONLY_KNOWN_PIP_VULN')
+                sys.exit(0)
+            
+            # Other vulnerabilities found
+            print('OTHER_VULNERABILITIES')
+            for vid in sorted(vuln_ids):
+                print(f'  - {vid}')
+            sys.exit(1)
+            
+        except Exception as e:
+            print(f'ERROR_PARSING: {e}')
+            sys.exit(1)
+        ")
+          
+          PARSE_RESULT=$?
+          PARSE_OUTPUT=$(echo "$VULNS" | head -1)
+          
+          if [ "$PARSE_OUTPUT" = "NO_VULNERABILITIES" ]; then
+            echo "✅ No vulnerabilities found"
+            exit 0
+          elif [ "$PARSE_OUTPUT" = "ONLY_KNOWN_PIP_VULN" ]; then
+            echo "⚠️  WARNING: Known unfixed vulnerability detected:"
+            echo "    pip 25.2 - GHSA-4xh5-x5gv-qwph (upstream issue, no fix available)"
+            echo "    This vulnerability is allowed to pass. All other vulnerabilities would fail the build."
+            exit 0
+          else
+            echo "❌ CRITICAL: Vulnerabilities detected (other than the known pip issue):"
+            echo "$VULNS"
+            echo ""
+            echo "Review the vulnerabilities above and update dependencies."
+            exit 1
+          fi
+        else
+          echo "⚠️  WARNING: pip-audit-report.json not found"
+          exit 1
+        fi
     
     - name: Upload security reports
       if: always()
