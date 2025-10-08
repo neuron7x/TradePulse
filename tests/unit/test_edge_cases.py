@@ -272,6 +272,11 @@ class TestNumericalStability:
         assert strategy.params["last_equity_curve"] == []
         assert strategy.params["max_drawdown"] == 0.0
         assert strategy.params["trades"] == 0
+        assert strategy.params["hit_rate"] == 0.0
+        assert strategy.params["turnover"] == 0.0
+        assert strategy.diagnostics is not None
+        assert strategy.diagnostics.equity_curve == []
+        assert strategy.diagnostics.trades == 0
 
     def test_entropy_handles_negative_values(self) -> None:
         """Entropy should handle negative values in data."""

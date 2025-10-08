@@ -8,12 +8,110 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
+@dataclass(slots=True)
+class StrategyDiagnostics:
+    """Snapshot of diagnostic metrics captured during the last simulation."""
+
+    equity_curve: list[float]
+    positions: list[float]
+    pnl: list[float]
+    max_drawdown: float
+    max_drawdown_pct: float
+    trades: int
+    sharpe: float
+    terminal_value: float
+    exposure: float
+    turnover: float
+    hit_rate: float
+    average_gain: float
+    average_loss: float
+
+    def as_params(self) -> Dict[str, Any]:
+        """Return a dictionary compatible with ``Strategy.params`` updates."""
+
+        return {
+            "last_equity_curve": self.equity_curve,
+            "max_drawdown": self.max_drawdown,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "trades": self.trades,
+            "sharpe": self.sharpe,
+            "terminal_value": self.terminal_value,
+            "exposure": self.exposure,
+            "turnover": self.turnover,
+            "hit_rate": self.hit_rate,
+            "average_gain": self.average_gain,
+            "average_loss": self.average_loss,
+        }
+
+    @staticmethod
+    def _safe_mean(values: np.ndarray) -> float:
+        return float(values.mean()) if values.size else 0.0
+
+    @classmethod
+    def from_arrays(
+        cls,
+        equity_curve: np.ndarray,
+        positions: np.ndarray,
+        pnl: np.ndarray,
+    ) -> "StrategyDiagnostics":
+        equity_curve = np.asarray(equity_curve, dtype=float)
+        positions = np.asarray(positions, dtype=float)
+        pnl = np.asarray(pnl, dtype=float)
+
+        if equity_curve.size:
+            peak = np.maximum.accumulate(np.concatenate(([0.0], equity_curve)))[1:]
+            drawdown = equity_curve - peak
+            max_drawdown = float(drawdown.min()) if drawdown.size else 0.0
+            denom = np.where(np.abs(peak) < 1e-9, 1.0, np.abs(peak))
+            max_drawdown_pct = float(
+                np.max((peak - equity_curve) / denom) if denom.size else 0.0
+            )
+            terminal_value = float(equity_curve[-1])
+        else:
+            peak = np.array([], dtype=float)
+            drawdown = np.array([], dtype=float)
+            max_drawdown = 0.0
+            max_drawdown_pct = 0.0
+            terminal_value = 0.0
+
+        trades = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
+        std = float(pnl.std()) if pnl.size else 0.0
+        sharpe = float(pnl.mean() / (std + 1e-9)) if pnl.size else 0.0
+        exposure = float(np.mean(np.abs(positions))) if positions.size else 0.0
+        turnover = (
+            float(np.sum(np.abs(np.diff(positions)))) if positions.size > 1 else 0.0
+        )
+        wins = pnl[pnl > 0.0]
+        losses = pnl[pnl < 0.0]
+        total_trades = wins.size + losses.size
+        hit_rate = float(wins.size / total_trades) if total_trades else 0.0
+        average_gain = cls._safe_mean(wins)
+        average_loss = cls._safe_mean(losses)
+
+        return cls(
+            equity_curve=equity_curve.tolist(),
+            positions=positions.tolist(),
+            pnl=pnl.tolist(),
+            max_drawdown=max_drawdown,
+            max_drawdown_pct=max_drawdown_pct,
+            trades=trades,
+            sharpe=sharpe,
+            terminal_value=terminal_value,
+            exposure=exposure,
+            turnover=turnover,
+            hit_rate=hit_rate,
+            average_gain=average_gain,
+            average_loss=average_loss,
+        )
+
+
 @dataclass
 class Strategy:
     name: str
     params: Dict[str, Any]
     score: float = 0.0
     timestamp: float = field(default_factory=time.time)
+    diagnostics: StrategyDiagnostics | None = field(default=None, init=False, repr=False)
 
     def generate_mutation(self, *, scale: float = 0.1) -> "Strategy":
         rng = np.random.default_rng()
@@ -44,18 +142,12 @@ class Strategy:
 
         self.validate_params()
 
-        def _update_diagnostics(equity_curve: np.ndarray, positions: np.ndarray) -> None:
-            if equity_curve.size == 0:
-                self.params["last_equity_curve"] = []
-                self.params["max_drawdown"] = 0.0
-                self.params["trades"] = 0
-                return
-
-            peak = np.maximum.accumulate(np.concatenate([[0.0], equity_curve]))[1:]
-            drawdown = equity_curve - peak
-            self.params["last_equity_curve"] = equity_curve.tolist()
-            self.params["max_drawdown"] = float(drawdown.min()) if drawdown.size else 0.0
-            self.params["trades"] = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
+        def _update_diagnostics(
+            equity_curve: np.ndarray, positions: np.ndarray, pnl: np.ndarray
+        ) -> None:
+            diagnostics = StrategyDiagnostics.from_arrays(equity_curve, positions, pnl)
+            self.diagnostics = diagnostics
+            self.params.update(diagnostics.as_params())
 
         if data is None:
             series = pd.Series(np.linspace(100.0, 101.0, 256), dtype=float)
@@ -68,7 +160,8 @@ class Strategy:
         series = series.replace([np.inf, -np.inf], np.nan)
         if series.isna().all():
             self.score = 0.0
-            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+            empty = np.array([], dtype=float)
+            _update_diagnostics(empty, empty, empty)
             return self.score
         series = series.ffill().bfill()
 
@@ -76,7 +169,8 @@ class Strategy:
         returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
         if returns.empty:
             self.score = 0.0
-            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+            empty = np.array([], dtype=float)
+            _update_diagnostics(empty, empty, empty)
             return self.score
 
         lookback = int(self.params.get("lookback", 20))
@@ -102,7 +196,7 @@ class Strategy:
 
         pnl = position * returns.to_numpy()
         equity = np.cumsum(pnl)
-        _update_diagnostics(equity, position)
+        _update_diagnostics(equity, position, pnl)
         if equity.size == 0:
             self.score = 0.0
             return self.score

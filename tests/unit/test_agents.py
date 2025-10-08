@@ -5,6 +5,9 @@ import math
 import random
 import time
 
+import numpy as np
+import pandas as pd
+
 import pytest
 
 from core.agent.bandits import EpsilonGreedy, UCB1
@@ -64,6 +67,24 @@ def test_strategy_simulate_performance_within_expected_range() -> None:
     random.seed(1)
     strategy = Strategy(name="strat", params={})
     score = strategy.simulate_performance(data=None)
+    assert -1.0 <= score <= 2.0
+
+
+def test_strategy_simulate_performance_populates_diagnostics() -> None:
+    strategy = Strategy(name="rich", params={"lookback": 12, "threshold": 0.4})
+    prices = pd.Series(np.linspace(100.0, 120.0, 256))
+
+    score = strategy.simulate_performance(prices)
+
+    diagnostics = strategy.diagnostics
+    assert diagnostics is not None
+    assert isinstance(diagnostics.trades, int)
+    assert strategy.params["last_equity_curve"] == diagnostics.equity_curve
+    assert strategy.params["max_drawdown"] == diagnostics.max_drawdown
+    assert strategy.params["sharpe"] == pytest.approx(diagnostics.sharpe)
+    assert strategy.params["hit_rate"] == pytest.approx(diagnostics.hit_rate)
+    assert strategy.params["turnover"] == pytest.approx(diagnostics.turnover)
+    assert strategy.params["terminal_value"] == pytest.approx(diagnostics.terminal_value)
     assert -1.0 <= score <= 2.0
 
 

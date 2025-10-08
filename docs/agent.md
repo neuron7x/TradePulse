@@ -11,7 +11,7 @@ contracts, key classes, and extension points.
 
 | Component | Responsibility | Implementation |
 | --------- | -------------- | --------------- |
-| `Strategy` | Holds hyperparameters, enforces bounds, and scores itself against historical data. | [`core/agent/strategy.py`](../core/agent/strategy.py) |
+| `Strategy` | Holds hyperparameters, enforces bounds, scores itself, and exposes structured diagnostics. | [`core/agent/strategy.py`](../core/agent/strategy.py) |
 | `PiAgent` | Wraps a strategy with instability detection, mutation/repair hooks, and action decisions. | [`core/agent/strategy.py`](../core/agent/strategy.py) |
 | `StrategyMemory` | Stores top-performing strategies keyed by market signature with exponential decay. | [`core/agent/memory.py`](../core/agent/memory.py) |
 | Bandits (`EpsilonGreedy`, `UCB1`) | Choose which strategy to evaluate next based on reward signals. | [`core/agent/bandits.py`](../core/agent/bandits.py) |
@@ -25,10 +25,11 @@ contracts, key classes, and extension points.
 2. **Performance simulation** – `Strategy.simulate_performance()` ingests raw
    prices (array, `Series`, or `DataFrame`), sanitises them, then runs a
    deterministic mean-reversion backtest that produces Sharpe- and P&L-weighted
-   scores plus diagnostics (`max_drawdown`, `trades`, equity curve). 【F:core/agent/strategy.py†L12-L92】
+   scores plus a `StrategyDiagnostics` snapshot (drawdown, turnover, hit rate,
+   equity curve). 【F:core/agent/strategy.py†L140-L207】
 3. **Mutation** – `Strategy.generate_mutation()` perturbs numeric parameters,
    reuses validation, and returns a ready-to-evaluate clone so exploration stays
-   bounded. 【F:core/agent/strategy.py†L18-L39】
+   bounded. 【F:core/agent/strategy.py†L116-L130】
 4. **Persistence** – After evaluation, store outcomes in `StrategyMemory.add()`
    keyed by a rounded `StrategySignature`; newer, higher-scoring entries replace
    stale ones while the decay factor continuously discounts old results. 【F:core/agent/memory.py†L6-L67】
@@ -54,11 +55,11 @@ memory.add(strategy.name, signature, score)
 
 `PiAgent` tracks short-term volatility regimes to decide when a strategy should
 enter, hold, or exit. It maintains an exponentially smoothed instability score
-and a cooldown timer so spurious blips do not trigger constant churn. 【F:core/agent/strategy.py†L94-L145】
+and a cooldown timer so spurious blips do not trigger constant churn. 【F:core/agent/strategy.py†L209-L251】
 
 Key signals expected in `market_state`:
 
-- `R` – Kuramoto order (synchrony) 【F:core/agent/strategy.py†L101-L113】
+- `R` – Kuramoto order (synchrony) 【F:core/agent/strategy.py†L220-L229】
 - `delta_H` – change in entropy
 - `kappa_mean` – Ricci curvature of price graph
 - `transition_score` – probability of phase transition
@@ -71,7 +72,27 @@ Actions returned by `PiAgent.evaluate_and_adapt(market_state)`:
 - `"hold"` – maintain current stance
 
 `PiAgent.repair()` cleans NaNs injected by upstream processes and re-validates
-parameters before the next evaluation cycle. 【F:core/agent/strategy.py†L127-L145】
+parameters before the next evaluation cycle. 【F:core/agent/strategy.py†L239-L243】
+
+---
+
+## Diagnostics Payload
+
+Every call to `Strategy.simulate_performance()` leaves a structured
+`StrategyDiagnostics` object on `strategy.diagnostics`. The data mirrors the
+subset published into `Strategy.params` so existing integrations keep working
+while new code can access rich metrics without type casts. 【F:core/agent/strategy.py†L11-L105】
+
+Key fields:
+
+- `equity_curve`, `pnl`, and `positions` as float lists
+- `max_drawdown` (absolute) and `max_drawdown_pct` (relative to peak equity)
+- Trade quality metrics: `trades`, `turnover`, `hit_rate`
+- Risk/return signals: `sharpe`, `terminal_value`, `exposure`, `average_gain`,
+  `average_loss`
+
+The diagnostics structure is safe to serialise as JSON and can be fed directly
+into dashboards or stored in experiment tracking tables.
 
 ---
 
@@ -101,8 +122,9 @@ bandit.update(arm, reward=0.42)
 
 - Keep market feature engineering consistent with `StrategySignature` to ensure
   memory lookups deduplicate comparable environments.
-- Log diagnostics stored on `Strategy.params` (`last_equity_curve`,
-  `max_drawdown`, `trades`) for post-mortem analysis.
+- Use `Strategy.diagnostics` for typed metrics and fall back to `Strategy.params`
+  keys (`last_equity_curve`, `max_drawdown`, `trades`, `sharpe`, `hit_rate`, …)
+  when maintaining legacy integrations.
 - When introducing new agent behaviours (e.g., reinforcement learning), extend
   this document and link to the relevant modules so the portal stays aligned
   with code.
