@@ -2,7 +2,20 @@
 
 TradePulse exposes a composable feature stack that measures synchronisation,
 entropy, fractality, and geometric curvature. All indicators implement the
-`BaseFeature` contract and can be orchestrated via `FeatureBlock` pipelines. 【F:core/indicators/base.py†L1-L80】
+`BaseFeature` contract and can be orchestrated via `FeatureBlock` pipelines.
+
+**New in v2.0:** The indicators API has been significantly enhanced with:
+- ✅ **Strict type hints** and Protocol definitions for all public APIs
+- ✅ **Async support** with concurrent execution (`BaseFeatureAsync`, `FeatureBlockConcurrent`)
+- ✅ **Observability** with structured JSON logging and Prometheus metrics
+- ✅ **Error handling** with circuit breaker pattern and customizable policies
+- ✅ **OpenAPI/JSON Schema** generation for integrations
+- ✅ **100% backward compatibility** - all existing code continues to work
+
+**📖 See the new comprehensive documentation:**
+- **[API Reference](indicators_api.md)** - Complete API documentation with all classes, methods, and protocols
+- **[Usage Examples](indicators_examples.md)** - Practical examples and patterns for common use cases
+- **[Quick Demo](../examples/indicators_demo.py)** - Runnable demo script showcasing all features
 
 ---
 
