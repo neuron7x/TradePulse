@@ -40,7 +40,7 @@ nav:
   - Getting Started:
       - Quick Start: quickstart.md
       - Docker Quick Start: docker-quickstart.md
-      - Installation: quickstart.md
+      - Installation: installation.md
       - FAQ: faq.md
       - Troubleshooting: troubleshooting.md
   - Core Concepts:

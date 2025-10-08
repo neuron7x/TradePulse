@@ -285,6 +285,28 @@ While the core requirements are met, these enhancements could be added:
 
 ---
 
+### ✅ Phase 5: Release Readiness Enhancements (Complete)
+
+**docs/installation.md - Dedicated Installation Runbook**
+- Captures OS/tooling prerequisites and reproducible environment setup
+- Verifies dependency health with a PyYAML/Hypothesis import smoke test
+- Covers optional Go execution engine and Next.js dashboard bootstrapping
+
+**docs/deployment.md - Production Deployment Guide**
+- Introduces pre-flight checklist aligned with QA requirements
+- Documents packaging, Kubernetes deployment, and rollback workflows
+- Maps infrastructure recommendations for database, cache, and observability layers
+
+**docs/quality-assurance.md - Quality Assurance Playbook**
+- Defines iterative integration steps for tests, linting, and documentation builds
+- Adds optimisation guardrails (benchmark tracking, duration profiling, performance notes)
+- Establishes a release gate checklist covering dependencies, monitoring, and rollback
+
+**docs/index.md - Documentation Portal Refresh**
+- Groups content into core, operational, quality, and example categories
+- Links directly to readiness and quality artefacts for faster navigation
+- Highlights governance documents (`CONTRIBUTING`, `SECURITY`, `DOCUMENTATION_SUMMARY`)
+
 ## Testing Status
 
 ✅ **Import verification**: All documented modules import successfully
