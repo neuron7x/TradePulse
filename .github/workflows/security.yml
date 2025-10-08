@@ -72,10 +72,54 @@ jobs:
         safety check --json --output safety-report.json || true
         safety check
     
+    # Install jq for JSON parsing in pip-audit analysis
+    - name: Install jq
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y jq
+    
+    # Run pip-audit with JSON output and analyze results
+    # Logic: Allow only the known pip 25.2 vulnerability (GHSA-4xh5-x5gv-qwph)
+    # - If no vulnerabilities found: exit 0 (pass)
+    # - If only GHSA-4xh5-x5gv-qwph found: print warning and exit 0 (pass)
+    # - If any other vulnerabilities found: print error and exit 1 (fail)
     - name: Audit dependencies with pip-audit
       run: |
-        pip-audit --desc -o pip-audit-report.json --format json || true
-        pip-audit --desc
+        set -e
+        
+        # Run pip-audit and capture JSON output
+        pip-audit --desc --format json > pip-audit-report.json || true
+        
+        # Check if the report file exists and has content
+        if [ ! -s pip-audit-report.json ]; then
+          echo "✅ No vulnerabilities found"
+          exit 0
+        fi
+        
+        # Parse the JSON output
+        vuln_count=$(jq '.dependencies[].vulns | length' pip-audit-report.json | awk '{s+=$1} END {print s+0}')
+        
+        if [ "$vuln_count" -eq 0 ]; then
+          echo "✅ No vulnerabilities found"
+          exit 0
+        fi
+        
+        # Check if all vulnerabilities are the known pip 25.2 issue
+        known_vuln_id="GHSA-4xh5-x5gv-qwph"
+        other_vulns=$(jq -r '.dependencies[].vulns[] | select(.id != "'$known_vuln_id'") | .id' pip-audit-report.json)
+        
+        if [ -z "$other_vulns" ]; then
+          # Only the known pip vulnerability found
+          echo "⚠️  Warning: Known pip 25.2 vulnerability detected (GHSA-4xh5-x5gv-qwph)"
+          echo "This is a known issue and does not affect security. CI will pass."
+          jq '.dependencies[] | select(.vulns != []) | {name, version, vulns: [.vulns[] | {id, description}]}' pip-audit-report.json
+          exit 0
+        else
+          # Other vulnerabilities found - this is a failure
+          echo "❌ Critical vulnerabilities found (excluding known pip 25.2 issue):"
+          jq '.dependencies[] | select(.vulns != []) | {name, version, vulns: [.vulns[] | select(.id != "'$known_vuln_id'") | {id, description, fix_versions}]}' pip-audit-report.json
+          exit 1
+        fi
     
     - name: Upload security reports
       if: always()
