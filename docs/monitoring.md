@@ -517,6 +517,58 @@ inhibit_rules:
     equal: ['alertname', 'instance']
 ```
 
+### SLO-driven Auto Rollback
+
+TradePulse now ships with an ``AutoRollbackGuard`` helper that consumes error rate
+and latency metrics to automatically revert unhealthy releases. Configure the
+guard with the expected SLO thresholds and wire a deployment specific callback
+that performs the rollback:
+
+```python
+from dataclasses import dataclass
+from datetime import timedelta
+
+from core.utils import AutoRollbackGuard, SLOConfig
+
+@dataclass
+class RequestMetrics:
+    latency_ms: float
+    success: bool
+
+def initiate_canary_rollback(reason: str, summary: dict[str, float]) -> None:
+    deployer.rollback_release(summary)
+
+guard = AutoRollbackGuard(
+    SLOConfig(
+        error_rate_threshold=0.02,       # 2% errors allowed
+        latency_threshold_ms=450.0,      # p95 latency ceiling
+        evaluation_period=timedelta(minutes=5),
+        min_requests=200,
+        cooldown=timedelta(minutes=10),
+    ),
+    rollback_callback=initiate_canary_rollback,
+)
+
+def handle_request(result: RequestMetrics) -> None:
+    guard.record_outcome(result.latency_ms, result.success)
+```
+
+For externally aggregated metrics (e.g. Prometheus or Datadog) feed the guard
+with snapshots instead of individual requests:
+
+```python
+snapshot = metrics_backend.fetch_slo_snapshot()
+guard.evaluate_snapshot(
+    error_rate=snapshot.error_rate,
+    latency_p95_ms=snapshot.p95_latency_ms,
+    total_requests=snapshot.request_count,
+)
+```
+
+The guard enforces a cooldown window between rollbacks to avoid flapping and
+exposes the last evaluation summary for audit dashboards. Instrument the
+callback with deployer specific logging to trace mitigation steps.
+
 ---
 
 ## Prometheus Integration
