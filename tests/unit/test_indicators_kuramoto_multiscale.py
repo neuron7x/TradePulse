@@ -135,4 +135,3 @@ def test_multiscale_feature_reports_metadata_and_custom_price_column() -> None:
     assert outcome.metadata["cross_scale_coherence"] == pytest.approx(0.82, rel=1e-12)
     assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=1e-12)
     assert outcome.metadata["window_M5"] == 144
-
