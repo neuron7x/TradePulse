@@ -38,6 +38,7 @@ theme:
 nav:
   - Home: index.md
   - Getting Started:
+      - User Onboarding: onboarding.md
       - Quick Start: quickstart.md
       - Docker Quick Start: docker-quickstart.md
       - Installation: quickstart.md
