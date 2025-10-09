@@ -41,10 +41,10 @@ source .venv/bin/activate
 ## Step 3: Install Dependencies
 
 ```bash
-# Install required packages
+# Install runtime packages
 pip install -r requirements.txt
 
-# Install development tools (optional)
+# Install development tools (optional, includes runtime stack)
 pip install -r requirements-dev.txt
 ```
 
@@ -370,8 +370,8 @@ pip install -e .
 
 If a package is missing:
 ```bash
-# Reinstall all dependencies
-pip install -r requirements.txt -r requirements-dev.txt
+# Reinstall all dependencies (dev extras include runtime stack)
+pip install -r requirements-dev.txt
 ```
 
 ### Permission Errors

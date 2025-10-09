@@ -1,10 +1,20 @@
+-r requirements.txt
+
+# Formatters & linters
 black==25.1.0
 ruff==0.14.0
+
+# Type checking
 mypy==1.18.2
+
+# Testing stack
 pytest==8.4.2
 pytest-cov==6.0.0
 pytest-asyncio==0.25.2
-bandit==1.8.0
 hypothesis==6.140.3
-PyYAML==6.0.3
-protobuf==6.32.1
+
+# Security scanning
+bandit==1.8.0
+
+# Protocol buffers tooling
+protobuf==5.29.5

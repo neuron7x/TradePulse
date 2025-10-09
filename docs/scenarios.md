@@ -32,8 +32,8 @@ cd TradePulse
 python -m venv .venv
 source .venv/bin/activate
 
-# Install dependencies
-pip install -r requirements.txt -r requirements-dev.txt
+# Install dependencies (dev extras include runtime stack)
+pip install -r requirements-dev.txt
 
 # Install pre-commit hooks
 pre-commit install

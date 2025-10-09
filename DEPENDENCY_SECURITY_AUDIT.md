@@ -106,29 +106,10 @@ This report documents the comprehensive security audit of all Python dependencie
 
 ### requirements.txt
 
-#### Core Dependencies Upgraded
-```diff
-- numpy>=1.23
-+ numpy>=1.26.0
-
-- scipy>=1.11
-+ scipy>=1.11.0
-
-- pandas>=1.5
-+ pandas>=2.0.0
-
-- networkx>=3.1
-+ networkx>=3.2.0
-
-- PyYAML>=6.0
-+ PyYAML>=6.0.2
-
-- hypothesis>=6.140
-+ hypothesis>=6.140.0
-
-- pytest>=7.4
-+ pytest>=8.0.0
-```
+#### Core Dependencies Updated
+- Reorganized the file around runtime concerns (analytics, instrumentation, templating, and HTTP stack).
+- Removed development/test tooling (`hypothesis`, `pytest`, `ruff`, `mypy`) from the runtime install to avoid bloating production images.
+- Retained numeric stack upgrades (NumPy 1.26+, SciPy 1.11+, pandas 2.0+, NetworkX 3.2+) and PyYAML 6.0.2+.
 
 #### Security Dependencies Added
 ```diff
@@ -144,26 +125,15 @@ This report documents the comprehensive security audit of all Python dependencie
 ### requirements-dev.txt
 
 ```diff
-- black==24.8.0
-+ black==25.1.0
++-r requirements.txt
 
 - ruff==0.6.9
-+ ruff==0.9.3
-
-- mypy==1.11.2
-+ mypy==1.18.2
++ ruff==0.14.0
 
 - pytest==8.3.3
-+ pytest==8.3.4
++ pytest==8.4.2
 
-- pytest-cov==5.0.0
-+ pytest-cov==6.0.0
-
-- pytest-asyncio==0.24.0
-+ pytest-asyncio==0.25.2
-
-- bandit==1.7.9
-+ bandit==1.8.0
+- PyYAML==6.0.3
 
 - protobuf==6.32.1
 + protobuf==5.29.5
@@ -175,7 +145,7 @@ This report documents the comprehensive security audit of all Python dependencie
 
 ### Installation Test
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements-dev.txt
 # All packages install successfully
 ```
 

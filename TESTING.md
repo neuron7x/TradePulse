@@ -55,9 +55,8 @@ Coverage is measured using `pytest-cov` and enforced in CI.
 
 ### Prerequisites
 
-Install dependencies:
+Install dependencies (development file includes runtime stack):
 ```bash
-pip install -r requirements.txt
 pip install -r requirements-dev.txt
 ```
 

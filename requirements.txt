@@ -1,17 +1,19 @@
+# Core analytics stack
 numpy>=1.26.0
 scipy>=1.11.0
 pandas>=2.0.0
 networkx>=3.2.0
+
+# Configuration & instrumentation
 PyYAML>=6.0.2
-hypothesis>=6.140.0
-pytest>=8.0.0
-ruff>=0.5.0
-mypy>=1.8.0
 prometheus-client>=0.19.0
-# Security: Pin secure versions of common transitive dependencies
-certifi>=2024.7.4
-idna>=3.7
+
+# Templates & packaging helpers
 jinja2>=3.1.6
-requests>=2.32.4
 setuptools>=78.1.1
+
+# Security: Pin secure versions of common transitive dependencies
+requests>=2.32.4
 urllib3>=2.5.0
+idna>=3.7
+certifi>=2024.7.4
