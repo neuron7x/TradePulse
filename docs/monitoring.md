@@ -34,6 +34,22 @@ TradePulse provides comprehensive observability through:
 3. **Actionable Alerts**: Only alert on conditions requiring human action
 4. **Retention Policies**: Balance storage costs with debugging needs
 
+### Observability-as-Code workflow
+
+TradePulse keeps its monitoring stack in the repository under the
+`observability/` directory to make dashboards, alerts, and metric catalogues
+reproducible across environments. Run the bundle builder after editing any of
+the JSON definitions:
+
+```bash
+python -m tools.observability.builder --output-dir observability/generated
+```
+
+The command validates metric definitions, renders Prometheus alert rules under
+`observability/generated/prometheus/alerts.yaml`, and reformats Grafana
+dashboards with stable ordering. Include the generated artefacts when promoting
+changes to staging or production clusters.
+
 ---
 
 ## Metrics
