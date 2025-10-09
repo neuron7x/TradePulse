@@ -6,16 +6,25 @@ performance-sensitive operations.
 """
 from __future__ import annotations
 
+import math
 import time
+from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
+
+try:  # pragma: no cover - exercised indirectly in environments without numpy
+    import numpy as np
+except ModuleNotFoundError:  # pragma: no cover - handled in fallback logic
+    np = None  # type: ignore[assignment]
+    _NUMPY_AVAILABLE = False
+else:  # pragma: no cover - covered via normal test environment
+    _NUMPY_AVAILABLE = True
 
 try:
     from prometheus_client import (
         Counter,
         Gauge,
         Histogram,
-        Summary,
         CollectorRegistry,
         generate_latest,
         start_http_server,
@@ -23,6 +32,37 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
+
+
+def _fallback_quantiles(values: list[float], quantiles: tuple[float, ...]) -> Dict[float, float]:
+    """Compute quantiles without numpy."""
+
+    if not values:
+        return {}
+
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    results: Dict[float, float] = {}
+
+    for q in quantiles:
+        if not 0.0 <= q <= 1.0:
+            continue
+
+        position = q * (n - 1)
+        lower_index = math.floor(position)
+        upper_index = math.ceil(position)
+
+        lower = sorted_values[lower_index]
+        upper = sorted_values[upper_index]
+
+        if lower_index == upper_index:
+            results[q] = float(lower)
+            continue
+
+        weight = position - lower_index
+        results[q] = float(lower + (upper - lower) * weight)
+
+    return results
 
 
 class MetricsCollector:
@@ -107,21 +147,28 @@ class MetricsCollector:
             ["source", "symbol"],
             registry=registry,
         )
-        
+
         self.data_ingestion_total = Counter(
             "tradepulse_data_ingestion_total",
             "Total number of data ingestion operations",
             ["source", "symbol", "status"],
             registry=registry,
         )
-        
+
+        self.data_ingestion_latency_quantiles = Gauge(
+            "tradepulse_data_ingestion_latency_quantiles_seconds",
+            "Data ingestion latency quantiles",
+            ["source", "symbol", "quantile"],
+            registry=registry,
+        )
+
         self.ticks_processed = Counter(
             "tradepulse_ticks_processed_total",
             "Total number of ticks processed",
             ["source", "symbol"],
             registry=registry,
         )
-        
+
         # Execution metrics
         self.order_placement_duration = Histogram(
             "tradepulse_order_placement_duration_seconds",
@@ -136,14 +183,28 @@ class MetricsCollector:
             ["exchange", "symbol", "order_type", "status"],
             registry=registry,
         )
-        
+
+        self.order_submission_latency_quantiles = Gauge(
+            "tradepulse_order_submission_latency_quantiles_seconds",
+            "Order submission latency quantiles",
+            ["exchange", "symbol", "quantile"],
+            registry=registry,
+        )
+
+        self.order_fill_latency_quantiles = Gauge(
+            "tradepulse_order_fill_latency_quantiles_seconds",
+            "Order fill latency quantiles",
+            ["exchange", "symbol", "quantile"],
+            registry=registry,
+        )
+
         self.open_positions = Gauge(
             "tradepulse_open_positions",
             "Number of open positions",
             ["exchange", "symbol"],
             registry=registry,
         )
-        
+
         # Strategy metrics
         self.strategy_score = Gauge(
             "tradepulse_strategy_score",
@@ -151,12 +212,38 @@ class MetricsCollector:
             ["strategy_name"],
             registry=registry,
         )
-        
+
         self.strategy_memory_size = Gauge(
             "tradepulse_strategy_memory_size",
             "Number of strategies in memory",
             registry=registry,
         )
+
+        self.backtest_equity_curve = Gauge(
+            "tradepulse_backtest_equity_curve",
+            "Equity curve samples for backtests",
+            ["strategy", "step"],
+            registry=registry,
+        )
+
+        self.signal_generation_latency_quantiles = Gauge(
+            "tradepulse_signal_generation_latency_quantiles_seconds",
+            "Signal generation latency quantiles",
+            ["strategy", "quantile"],
+            registry=registry,
+        )
+
+        self.signal_generation_total = Counter(
+            "tradepulse_signal_generation_total",
+            "Total number of signal generation calls",
+            ["strategy", "status"],
+            registry=registry,
+        )
+
+        self._ingestion_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
+        self._signal_latency_samples: Dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=256))
+        self._order_submission_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
+        self._order_fill_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
         
         # Agent/optimization metrics
         self.optimization_duration = Histogram(
@@ -294,6 +381,62 @@ class MetricsCollector:
             return
         self.feature_value.labels(feature_name=feature_name).set(value)
 
+    def _update_latency_quantiles(
+        self,
+        gauge: Gauge,
+        labels: Dict[str, str],
+        samples: deque[float],
+    ) -> None:
+        if not self._enabled or not samples:
+            return
+        values = list(map(float, samples))
+        if not values:
+            return
+
+        quantiles = (0.5, 0.95, 0.99)
+        if _NUMPY_AVAILABLE and np is not None:
+            arr = np.fromiter(values, dtype=float, count=len(values))
+            if arr.size == 0:
+                return
+            quantile_values = {q: float(np.quantile(arr, q)) for q in quantiles}
+        else:
+            quantile_values = _fallback_quantiles(values, quantiles)
+
+        for quantile, name in zip(quantiles, ("p50", "p95", "p99")):
+            value = quantile_values.get(quantile)
+            if value is None:
+                continue
+            gauge.labels(**labels, quantile=name).set(value)
+
+    @contextmanager
+    def measure_signal_generation(self, strategy: str) -> Iterator[Dict[str, Any]]:
+        """Measure latency of strategy signal generation."""
+
+        if not self._enabled:
+            yield {}
+            return
+
+        start_time = time.time()
+        ctx: Dict[str, Any] = {}
+        status = "success"
+
+        try:
+            yield ctx
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.time() - start_time
+            final_status = self._resolve_status(ctx, status)
+            samples = self._signal_latency_samples[strategy]
+            samples.append(duration)
+            self._update_latency_quantiles(
+                self.signal_generation_latency_quantiles,
+                {"strategy": strategy},
+                samples,
+            )
+            self.signal_generation_total.labels(strategy=strategy, status=final_status).inc()
+
     @contextmanager
     def measure_data_ingestion(
         self,
@@ -329,6 +472,13 @@ class MetricsCollector:
                 source=source,
                 symbol=symbol,
             ).observe(duration)
+            samples = self._ingestion_latency_samples[(source, symbol)]
+            samples.append(duration)
+            self._update_latency_quantiles(
+                self.data_ingestion_latency_quantiles,
+                {"source": source, "symbol": symbol},
+                samples,
+            )
             self.data_ingestion_total.labels(
                 source=source,
                 symbol=symbol,
@@ -402,6 +552,13 @@ class MetricsCollector:
                 exchange=exchange,
                 symbol=symbol,
             ).observe(duration)
+            samples = self._order_submission_latency_samples[(exchange, symbol)]
+            samples.append(duration)
+            self._update_latency_quantiles(
+                self.order_submission_latency_quantiles,
+                {"exchange": exchange, "symbol": symbol},
+                samples,
+            )
             self.orders_placed.labels(
                 exchange=exchange,
                 symbol=symbol,
@@ -416,6 +573,19 @@ class MetricsCollector:
             return
         self.open_positions.labels(exchange=exchange, symbol=symbol).set(positions)
 
+    def record_order_fill_latency(self, exchange: str, symbol: str, duration: float) -> None:
+        """Observe latency from order submission to fill."""
+
+        if not self._enabled:
+            return
+        samples = self._order_fill_latency_samples[(exchange, symbol)]
+        samples.append(duration)
+        self._update_latency_quantiles(
+            self.order_fill_latency_quantiles,
+            {"exchange": exchange, "symbol": symbol},
+            samples,
+        )
+
     def set_strategy_score(self, strategy_name: str, score: float) -> None:
         """Record the latest strategy score."""
 
@@ -429,6 +599,13 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.strategy_memory_size.set(size)
+
+    def record_equity_point(self, strategy: str, step: int, value: float) -> None:
+        """Record a sample on the equity curve gauge."""
+
+        if not self._enabled:
+            return
+        self.backtest_equity_curve.labels(strategy=strategy, step=str(step)).set(value)
 
     def render_prometheus(self) -> str:
         """Render the currently collected metrics in Prometheus text format."""

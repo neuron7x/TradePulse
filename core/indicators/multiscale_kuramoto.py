@@ -66,6 +66,13 @@ def _hilbert_phase(series: np.ndarray) -> np.ndarray:
     x = np.asarray(series, dtype=float)
     if x.size == 0:
         raise ValueError("phase extraction requires at least one sample")
+    if not np.all(np.isfinite(x)):
+        finite = x[np.isfinite(x)]
+        if finite.size == 0:
+            x = np.zeros_like(x)
+        else:
+            fill_value = float(np.mean(finite))
+            x = np.where(np.isfinite(x), x, fill_value)
     if _signal is None:
         # fallback: leverage FFT-based analytic signal
         n = x.size
