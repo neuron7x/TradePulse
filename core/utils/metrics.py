@@ -6,12 +6,19 @@ performance-sensitive operations.
 """
 from __future__ import annotations
 
+import math
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
-import numpy as np
+try:  # pragma: no cover - exercised indirectly in environments without numpy
+    import numpy as np
+except ModuleNotFoundError:  # pragma: no cover - handled in fallback logic
+    np = None  # type: ignore[assignment]
+    _NUMPY_AVAILABLE = False
+else:  # pragma: no cover - covered via normal test environment
+    _NUMPY_AVAILABLE = True
 
 try:
     from prometheus_client import (
@@ -25,6 +32,37 @@ try:
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
+
+
+def _fallback_quantiles(values: list[float], quantiles: tuple[float, ...]) -> Dict[float, float]:
+    """Compute quantiles without numpy."""
+
+    if not values:
+        return {}
+
+    sorted_values = sorted(values)
+    n = len(sorted_values)
+    results: Dict[float, float] = {}
+
+    for q in quantiles:
+        if not 0.0 <= q <= 1.0:
+            continue
+
+        position = q * (n - 1)
+        lower_index = math.floor(position)
+        upper_index = math.ceil(position)
+
+        lower = sorted_values[lower_index]
+        upper = sorted_values[upper_index]
+
+        if lower_index == upper_index:
+            results[q] = float(lower)
+            continue
+
+        weight = position - lower_index
+        results[q] = float(lower + (upper - lower) * weight)
+
+    return results
 
 
 class MetricsCollector:
@@ -351,11 +389,23 @@ class MetricsCollector:
     ) -> None:
         if not self._enabled or not samples:
             return
-        arr = np.fromiter(samples, dtype=float, count=len(samples))
-        if arr.size == 0:
+        values = list(map(float, samples))
+        if not values:
             return
-        for quantile, name in ((0.5, "p50"), (0.95, "p95"), (0.99, "p99")):
-            value = float(np.quantile(arr, quantile))
+
+        quantiles = (0.5, 0.95, 0.99)
+        if _NUMPY_AVAILABLE and np is not None:
+            arr = np.fromiter(values, dtype=float, count=len(values))
+            if arr.size == 0:
+                return
+            quantile_values = {q: float(np.quantile(arr, q)) for q in quantiles}
+        else:
+            quantile_values = _fallback_quantiles(values, quantiles)
+
+        for quantile, name in zip(quantiles, ("p50", "p95", "p99")):
+            value = quantile_values.get(quantile)
+            if value is None:
+                continue
             gauge.labels(**labels, quantile=name).set(value)
 
     @contextmanager

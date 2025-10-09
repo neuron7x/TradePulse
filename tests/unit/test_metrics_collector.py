@@ -183,6 +183,37 @@ def test_order_placement_context_forces_error_status_on_exception() -> None:
     assert filled_total is None
 
 
+def test_latency_quantiles_without_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = CollectorRegistry()
+
+    # Simulate an environment where numpy is unavailable so the fallback code path is used.
+    monkeypatch.setattr("core.utils.metrics._NUMPY_AVAILABLE", False, raising=False)
+    monkeypatch.setattr("core.utils.metrics.np", None, raising=False)
+
+    # Provide deterministic timing so the computed duration is stable.
+    times = [0.0, 0.25]
+
+    def fake_time() -> float:
+        return times.pop(0) if times else 0.25
+
+    monkeypatch.setattr("core.utils.metrics.time.time", fake_time)
+
+    collector = MetricsCollector(registry)
+
+    with collector.measure_data_ingestion("csv", "BTC-USDT"):
+        pass
+
+    quantile = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_latency_quantiles_seconds",
+        {"source": "csv", "symbol": "BTC-USDT", "quantile": "p95"},
+    )
+
+    # With deterministic timing and the fallback path, the quantile should match the
+    # observed duration, demonstrating that the computation works without numpy.
+    assert quantile == pytest.approx(0.25)
+
+
 def test_signal_generation_latency_and_equity_curve_gauge() -> None:
     registry = CollectorRegistry()
     collector = MetricsCollector(registry)
