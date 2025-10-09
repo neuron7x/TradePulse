@@ -42,6 +42,16 @@ def test_wavelet_selector_validates_window_bounds() -> None:
         WaveletWindowSelector(min_window=128, max_window=64)
 
 
+def test_wavelet_selector_rejects_excessive_resource_requests() -> None:
+    selector = WaveletWindowSelector(min_window=64, max_window=2_000_000)
+    with pytest.raises(ValueError):
+        selector.select_window([1.0, 2.0, 3.0])
+
+    selector = WaveletWindowSelector(levels=10_000)
+    with pytest.raises(ValueError):
+        selector.select_window([1.0, 2.0, 3.0])
+
+
 def test_multiscale_analyzer_requires_price_column() -> None:
     df = _synth_dataframe().rename(columns={"close": "price"})
     analyzer = MultiScaleKuramoto(use_adaptive_window=False)
@@ -125,4 +135,3 @@ def test_multiscale_feature_reports_metadata_and_custom_price_column() -> None:
     assert outcome.metadata["cross_scale_coherence"] == pytest.approx(0.82, rel=1e-12)
     assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=1e-12)
     assert outcome.metadata["window_M5"] == 144
-
