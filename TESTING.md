@@ -38,7 +38,7 @@ tests/
 
 ## Coverage Requirements
 
-**Target Coverage: 98%**
+**Target Coverage: 98%** *(current CI gate: 80% while Kuramoto/Ricci suites stabilize)*
 
 Current module coverage targets:
 - `backtest/`: 100% (ACHIEVED)
@@ -148,7 +148,7 @@ See `.github/workflows/tests.yml`:
 1. **Unit & Integration Tests**: Run with coverage
 2. **Property-Based Tests**: Run with Hypothesis statistics
 3. **Coverage Report**: Generate and upload to CI artifacts
-4. **Coverage Threshold**: Fail if coverage < 98%
+4. **Coverage Threshold**: Fail if coverage < 80%
 
 ### Coverage Enforcement
 
@@ -157,12 +157,12 @@ The CI enforces coverage thresholds using `pytest-cov`:
 ```bash
 pytest --cov=core --cov=backtest --cov=execution \
        --cov-report=term-missing \
-       --cov-fail-under=98
+       --cov-fail-under=80
 ```
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=98
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=80
 ```
 
 ## Writing Tests

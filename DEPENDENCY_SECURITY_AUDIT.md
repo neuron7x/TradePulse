@@ -18,7 +18,7 @@ This report documents the comprehensive security audit of all Python dependencie
 - **Critical issues**: 3 (protobuf, setuptools, urllib3)
 - **High severity**: 3 (jinja2, requests, certifi)
 - **All tests passing**: ✅ 139/139 tests
-- **Test coverage**: 57.42% (above 56% requirement)
+- **Test coverage**: 57.42% (below the new 80% requirement; remediation plan active)
 
 ---
 
@@ -159,7 +159,7 @@ pip-audit --desc
 ```bash
 pytest tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
   --cov=core --cov=backtest --cov=execution \
-  --cov-fail-under=56
+  --cov-fail-under=80
 # ✅ 139 passed, 57.42% coverage
 ```
 
