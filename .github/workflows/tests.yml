@@ -20,6 +20,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+      - name: Prepare test report directories
+        run: |
+          mkdir -p reports
       - name: Run unit and integration tests with coverage
         run: |
           pytest tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
@@ -28,11 +31,40 @@ jobs:
             --ignore=tests/unit/test_indicators_ricci.py \
             --ignore=tests/unit/test_indicators_temporal_ricci.py \
             --cov=core --cov=backtest --cov=execution \
-            --cov-report=xml --cov-report=term-missing \
-            --cov-fail-under=56
+            --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
+            --cov-fail-under=56 \
+            --junitxml=reports/unit-integration-tests.xml \
+            --html=reports/unit-integration-report.html --self-contained-html
       - name: Run property-based tests with statistics
-        run: pytest tests/property/ --hypothesis-show-statistics
+        run: |
+          pytest tests/property/ --hypothesis-show-statistics \
+            --junitxml=reports/property-tests.xml \
+            --html=reports/property-tests-report.html --self-contained-html
+      - name: Upload JUnit test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-results
+          path: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+          if-no-files-found: error
+      - name: Upload HTML test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-html-reports
+          path: |
+            reports/unit-integration-report.html
+            reports/property-tests-report.html
+          if-no-files-found: error
       - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            coverage_html
+          if-no-files-found: error
+      - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml

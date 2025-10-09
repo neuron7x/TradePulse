@@ -13,6 +13,8 @@ build/
 .coverage
 .coverage.*
 htmlcov/
+coverage_html/
+reports/
 .pytest_cache/
 .hypothesis/
 
