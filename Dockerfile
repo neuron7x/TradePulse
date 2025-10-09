@@ -2,7 +2,8 @@
 FROM python:3.11-slim
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade "pip>=25.2" && \
+    pip install --no-cache-dir -r requirements.txt
 COPY nfpro/ ./nfpro/
 ENV PYTHONUNBUFFERED=1
 CMD ["python", "-m", "nfpro", "--mode", "paper"]

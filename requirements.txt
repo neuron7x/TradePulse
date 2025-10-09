@@ -1,3 +1,4 @@
+pip>=25.2
 numpy>=1.23
 scipy>=1.11
 pandas>=1.5

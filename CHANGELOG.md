@@ -2,6 +2,9 @@
 Ведемо зміни за правилами [Keep a Changelog](https://keepachangelog.com/) та [SemVer](https://semver.org/).
 
 ## [Unreleased]
+### Security
+- **CRITICAL**: Upgraded pip dependency to version >=25.2 to mitigate vulnerability GHSA-4xh5-x5gv-qwph (arbitrary file overwrite via tarfile extraction). Updated requirements.txt, requirements-dev.txt, Dockerfile, and CI workflows (.github/workflows/tests.yml, .github/workflows/security.yml) to enforce minimum pip version 25.2. When pip 25.3+ becomes available, it will be automatically adopted due to the >= constraint.
+
 ## [2.1.3] - 2025-10-05
 ### Added
 - Новий конвеєр **CI/CD**: `ci.yml` (матриці лінтів/тестів, concurrency, кеші), `pre-commit.yml`, `auto-merge.yml`, `sbom-scan.yml`, `publish-image.yml` (cosign), `data-sanity.yml`.
