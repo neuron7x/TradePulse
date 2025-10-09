@@ -182,6 +182,20 @@ scripts/lint.sh  # Full lint suite
 - Include screenshots for UI changes
 - Fill out the PR template completely
 
+**Important: Code Owner Review Requirements**
+
+All pull requests to the `main` branch require approval from at least one code owner as defined in `.github/CODEOWNERS`. This ensures:
+- Security-sensitive changes are properly reviewed
+- Core trading logic is validated by experienced maintainers
+- CI/CD and automation changes are carefully examined
+
+Code owners are automatically requested for review based on the files you modify. Please:
+- Allow time for code owner review (typically 1-2 business days)
+- Respond to review feedback promptly
+- Address all requested changes before re-requesting review
+
+For urgent security fixes, contact the security team directly at security@tradepulse.local.
+
 ---
 
 ## Code Standards

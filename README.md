@@ -218,11 +218,29 @@ See [Usage Examples](docs/examples/) for more detailed examples.
 
 ## 🔒 Security
 
-TradePulse takes security seriously. Please see [SECURITY.md](SECURITY.md) for:
-- Vulnerability disclosure process
-- Security best practices
-- Dependency management
-- Security tooling and scanning
+TradePulse implements comprehensive security measures with professional CI/CD practices:
+
+### Automated Security Scanning
+- **CodeQL Analysis**: Advanced static analysis for Python security vulnerabilities
+- **Bandit**: Python security linter checking for common security issues
+- **Secret Scanning**: Multi-tool approach (custom scanner, TruffleHog, Gitleaks)
+- **Dependency Scanning**: pip-audit with custom vulnerability filtering
+- **Weekly Automated Scans**: Scheduled security audits every Monday
+
+### Security Policies
+- **Coordinated Disclosure**: Responsible vulnerability reporting process
+- **Code Owner Review**: Required approvals for security-sensitive changes
+- **Dependabot**: Automated weekly dependency updates
+- **Security Artifacts**: All scan results archived for audit trail (90-day retention)
+
+Please see [SECURITY.md](SECURITY.md) for:
+- Vulnerability disclosure process and timelines
+- Security best practices for contributors
+- Dependency management guidelines
+- Security tooling and scanning details
+- Severity classification and response SLAs
+
+**Report Security Issues**: security@tradepulse.local or via [GitHub Security Advisories](https://github.com/neuron7x/TradePulse/security/advisories/new)
 
 ---
 

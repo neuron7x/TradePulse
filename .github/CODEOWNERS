@@ -1,5 +1,48 @@
-# CODEOWNERS
+################################################################################
+# CODEOWNERS - Code Ownership and Review Requirements
+#
+# This file defines code ownership for TradePulse repository. Code owners are
+# automatically requested for review when someone opens a pull request that
+# modifies code they own.
+#
+# IMPORTANT: To enforce CODEOWNERS approval requirements:
+# 1. Go to repository Settings → Branches
+# 2. Add/Edit branch protection rule for 'main' branch
+# 3. Enable "Require a pull request before merging"
+# 4. Enable "Require review from Code Owners"
+# 5. Enable "Require status checks to pass before merging"
+#
+# With these settings enabled, pull requests to 'main' MUST be approved by
+# at least one code owner before merging.
+#
+# Pattern format:
+#   path/to/file.ext @username
+#   path/to/directory/ @username
+#   *.extension @username
+#
+# Learn more: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+################################################################################
 
-# This is a CODEOWNERS file that requires at least one code owner to approve changes.
-
+# Default owners for everything in the repository
+# These owners will be requested for review for all PRs unless a later match
+# takes precedence
 * @neuron7x
+
+# Security-related files require extra scrutiny
+/.github/workflows/security.yml @neuron7x
+/SECURITY.md @neuron7x
+/core/utils/security.py @neuron7x
+
+# CI/CD workflows and automation
+/.github/workflows/ @neuron7x
+/.github/dependabot.yml @neuron7x
+
+# Core trading logic - critical for system correctness
+/core/ @neuron7x
+/backtest/ @neuron7x
+/execution/ @neuron7x
+
+# Documentation and contribution guidelines
+/CONTRIBUTING.md @neuron7x
+/CODE_OF_CONDUCT.md @neuron7x
+/README.md @neuron7x
