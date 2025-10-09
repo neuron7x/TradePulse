@@ -60,6 +60,7 @@ nav:
       - Contributing: ../CONTRIBUTING.md
   - Operations:
       - Monitoring: monitoring.md
+      - Scaling: scaling.md
       - Security: ../SECURITY.md
       - Deployment: deployment.md
   - Reference:
