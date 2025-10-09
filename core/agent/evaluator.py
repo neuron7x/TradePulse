@@ -6,9 +6,11 @@ from __future__ import annotations
 import math
 import os
 import time
-from concurrent.futures import Executor, Future, ThreadPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures import Executor, ThreadPoolExecutor
+from queue import Queue
+from threading import Lock
 from dataclasses import dataclass
-from typing import Any, Callable, Iterable, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -115,43 +117,45 @@ class StrategyBatchEvaluator:
         worker_count = self.max_workers or min(32, (os.cpu_count() or 1) + 4)
         collector = get_metrics_collector()
 
-        results: List[Tuple[int, EvaluationResult]] = []
+        task_queue: Queue[tuple[int, Strategy] | None] = Queue(maxsize=self.chunk_size)
+        result_map: Dict[int, EvaluationResult] = {}
         failures: List[EvaluationResult] = []
+        result_lock = Lock()
+
+        def _worker() -> None:
+            while True:
+                item = task_queue.get()
+                try:
+                    if item is None:
+                        return
+                    idx, strategy = item
+                    result = self._evaluate_strategy(
+                        strategy,
+                        prepared_data,
+                        collector,
+                    )
+                    with result_lock:
+                        result_map[idx] = result
+                        if result.error is not None:
+                            failures.append(result)
+                finally:
+                    task_queue.task_done()
 
         with self.executor_factory(worker_count) as executor:
-            pending: dict[Future, Tuple[int, Strategy]] = {}
-            iterator = enumerate(ordered_strategies)
+            workers = [executor.submit(_worker) for _ in range(worker_count)]
 
-            def _submit_next() -> bool:
-                try:
-                    idx, strategy = next(iterator)
-                except StopIteration:
-                    return False
-                future = executor.submit(
-                    self._evaluate_strategy,
-                    strategy,
-                    prepared_data,
-                    collector,
-                )
-                pending[future] = (idx, strategy)
-                return True
+            for item in enumerate(ordered_strategies):
+                task_queue.put(item)
 
-            while len(pending) < self.chunk_size and _submit_next():
-                pass
+            for _ in workers:
+                task_queue.put(None)
 
-            while pending:
-                done, _ = wait(pending.keys(), return_when=FIRST_COMPLETED)
-                for future in done:
-                    idx, strategy = pending.pop(future)
-                    result = future.result()
-                    results.append((idx, result))
-                    if result.error is not None:
-                        failures.append(result)
-                    while len(pending) < self.chunk_size and _submit_next():
-                        pass
+            task_queue.join()
 
-        results.sort(key=lambda item: item[0])
-        ordered_results = [res for _, res in results]
+            for worker in workers:
+                worker.result()
+
+        ordered_results = [result_map[idx] for idx in sorted(result_map.keys())]
 
         if raise_on_error and failures:
             raise StrategyEvaluationError(failures)
