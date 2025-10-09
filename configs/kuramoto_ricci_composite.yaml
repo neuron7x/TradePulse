@@ -4,11 +4,13 @@ kuramoto:
   adaptive_window:
     enabled: true
     base_window: 200
+  min_samples_per_scale: 64
 
 ricci:
   temporal:
     window_size: 100
     n_snapshots: 8
+    retain_history: true
   graph:
     n_levels: 20
     connection_threshold: 0.1
