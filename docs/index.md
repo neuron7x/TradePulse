@@ -52,6 +52,8 @@ focused document so contributors can quickly find the details they need.
   [`execution/order.py`](../execution/order.py).
 - When adding major features, update this index so the navigation reflects the
   newest capabilities.
+- Apply the practices in the [Technical Debt Management Playbook](technical-debt.md)
+  to sustain healthy engineering velocity while avoiding unplanned outages.
 
 ---
 
