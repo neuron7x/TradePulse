@@ -177,6 +177,26 @@ class MetricsCollector:
     def enabled(self) -> bool:
         """Check if metrics collection is enabled."""
         return self._enabled
+
+    def _resolve_status(self, ctx: Dict[str, Any], status: str) -> str:
+        """Resolve the final status for metrics labels.
+
+        When an exception occurs the contextual status must *always* be
+        recorded as ``"error"`` regardless of any values stored on the
+        context dictionary. For successful executions we still allow callers to
+        provide a custom status value via ``ctx["status"]`` while gracefully
+        handling ``None``/empty values by falling back to the default status.
+        """
+
+        if status == "error":
+            return "error"
+
+        override = ctx.get("status")
+        if override is None:
+            return status
+
+        final_status = str(override).strip()
+        return final_status or status
         
     @contextmanager
     def measure_feature_transform(
@@ -304,7 +324,7 @@ class MetricsCollector:
             raise
         finally:
             duration = time.time() - start_time
-            final_status = ctx.get("status", status)
+            final_status = self._resolve_status(ctx, status)
             self.data_ingestion_duration.labels(
                 source=source,
                 symbol=symbol,
@@ -377,7 +397,7 @@ class MetricsCollector:
             raise
         finally:
             duration = time.time() - start_time
-            final_status = ctx.get("status", status)
+            final_status = self._resolve_status(ctx, status)
             self.order_placement_duration.labels(
                 exchange=exchange,
                 symbol=symbol,
