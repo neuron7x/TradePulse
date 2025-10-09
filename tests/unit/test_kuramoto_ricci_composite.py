@@ -225,7 +225,7 @@ class TestCompositeEngine:
         assert not np.isnan(signal.kuramoto_R)
         assert not np.isnan(signal.temporal_ricci)
 
-    def test_signal_history_tracking(self) -> None:
+    def test_signal_history_idempotent_retries(self) -> None:
         dates = pd.date_range("2024-01-01", periods=300, freq="1min")
         rng = np.random.default_rng(654)
         prices = 100 + rng.normal(0, 0.5, len(dates))
@@ -236,10 +236,34 @@ class TestCompositeEngine:
         engine.analyze_market(df)
         engine.analyze_market(df)
 
+        assert len(engine.signal_history) == 1
+        df_signals = engine.get_signal_dataframe()
+        assert len(df_signals) == 1
+        assert set(["phase", "entry_signal"]).issubset(df_signals.columns)
+        assert pd.Timestamp(df_signals.iloc[0]["timestamp"]) == df.index[-1]
+
+    def test_signal_history_appends_newer_data(self) -> None:
+        dates = pd.date_range("2024-01-01", periods=300, freq="1min")
+        rng = np.random.default_rng(321)
+        prices = 100 + rng.normal(0, 0.5, len(dates))
+        volumes = np.full(len(dates), 1000.0)
+        df = pd.DataFrame({"close": prices, "volume": volumes}, index=dates)
+
+        engine = TradePulseCompositeEngine()
+        engine.analyze_market(df)
+        engine.analyze_market(df)  # retry with identical payload should not duplicate
+
+        extended_index = df.index.append(pd.Index([df.index[-1] + pd.Timedelta(minutes=1)]))
+        extended_prices = np.append(prices, prices[-1] + 0.1)
+        extended_volumes = np.append(volumes, volumes[-1])
+        df_extended = pd.DataFrame({"close": extended_prices, "volume": extended_volumes}, index=extended_index)
+
+        engine.analyze_market(df_extended)
+
         assert len(engine.signal_history) == 2
+        assert engine.signal_history[-1].timestamp == df_extended.index[-1]
         df_signals = engine.get_signal_dataframe()
         assert len(df_signals) == 2
-        assert set(["phase", "entry_signal"]).issubset(df_signals.columns)
 
 
 if HYPOTHESIS_AVAILABLE:
