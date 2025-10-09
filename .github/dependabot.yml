@@ -4,3 +4,41 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    labels:
+      - dependencies
+      - python
+    open-pull-requests-limit: 10
+    groups:
+      lint-and-test:
+        patterns:
+          - "pytest"
+          - "hypothesis"
+          - "ruff"
+          - "mypy"
+      data-core:
+        patterns:
+          - "numpy"
+          - "scipy"
+          - "pandas"
+          - "networkx"
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - dependencies
+      - go
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - dependencies
+      - ci
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - dependencies
+      - docker
