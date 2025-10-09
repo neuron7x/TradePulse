@@ -24,9 +24,14 @@ jobs:
       with:
         python-version: '3.11'
     
+    - name: Upgrade pip to 25.3+
+      run: python -m pip install --upgrade 'pip>=25.3'
+    
+    - name: Verify pip version
+      run: pip --version
+    
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install bandit safety
     
     - name: Run custom secret scanner
@@ -62,9 +67,14 @@ jobs:
       with:
         python-version: '3.11'
     
+    - name: Upgrade pip to 25.3+
+      run: python -m pip install --upgrade 'pip>=25.3'
+    
+    - name: Verify pip version
+      run: pip --version
+    
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
         pip install safety pip-audit
     
     - name: Check for known vulnerabilities with Safety
