@@ -423,6 +423,35 @@ with ProcessPoolExecutor(max_workers=4) as executor:
 print(f"Processed {len(batches) * 10} time series")
 ```
 
+### Strategy Batch Evaluator
+
+```python
+"""Evaluate large populations of strategies in parallel."""
+import pandas as pd
+from core.agent import Strategy, StrategyBatchEvaluator
+
+
+class MeanReversion(Strategy):
+    def simulate_performance(self, data: pd.DataFrame) -> float:
+        return super().simulate_performance(data)
+
+
+dataset = pd.read_parquet("/data/market.parquet")
+strategies = [
+    MeanReversion(name=f"mean_rev_{lookback}", params={"lookback": lookback})
+    for lookback in range(10, 110, 10)
+]
+
+evaluator = StrategyBatchEvaluator(max_workers=8, chunk_size=8)
+results = evaluator.evaluate(strategies, dataset)
+
+for outcome in results:
+    if outcome.succeeded:
+        print(f"{outcome.strategy.name}: score={outcome.score:.3f}")
+    else:
+        print(f"{outcome.strategy.name} failed: {outcome.error}")
+```
+
 ### Example 3: Production Monitoring
 
 ```python
