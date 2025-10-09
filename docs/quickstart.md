@@ -225,10 +225,55 @@ docker compose up -d prometheus grafana
 
 ---
 
-## Step 10: Explore Documentation
+## Step 10: Optimize Performance (Optional)
+
+For large datasets or production deployments, use performance optimizations:
+
+```python
+import numpy as np
+from core.indicators.entropy import EntropyFeature
+from core.indicators.hurst import HurstFeature
+from core.data.preprocess import scale_series
+
+# Load large dataset
+large_data = np.random.randn(1_000_000)
+
+# Memory-efficient processing with float32
+entropy_feat = EntropyFeature(
+    bins=50,
+    use_float32=True,        # 50% memory reduction
+    chunk_size=100_000       # Process in chunks
+)
+
+hurst_feat = HurstFeature(
+    use_float32=True
+)
+
+# Scale data efficiently
+scaled = scale_series(large_data, use_float32=True)
+
+# Compute indicators with monitoring
+result = entropy_feat.transform(scaled)
+print(f"Entropy: {result.value:.4f}")
+
+# Enable structured logging
+from core.utils.logging import configure_logging
+configure_logging(level="INFO", use_json=True)
+
+# Start Prometheus metrics server
+from core.utils.metrics import start_metrics_server
+start_metrics_server(port=8000)  # Metrics at http://localhost:8000/metrics
+```
+
+See the **[Performance Optimization Guide](performance.md)** for details.
+
+---
+
+## Step 11: Explore Documentation
 
 Now that you're up and running, explore:
 
+- **[Performance Guide](performance.md)** - Memory optimization and execution profiling
 - **[Indicators Guide](indicators.md)** - Learn about available indicators
 - **[Backtesting Guide](backtest.md)** - Advanced backtesting features
 - **[Execution Guide](execution.md)** - Live trading setup

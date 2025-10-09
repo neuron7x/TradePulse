@@ -6,38 +6,46 @@ from typing import Any, Sequence
 import numpy as np
 
 from .base import BaseFeature, FeatureResult
+from ..utils.logging import get_logger
+from ..utils.metrics import get_metrics_collector
+
+_logger = get_logger(__name__)
+_metrics = get_metrics_collector()
 
 try:
     from scipy.signal import hilbert
 except Exception:  # fallback if SciPy not installed
     hilbert = None
 
-def compute_phase(x: np.ndarray) -> np.ndarray:
+def compute_phase(x: np.ndarray, *, use_float32: bool = False) -> np.ndarray:
     """Compute instantaneous phase via Hilbert transform.
     If SciPy unavailable, fall back to angle of analytic signal via FFT trick.
     Args:
         x: 1D array of samples.
+        use_float32: Use float32 precision to reduce memory usage (default: False)
     Returns:
         phases in radians in [-pi, pi].
     """
-    x = np.asarray(x, dtype=float)
-    if x.ndim != 1:
-        raise ValueError("compute_phase expects 1D array")
-    if hilbert is not None:
-        a = hilbert(x)
-    else:
-        # Analytic signal via frequency-domain Hilbert transform.
-        n = x.size
-        X = np.fft.fft(x)
-        H = np.zeros(n)
-        if n % 2 == 0:
-            H[0] = H[n // 2] = 1
-            H[1 : n // 2] = 2
+    with _logger.operation("compute_phase", data_size=len(x), use_float32=use_float32):
+        dtype = np.float32 if use_float32 else float
+        x = np.asarray(x, dtype=dtype)
+        if x.ndim != 1:
+            raise ValueError("compute_phase expects 1D array")
+        if hilbert is not None:
+            a = hilbert(x)
         else:
-            H[0] = 1
-            H[1 : (n + 1) // 2] = 2
-        a = np.fft.ifft(X * H)
-    return np.angle(a)
+            # Analytic signal via frequency-domain Hilbert transform.
+            n = x.size
+            X = np.fft.fft(x)
+            H = np.zeros(n, dtype=dtype)
+            if n % 2 == 0:
+                H[0] = H[n // 2] = 1
+                H[1 : n // 2] = 2
+            else:
+                H[0] = 1
+                H[1 : (n + 1) // 2] = 2
+            a = np.fft.ifft(X * H)
+        return np.angle(a)
 
 def kuramoto_order(phases: np.ndarray) -> float:
     """Kuramoto order parameter R = |mean(exp(iθ))| for a set of phases.
@@ -68,35 +76,71 @@ except Exception:
     cp = None
 
 def compute_phase_gpu(x):
-    """GPU phase via CuPy Hilbert transform if CuPy is available; else falls back."""
-    if cp is None:
-        from .kuramoto import compute_phase as _cpu
-        return _cpu(np.asarray(x))
-    x_gpu = cp.asarray(x, dtype=cp.float32)
-    # Analytic signal via the same FFT approach as the CPU fallback.
-    n = x_gpu.size
-    X = cp.fft.fft(x_gpu)
-    H = cp.zeros(n, dtype=cp.float32)
-    if n % 2 == 0:
-        H[0] = H[n // 2] = 1
-        H[1 : n // 2] = 2
-    else:
-        H[0] = 1
-        H[1 : (n + 1) // 2] = 2
-    a = cp.fft.ifft(X * H)
-    ph = cp.angle(a)
-    return cp.asnumpy(ph)
+    """GPU phase via CuPy Hilbert transform if CuPy is available; else falls back.
+    
+    This function properly handles CuPy imports and memory transfers, ensuring
+    correct GPU utilization when CuPy is available.
+    """
+    with _logger.operation("compute_phase_gpu", data_size=len(x), has_cupy=cp is not None):
+        if cp is None:
+            _logger.info("CuPy not available, falling back to CPU compute_phase")
+            return compute_phase(np.asarray(x))
+        
+        try:
+            # Use float32 for GPU efficiency
+            x_gpu = cp.asarray(x, dtype=cp.float32)
+            # Analytic signal via the same FFT approach as the CPU fallback.
+            n = x_gpu.size
+            X = cp.fft.fft(x_gpu)
+            H = cp.zeros(n, dtype=cp.float32)
+            if n % 2 == 0:
+                H[0] = H[n // 2] = 1
+                H[1 : n // 2] = 2
+            else:
+                H[0] = 1
+                H[1 : (n + 1) // 2] = 2
+            a = cp.fft.ifft(X * H)
+            ph = cp.angle(a)
+            return cp.asnumpy(ph)
+        except Exception as e:
+            _logger.warning(f"GPU computation failed, falling back to CPU: {e}")
+            return compute_phase(np.asarray(x))
 
 
 class KuramotoOrderFeature(BaseFeature):
     """Feature wrapper for the Kuramoto order parameter."""
 
-    def __init__(self, *, name: str | None = None) -> None:
+    def __init__(self, *, use_float32: bool = False, name: str | None = None) -> None:
+        """Initialize Kuramoto order parameter feature.
+        
+        Args:
+            use_float32: Use float32 precision for memory efficiency (default: False)
+            name: Optional custom name (default: "kuramoto_order")
+        """
         super().__init__(name or "kuramoto_order")
+        self.use_float32 = use_float32
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
-        value = kuramoto_order(data)
-        return FeatureResult(name=self.name, value=value, metadata={})
+        """Compute Kuramoto order parameter.
+        
+        Args:
+            data: 1D or 2D array of phases or time series
+            **_: Additional keyword arguments (ignored)
+            
+        Returns:
+            FeatureResult containing Kuramoto order parameter and metadata
+        """
+        with _metrics.measure_feature_transform(self.name, "kuramoto"):
+            # Convert to appropriate dtype if needed
+            if self.use_float32:
+                data = np.asarray(data, dtype=np.float32)
+            value = kuramoto_order(data)
+            _metrics.record_feature_value(self.name, value)
+            return FeatureResult(
+                name=self.name, 
+                value=value, 
+                metadata={"use_float32": self.use_float32}
+            )
 
 
 class MultiAssetKuramotoFeature(BaseFeature):

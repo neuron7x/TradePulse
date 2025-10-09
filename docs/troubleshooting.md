@@ -484,15 +484,36 @@ Process uses too much memory.
 
 **Solutions:**
 
-1. Process data in chunks:
+1. **Use float32 precision** (NEW - 50% memory reduction):
 ```python
-chunk_size = 10000
-for i in range(0, len(prices), chunk_size):
-    chunk = prices[i:i+chunk_size]
-    process_chunk(chunk)
+from core.indicators.entropy import EntropyFeature
+from core.indicators.hurst import HurstFeature
+
+# Memory-efficient features
+entropy_feat = EntropyFeature(bins=30, use_float32=True)
+hurst_feat = HurstFeature(use_float32=True)
+
+# Or for preprocessing
+from core.data.preprocess import scale_series, normalize_df
+scaled = scale_series(data, use_float32=True)
+df_opt = normalize_df(df, use_float32=True)
 ```
 
-2. Delete intermediate results:
+2. **Process data in chunks** (NEW):
+```python
+# Process large arrays in chunks
+from core.indicators.entropy import entropy
+from core.indicators.ricci import mean_ricci, build_price_graph
+
+# Entropy with chunking (for 10M+ points)
+H = entropy(large_data, bins=50, chunk_size=100_000, use_float32=True)
+
+# Ricci with chunking (for large graphs)
+G = build_price_graph(prices)
+ricci = mean_ricci(G, chunk_size=1000, use_float32=True)
+```
+
+3. Delete intermediate results:
 ```python
 result = compute_expensive_indicator(prices)
 use_result(result)
@@ -500,16 +521,12 @@ del result  # Free memory
 gc.collect()  # Force garbage collection
 ```
 
-3. Use memory-efficient data types:
-```python
-# Use float32 instead of float64
-prices = prices.astype(np.float32)
-```
-
 4. Profile memory usage:
 ```bash
 python -m memory_profiler backtest.py
 ```
+
+**See also:** [Performance Optimization Guide](performance.md#memory-optimization)
 
 ### CPU usage too high
 
@@ -518,14 +535,26 @@ Process uses 100% CPU continuously.
 
 **Solutions:**
 
-1. Add sleep to loops:
+1. **Enable structured logging to find bottlenecks** (NEW):
+```python
+from core.utils.logging import configure_logging
+
+# Enable JSON logging
+configure_logging(level="INFO", use_json=True)
+
+# All optimized functions automatically log execution time
+result = entropy(data, bins=30)
+# Check logs for duration_seconds
+```
+
+2. Add sleep to loops:
 ```python
 while True:
     process_tick()
     time.sleep(0.001)  # Yield CPU
 ```
 
-2. Optimize hot paths:
+3. Optimize hot paths:
 ```python
 # Use numpy instead of loops
 # Bad:
@@ -535,7 +564,7 @@ result = [expensive_calc(x) for x in prices]
 result = np.array([expensive_calc(x) for x in prices])
 ```
 
-3. Use profiling to find bottlenecks:
+4. Use profiling to find bottlenecks:
 ```bash
 python -m cProfile -s cumulative backtest.py | head -20
 ```
@@ -547,7 +576,33 @@ Complex indicators take too long.
 
 **Solutions:**
 
-1. Vectorize calculations:
+1. **Use GPU acceleration** (NEW - requires CuPy):
+```python
+from core.indicators.kuramoto import compute_phase_gpu
+
+# Automatically uses GPU if available, falls back to CPU
+phases = compute_phase_gpu(large_data)
+
+# Install CuPy for GPU support:
+# pip install cupy-cuda11x  # For CUDA 11.x
+# pip install cupy-cuda12x  # For CUDA 12.x
+```
+
+2. **Enable Prometheus metrics** (NEW - for production monitoring):
+```python
+from core.utils.metrics import get_metrics_collector, start_metrics_server
+
+# Start metrics server
+start_metrics_server(port=8000)
+
+# Metrics automatically collected for all features
+entropy_feat = EntropyFeature(bins=30)
+result = entropy_feat.transform(data)
+
+# View metrics at http://localhost:8000/metrics
+```
+
+3. Vectorize calculations:
 ```python
 # Use numpy operations instead of loops
 result = np.mean(prices[-window:])  # Fast

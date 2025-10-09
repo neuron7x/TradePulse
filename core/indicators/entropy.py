@@ -22,9 +22,14 @@ from typing import Any
 import numpy as np
 
 from .base import BaseFeature, FeatureResult
+from ..utils.logging import get_logger
+from ..utils.metrics import get_metrics_collector
+
+_logger = get_logger(__name__)
+_metrics = get_metrics_collector()
 
 
-def entropy(series: np.ndarray, bins: int = 30) -> float:
+def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, chunk_size: int | None = None) -> float:
     """Calculate Shannon entropy of a data series.
     
     Entropy quantifies the uncertainty or randomness in the data distribution.
@@ -37,6 +42,9 @@ def entropy(series: np.ndarray, bins: int = 30) -> float:
     Args:
         series: 1D array of numeric data (typically prices or returns)
         bins: Number of bins for histogram discretization (default: 30)
+        use_float32: Use float32 precision to reduce memory usage (default: False)
+        chunk_size: Process data in chunks for large arrays (default: None, no chunking).
+                   If specified, computes entropy by averaging over chunks.
         
     Returns:
         Shannon entropy value. Higher values indicate more randomness/chaos.
@@ -48,36 +56,81 @@ def entropy(series: np.ndarray, bins: int = 30) -> float:
         >>> print(f"Entropy: {H:.3f}")
         Entropy: 1.234
         
+        >>> # Memory-efficient processing for large arrays
+        >>> large_data = np.random.randn(1_000_000)
+        >>> H = entropy(large_data, bins=50, use_float32=True, chunk_size=10000)
+        
     Note:
         - Data is automatically scaled to [-1, 1] range for numerical stability
         - Invalid values (NaN, inf) are filtered out
         - Returns 0.0 if no valid data remains after filtering
+        - Chunked processing computes weighted average entropy across chunks
     """
-    x = np.asarray(series, dtype=float)
-    if x.size == 0:
-        return 0.0
+    with _logger.operation("entropy", bins=bins, use_float32=use_float32, 
+                          chunk_size=chunk_size, data_size=len(series)):
+        dtype = np.float32 if use_float32 else float
+        x = np.asarray(series, dtype=dtype)
+        if x.size == 0:
+            return 0.0
 
-    # Filter out non-finite values
-    finite = np.isfinite(x)
-    if not finite.all():
-        x = x[finite]
-    if x.size == 0:
-        return 0.0
+        # Filter out non-finite values
+        finite = np.isfinite(x)
+        if not finite.all():
+            x = x[finite]
+        if x.size == 0:
+            return 0.0
 
-    # Normalize to [-1, 1] for numerical stability
-    scale = np.max(np.abs(x))
-    if scale and np.isfinite(scale):
-        x = x / scale
+        # Chunked processing for large arrays
+        if chunk_size is not None and x.size > chunk_size:
+            n_chunks = (x.size + chunk_size - 1) // chunk_size
+            entropies = []
+            weights = []
+            
+            for i in range(n_chunks):
+                start = i * chunk_size
+                end = min((i + 1) * chunk_size, x.size)
+                chunk = x[start:end]
+                
+                if chunk.size == 0:
+                    continue
+                
+                # Normalize chunk
+                scale = np.max(np.abs(chunk))
+                if scale and np.isfinite(scale):
+                    chunk = chunk / scale
+                
+                # Compute histogram for chunk
+                counts, _ = np.histogram(chunk, bins=bins, density=False)
+                total = counts.sum(dtype=dtype)
+                if total > 0:
+                    p = counts[counts > 0] / total
+                    chunk_entropy = float(-(p * np.log(p)).sum())
+                    entropies.append(chunk_entropy)
+                    weights.append(chunk.size)
+            
+            if not entropies:
+                return 0.0
+            
+            # Return weighted average entropy
+            weights_arr = np.array(weights, dtype=dtype)
+            entropies_arr = np.array(entropies, dtype=dtype)
+            return float(np.average(entropies_arr, weights=weights_arr))
 
-    # Compute histogram
-    counts, _ = np.histogram(x, bins=bins, density=False)
-    total = counts.sum(dtype=float)
-    if total == 0:
-        return 0.0
+        # Standard single-pass processing
+        # Normalize to [-1, 1] for numerical stability
+        scale = np.max(np.abs(x))
+        if scale and np.isfinite(scale):
+            x = x / scale
 
-    # Calculate Shannon entropy
-    p = counts[counts > 0] / total
-    return float(-(p * np.log(p)).sum())
+        # Compute histogram
+        counts, _ = np.histogram(x, bins=bins, density=False)
+        total = counts.sum(dtype=dtype)
+        if total == 0:
+            return 0.0
+
+        # Calculate Shannon entropy
+        p = counts[counts > 0] / total
+        return float(-(p * np.log(p)).sum())
 
 
 def delta_entropy(series: np.ndarray, window: int = 100, bins_range=(10, 50)) -> float:
@@ -138,6 +191,8 @@ class EntropyFeature(BaseFeature):
     
     Attributes:
         bins: Number of histogram bins for entropy calculation
+        use_float32: Use float32 precision to reduce memory usage
+        chunk_size: Chunk size for processing large arrays
         name: Feature identifier
         
     Example:
@@ -154,15 +209,26 @@ class EntropyFeature(BaseFeature):
         Metadata: {'bins': 50}
     """
 
-    def __init__(self, bins: int = 30, *, name: str | None = None) -> None:
+    def __init__(
+        self, 
+        bins: int = 30, 
+        *, 
+        use_float32: bool = False,
+        chunk_size: int | None = None,
+        name: str | None = None
+    ) -> None:
         """Initialize entropy feature.
         
         Args:
             bins: Number of bins for histogram discretization (default: 30)
+            use_float32: Use float32 precision for memory efficiency (default: False)
+            chunk_size: Chunk size for large arrays, None disables chunking (default: None)
             name: Optional custom name for the feature (default: "entropy")
         """
         super().__init__(name or "entropy")
         self.bins = bins
+        self.use_float32 = use_float32
+        self.chunk_size = chunk_size
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Shannon entropy of input data.
@@ -174,8 +240,16 @@ class EntropyFeature(BaseFeature):
         Returns:
             FeatureResult containing entropy value and metadata
         """
-        value = entropy(data, bins=self.bins)
-        return FeatureResult(name=self.name, value=value, metadata={"bins": self.bins})
+        with _metrics.measure_feature_transform(self.name, "entropy"):
+            value = entropy(data, bins=self.bins, use_float32=self.use_float32, 
+                          chunk_size=self.chunk_size)
+            _metrics.record_feature_value(self.name, value)
+            metadata = {
+                "bins": self.bins, 
+                "use_float32": self.use_float32,
+                "chunk_size": self.chunk_size
+            }
+            return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
 class DeltaEntropyFeature(BaseFeature):

@@ -22,9 +22,14 @@ from typing import Any
 import numpy as np
 
 from .base import BaseFeature, FeatureResult
+from ..utils.logging import get_logger
+from ..utils.metrics import get_metrics_collector
+
+_logger = get_logger(__name__)
+_metrics = get_metrics_collector()
 
 
-def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50) -> float:
+def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50, *, use_float32: bool = False) -> float:
     """Estimate Hurst exponent using rescaled range (R/S) analysis.
     
     The Hurst exponent characterizes the long-term statistical dependencies
@@ -38,6 +43,7 @@ def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50) -> float
         ts: 1D array of time series data (typically prices)
         min_lag: Minimum lag for R/S analysis (default: 2)
         max_lag: Maximum lag for R/S analysis (default: 50)
+        use_float32: Use float32 precision to reduce memory usage (default: False)
         
     Returns:
         Hurst exponent H ∈ [0, 1]:
@@ -65,23 +71,27 @@ def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50) -> float
         - Requires at least 2 * max_lag data points
         - Result is clipped to [0, 1] range
         - More data generally provides more reliable estimates
+        - float32 mode reduces memory footprint for large datasets
     """
-    x = np.asarray(ts, dtype=float)
-    if x.size < max_lag * 2:
-        return 0.5
-    
-    # Calculate standard deviation of differences for each lag
-    lags = np.arange(min_lag, max_lag + 1)
-    tau = [np.std(np.subtract(x[lag:], x[:-lag])) for lag in lags]
-    
-    # Perform log-log linear regression
-    # log(tau) = log(c) + H * log(lag)
-    y = np.log(tau)
-    X = np.vstack([np.ones_like(lags), np.log(lags)]).T
-    beta = np.linalg.lstsq(X, y, rcond=None)[0]
-    H = beta[1]  # Slope is Hurst exponent
-    
-    return float(np.clip(H, 0.0, 1.0))
+    with _logger.operation("hurst_exponent", min_lag=min_lag, max_lag=max_lag, 
+                          use_float32=use_float32, data_size=len(ts)):
+        dtype = np.float32 if use_float32 else float
+        x = np.asarray(ts, dtype=dtype)
+        if x.size < max_lag * 2:
+            return 0.5
+        
+        # Calculate standard deviation of differences for each lag
+        lags = np.arange(min_lag, max_lag + 1)
+        tau = [np.std(np.subtract(x[lag:], x[:-lag])) for lag in lags]
+        
+        # Perform log-log linear regression
+        # log(tau) = log(c) + H * log(lag)
+        y = np.log(tau)
+        X = np.vstack([np.ones_like(lags, dtype=dtype), np.log(lags)]).T
+        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        H = beta[1]  # Slope is Hurst exponent
+        
+        return float(np.clip(H, 0.0, 1.0))
 
 
 class HurstFeature(BaseFeature):
@@ -124,6 +134,7 @@ class HurstFeature(BaseFeature):
         min_lag: int = 2,
         max_lag: int = 50,
         *,
+        use_float32: bool = False,
         name: str | None = None,
     ) -> None:
         """Initialize Hurst exponent feature.
@@ -131,11 +142,13 @@ class HurstFeature(BaseFeature):
         Args:
             min_lag: Minimum lag for R/S analysis (default: 2)
             max_lag: Maximum lag for R/S analysis (default: 50)
+            use_float32: Use float32 precision for memory efficiency (default: False)
             name: Optional custom name (default: "hurst_exponent")
         """
         super().__init__(name or "hurst_exponent")
         self.min_lag = min_lag
         self.max_lag = max_lag
+        self.use_float32 = use_float32
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Hurst exponent of input data.
@@ -147,9 +160,16 @@ class HurstFeature(BaseFeature):
         Returns:
             FeatureResult containing Hurst exponent and metadata
         """
-        value = hurst_exponent(data, min_lag=self.min_lag, max_lag=self.max_lag)
-        metadata = {"min_lag": self.min_lag, "max_lag": self.max_lag}
-        return FeatureResult(name=self.name, value=value, metadata=metadata)
+        with _metrics.measure_feature_transform(self.name, "hurst"):
+            value = hurst_exponent(data, min_lag=self.min_lag, max_lag=self.max_lag,
+                                  use_float32=self.use_float32)
+            _metrics.record_feature_value(self.name, value)
+            metadata = {
+                "min_lag": self.min_lag, 
+                "max_lag": self.max_lag,
+                "use_float32": self.use_float32
+            }
+            return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
 __all__ = ["hurst_exponent", "HurstFeature"]

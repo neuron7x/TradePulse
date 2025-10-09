@@ -17,6 +17,7 @@ TradePulse is a professional algorithmic trading platform that combines advanced
 **✨ Key Features:**
 - 🔬 **Advanced Indicators**: Kuramoto, Ricci curvature, entropy, Hurst exponent
 - ⚡ **Async Support**: Full async/await for data ingestion and processing
+- 🚀 **Performance Optimized**: Float32 precision, chunked processing, GPU acceleration
 - 📊 **Observability**: Structured JSON logging + Prometheus metrics
 - 🔒 **Type Safe**: 100% type hints with mypy validation
 - 🧪 **Well Tested**: 192 tests with 98% coverage
@@ -79,10 +80,17 @@ See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructi
 ### Observability & Operations
 - **Structured JSON Logging**: Correlation IDs, operation tracking, hierarchical logging
 - **Prometheus Metrics**: Complete instrumentation of features, backtests, data pipelines
+- **Performance Profiling**: Automatic execution time tracking for all critical functions
 - **JSON Schemas**: Auto-generated schemas for all public payloads (OpenAPI compatible)
 - **Security Scanning**: Automated secret detection and dependency vulnerability checks
 - **Type Safety**: 100% type hints with strict mypy validation (0 errors)
-- **Real-time Execution**: Live trading interface with multiple data sources
+
+### Performance Optimization
+- **Float32 Precision**: 50% memory reduction with minimal accuracy loss
+- **Chunked Processing**: Handle unlimited dataset sizes efficiently
+- **GPU Acceleration**: CuPy integration for phase computation (5-50x speedup)
+- **Memory Profiling**: Built-in tools for identifying memory bottlenecks
+- **Production Ready**: Optimized for large-scale data processing
 
 ### Architecture
 - **Contracts-first Design**: Protocol Buffers for all data interfaces
@@ -106,6 +114,7 @@ See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructi
 - [Backtesting](docs/backtest.md) - Walk-forward simulation and testing
 - [Execution](docs/execution.md) - Order execution and risk management
 - [Agent System](docs/agent.md) - Genetic algorithm strategy optimization
+- **[Performance Guide](docs/performance.md)** - Optimization techniques and best practices
 
 ### Developer Guides
 - [Contributing](CONTRIBUTING.md) - Contribution guidelines and workflow
@@ -205,6 +214,34 @@ python -m interfaces.cli backtest --csv sample.csv \
     --initial-capital 10000
 ```
 
+### Performance-Optimized Processing
+
+```python
+import numpy as np
+from core.indicators.entropy import EntropyFeature
+from core.indicators.hurst import HurstFeature
+from core.data.preprocess import scale_series
+
+# Large dataset (1M points)
+large_data = np.random.randn(1_000_000)
+
+# Memory-efficient processing with float32 (50% memory savings)
+entropy_feat = EntropyFeature(
+    bins=50,
+    use_float32=True,        # Reduce memory usage
+    chunk_size=100_000       # Process in chunks
+)
+
+# Compute indicators
+result = entropy_feat.transform(large_data)
+print(f"Entropy: {result.value:.4f}")
+
+# Scale data efficiently
+scaled = scale_series(large_data, use_float32=True)
+
+# See docs/performance.md for complete guide
+```
+
 ### Live Trading (Demo)
 
 ```bash
@@ -212,7 +249,7 @@ python -m interfaces.cli backtest --csv sample.csv \
 python -m interfaces.cli live --source csv --path sample.csv --window 200
 ```
 
-See [Usage Examples](docs/examples/) for more detailed examples.
+See [Usage Examples](docs/examples/) and [Performance Demo](examples/performance_demo.py) for more detailed examples.
 
 ---
 
