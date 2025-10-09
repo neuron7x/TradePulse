@@ -67,6 +67,12 @@ with observability_scope(
         raise
 ```
 
+Both ``scope.set_attribute`` and ``scope.set_status`` now keep the structured
+payloads for logs, metrics, and traces in sync. Any custom attributes that you
+set are immediately visible in the log context dictionary, the Prometheus
+operation labels, and the active span, ensuring that dashboards and traces
+reflect the same metadata without additional plumbing.
+
 ### Correlation contexts
 
 Use ``core.utils.logging.correlation_context`` when you need to propagate an existing correlation ID across async tasks or threads:

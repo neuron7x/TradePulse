@@ -32,9 +32,11 @@ class ObservabilityScope:
     def set_status(self, status: str) -> None:
         """Propagate a status indicator to logs, metrics, and traces."""
 
-        if self.log_context is not None:
+        self.attributes["status"] = status
+
+        if isinstance(self.log_context, dict):
             self.log_context["status"] = status
-        if self.metric_context is not None:
+        if isinstance(self.metric_context, dict):
             self.metric_context["status"] = status
         if self.span is not None:
             try:
@@ -46,6 +48,10 @@ class ObservabilityScope:
         """Attach an attribute to the active span and cached attribute payload."""
 
         self.attributes[key] = value
+        if isinstance(self.log_context, dict):
+            self.log_context[key] = value
+        if isinstance(self.metric_context, dict):
+            self.metric_context[key] = value
         if self.span is not None:
             try:
                 self.span.set_attribute(key, value)
@@ -55,10 +61,12 @@ class ObservabilityScope:
     def add_event(self, name: str, **fields: Any) -> None:
         """Emit a structured event to logs and traces."""
 
-        self.logger.info(name, **fields)
+        payload = dict(fields)
+        payload.setdefault("event", name)
+        self.logger.info(name, **payload)
         if self.span is not None:
             try:
-                self.span.add_event(name, attributes=fields)
+                self.span.add_event(name, attributes=payload)
             except AttributeError:  # pragma: no cover - defensive
                 pass
 
@@ -100,7 +108,7 @@ def observability_scope(
 
     if is_tracing_enabled():
         tracer = get_tracer(component)
-        span_attrs = {**log_attrs, "correlation_id": corr_id}
+        span_attrs = {**log_attrs, "operation": operation, "correlation_id": corr_id}
         tracer_cm = tracer.start_as_current_span(operation, attributes=span_attrs)
     else:
         tracer_cm = nullcontext(None)
@@ -109,14 +117,24 @@ def observability_scope(
         with structured_logger.operation(operation, correlation_id=corr_id, **log_attrs) as log_ctx:
             with metrics_cm as metric_ctx:
                 with tracer_cm as span_obj:
+                    scope_attributes = {**log_attrs, "operation": operation, "correlation_id": corr_id}
                     scope = ObservabilityScope(
                         correlation_id=corr_id,
                         logger=structured_logger,
-                        attributes=log_attrs,
+                        attributes=scope_attributes,
                         span=span_obj,
                         log_context=log_ctx,
                         metric_context=metric_ctx,
                     )
+                    if isinstance(scope.log_context, dict):
+                        scope.log_context.setdefault("correlation_id", corr_id)
+                        scope.log_context.setdefault("operation", operation)
+                    if isinstance(scope.metric_context, dict):
+                        scope.metric_context.setdefault("component", component)
+                        scope.metric_context.setdefault("operation", operation)
+                        scope.metric_context.setdefault("correlation_id", corr_id)
+                        for attr_key, attr_value in log_attrs.items():
+                            scope.metric_context.setdefault(attr_key, attr_value)
                     yield scope
 
 
