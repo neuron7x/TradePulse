@@ -27,17 +27,18 @@ except ImportError:
 
 class MetricsCollector:
     """Centralized metrics collection for TradePulse."""
-    
+
     def __init__(self, registry: Optional[Any] = None):
         """Initialize metrics collector.
-        
+
         Args:
             registry: Prometheus registry (uses default if None)
         """
         if not PROMETHEUS_AVAILABLE:
             self._enabled = False
+            self.registry = None
             return
-            
+
         self._enabled = True
         self.registry = registry
         
@@ -179,9 +180,9 @@ class MetricsCollector:
         
     @contextmanager
     def measure_feature_transform(
-        self, 
+        self,
         feature_name: str,
-        feature_type: str = "generic"
+        feature_type: str = "generic",
     ) -> Iterator[None]:
         """Context manager for measuring feature transformation time.
         
@@ -264,7 +265,7 @@ class MetricsCollector:
                     
     def record_feature_value(self, feature_name: str, value: float) -> None:
         """Record a feature value.
-        
+
         Args:
             feature_name: Name of the feature
             value: Feature value
@@ -272,32 +273,76 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.feature_value.labels(feature_name=feature_name).set(value)
-        
-    def record_tick_processed(self, source: str, symbol: str) -> None:
-        """Record that a tick was processed.
-        
+
+    @contextmanager
+    def measure_data_ingestion(
+        self,
+        source: str,
+        symbol: str,
+    ) -> Iterator[Dict[str, Any]]:
+        """Context manager for measuring data ingestion operations.
+
         Args:
             source: Data source name
             symbol: Trading symbol
+
+        Yields:
+            Dictionary that can be populated with metadata (e.g. ``{"status": "error"}``).
+        """
+        if not self._enabled:
+            yield {}
+            return
+
+        start_time = time.time()
+        ctx: Dict[str, Any] = {}
+        status = "success"
+
+        try:
+            yield ctx
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.time() - start_time
+            final_status = ctx.get("status", status)
+            self.data_ingestion_duration.labels(
+                source=source,
+                symbol=symbol,
+            ).observe(duration)
+            self.data_ingestion_total.labels(
+                source=source,
+                symbol=symbol,
+                status=final_status,
+            ).inc()
+
+    def record_tick_processed(self, source: str, symbol: str, count: int = 1) -> None:
+        """Record that ticks were processed.
+
+        Args:
+            source: Data source name
+            symbol: Trading symbol
+            count: Number of ticks processed in the batch
         """
         if not self._enabled:
             return
-        self.ticks_processed.labels(source=source, symbol=symbol).inc()
-        
+        self.ticks_processed.labels(source=source, symbol=symbol).inc(count)
+
     def record_order_placed(
         self,
         exchange: str,
         symbol: str,
         order_type: str,
-        status: str = "success"
+        status: str = "success",
+        count: int = 1,
     ) -> None:
         """Record an order placement.
-        
+
         Args:
             exchange: Exchange name
             symbol: Trading symbol
             order_type: Order type (market, limit, etc.)
             status: Order status
+            count: Number of orders placed
         """
         if not self._enabled:
             return
@@ -305,8 +350,74 @@ class MetricsCollector:
             exchange=exchange,
             symbol=symbol,
             order_type=order_type,
-            status=status
-        ).inc()
+            status=status,
+        ).inc(count)
+
+    @contextmanager
+    def measure_order_placement(
+        self,
+        exchange: str,
+        symbol: str,
+        order_type: str,
+    ) -> Iterator[Dict[str, Any]]:
+        """Context manager for measuring order placement latency and outcomes."""
+
+        if not self._enabled:
+            yield {}
+            return
+
+        start_time = time.time()
+        ctx: Dict[str, Any] = {}
+        status = "success"
+
+        try:
+            yield ctx
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.time() - start_time
+            final_status = ctx.get("status", status)
+            self.order_placement_duration.labels(
+                exchange=exchange,
+                symbol=symbol,
+            ).observe(duration)
+            self.orders_placed.labels(
+                exchange=exchange,
+                symbol=symbol,
+                order_type=order_type,
+                status=final_status,
+            ).inc()
+
+    def set_open_positions(self, exchange: str, symbol: str, positions: float) -> None:
+        """Update the gauge tracking open positions."""
+
+        if not self._enabled:
+            return
+        self.open_positions.labels(exchange=exchange, symbol=symbol).set(positions)
+
+    def set_strategy_score(self, strategy_name: str, score: float) -> None:
+        """Record the latest strategy score."""
+
+        if not self._enabled:
+            return
+        self.strategy_score.labels(strategy_name=strategy_name).set(score)
+
+    def set_strategy_memory_size(self, size: int) -> None:
+        """Update the number of strategies currently held in memory."""
+
+        if not self._enabled:
+            return
+        self.strategy_memory_size.set(size)
+
+    def render_prometheus(self) -> str:
+        """Render the currently collected metrics in Prometheus text format."""
+
+        if not self._enabled:
+            return ""
+
+        payload = generate_latest(self.registry) if self.registry else generate_latest()
+        return payload.decode("utf-8")
 
 
 # Global metrics collector instance
