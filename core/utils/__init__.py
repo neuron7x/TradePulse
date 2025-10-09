@@ -12,6 +12,7 @@ from .metrics import (
     get_metrics_collector,
     start_metrics_server,
 )
+from .slo import AutoRollbackGuard, SLOConfig
 
 __all__ = [
     "JSONFormatter",
@@ -21,5 +22,7 @@ __all__ = [
     "MetricsCollector",
     "get_metrics_collector",
     "start_metrics_server",
+    "AutoRollbackGuard",
+    "SLOConfig",
 ]
 
