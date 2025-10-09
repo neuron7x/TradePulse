@@ -29,9 +29,15 @@ def test_measure_data_ingestion_records_duration_and_status() -> None:
         "tradepulse_data_ingestion_total",
         {"source": "csv", "symbol": "BTC-USDT", "status": "success"},
     )
+    latency_quantile = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_latency_quantiles_seconds",
+        {"source": "csv", "symbol": "BTC-USDT", "quantile": "p50"},
+    )
 
     assert count == 1.0
     assert total == 1.0
+    assert latency_quantile is not None
 
 
 def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None:
@@ -80,6 +86,12 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     )
 
     assert duration_count == 1.0
+    submission_quantile = _sample_value(
+        registry,
+        "tradepulse_order_submission_latency_quantiles_seconds",
+        {"exchange": "binance", "symbol": "ETH-USDT", "quantile": "p50"},
+    )
+    assert submission_quantile is not None
     assert rejected_total == 1.0
     assert open_positions == 2.0
     assert strategy_score == 0.87
@@ -169,3 +181,71 @@ def test_order_placement_context_forces_error_status_on_exception() -> None:
 
     assert error_total == 1.0
     assert filled_total is None
+
+
+def test_latency_quantiles_without_numpy(monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = CollectorRegistry()
+
+    # Simulate an environment where numpy is unavailable so the fallback code path is used.
+    monkeypatch.setattr("core.utils.metrics._NUMPY_AVAILABLE", False, raising=False)
+    monkeypatch.setattr("core.utils.metrics.np", None, raising=False)
+
+    # Provide deterministic timing so the computed duration is stable.
+    times = [0.0, 0.25]
+
+    def fake_time() -> float:
+        return times.pop(0) if times else 0.25
+
+    monkeypatch.setattr("core.utils.metrics.time.time", fake_time)
+
+    collector = MetricsCollector(registry)
+
+    with collector.measure_data_ingestion("csv", "BTC-USDT"):
+        pass
+
+    quantile = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_latency_quantiles_seconds",
+        {"source": "csv", "symbol": "BTC-USDT", "quantile": "p95"},
+    )
+
+    # With deterministic timing and the fallback path, the quantile should match the
+    # observed duration, demonstrating that the computation works without numpy.
+    assert quantile == pytest.approx(0.25)
+
+
+def test_signal_generation_latency_and_equity_curve_gauge() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    with collector.measure_signal_generation("trend"):
+        pass
+
+    collector.record_equity_point("trend", 0, 100.0)
+    collector.record_order_fill_latency("demo", "trend", 0.123)
+
+    signal_total = _sample_value(
+        registry,
+        "tradepulse_signal_generation_total",
+        {"strategy": "trend", "status": "success"},
+    )
+    signal_quantile = _sample_value(
+        registry,
+        "tradepulse_signal_generation_latency_quantiles_seconds",
+        {"strategy": "trend", "quantile": "p50"},
+    )
+    fill_quantile = _sample_value(
+        registry,
+        "tradepulse_order_fill_latency_quantiles_seconds",
+        {"exchange": "demo", "symbol": "trend", "quantile": "p50"},
+    )
+    equity_gauge = _sample_value(
+        registry,
+        "tradepulse_backtest_equity_curve",
+        {"strategy": "trend", "step": "0"},
+    )
+
+    assert signal_total == 1.0
+    assert signal_quantile is not None
+    assert fill_quantile is not None
+    assert equity_gauge == 100.0
