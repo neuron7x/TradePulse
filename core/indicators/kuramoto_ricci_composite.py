@@ -152,13 +152,15 @@ class TradePulseCompositeEngine:
         self.r = TemporalRicciAnalyzer(**(ricci_config or {}))
         self.c = KuramotoRicciComposite(**(composite_config or {}))
         self.history: list[CompositeSignal] = []
+        # Track signals by timestamp to guarantee idempotent retries.
+        self._history_index: dict[pd.Timestamp, int] = {}
 
     def analyze_market(self, df: pd.DataFrame, price_col: str = "close", volume_col: str = "volume") -> CompositeSignal:
         kres = self.k.analyze(df, price_col=price_col)
         rres = self.r.analyze(df, price_col=price_col, volume_col=volume_col)
         static_ricci = rres.graph_snapshots[-1].avg_curvature if rres.graph_snapshots else 0.0
         sig = self.c.analyze(kres, rres, static_ricci, df.index[-1])
-        self.history.append(sig)
+        self._record_signal(sig)
         return sig
 
     def get_signal_dataframe(self) -> pd.DataFrame:
@@ -168,3 +170,15 @@ class TradePulseCompositeEngine:
     @property
     def signal_history(self) -> list[CompositeSignal]:
         return self.history
+
+    def _record_signal(self, signal: CompositeSignal) -> None:
+        """Persist a signal ensuring retries are idempotent."""
+
+        ts = signal.timestamp
+        idx = self._history_index.get(ts)
+        if idx is not None:
+            self.history[idx] = signal
+            return
+
+        self.history.append(signal)
+        self._history_index[ts] = len(self.history) - 1
