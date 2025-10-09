@@ -165,15 +165,29 @@ safety check
 
 ### Automated Security Scanning
 
-We use multiple tools in CI/CD:
+We use multiple tools in CI/CD (configured in `.github/workflows/security.yml`):
 
 #### 1. CodeQL (GitHub Advanced Security)
 ```yaml
 # Automatically scans code for vulnerabilities
-# Configured in .github/workflows/codeql.yml
+# Configured in .github/workflows/security.yml (codeql-analysis job)
+# - Uses security-extended query suite for comprehensive analysis
+# - Results visible in GitHub Security tab
+# - Runs on every push/PR and weekly schedule
 ```
 
-#### 2. Bandit (Python Security Linter)
+#### 2. Gitleaks (Secret Scanning)
+```bash
+# Integrated in CI/CD pipeline
+# Automatically scans for hardcoded secrets, API keys, tokens
+# Uses extensive pattern library for detection
+# Fails builds if secrets are detected
+
+# Run locally with Docker:
+docker run --rm -v $(pwd):/repo zricethezav/gitleaks:latest detect --source /repo -v
+```
+
+#### 3. Bandit (Python Security Linter)
 ```bash
 # Run locally
 bandit -r core/ backtest/ execution/ interfaces/
@@ -183,28 +197,59 @@ bandit -r core/ backtest/ execution/ interfaces/
 # - Hardcoded passwords
 # - SQL injection risks
 # - Shell injection risks
+
+# CI/CD configuration:
+# - Fails on medium/high severity issues (-ll -ii flags)
+# - Generates JSON reports for artifact storage
 ```
 
-#### 3. Safety (Dependency Checker)
+#### 4. Safety (Dependency Checker)
 ```bash
 # Check for known vulnerabilities
 safety check --json
 
 # Update requirements
 safety check --update
+
+# CI/CD notes:
+# - Runs on all dependencies in requirements.txt
+# - Warns on vulnerabilities but doesn't fail builds (informational)
 ```
 
-#### 4. pip-audit
+#### 5. pip-audit (Dependency Auditor)
 ```bash
 # Audit Python packages
 pip-audit --desc --format json
+
+# CI/CD configuration:
+# - Fails on CRITICAL/HIGH severity vulnerabilities
+# - Ignores known low-risk vulnerability: GHSA-4xh5-x5gv-qwph (pip 25.2)
+# - Smart filtering for production-relevant vulnerabilities
 ```
 
-#### 5. Semgrep (Static Analysis)
-```bash
-# Run semantic code analysis
-semgrep --config=auto .
+#### 6. Custom Secret Scanner
+```python
+# Built-in Python-based secret detection
+from core.utils.security import check_for_hardcoded_secrets
+
+# Scans for:
+# - API keys and tokens
+# - Private keys
+# - Database credentials
+# - AWS/GCP credentials
 ```
+
+### Dependabot (Automated Dependency Updates)
+
+Configured in `.github/dependabot.yml`:
+
+- **Python dependencies**: Weekly updates on Monday
+- **GitHub Actions**: Weekly workflow updates  
+- **Go modules**: Weekly Go dependency updates
+- **Security updates**: Automatically grouped and prioritized
+- **Auto-rebase**: Keeps PRs up-to-date automatically
+
+Configure reviewers and assignees in repository settings.
 
 ### Pre-commit Hooks
 

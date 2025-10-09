@@ -1,2 +1,142 @@
-# CODEOWNERS intentionally left without owners to avoid invalid handles.
-# Enable Branch Protection and add required reviewers in repository settings.
+# CODEOWNERS - Define code ownership for automated review requests
+# Documentation: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# HOW TO USE:
+# 1. Replace placeholder handles below with actual GitHub usernames or team names
+# 2. Teams should be in the format: @org/team-name (requires GitHub organization)
+# 3. Users should be in the format: @username
+# 4. These owners will be automatically requested for review when files are changed
+#
+# PATTERN SYNTAX:
+# - Use standard gitignore patterns
+# - Last matching pattern takes precedence
+# - Order from least to most specific
+#
+# EXAMPLES:
+# * @default-owner                    # Default owner for everything
+# *.js @js-team                       # All JavaScript files
+# /docs/ @documentation-team          # Everything in docs/ directory
+# *.py @python-team                   # All Python files
+# /core/security/ @security-team      # Security-critical code
+
+# =============================================================================
+# DEFAULT OWNERS
+# =============================================================================
+# These owners will be requested for review unless overridden by a later match
+# Replace with actual GitHub usernames or team names
+
+# * @neuron7x/maintainers
+
+# =============================================================================
+# SECURITY-CRITICAL FILES
+# =============================================================================
+# Security files require review from security-focused team members
+# High priority for security issues and vulnerability fixes
+
+# Security configuration and policies
+/SECURITY.md @neuron7x/security-team
+/.github/workflows/security.yml @neuron7x/security-team
+
+# Security-related code
+/core/utils/security.py @neuron7x/security-team
+
+# =============================================================================
+# CORE COMPONENTS
+# =============================================================================
+# Core trading engine and critical business logic
+
+# Core trading logic
+/core/ @neuron7x/core-team
+/backtest/ @neuron7x/core-team
+/execution/ @neuron7x/core-team
+
+# Data ingestion and processing
+/core/data/ @neuron7x/data-team
+
+# =============================================================================
+# INFRASTRUCTURE & DEVOPS
+# =============================================================================
+# CI/CD, deployment, and infrastructure configuration
+
+# GitHub workflows and CI/CD
+/.github/workflows/ @neuron7x/devops-team
+
+# Docker and deployment
+/Dockerfile @neuron7x/devops-team
+/docker-compose.yml @neuron7x/devops-team
+/deploy/ @neuron7x/devops-team
+
+# Dependency management
+/requirements.txt @neuron7x/devops-team
+/requirements-dev.txt @neuron7x/devops-team
+/.github/dependabot.yml @neuron7x/devops-team
+
+# =============================================================================
+# DOCUMENTATION
+# =============================================================================
+# Documentation and user guides
+
+/docs/ @neuron7x/documentation-team
+/README.md @neuron7x/documentation-team
+/CONTRIBUTING.md @neuron7x/documentation-team
+
+# =============================================================================
+# TESTING
+# =============================================================================
+# Test files and testing infrastructure
+
+/tests/ @neuron7x/qa-team
+/pytest.ini @neuron7x/qa-team
+/conftest.py @neuron7x/qa-team
+
+# =============================================================================
+# BRANCH PROTECTION RECOMMENDATIONS
+# =============================================================================
+# 
+# To enable branch protection for the main branch:
+# 
+# 1. Go to: Settings → Branches → Add branch protection rule
+# 2. Branch name pattern: main
+# 3. Enable the following settings:
+# 
+#    REQUIRED CHECKS:
+#    ☑ Require a pull request before merging
+#      ☑ Require approvals: 2
+#      ☑ Dismiss stale pull request approvals when new commits are pushed
+#      ☑ Require review from Code Owners
+#    
+#    ☑ Require status checks to pass before merging
+#      ☑ Require branches to be up to date before merging
+#      Required checks (select from workflows):
+#        - CodeQL Analysis
+#        - Bandit Security Linter
+#        - Scan Dependencies
+#        - Scan for Secrets
+#        - Tests (from tests.yml workflow)
+#    
+#    ☑ Require conversation resolution before merging
+#    
+#    ☑ Require signed commits (recommended)
+#    
+#    ☑ Require linear history (recommended)
+#    
+#    ☑ Do not allow bypassing the above settings
+#    
+#    ☑ Restrict who can push to matching branches
+#      - Add: @neuron7x/maintainers
+#    
+#    ☑ Allow force pushes: OFF
+#    ☑ Allow deletions: OFF
+# 
+# 4. Save changes
+# 
+# ADDITIONAL RECOMMENDATIONS:
+# - Enable "Automatically delete head branches" in Settings → General
+# - Enable "Always suggest updating pull request branches" 
+# - Configure "Merge button" to only allow "Squash and merge"
+# - Set up repository secrets for CI/CD in Settings → Secrets and variables
+# - Enable Dependabot security updates in Settings → Code security and analysis
+# - Enable GitHub Advanced Security features (CodeQL, Secret scanning, Dependency review)
+# 
+# =============================================================================
+

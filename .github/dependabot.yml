@@ -1,0 +1,120 @@
+# Dependabot configuration for automated dependency updates
+# Documentation: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
+
+version: 2
+updates:
+  # Monitor Python dependencies in requirements.txt
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      # Check for updates weekly on Monday
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    
+    # Automatically create pull requests for security updates
+    open-pull-requests-limit: 10
+    
+    # Pull request configuration
+    pull-request-branch-name:
+      separator: "-"
+    
+    # Automatically rebase PRs when they become out of date
+    rebase-strategy: "auto"
+    
+    # Add labels to PRs for easy filtering
+    labels:
+      - "dependencies"
+      - "security"
+      - "python"
+    
+    # Commit message configuration
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    
+    # Grouping strategy: separate security updates from regular updates
+    groups:
+      # Group all security updates together for faster review
+      security-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "security"
+      
+      # Group minor and patch updates for non-security updates
+      minor-and-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+    
+    # Reviewers and assignees (configure in repository settings)
+    # reviewers:
+    #   - "security-team"
+    # assignees:
+    #   - "maintainer"
+    
+    # Only create PRs for security updates and version updates
+    # Ignore pre-release versions
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+    
+    # Allow both direct and indirect dependencies
+    allow:
+      - dependency-type: "all"
+
+  # Monitor GitHub Actions workflow dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    
+    open-pull-requests-limit: 5
+    
+    labels:
+      - "dependencies"
+      - "github-actions"
+    
+    commit-message:
+      prefix: "chore(ci)"
+      include: "scope"
+    
+    # Group all GitHub Actions updates together
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+
+  # Monitor Go dependencies (if go.mod exists)
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    
+    open-pull-requests-limit: 5
+    
+    labels:
+      - "dependencies"
+      - "go"
+    
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    
+    groups:
+      go-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
