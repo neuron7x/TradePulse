@@ -16,6 +16,7 @@ This document outlines the rules and processes that enable fast and safe develop
 - [Issue Templates](#issue-templates)
 - [Review Process](#review-process)
 - [Local Development](#local-development)
+- [Branch Protection](#branch-protection)
 - [License](#license)
 - [Contact](#contact)
 
@@ -605,6 +606,25 @@ def function_name(arg1: type, arg2: type) -> return_type:
 - Update docs with code changes
 - Use examples liberally
 - Link between related docs
+
+---
+
+## Branch Protection
+
+**For Repository Administrators:**
+
+TradePulse uses branch protection rules to ensure code quality and security. The `main` branch requires:
+- Pull request reviews from code owners
+- All security scans to pass (CodeQL, Bandit, secret scanning, dependency scanning)
+- Conversation resolution before merging
+
+**Setup Instructions**: See [Branch Protection Setup Guide](.github/BRANCH_PROTECTION_SETUP.md) for detailed configuration steps.
+
+**Key Features:**
+- CODEOWNERS-based review requirements
+- Required CI/CD status checks
+- Prevents direct pushes to main
+- Audit trail for all changes
 
 ---
 

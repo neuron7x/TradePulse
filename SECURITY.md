@@ -165,13 +165,22 @@ safety check
 
 ### Automated Security Scanning
 
-We use multiple tools in CI/CD:
+We use multiple tools in CI/CD, all configured in `.github/workflows/security.yml`:
 
 #### 1. CodeQL (GitHub Advanced Security)
 ```yaml
 # Automatically scans code for vulnerabilities
-# Configured in .github/workflows/codeql.yml
+# Configured in .github/workflows/security.yml (codeql-analysis job)
+# Runs security-extended queries for comprehensive analysis
 ```
+
+**Detects:**
+- SQL injection
+- Command injection
+- Path traversal
+- XSS vulnerabilities
+- Insecure deserialization
+- And many more security issues
 
 #### 2. Bandit (Python Security Linter)
 ```bash
@@ -185,7 +194,46 @@ bandit -r core/ backtest/ execution/ interfaces/
 # - Shell injection risks
 ```
 
-#### 3. Safety (Dependency Checker)
+**CI/CD:** Runs automatically in `bandit-scan` job, outputs JSON artifact for auditing.
+
+#### 3. Secret Scanning (Multi-Tool Approach)
+
+Our CI/CD uses three complementary tools:
+
+**Custom Python Scanner:**
+```python
+from core.utils.security import check_for_hardcoded_secrets
+if check_for_hardcoded_secrets('.'):
+    print("Secrets detected!")
+```
+
+**TruffleHog:**
+- Scans entire git history
+- Detects verified secrets
+- High accuracy with entropy analysis
+
+**Gitleaks:**
+- Fast regex-based detection
+- Configurable rule sets
+- JSON output for artifacts
+
+**CI/CD:** All three run in parallel in `secret-scan` job.
+
+#### 4. pip-audit (with Custom Filtering)
+```bash
+# Audit Python packages with custom logic
+# Ignores only pip 25.2 vulnerability (known safe)
+# Fails on any other vulnerability
+
+pip-audit --desc --format json
+```
+
+**CI/CD:** Automated in `dependency-scan` job with intelligent filtering:
+- ✅ Ignores pip 25.2 (known safe in our context)
+- ❌ Fails on all other vulnerabilities
+- 📊 Generates JSON report artifact
+
+#### 5. Safety (Dependency Checker)
 ```bash
 # Check for known vulnerabilities
 safety check --json
@@ -194,17 +242,23 @@ safety check --json
 safety check --update
 ```
 
-#### 4. pip-audit
-```bash
-# Audit Python packages
-pip-audit --desc --format json
-```
+**CI/CD:** Runs alongside pip-audit for comprehensive dependency scanning.
 
-#### 5. Semgrep (Static Analysis)
-```bash
-# Run semantic code analysis
-semgrep --config=auto .
-```
+### CI/CD Security Pipeline
+
+All security scans run automatically:
+- **On Push**: To `main` and `develop` branches
+- **On Pull Request**: Before code can be merged
+- **Weekly Schedule**: Every Monday at 00:00 UTC
+- **Manual Trigger**: Via GitHub Actions UI
+
+**Job Parallelization**: All 4 security jobs run independently for speed:
+1. Secret Scanning (Multi-Tool)
+2. Bandit Security Linting
+3. Dependency Vulnerability Scanning
+4. CodeQL Static Analysis
+
+**Artifacts**: All scan results stored for 90 days for audit trail.
 
 ### Pre-commit Hooks
 
