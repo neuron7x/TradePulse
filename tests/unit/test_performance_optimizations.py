@@ -1,5 +1,27 @@
 # SPDX-License-Identifier: MIT
-"""Tests for performance optimization features."""
+"""Tests for performance optimization features.
+
+This module tests the optional performance optimization parameters (use_float32, chunk_size)
+that have been added to various indicator features including:
+- EntropyFeature: Shannon entropy calculation with optional float32 and chunking
+- HurstFeature: Hurst exponent estimation with optional float32
+- MeanRicciFeature: Ricci curvature with optional float32 and chunking
+- KuramotoOrderFeature: Kuramoto order parameter with optional float32
+
+The tests verify:
+1. Float32 precision support reduces memory usage while preserving accuracy
+2. Chunked processing handles large datasets efficiently
+3. Feature classes correctly report optimization parameters in metadata
+4. GPU acceleration (when available) produces equivalent results to CPU
+5. Edge cases are handled properly (empty arrays, constant values, etc.)
+6. Backward compatibility is maintained (original API still works)
+
+Key testing principles:
+- Optimization parameters should only appear in metadata when explicitly enabled
+- Float32 results should be close to float64 (within reasonable tolerance)
+- Chunked processing should produce results similar to non-chunked
+- All optimizations should preserve the core algorithm behavior
+"""
 from __future__ import annotations
 
 import numpy as np
