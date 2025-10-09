@@ -7,6 +7,11 @@ import warnings
 import numpy as np
 
 from .base import BaseFeature, FeatureResult
+from ..utils.logging import get_logger
+from ..utils.metrics import get_metrics_collector
+
+_logger = get_logger(__name__)
+_metrics = get_metrics_collector()
 
 try:
     import networkx as nx
@@ -155,11 +160,40 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     dist = W1(a, b) if W1 is not None else _w1_fallback(a, b)
     return float(1.0 - dist / d_xy)
 
-def mean_ricci(G: nx.Graph) -> float:
-    if G.number_of_edges() == 0:
-        return 0.0
-    curv = [ricci_curvature_edge(G, u, v) for u, v in G.edges()]
-    return float(np.mean(curv))
+def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool = False) -> float:
+    """Compute mean Ollivier-Ricci curvature over all edges.
+    
+    Args:
+        G: NetworkX graph
+        chunk_size: Process edges in chunks for large graphs (default: None, no chunking)
+        use_float32: Use float32 precision for computations (default: False)
+        
+    Returns:
+        Mean Ricci curvature across all edges
+    """
+    with _logger.operation("mean_ricci", edges=G.number_of_edges(), nodes=G.number_of_nodes(),
+                          chunk_size=chunk_size, use_float32=use_float32):
+        if G.number_of_edges() == 0:
+            return 0.0
+        
+        edges = list(G.edges())
+        
+        # Chunked processing for large graphs
+        if chunk_size is not None and len(edges) > chunk_size:
+            dtype = np.float32 if use_float32 else float
+            curvatures = []
+            
+            for i in range(0, len(edges), chunk_size):
+                chunk_edges = edges[i:i + chunk_size]
+                chunk_curv = [ricci_curvature_edge(G, u, v) for u, v in chunk_edges]
+                curvatures.extend(chunk_curv)
+            
+            return float(np.mean(np.array(curvatures, dtype=dtype)))
+        
+        # Standard processing
+        curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
+        dtype = np.float32 if use_float32 else float
+        return float(np.mean(np.array(curv, dtype=dtype)))
 
 def _w1_fallback(a, b):
     import numpy as _np
@@ -173,15 +207,49 @@ def _w1_fallback(a, b):
 class MeanRicciFeature(BaseFeature):
     """Feature computing mean Ollivier–Ricci curvature of a price graph."""
 
-    def __init__(self, delta: float = 0.005, *, name: str | None = None) -> None:
+    def __init__(
+        self, 
+        delta: float = 0.005, 
+        *, 
+        chunk_size: int | None = None,
+        use_float32: bool = False,
+        name: str | None = None
+    ) -> None:
+        """Initialize mean Ricci curvature feature.
+        
+        Args:
+            delta: Price quantization granularity (default: 0.005)
+            chunk_size: Process edges in chunks for large graphs (default: None)
+            use_float32: Use float32 precision for memory efficiency (default: False)
+            name: Optional custom name (default: "mean_ricci")
+        """
         super().__init__(name or "mean_ricci")
         self.delta = float(delta)
+        self.chunk_size = chunk_size
+        self.use_float32 = use_float32
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
-        G = build_price_graph(data, delta=self.delta)
-        value = mean_ricci(G)
-        metadata = {"delta": self.delta, "nodes": G.number_of_nodes()}
-        return FeatureResult(name=self.name, value=value, metadata=metadata)
+        """Compute mean Ricci curvature of price graph.
+        
+        Args:
+            data: 1D array of prices
+            **_: Additional keyword arguments (ignored)
+            
+        Returns:
+            FeatureResult containing mean Ricci curvature and metadata
+        """
+        with _metrics.measure_feature_transform(self.name, "ricci"):
+            G = build_price_graph(data, delta=self.delta)
+            value = mean_ricci(G, chunk_size=self.chunk_size, use_float32=self.use_float32)
+            _metrics.record_feature_value(self.name, value)
+            metadata = {
+                "delta": self.delta, 
+                "nodes": G.number_of_nodes(),
+                "edges": G.number_of_edges(),
+                "chunk_size": self.chunk_size,
+                "use_float32": self.use_float32
+            }
+            return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
 __all__ = [
