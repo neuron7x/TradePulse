@@ -108,6 +108,7 @@ See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructi
 - [Quick Start Guide](docs/quickstart.md) - Get up and running in 5 minutes
 - [Installation Guide](docs/installation.md) - Detailed installation instructions
 - [Architecture Overview](docs/ARCHITECTURE.md) - System design and principles
+- [Roadmap](docs/roadmap.md) - Development map aligned with quarterly goals
 - [FAQ](docs/faq.md) - Frequently asked questions
 - [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
 

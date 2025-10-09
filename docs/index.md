@@ -43,6 +43,15 @@ focused document so contributors can quickly find the details they need.
 
 ---
 
+## Strategic Direction
+
+- Review the [TradePulse Roadmap](roadmap.md) for the current development map and
+  quarterly priorities.
+- Cross-reference the [Improvement Plan](improvement_plan.md) for detailed
+  success criteria and implementation guidance.
+
+---
+
 ## Contribution Workflow
 
 - Adhere to the testing instructions in [`TESTING.md`](../TESTING.md) and the
