@@ -39,8 +39,10 @@ cd TradePulse
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install dependencies
+# Install runtime dependencies (skip if you only need dev setup below)
 pip install -r requirements.txt
+
+# Install development & test dependencies (includes runtime stack)
 pip install -r requirements-dev.txt
 ```
 

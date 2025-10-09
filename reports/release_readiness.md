@@ -15,7 +15,7 @@ TradePulse provides a functional core for algorithmic trading — including indi
 - **Frontend still a stub.** The Next.js dashboard consists of a single placeholder string, so there is no production-ready UI. 【F:apps/web/app/page.tsx†L1-L3】
 
 ## Additional Gaps to Address
-- **Dependency hygiene.** Property-based tests also skip because Hypothesis is optional unless `requirements-dev` is installed. Either update documentation to clarify workflows or consolidate runtime/test dependencies. 【5d57c7†L1-L16】【F:requirements-dev.txt†L1-L9】
+- **Dependency hygiene.** Development requirements now include the runtime stack, so installing `requirements-dev.txt` brings in Hypothesis/pytest automatically; contributor docs were updated to highlight the single-step setup. 【F:requirements-dev.txt†L1-L15】【F:CONTRIBUTING.md†L68-L80】
 - **Operational parity.** Several documentation promises (e.g., protocol buffer interfaces, microservice engines) lack corresponding implementation or deployment guides in the repo snapshot, suggesting marketing material outpaces available code. 【F:README.md†L49-L155】
 
 ## Recommendations
