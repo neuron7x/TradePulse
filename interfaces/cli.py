@@ -1,13 +1,22 @@
 # SPDX-License-Identifier: MIT
 
 from __future__ import annotations
-import json, argparse, numpy as np, pandas as pd, time
-from core.indicators.kuramoto import compute_phase, kuramoto_order
-from core.indicators.entropy import entropy, delta_entropy
-from core.indicators.hurst import hurst_exponent
-from core.indicators.ricci import build_price_graph, mean_ricci
-from core.phase.detector import phase_flags, composite_transition
+
+import argparse
+import json
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
 from backtest.engine import walk_forward
+from core.indicators.entropy import delta_entropy, entropy
+from core.indicators.hurst import hurst_exponent
+from core.indicators.kuramoto import compute_phase, kuramoto_order
+from core.indicators.ricci import build_price_graph, mean_ricci
+from core.phase.detector import composite_transition, phase_flags
 
 def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
     """Return -1/0/1 based on composite transition signal and simple thresholds."""
@@ -33,18 +42,45 @@ def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
     return sig
 
 
-def _apply_config(args):
-    if getattr(args, "config", None):
-        import yaml, types
-        cfg = yaml.safe_load(open(args.config, "r", encoding="utf-8"))
-        # simple override: indicators.window, indicators.bins, execution.risk, etc.
-        ind = cfg.get("indicators", {})
-        for k in ["window","bins","delta"]:
-            if k in ind:
-                setattr(args, k if k!="delta" else "delta", ind[k])
-        data = cfg.get("data", {})
-        if "path" in data and not getattr(args, "csv", None):
-            args.csv = data["path"]
+def _load_yaml() -> Any:
+    """Return the PyYAML module, raising a helpful error when missing."""
+
+    try:
+        import yaml  # type: ignore[import-not-found]
+    except ModuleNotFoundError as exc:  # pragma: no cover - exercised in minimal envs
+        raise RuntimeError(
+            "YAML configuration support requires the 'PyYAML' package. "
+            "Install it via 'pip install PyYAML' or omit the --config option."
+        ) from exc
+    return yaml
+
+
+def _apply_config(args: argparse.Namespace) -> argparse.Namespace:
+    """Merge configuration overrides from a YAML file into CLI arguments."""
+
+    config_path = getattr(args, "config", None)
+    if not config_path:
+        return args
+
+    yaml = _load_yaml()
+    path = Path(config_path)
+    config: dict[str, Any] = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as handle:
+            loaded = yaml.safe_load(handle)
+            if isinstance(loaded, Mapping):
+                config = dict(loaded)
+
+    indicators = config.get("indicators", {})
+    if isinstance(indicators, Mapping):
+        for key in ("window", "bins", "delta"):
+            if key in indicators:
+                setattr(args, key, indicators[key])
+
+    data_section = config.get("data", {})
+    if isinstance(data_section, Mapping) and "path" in data_section and not getattr(args, "csv", None):
+        args.csv = data_section["path"]
+
     return args
 
 def cmd_analyze(args):
@@ -99,7 +135,6 @@ def cmd_live(args):
             print(json.dumps({"ts": t.ts, "R": float(R), "H": float(H), "delta_H": float(dH), "kappa_mean": float(kappa)}))
 
 def main():
-    import yaml, os
     p = argparse.ArgumentParser(prog="tradepulse")
     sub = p.add_subparsers(dest="cmd", required=True)
 

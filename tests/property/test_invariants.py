@@ -1,16 +1,21 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 
-import yaml
+import pytest
+
+yaml = pytest.importorskip("yaml")
 
 CONFIG_PATH = Path("configs/kuramoto_ricci_composite.yaml")
 
 
+@functools.lru_cache(maxsize=1)
 def load_config() -> dict:
     with CONFIG_PATH.open("r", encoding="utf-8") as fh:
-        return yaml.safe_load(fh)
+        loaded = yaml.safe_load(fh)
+    return dict(loaded) if isinstance(loaded, dict) else {}
 
 
 def test_kuramoto_timeframes_are_increasing() -> None:
