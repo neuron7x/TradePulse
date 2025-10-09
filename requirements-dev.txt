@@ -1,4 +1,4 @@
-black==24.8.0
+black==25.9.0
 ruff==0.6.9
 mypy==1.11.2
 pytest==8.3.3
