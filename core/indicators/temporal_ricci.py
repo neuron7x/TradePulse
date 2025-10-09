@@ -186,6 +186,14 @@ class PriceLevelGraph:
 
     def build(self, prices: np.ndarray, volumes: Optional[np.ndarray] = None) -> LightGraph:
         prices = np.asarray(prices, dtype=float)
+        if prices.size == 0:
+            return LightGraph(self.n_levels)
+        finite_mask = np.isfinite(prices)
+        if finite_mask.any():
+            mean_price = float(np.mean(prices[finite_mask]))
+            prices = np.where(finite_mask, prices, mean_price)
+        else:
+            prices = np.zeros_like(prices)
         n = self.n_levels
         pmin, pmax = float(prices.min()), float(prices.max())
         if pmax == pmin:
@@ -203,7 +211,7 @@ class PriceLevelGraph:
                 raw = raw[:-1]
             elif raw.size != len(idx) - 1:
                 raise ValueError("volumes length must be len(prices) - 1")
-            weights = np.maximum(raw, 0.0)
+            weights = np.maximum(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0)
         transitions = np.column_stack([idx[:-1], idx[1:]]).astype(int)
         mask = transitions[:, 0] != transitions[:, 1]
         transitions = transitions[mask]
@@ -346,8 +354,20 @@ class TemporalRicciAnalyzer:
             seg = df.iloc[i:i+self.window_size]
             if len(seg) < self.window_size:
                 continue
-            prices = seg[price_col].astype(float).values
-            volumes = seg[volume_col].astype(float).values if (volume_col and volume_col in seg.columns) else None
+            price_values = seg[price_col].astype(float).values
+            if not np.all(np.isfinite(price_values)):
+                finite = price_values[np.isfinite(price_values)]
+                if finite.size == 0:
+                    continue
+                fill_value = float(np.mean(finite))
+                price_values = np.where(np.isfinite(price_values), price_values, fill_value)
+            prices = price_values
+            volumes = None
+            if volume_col and volume_col in seg.columns:
+                vol_values = seg[volume_col].astype(float).values
+                if vol_values.size:
+                    vol_values = np.nan_to_num(vol_values, nan=0.0, posinf=0.0, neginf=0.0)
+                volumes = vol_values
             ts = seg.index[-1]
             snap = self._snapshot(prices, volumes, ts)
             self.history.append(snap)

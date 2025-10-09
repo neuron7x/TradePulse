@@ -127,6 +127,19 @@ trade_pnl = Summary(
 trade_pnl.labels(strategy='momentum', symbol='BTCUSD').observe(150.50)
 ```
 
+TradePulse additionally exports summary-based latency quantiles for the
+critical ingestion → signal → execution pipeline. These are enabled automatically
+through the `MetricsCollector` helpers:
+
+```python
+with collector.measure_signal_generation('momentum'):
+    generate_signals()
+```
+
+This produces PromQL series such as
+`tradepulse_signal_generation_latency_quantiles_seconds{quantile="0.95"}` which map
+directly to the p50/p95/p99 panels in Grafana.
+
 ### Core Metrics
 
 #### Trading Metrics
@@ -136,11 +149,15 @@ trades_executed_total       # Counter: Total trades executed
 trade_errors_total          # Counter: Failed trades
 trade_pnl_usd               # Summary: P&L per trade
 trade_latency_seconds       # Histogram: Order execution time
+tradepulse_signal_generation_latency_quantiles_seconds  # Gauge: Signal engine latency (p50/p95/p99)
+tradepulse_order_submission_latency_quantiles_seconds   # Gauge: Order placement latency (p50/p95/p99)
+tradepulse_order_fill_latency_quantiles_seconds         # Gauge: Fill latency (p50/p95/p99)
 
 # Positions
 open_positions_count        # Gauge: Current open positions
 position_value_usd          # Gauge: Total position value
 position_exposure_percent   # Gauge: Portfolio exposure
+tradepulse_backtest_equity_curve              # Gauge: Equity curve samples per backtest run
 
 # Risk
 portfolio_value_usd         # Gauge: Current portfolio value
@@ -154,6 +171,7 @@ risk_per_trade_percent      # Gauge: Risk per trade
 indicator_computation_seconds  # Histogram: Time to compute indicators
 backtest_duration_seconds      # Histogram: Backtest execution time
 data_ingestion_rate           # Gauge: Ticks/bars per second
+tradepulse_data_ingestion_latency_quantiles_seconds    # Gauge: Data ingestion latency (p50/p95/p99)
 
 # Health
 service_up                    # Gauge: Service health (1=up, 0=down)

@@ -110,6 +110,10 @@ except Exception:  # pragma: no cover
 def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
     """Quantize price levels into nodes; connect adjacent active levels."""
     p = np.asarray(prices, dtype=float)
+    mask = np.isfinite(p)
+    if mask.sum() < 2:
+        return nx.Graph()
+    p = p[mask]
     base = p[0]
     levels = np.round((p - base) / (base * delta)).astype(int)
     G = nx.Graph()
@@ -128,7 +132,10 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     weights = []
     for n in neigh:
         data = G.get_edge_data(node, n, default={"weight": 1.0})
-        weights.append(float(data.get("weight", 1.0)))
+        weight = float(data.get("weight", 1.0))
+        if not np.isfinite(weight):
+            weight = 1.0
+        weights.append(weight)
     w_arr = np.asarray(weights, dtype=float)
     total = w_arr.sum()
     if total == 0:
@@ -191,9 +198,15 @@ def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool 
             return float(np.mean(np.array(curvatures, dtype=dtype)))
         
         # Standard processing
-        curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
-        dtype = np.float32 if use_float32 else float
-        return float(np.mean(np.array(curv, dtype=dtype)))
+    curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
+    dtype = np.float32 if use_float32 else float
+    if not curv:
+        return 0.0
+    arr = np.array(curv, dtype=dtype)
+    arr = arr[np.isfinite(arr)]
+    if arr.size == 0:
+        return 0.0
+    return float(np.mean(arr))
 
 def _w1_fallback(a, b):
     import numpy as _np

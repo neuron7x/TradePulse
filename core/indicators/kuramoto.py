@@ -31,6 +31,8 @@ def compute_phase(x: np.ndarray, *, use_float32: bool = False) -> np.ndarray:
         x = np.asarray(x, dtype=dtype)
         if x.ndim != 1:
             raise ValueError("compute_phase expects 1D array")
+        if not np.all(np.isfinite(x)):
+            x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         if hilbert is not None:
             a = hilbert(x)
         else:
@@ -55,10 +57,24 @@ def kuramoto_order(phases: np.ndarray) -> float:
     Returns:
         float if 1D else np.ndarray of shape (T,).
     """
+    phases = np.asarray(phases, dtype=float)
+    mask = np.isfinite(phases)
     z = np.exp(1j * phases)
+
     if z.ndim == 1:
-        return float(np.abs(np.mean(z)))
-    return np.abs(np.mean(z, axis=0)).astype(float)
+        if not mask.any():
+            return 0.0
+        z = np.where(mask, z, np.nan + 0j)
+        return float(np.abs(np.nanmean(z)))
+
+    if z.ndim != 2:
+        raise ValueError("kuramoto_order expects 1D or 2D array")
+
+    if not mask.any():
+        return float(0.0)
+
+    z = np.where(mask, z, np.nan + 0j)
+    return np.abs(np.nanmean(z, axis=0)).astype(float)
 
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Compute Kuramoto R across multiple synchronized assets (same length).
