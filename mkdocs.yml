@@ -61,6 +61,7 @@ nav:
   - Operations:
       - Monitoring: monitoring.md
       - Scaling: scaling.md
+      - Chaos Testing (GameDay): resilience.md
       - Security: ../SECURITY.md
       - Deployment: deployment.md
   - Reference:
