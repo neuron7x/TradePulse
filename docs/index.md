@@ -54,6 +54,8 @@ focused document so contributors can quickly find the details they need.
   newest capabilities.
 - Apply the practices in the [Technical Debt Management Playbook](technical-debt.md)
   to sustain healthy engineering velocity while avoiding unplanned outages.
+- Use the [Quality DoR/DoD checklist](quality-dor-dod.md) to enforce clear entry
+  and exit criteria before pulling or closing quality-focused work.
 
 ---
 
