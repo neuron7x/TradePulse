@@ -165,6 +165,6 @@ class TestAsyncWebSocketStream:
         with pytest.raises(NotImplementedError):
             await stream.disconnect()
             
-        # subscribe() should raise NotImplementedError when called
-        result = stream.subscribe()
-        assert result is not None  # Returns a coroutine/async gen
+        # subscribe() should raise NotImplementedError when awaited
+        with pytest.raises(NotImplementedError):
+            await stream.subscribe()
