@@ -242,13 +242,16 @@ class MeanRicciFeature(BaseFeature):
             G = build_price_graph(data, delta=self.delta)
             value = mean_ricci(G, chunk_size=self.chunk_size, use_float32=self.use_float32)
             _metrics.record_feature_value(self.name, value)
-            metadata = {
+            metadata: dict[str, Any] = {
                 "delta": self.delta, 
                 "nodes": G.number_of_nodes(),
                 "edges": G.number_of_edges(),
-                "chunk_size": self.chunk_size,
-                "use_float32": self.use_float32
             }
+            # Only expose optional optimisation flags when they are actively used
+            if self.use_float32:
+                metadata["use_float32"] = True
+            if self.chunk_size is not None:
+                metadata["chunk_size"] = self.chunk_size
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
