@@ -129,7 +129,7 @@ class MetricsCollector:
             ["exchange", "symbol"],
             registry=registry,
         )
-        
+
         self.orders_placed = Counter(
             "tradepulse_orders_placed_total",
             "Total number of orders placed",
@@ -157,7 +157,7 @@ class MetricsCollector:
             "Number of strategies in memory",
             registry=registry,
         )
-        
+
         # Agent/optimization metrics
         self.optimization_duration = Histogram(
             "tradepulse_optimization_duration_seconds",
@@ -165,11 +165,26 @@ class MetricsCollector:
             ["optimizer_type"],
             registry=registry,
         )
-        
+
         self.optimization_iterations = Counter(
             "tradepulse_optimization_iterations_total",
             "Total number of optimization iterations",
             ["optimizer_type"],
+            registry=registry,
+        )
+
+        # Generic operation metrics
+        self.operation_duration = Histogram(
+            "tradepulse_operation_duration_seconds",
+            "Time spent in observability scopes",
+            ["component", "operation"],
+            registry=registry,
+        )
+
+        self.operation_total = Counter(
+            "tradepulse_operation_total",
+            "Total number of observability-scoped operations",
+            ["component", "operation", "status"],
             registry=registry,
         )
         
@@ -429,6 +444,38 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.strategy_memory_size.set(size)
+
+    @contextmanager
+    def measure_operation(
+        self, component: str, operation: str
+    ) -> Iterator[Dict[str, Any]]:
+        """Track observability operation timing and status."""
+
+        if not self._enabled:
+            yield {}
+            return
+
+        start_time = time.time()
+        status = "success"
+        ctx: Dict[str, Any] = {}
+
+        try:
+            yield ctx
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.time() - start_time
+            final_status = self._resolve_status(ctx, status)
+            self.operation_duration.labels(
+                component=component,
+                operation=operation,
+            ).observe(duration)
+            self.operation_total.labels(
+                component=component,
+                operation=operation,
+                status=final_status,
+            ).inc()
 
     def render_prometheus(self) -> str:
         """Render the currently collected metrics in Prometheus text format."""

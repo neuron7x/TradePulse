@@ -11,8 +11,38 @@ import logging
 import sys
 import time
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any, Dict, Iterator, Optional
 from uuid import uuid4
+
+
+_CORRELATION_ID_VAR: ContextVar[Optional[str]] = ContextVar(
+    "tradepulse_correlation_id", default=None
+)
+
+
+def generate_correlation_id() -> str:
+    """Generate a new correlation identifier."""
+
+    return uuid4().hex
+
+
+def get_correlation_id() -> Optional[str]:
+    """Return the currently active correlation identifier, if any."""
+
+    return _CORRELATION_ID_VAR.get()
+
+
+@contextmanager
+def correlation_context(correlation_id: Optional[str] = None) -> Iterator[str]:
+    """Context manager that propagates correlation identifiers across observability tools."""
+
+    resolved = correlation_id or generate_correlation_id()
+    token = _CORRELATION_ID_VAR.set(resolved)
+    try:
+        yield resolved
+    finally:
+        _CORRELATION_ID_VAR.reset(token)
 
 
 class JSONFormatter(logging.Formatter):
@@ -47,14 +77,29 @@ class JSONFormatter(logging.Formatter):
 
 class StructuredLogger:
     """Wrapper around standard logger with structured logging capabilities."""
-    
+
     def __init__(self, name: str, correlation_id: Optional[str] = None):
         self.logger = logging.getLogger(name)
-        self.correlation_id = correlation_id or str(uuid4())
-        
+        self._correlation_id = correlation_id
+
+    def _resolve_correlation_id(self, explicit: Optional[str] = None) -> str:
+        if explicit:
+            return explicit
+
+        current = get_correlation_id()
+        if current:
+            return current
+
+        if self._correlation_id is None:
+            self._correlation_id = generate_correlation_id()
+        return self._correlation_id
+
     def _log(self, level: int, msg: str, **kwargs: Any) -> None:
         """Internal logging method with structured fields."""
-        extra_data: Dict[str, Any] = {"correlation_id": self.correlation_id}
+
+        correlation_id = kwargs.pop("correlation_id", None)
+        resolved_id = self._resolve_correlation_id(correlation_id)
+        extra_data: Dict[str, Any] = {"correlation_id": resolved_id}
         if kwargs:
             extra_data["extra_fields"] = kwargs
         self.logger.log(level, msg, extra=extra_data)
@@ -80,7 +125,9 @@ class StructuredLogger:
         self._log(logging.CRITICAL, msg, **kwargs)
         
     @contextmanager
-    def operation(self, operation_name: str, **context: Any) -> Iterator[Dict[str, Any]]:
+    def operation(
+        self, operation_name: str, *, correlation_id: Optional[str] = None, **context: Any
+    ) -> Iterator[Dict[str, Any]]:
         """Context manager for tracking operation timing and status.
         
         Args:
@@ -97,30 +144,37 @@ class StructuredLogger:
             ...     op["result_value"] = result
         """
         start_time = time.time()
+        resolved_id = self._resolve_correlation_id(correlation_id)
         op_context: Dict[str, Any] = {"operation": operation_name, **context}
-        
-        self.info(f"Starting operation: {operation_name}", **op_context)
-        
-        try:
-            yield op_context
-            duration = time.time() - start_time
-            self.info(
-                f"Completed operation: {operation_name}",
-                duration_seconds=duration,
-                status="success",
-                **op_context
-            )
-        except Exception as e:
-            duration = time.time() - start_time
-            self.error(
-                f"Failed operation: {operation_name}",
-                duration_seconds=duration,
-                status="failure",
-                error_type=type(e).__name__,
-                error_message=str(e),
-                **op_context
-            )
-            raise
+
+        with correlation_context(resolved_id):
+            self.info(f"Starting operation: {operation_name}", **op_context)
+
+            try:
+                yield op_context
+                duration = time.time() - start_time
+                status_value = op_context.get("status") or "success"
+                op_context["status"] = status_value
+                payload = {**op_context, "duration_seconds": duration}
+                self.info(
+                    f"Completed operation: {operation_name}",
+                    **payload,
+                )
+            except Exception as e:
+                duration = time.time() - start_time
+                status_value = op_context.get("status") or "failure"
+                op_context["status"] = status_value
+                payload = {
+                    **op_context,
+                    "duration_seconds": duration,
+                    "error_type": type(e).__name__,
+                    "error_message": str(e),
+                }
+                self.error(
+                    f"Failed operation: {operation_name}",
+                    **payload,
+                )
+                raise
 
 
 def configure_logging(
@@ -174,4 +228,7 @@ __all__ = [
     "StructuredLogger",
     "configure_logging",
     "get_logger",
+    "correlation_context",
+    "generate_correlation_id",
+    "get_correlation_id",
 ]

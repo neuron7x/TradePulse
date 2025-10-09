@@ -7,6 +7,7 @@ This guide covers monitoring, logging, alerting, and observability for TradePuls
 ## Table of Contents
 
 - [Overview](#overview)
+- [Unified Observability Bootstrap](#unified-observability-bootstrap)
 - [Metrics](#metrics)
 - [Logging](#logging)
 - [Alerting](#alerting)
@@ -25,7 +26,61 @@ TradePulse provides comprehensive observability through:
 - **Logs**: Structured logging for debugging and audit trails
 - **Alerts**: Automated alerting for critical conditions
 - **Dashboards**: Grafana dashboards for visualization
-- **Tracing**: Distributed tracing for performance analysis (planned)
+- **Tracing**: Distributed tracing for performance analysis
+
+Structured **correlation IDs** now propagate automatically between logs, metrics, and spans, enabling single-request debugging end-to-end.
+
+---
+
+## Unified Observability Bootstrap
+
+The ``core.observability`` package provides a single entry point that wires together logging, metrics, and tracing with consistent correlation IDs.
+
+### Quick start
+
+```python
+from core.observability import (
+    ObservabilityConfig,
+    TracingConfig,
+    bootstrap_observability,
+    observability_scope,
+)
+
+bootstrap_observability(
+    ObservabilityConfig(
+        logging_level="INFO",
+        metrics_port=9100,
+        tracing=TracingConfig(exporter="otlp", endpoint="http://collector:4318"),
+        service_name="tradepulse-worker",
+    )
+)
+
+with observability_scope(
+    "rebalance", component="portfolio", attributes={"portfolio": "alpha"}
+) as scope:
+    scope.add_event("starting", positions=42)
+    try:
+        rebalance_portfolio()
+        scope.set_status("success")
+    except Exception as exc:
+        scope.record_exception(exc)
+        raise
+```
+
+### Correlation contexts
+
+Use ``core.utils.logging.correlation_context`` when you need to propagate an existing correlation ID across async tasks or threads:
+
+```python
+from core.utils.logging import correlation_context, get_logger
+
+logger = get_logger(__name__)
+
+with correlation_context("job-123"):
+    logger.info("sub-task started")
+```
+
+The ``observability_scope`` helper automatically manages correlation IDs, spans, and Prometheus operation metrics (``tradepulse_operation_*``).
 
 ### Key Principles
 
@@ -608,6 +663,8 @@ sum(tradepulse_trades_total) by (symbol)
 ---
 
 ## Grafana Dashboards
+
+Pre-built dashboards live in ``configs/observability/grafana``. Import ``tradepulse-overview.json`` to get unified latency, ingestion, and strategy panels that align with the new ``tradepulse_operation_*`` metrics and correlation-aware logging.
 
 ### Installation
 
