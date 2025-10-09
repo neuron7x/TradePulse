@@ -16,6 +16,8 @@ focused document so contributors can quickly find the details they need.
   catalogues, orchestration contracts, and reproducible benchmarks.
 - **Monitoring & operations** – instrumentation, alerting, and dashboard
   recipes live in [`docs/monitoring.md`](monitoring.md).
+- **Reliability & SRE** – SLA commitments, SLOs, error budgets, and escalation
+  policy are outlined in [`docs/reliability.md`](reliability.md).
 
 ---
 
