@@ -99,10 +99,22 @@ class WaveletWindowSelector:
             raise ValueError("window bounds must be positive")
         if min_window > max_window:
             raise ValueError("min_window must be <= max_window")
-        self.min_window = int(min_window)
-        self.max_window = int(max_window)
+
+        min_window = int(min_window)
+        max_window = int(max_window)
+        if max_window > 1_048_576:
+            raise ValueError("max_window is excessively large for efficient wavelet analysis")
+
+        levels = int(levels)
+        if levels <= 0:
+            raise ValueError("levels must be positive")
+        if levels > 8192:
+            raise ValueError("levels is excessively large and could exhaust memory during wavelet selection")
+
+        self.min_window = min_window
+        self.max_window = max_window
         self.wavelet = wavelet
-        self.levels = max(2, int(levels))
+        self.levels = max(2, levels)
 
     def select_window(self, prices: Sequence[float]) -> int:
         values = np.asarray(prices, dtype=float)
