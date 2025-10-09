@@ -31,3 +31,4 @@ Thumbs.db
 *.log
 .env
 .env.local
+apps/web/node_modules/
