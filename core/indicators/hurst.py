@@ -164,11 +164,12 @@ class HurstFeature(BaseFeature):
             value = hurst_exponent(data, min_lag=self.min_lag, max_lag=self.max_lag,
                                   use_float32=self.use_float32)
             _metrics.record_feature_value(self.name, value)
-            metadata = {
-                "min_lag": self.min_lag, 
+            metadata: dict[str, Any] = {
+                "min_lag": self.min_lag,
                 "max_lag": self.max_lag,
-                "use_float32": self.use_float32
             }
+            if self.use_float32:
+                metadata["use_float32"] = True
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 

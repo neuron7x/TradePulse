@@ -244,11 +244,20 @@ class EntropyFeature(BaseFeature):
             value = entropy(data, bins=self.bins, use_float32=self.use_float32, 
                           chunk_size=self.chunk_size)
             _metrics.record_feature_value(self.name, value)
-            metadata = {
-                "bins": self.bins, 
-                "use_float32": self.use_float32,
-                "chunk_size": self.chunk_size
-            }
+            metadata: dict[str, Any] = {"bins": self.bins}
+
+            # Only expose optional optimisation flags when they are actively used
+            # so the metadata payload remains stable for the simple/default case
+            # and downstream tests/consumers do not need to defensively filter
+            # out empty values.  This mirrors the expectations encoded in the
+            # public unit tests which only anticipate the "bins" entry for the
+            # default configuration while still validating the presence of
+            # optimisation hints when they are explicitly enabled.
+            if self.use_float32:
+                metadata["use_float32"] = True
+            if self.chunk_size is not None:
+                metadata["chunk_size"] = self.chunk_size
+
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
