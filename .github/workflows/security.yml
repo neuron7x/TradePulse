@@ -122,6 +122,108 @@ jobs:
           safety-report.json
           pip-audit-report.json
 
+  dast-scan:
+    name: Dynamic App Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: apps/web/package-lock.json
+
+    - name: Install web dependencies
+      run: npm install --prefix apps/web --no-package-lock
+
+    - name: Build Next.js application
+      run: npm run build --prefix apps/web
+
+    - name: Start Next.js application
+      run: |
+        cd apps/web
+        npx next start -H 0.0.0.0 -p 3000 > ../../next.log 2>&1 &
+        echo $! > ../../next.pid
+
+    - name: Wait for application readiness
+      run: npx --yes wait-on@7.0.1 http://127.0.0.1:3000
+
+    - name: Run ZAP baseline scan
+      uses: zaproxy/action-baseline@v0.12.0
+      with:
+        target: 'http://host.docker.internal:3000'
+        cmd_options: '-m 5 -r zap-report.html -x zap-report.xml -J zap-report.json'
+        allow_issue_writing: false
+        fail_action: false
+
+    - name: Evaluate ZAP results
+      run: |
+        if [ ! -f zap-report.json ]; then
+          echo 'ZAP report zap-report.json not found'
+          exit 1
+        fi
+
+        ALLOWLIST=$(jq '.ignore | map(.id)' configs/security/zap-allowlist.json)
+
+        MEDIUM_OR_HIGH=$(jq --argjson allow "$ALLOWLIST" '
+          [ (.site // [])[]
+            | (.alerts // [])[]
+            | select((.riskcode | tonumber) >= 2)
+            | select(.pluginid as $pid | ($allow | index($pid)) | not)
+          ]
+        ' zap-report.json)
+
+        MEDIUM_COUNT=$(echo "$MEDIUM_OR_HIGH" | jq '[ .[] | select((.riskcode | tonumber) == 2) ] | length')
+        HIGH_ALERTS=$(echo "$MEDIUM_OR_HIGH" | jq '[ .[] | select((.riskcode | tonumber) >= 3) ]')
+        HIGH_COUNT=$(echo "$HIGH_ALERTS" | jq 'length')
+
+        if [ "$MEDIUM_COUNT" -gt 0 ]; then
+          echo 'Medium severity alerts detected (review recommended):'
+          echo "$MEDIUM_OR_HIGH" | jq -r '
+            [ .[]
+              | select((.riskcode | tonumber) == 2)
+              | "- [ID \(.pluginid)] \(.alert // "Unknown alert") (severity: \(.riskdesc // ("riskcode " + (.riskcode // "n/a"))))"
+            ] | .[]
+          '
+        else
+          echo 'No medium severity alerts detected.'
+        fi
+
+        if [ "$HIGH_COUNT" -gt 0 ]; then
+          echo 'ERROR: High severity alerts detected:'
+          echo "$HIGH_ALERTS" | jq -r '
+            [ .[]
+              | "- [ID \(.pluginid)] \(.alert // "Unknown alert") (severity: \(.riskdesc // ("riskcode " + (.riskcode // "n/a"))))"
+            ] | .[]
+          '
+          exit 1
+        fi
+
+        echo 'No unallowlisted high severity alerts detected.'
+
+    - name: Upload ZAP artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: zap-dast-report
+        path: |
+          zap-report.json
+          zap-report.xml
+          zap-report.html
+          next.log
+        if-no-files-found: ignore
+
+    - name: Stop Next.js application
+      if: always()
+      run: |
+        if [ -f next.pid ]; then
+          kill "$(cat next.pid)" || true
+          rm -f next.pid
+        fi
+
   codeql-analysis:
     name: CodeQL Analysis
     runs-on: ubuntu-latest
@@ -129,18 +231,38 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-    
+
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v3
       with:
         languages: python
         queries: security-extended
-    
+
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
       with:
         category: "/language:python"
+
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Generate SPDX SBOM
+      uses: anchore/sbom-action@v0
+      with:
+        output-file: sbom.spdx.json
+        format: spdx-json
+
+    - name: Upload SBOM artifact
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-spdx
+        path: sbom.spdx.json

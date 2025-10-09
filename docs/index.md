@@ -54,6 +54,8 @@ focused document so contributors can quickly find the details they need.
   newest capabilities.
 - Apply the practices in the [Technical Debt Management Playbook](technical-debt.md)
   to sustain healthy engineering velocity while avoiding unplanned outages.
+- Review the [Security Shift-Left Program](security-shift-left.md) so every
+  change aligns with the CI security gates.
 
 ---
 

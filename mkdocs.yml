@@ -63,6 +63,7 @@ nav:
       - Scaling: scaling.md
       - Chaos Testing (GameDay): resilience.md
       - Security: ../SECURITY.md
+      - Security Shift-Left: security-shift-left.md
       - Deployment: deployment.md
   - Reference:
       - API Reference: integration-api.md

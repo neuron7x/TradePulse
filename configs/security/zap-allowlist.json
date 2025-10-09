@@ -1,0 +1,21 @@
+{
+  "description": "Plugin identifiers that are mitigated by edge hardening or are out of scope for the ZAP baseline scan.",
+  "ignore": [
+    {
+      "id": "10020",
+      "reason": "X-Frame-Options header enforced by the CDN in production"
+    },
+    {
+      "id": "10021",
+      "reason": "X-Content-Type-Options header appended by the CDN in production"
+    },
+    {
+      "id": "10038",
+      "reason": "Content Security Policy is injected by the edge gateway"
+    },
+    {
+      "id": "10055",
+      "reason": "X-Content-Security-Policy header is deprecated and intentionally omitted"
+    }
+  ]
+}

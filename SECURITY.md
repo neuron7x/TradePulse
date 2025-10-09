@@ -170,7 +170,7 @@ We use multiple tools in CI/CD:
 #### 1. CodeQL (GitHub Advanced Security)
 ```yaml
 # Automatically scans code for vulnerabilities
-# Configured in .github/workflows/codeql.yml
+# Configured in .github/workflows/security.yml (codeql-analysis job)
 ```
 
 #### 2. Bandit (Python Security Linter)
@@ -199,6 +199,27 @@ safety check --update
 # Audit Python packages
 pip-audit --desc --format json
 ```
+
+#### 5. OWASP ZAP Baseline (DAST)
+```bash
+# Spin up the Next.js app locally before running the scan
+npm install --prefix apps/web --no-package-lock
+npm run build --prefix apps/web
+npx next start --hostname 0.0.0.0 --port 3000 --cwd apps/web &
+ZAP_TARGET="http://localhost:3000" zap-baseline.py -t "$ZAP_TARGET" -m 5 -J zap-report.json -x zap-report.xml
+```
+- CI job: `dast-scan` inside [`.github/workflows/security.yml`](.github/workflows/security.yml)
+- Medium alerts log to the job output for manual triage; unallowlisted high alerts fail the pipeline.
+- Suppressions live in [`configs/security/zap-allowlist.json`](configs/security/zap-allowlist.json) and must include justification.
+
+#### 6. SBOM Generation
+```bash
+# Generate an SPDX SBOM for local review
+pip install cyclonedx-bom
+cyclonedx-py --requirements requirements.txt --requirements requirements-dev.txt --format json --output sbom.spdx.json
+```
+- CI job: `sbom` in [`.github/workflows/security.yml`](.github/workflows/security.yml)
+- The generated SPDX artifact is uploaded to the build for downstream compliance tooling.
 
 #### 5. Semgrep (Static Analysis)
 ```bash
