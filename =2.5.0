@@ -1,0 +1,6 @@
+Requirement already satisfied: certifi in /usr/lib/python3/dist-packages (2023.11.17)
+Requirement already satisfied: idna in /usr/lib/python3/dist-packages (3.6)
+Requirement already satisfied: jinja2 in /usr/lib/python3/dist-packages (3.1.2)
+Requirement already satisfied: requests in /usr/lib/python3/dist-packages (2.31.0)
+Requirement already satisfied: setuptools in /usr/lib/python3/dist-packages (68.1.2)
+Requirement already satisfied: urllib3 in /usr/lib/python3/dist-packages (2.0.7)
