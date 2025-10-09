@@ -15,10 +15,13 @@ This module performs two responsibilities:
 
 from __future__ import annotations
 
+import asyncio
 import pathlib
 import sys
 import warnings
 from typing import Iterable
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -74,3 +77,28 @@ def pytest_configure(config):  # type: ignore[override]
             PytestWarning,
             stacklevel=2,
         )
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
+    """Provide a minimal ``pytest-asyncio`` fallback."""
+
+    if pyfuncitem.config.pluginmanager.hasplugin("pytest_asyncio"):
+        return None
+
+    testfunction = pyfuncitem.obj
+    if not asyncio.iscoroutinefunction(testfunction):
+        return None
+
+    loop = asyncio.new_event_loop()
+    try:
+        asyncio.set_event_loop(loop)
+        kwargs = {arg: pyfuncitem.funcargs[arg] for arg in pyfuncitem._fixtureinfo.argnames}
+        loop.run_until_complete(testfunction(**kwargs))
+    finally:
+        try:
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        finally:
+            asyncio.set_event_loop(None)
+            loop.close()
+    return True

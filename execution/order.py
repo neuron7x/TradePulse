@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
+import math
 from dataclasses import dataclass
 
 @dataclass
@@ -16,6 +18,19 @@ def position_sizing(balance: float, risk: float, price: float, *, max_leverage: 
         raise ValueError("price must be positive")
     risk = max(0.0, min(risk, 1.0))
     notional = balance * risk
-    qty = notional / price
+    if notional <= 0.0:
+        return 0.0
+
+    risk_qty = notional / price
     leverage_cap = (balance * max_leverage) / price
-    return float(max(0.0, min(qty, leverage_cap)))
+    qty = min(risk_qty, leverage_cap)
+
+    if qty > 0.0 and qty * price > notional:
+        # When working with denormals the round-trip multiplication can
+        # overshoot the risk budget due to floating point rounding.
+        # Bias the quantity towards zero until it fits within the budget.
+        qty = math.nextafter(qty, 0.0)
+        while qty > 0.0 and qty * price > notional:
+            qty = math.nextafter(qty, 0.0)
+
+    return float(max(0.0, qty))
