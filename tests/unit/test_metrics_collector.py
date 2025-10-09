@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from prometheus_client import CollectorRegistry
 
 from core.utils.metrics import MetricsCollector
@@ -92,3 +93,79 @@ def test_render_prometheus_disabled_returns_empty(monkeypatch) -> None:
     collector = MetricsCollector()
 
     assert collector.render_prometheus() == ""
+
+
+def test_data_ingestion_context_ignores_none_and_blank_status_overrides() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    with collector.measure_data_ingestion("api", "BTC-USDT") as ctx:
+        ctx["status"] = None
+
+    success_total = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_total",
+        {"source": "api", "symbol": "BTC-USDT", "status": "success"},
+    )
+    none_total = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_total",
+        {"source": "api", "symbol": "BTC-USDT", "status": "None"},
+    )
+
+    assert success_total == 1.0
+    assert none_total is None
+
+    second_registry = CollectorRegistry()
+    collector = MetricsCollector(second_registry)
+
+    with collector.measure_data_ingestion("api", "ETH-USDT") as ctx:
+        ctx["status"] = "   "
+
+    blank_success = _sample_value(
+        second_registry,
+        "tradepulse_data_ingestion_total",
+        {"source": "api", "symbol": "ETH-USDT", "status": "success"},
+    )
+    blank_override = _sample_value(
+        second_registry,
+        "tradepulse_data_ingestion_total",
+        {"source": "api", "symbol": "ETH-USDT", "status": ""},
+    )
+
+    assert blank_success == 1.0
+    assert blank_override is None
+
+
+def test_order_placement_context_forces_error_status_on_exception() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    with pytest.raises(RuntimeError):
+        with collector.measure_order_placement("binance", "BTC-USDT", "limit") as ctx:
+            ctx["status"] = "filled"
+            raise RuntimeError("order placement failed")
+
+    error_total = _sample_value(
+        registry,
+        "tradepulse_orders_placed_total",
+        {
+            "exchange": "binance",
+            "symbol": "BTC-USDT",
+            "order_type": "limit",
+            "status": "error",
+        },
+    )
+    filled_total = _sample_value(
+        registry,
+        "tradepulse_orders_placed_total",
+        {
+            "exchange": "binance",
+            "symbol": "BTC-USDT",
+            "order_type": "limit",
+            "status": "filled",
+        },
+    )
+
+    assert error_total == 1.0
+    assert filled_total is None
