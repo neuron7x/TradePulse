@@ -74,8 +74,43 @@ jobs:
     
     - name: Audit dependencies with pip-audit
       run: |
+        # Run pip-audit and save the report
         pip-audit --desc -o pip-audit-report.json --format json || true
-        pip-audit --desc
+        
+        # Display the full report for visibility
+        pip-audit --desc || true
+        
+        # TEMPORARY WORKAROUND: Ignore known pip vulnerability GHSA-4xh5-x5gv-qwph (CVE-2025-8869)
+        # This vulnerability is in pip itself and will be fixed in pip 25.3
+        # We filter it out to avoid failing the build, but fail for any OTHER vulnerabilities
+        # Reference: https://github.com/pypa/pip/security/advisories/GHSA-4xh5-x5gv-qwph
+        
+        # Use jq to check if there are any vulnerabilities OTHER than the known pip issue
+        OTHER_VULNS=$(jq -r '
+          [.dependencies[] | 
+           select(.vulns != null and (.vulns | length) > 0) |
+           .vulns[] |
+           select(.id != "GHSA-4xh5-x5gv-qwph")
+          ] | length
+        ' pip-audit-report.json)
+        
+        echo "Found $OTHER_VULNS vulnerabilities (excluding GHSA-4xh5-x5gv-qwph)"
+        
+        if [ "$OTHER_VULNS" -gt 0 ]; then
+          echo "ERROR: Found vulnerabilities other than the known pip issue GHSA-4xh5-x5gv-qwph"
+          echo "Please review and fix these vulnerabilities:"
+          jq -r '
+            .dependencies[] | 
+            select(.vulns != null and (.vulns | length) > 0) |
+            .vulns[] |
+            select(.id != "GHSA-4xh5-x5gv-qwph") |
+            "  - \(.id): \(.description[:100])..."
+          ' pip-audit-report.json
+          exit 1
+        else
+          echo "SUCCESS: Only the known pip vulnerability GHSA-4xh5-x5gv-qwph is present"
+          echo "This will be fixed when pip 25.3 is released"
+        fi
     
     - name: Upload security reports
       if: always()
