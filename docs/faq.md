@@ -70,8 +70,8 @@ No, Docker is optional. You can run TradePulse with just Python. Docker is recom
 
 Try:
 ```bash
-# Update pip
-pip install --upgrade pip
+# Update pip (ensure version >=25.2 for security)
+pip install --upgrade "pip>=25.2"
 
 # Install with verbose output
 pip install -v -r requirements.txt

@@ -29,9 +29,9 @@ ERROR: Could not find a version that satisfies the requirement package_name
 
 **Solutions:**
 
-1. Update pip:
+1. Update pip (ensure version >=25.2 for security):
 ```bash
-pip install --upgrade pip
+pip install --upgrade "pip>=25.2"
 ```
 
 2. Check Python version:
