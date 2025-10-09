@@ -225,13 +225,22 @@ class PriceLevelGraph:
 
 # --------- Temporal analyzer ---------
 class TemporalRicciAnalyzer:
-    def __init__(self, window_size: int = 100, n_snapshots: int = 10, n_levels: int = 20, *, retain_history: bool = True):
+    def __init__(
+        self,
+        window_size: int = 100,
+        n_snapshots: int = 10,
+        n_levels: int = 20,
+        *,
+        retain_history: bool = True,
+        connection_threshold: float = 0.1,
+    ):
         self.window_size = window_size
         self.n_snapshots = n_snapshots
         self.n_levels = n_levels
         self.ricci = OllivierRicciCurvatureLite(alpha=0.5)
-        self.builder = PriceLevelGraph(n_levels=n_levels)
+        self.builder = PriceLevelGraph(n_levels=n_levels, connection_threshold=connection_threshold)
         self.retain_history = retain_history
+        self.connection_threshold = connection_threshold
         self.history: deque[GraphSnapshot] = deque(maxlen=n_snapshots)
 
     def _snapshot(self, prices: np.ndarray, volumes: Optional[np.ndarray], ts: pd.Timestamp) -> GraphSnapshot:
