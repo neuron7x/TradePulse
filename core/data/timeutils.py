@@ -65,7 +65,15 @@ class MarketCalendar:
             calendar = _load_exchange_calendar(self.calendar_name)
             object.__setattr__(self, "_calendar", calendar)
             calendar_tz = calendar.tz
-            tz_value = getattr(calendar_tz, "key", None) or str(calendar_tz)
+            tz_value = (
+                getattr(calendar_tz, "key", None)
+                or getattr(calendar_tz, "zone", None)
+                or str(calendar_tz)
+            )
+            override = _CALENDAR_TIMEZONE_OVERRIDES.get(self.calendar_name.upper())
+            tz_normalized = str(tz_value).upper() if tz_value is not None else None
+            if tz_normalized in {None, "UTC", "ETC/UTC"} and override is not None:
+                tz_value = override
             object.__setattr__(self, "timezone", tz_value)
             default_weekend = tuple()
         else:
@@ -88,7 +96,9 @@ class MarketCalendar:
     def is_open(self, when: datetime) -> bool:
         if self._calendar is not None:
             ts = _ensure_timestamp(when)
-            return bool(self._calendar.is_open_on_minute(ts))
+            if hasattr(self._calendar, "is_open_on_minute"):
+                return bool(self._calendar.is_open_on_minute(ts))
+            return True
         local_time = convert_timestamp(when, self.market)
         if local_time.date() in self.holidays:
             return False
@@ -110,6 +120,14 @@ def _ensure_timestamp(value: datetime) -> pd.Timestamp:
     else:
         ts = ts.tz_convert("UTC")
     return ts
+
+
+_CALENDAR_TIMEZONE_OVERRIDES: Dict[str, str] = {
+    "ALWAYS_OPEN": "UTC",
+    "XNYS": "America/New_York",
+    "XNAS": "America/New_York",
+    "CMES": "America/Chicago",
+}
 
 
 _BINANCE_CALENDAR = MarketCalendar(market="BINANCE", calendar_name="ALWAYS_OPEN", weekend_closure=())
@@ -264,7 +282,7 @@ def validate_bar_alignment(
     calendar = get_market_calendar(market)
     exchange_calendar = calendar.exchange_calendar
 
-    if exchange_calendar is None:
+    if exchange_calendar is None or not hasattr(exchange_calendar, "minutes_in_range"):
         expected = pd.date_range(start=index[0], end=index[-1], freq=freq, tz="UTC")
         if not index.equals(expected):
             raise ValueError("timestamps do not align with the requested frequency")
