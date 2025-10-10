@@ -5,6 +5,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Mapping, MutableMapping
 
+from interfaces.execution import PortfolioRiskAnalyzer, RiskController
+
 
 class RiskError(RuntimeError):
     """Base exception for risk-control violations."""
@@ -55,7 +57,7 @@ class KillSwitch:
             raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
 
 
-class RiskManager:
+class RiskManager(RiskController):
     """Apply notional/position caps and order throttling."""
 
     def __init__(
@@ -65,7 +67,7 @@ class RiskManager:
         time_source: Callable[[], float] | None = None,
     ) -> None:
         self.limits = limits
-        self.kill_switch = KillSwitch()
+        self._kill_switch = KillSwitch()
         self._time = time_source or time.time
         self._positions: MutableMapping[str, float] = {}
         self._last_notional: MutableMapping[str, float] = {}
@@ -91,7 +93,7 @@ class RiskManager:
     def validate_order(self, symbol: str, side: str, qty: float, price: float) -> None:
         """Validate an order request without mutating the position book."""
 
-        self.kill_switch.guard()
+        self._kill_switch.guard()
         self._validate_inputs(qty, price)
         now = self._time()
         self._check_rate_limit(now)
@@ -112,6 +114,12 @@ class RiskManager:
             )
 
         self._submissions.append(now)
+
+    @property
+    def kill_switch(self) -> KillSwitch:
+        """Expose the kill-switch handle."""
+
+        return self._kill_switch
 
     def register_fill(self, symbol: str, side: str, qty: float, price: float) -> None:
         """Update exposure after a confirmed fill."""
@@ -167,18 +175,26 @@ class IdempotentRetryExecutor:
         raise RuntimeError("IdempotentRetryExecutor terminated without executing the callable")
 
 
+class DefaultPortfolioRiskAnalyzer(PortfolioRiskAnalyzer):
+    """Portfolio risk analyzer compatible with :func:`portfolio_heat`."""
+
+    def heat(self, positions: Iterable[Mapping[str, float]]) -> float:
+        total = 0.0
+        for pos in positions:
+            qty = float(pos.get("qty", 0.0))
+            price = float(pos.get("price", 0.0))
+            risk_weight = float(pos.get("risk_weight", 1.0))
+            side = pos.get("side", "long")
+            direction = 1.0 if side == "long" else -1.0
+            total += abs(qty * price * risk_weight * direction)
+        return float(total)
+
+
 def portfolio_heat(positions: Iterable[Mapping[str, float]]) -> float:
     """Compute aggregate risk heat with directionality and weights."""
 
-    total = 0.0
-    for pos in positions:
-        qty = float(pos.get("qty", 0.0))
-        price = float(pos.get("price", 0.0))
-        risk_weight = float(pos.get("risk_weight", 1.0))
-        side = pos.get("side", "long")
-        direction = 1.0 if side == "long" else -1.0
-        total += abs(qty * price * risk_weight * direction)
-    return float(total)
+    analyzer = DefaultPortfolioRiskAnalyzer()
+    return analyzer.heat(positions)
 
 
 __all__ = [
@@ -188,6 +204,7 @@ __all__ = [
     "RiskLimits",
     "KillSwitch",
     "RiskManager",
+    "DefaultPortfolioRiskAnalyzer",
     "IdempotentRetryExecutor",
     "portfolio_heat",
 ]

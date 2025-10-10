@@ -10,13 +10,14 @@ import asyncio
 import csv
 from datetime import datetime, timezone
 from decimal import InvalidOperation
-from typing import AsyncIterator, Callable, Optional, List
+from typing import AsyncIterator, Callable, Optional
 
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 
 from core.data.models import InstrumentType, PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
+from interfaces.ingestion import AsyncDataIngestionService
 
 __all__ = ["AsyncDataIngestor", "AsyncWebSocketStream", "Ticker", "merge_streams"]
 
@@ -24,7 +25,7 @@ logger = get_logger(__name__)
 metrics = get_metrics_collector()
 
 
-class AsyncDataIngestor:
+class AsyncDataIngestor(AsyncDataIngestionService):
     """Async data ingestion with support for CSV and streaming sources."""
     
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
@@ -167,7 +168,7 @@ class AsyncDataIngestor:
     async def batch_process(
         self,
         ticks: AsyncIterator[Ticker],
-        callback: Callable[[List[Ticker]], None],
+        callback: Callable[[list[Ticker]], None],
         batch_size: int = 100,
     ) -> int:
         """Process ticks in batches with async callback.
@@ -180,7 +181,7 @@ class AsyncDataIngestor:
         Returns:
             Total number of ticks processed
         """
-        batch: List[Ticker] = []
+        batch: list[Ticker] = []
         total = 0
         
         async for tick in ticks:

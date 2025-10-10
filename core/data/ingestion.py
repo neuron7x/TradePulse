@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 
 from core.data.models import InstrumentType, PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
+from interfaces.ingestion import DataIngestionService
 
 __all__ = ["Ticker", "DataIngestor", "BinanceStreamHandle"]
 
@@ -41,7 +42,7 @@ class BinanceStreamHandle:
         self.close()
 
 
-class DataIngestor:
+class DataIngestor(DataIngestionService):
     def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
         self.api_key = api_key
         self.api_secret = api_secret
