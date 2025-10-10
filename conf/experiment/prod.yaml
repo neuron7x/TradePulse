@@ -1,0 +1,15 @@
+name: prod
+db_uri: "postgresql://prod:pwd@host/prod"
+debug: false
+log_level: WARNING
+random_seed: 7
+data:
+  price_csv: /mnt/prod_data/prices.csv
+  price_column: price
+analytics:
+  window: 512
+  bins: 64
+  delta: 0.0025
+tracking:
+  enabled: true
+  base_dir: /mnt/prod_runs
