@@ -15,6 +15,7 @@ preserve backwards compatibility with existing ingestion pipelines.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
@@ -23,7 +24,8 @@ from typing import Any, Dict, Literal, Optional, Union
 import pydantic
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
-PYDANTIC_V2 = hasattr(BaseModel, "model_fields")
+_FORCE_PYDANTIC_V1 = os.getenv("TRADEPULSE_FORCE_PYDANTIC_V1") == "1"
+PYDANTIC_V2 = hasattr(BaseModel, "model_fields") and not _FORCE_PYDANTIC_V1
 
 if PYDANTIC_V2:
     from pydantic import field_serializer, field_validator, model_validator
@@ -73,12 +75,13 @@ def _to_decimal(value: Union[Decimal, float, int, str]) -> Decimal:
 class _FrozenModel(BaseModel):
     """Base configuration shared by immutable market data models."""
 
-    model_config = ConfigDict(
-        frozen=True,
-        str_strip_whitespace=True,
-        extra="forbid",
-        use_enum_values=False,
-    )
+    if PYDANTIC_V2:
+        model_config = ConfigDict(
+            frozen=True,
+            str_strip_whitespace=True,
+            extra="forbid",
+            use_enum_values=False,
+        )
 
     if not PYDANTIC_V2:
 
@@ -366,7 +369,7 @@ class OHLCVBar(MarketDataPoint):
                 raise ValueError("OHLCV values must be non-negative")
             return value
 
-        @root_validator
+        @root_validator(skip_on_failure=True)
         def _validate_price_relationships(cls, values: Dict[str, Any]) -> Dict[str, Any]:
             low = values.get("low")
             high = values.get("high")

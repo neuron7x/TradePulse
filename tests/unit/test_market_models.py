@@ -1,6 +1,10 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import importlib
+import importlib.util
+import sys
+import warnings
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -9,12 +13,14 @@ import pytest
 from pydantic import ValidationError
 
 from core.data.models import (
+    PYDANTIC_V2,
     AggregateMetric,
     DataKind,
     InstrumentType,
     MarketMetadata,
     OHLCVBar,
     PriceTick,
+    _FrozenModel,
 )
 
 
@@ -57,6 +63,29 @@ def test_price_tick_rejects_invalid_values() -> None:
             volume=1,
             timestamp=datetime.now(timezone.utc),
         )
+
+
+def test_price_tick_supports_decimal_inputs_and_timestamp_conversion() -> None:
+    tick = PriceTick.create(
+        symbol="ETHUSD",
+        venue="COINBASE",
+        price=Decimal("1200.5"),
+        volume=Decimal("1.25"),
+        timestamp=1_700_000_000,
+        trade_id=" tid ",
+    )
+
+    assert tick.kind is DataKind.TICK
+    assert tick.ts == pytest.approx(1_700_000_000.0)
+    assert tick.trade_id == "tid"
+
+
+def test_market_metadata_rejects_blank_inputs() -> None:
+    with pytest.raises(ValidationError):
+        MarketMetadata(symbol=" ", venue="BINANCE")
+
+    with pytest.raises(ValidationError):
+        MarketMetadata(symbol="BTCUSD", venue=" ")
 
 
 def test_ohlcv_bar_enforces_bounds() -> None:
@@ -120,3 +149,82 @@ def test_aggregate_metric_validates_inputs() -> None:
             value="10",
             window_seconds=60,
         )
+
+
+def test_aggregate_metric_coerces_kind_and_epoch_timestamp() -> None:
+    metric = AggregateMetric(
+        metadata=MarketMetadata(symbol="DOTUSD", venue="KRAKEN"),
+        timestamp=1_690_000_000,
+        metric="spread",
+        value="1.23",
+        window_seconds=120,
+        kind="aggregate",
+    )
+
+    assert metric.kind is DataKind.AGGREGATE
+    assert metric.timestamp.tzinfo is timezone.utc
+    assert metric.ts == pytest.approx(1_690_000_000.0)
+
+
+def test_price_tick_factory_supports_forced_v1_compatibility(monkeypatch) -> None:
+    import core.data.models as models
+    from pydantic.warnings import PydanticDeprecatedSince20
+
+    monkeypatch.setenv("TRADEPULSE_FORCE_PYDANTIC_V1", "1")
+    module_name = "core.data.models_forced_v1"
+    spec = importlib.util.spec_from_file_location(module_name, models.__file__)
+    assert spec and spec.loader
+    forced_module = importlib.util.module_from_spec(spec)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", PydanticDeprecatedSince20)
+        sys.modules[module_name] = forced_module
+        spec.loader.exec_module(forced_module)
+
+    try:
+        tick = forced_module.PriceTick.create(
+            symbol="ADAUSD",
+            venue="BINANCE",
+            price=1.23,
+            volume=0.5,
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            trade_id=" tid ",
+        )
+        assert tick.trade_id == "tid"
+        assert tick.volume == Decimal("0.5")
+        assert tick.price == Decimal("1.23")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", PydanticDeprecatedSince20)
+            assert "1.23" in tick.json()
+
+        bar = forced_module.OHLCVBar(
+            metadata=forced_module.MarketMetadata(symbol="SOLUSD", venue="BINANCE"),
+            timestamp=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            open=1,
+            high=2,
+            low=1,
+            close=1.5,
+            volume=3,
+            interval_seconds=60,
+            kind="ohlcv",
+        )
+        assert bar.kind is forced_module.DataKind.OHLCV
+
+        metric = forced_module.AggregateMetric(
+            metadata=bar.metadata,
+            timestamp=bar.timestamp,
+            metric=" vw ",
+            value=2.5,
+            window_seconds=30,
+            kind="aggregate",
+        )
+        assert metric.metric == "vw"
+        assert metric.kind is forced_module.DataKind.AGGREGATE
+    finally:
+        monkeypatch.delenv("TRADEPULSE_FORCE_PYDANTIC_V1", raising=False)
+        sys.modules.pop(module_name, None)
+
+
+def test_frozen_model_serializer_converts_decimals_to_strings() -> None:
+    assert _FrozenModel._serialize_decimal(_FrozenModel, Decimal("42")) == "42"
+    assert _FrozenModel._serialize_decimal(_FrozenModel, "noop") == "noop"

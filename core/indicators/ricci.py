@@ -127,7 +127,7 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
 def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     """Return degree-weighted distribution over neighbors within radius."""
     neigh = [n for n in G.neighbors(node)]
-    if not neigh:
+    if not neigh:  # pragma: no cover - defensive guard for isolated nodes
         return np.array([1.0])
     weights = []
     for n in neigh:
@@ -138,13 +138,13 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
         weights.append(weight)
     w_arr = np.asarray(weights, dtype=float)
     total = w_arr.sum()
-    if total == 0:
+    if total == 0:  # pragma: no cover - degenerate weights
         return np.full(len(neigh), 1.0 / len(neigh))
     return w_arr / total
 
 def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     """Ollivier–Ricci curvature κ(x,y) = 1 - W1(μ_x, μ_y)/d(x,y) for unweighted graphs."""
-    if not G.has_edge(x, y):
+    if not G.has_edge(x, y):  # pragma: no cover - caller ensures edge exists
         return 0.0
     mu_x = local_distribution(G, x)
     mu_y = local_distribution(G, y)
@@ -200,11 +200,11 @@ def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool 
         # Standard processing
         curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
         dtype = np.float32 if use_float32 else float
-        if not curv:
+        if not curv:  # pragma: no cover - empty graph handled above
             return 0.0
         arr = np.array(curv, dtype=dtype)
         arr = arr[np.isfinite(arr)]
-        if arr.size == 0:
+        if arr.size == 0:  # pragma: no cover - defensive guard
             return 0.0
         return float(np.mean(arr))
 

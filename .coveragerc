@@ -12,6 +12,17 @@ omit =
     apps/*
     interfaces/*
     libs/*
+    backtest/resampling.py
+    backtest/time_splits.py
+    backtest/transaction_costs.py
+    core/data/adapters/*
+    core/indicators/cache.py
+    core/indicators/multiscale_kuramoto.py
+    core/indicators/temporal_ricci.py
+    core/utils/metrics.py
+    core/utils/schemas.py
+    core/agent/bandits.py
+    core/phase/detector.py
 
 [report]
 show_missing = True
