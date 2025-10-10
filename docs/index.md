@@ -29,6 +29,7 @@ focused document so contributors can quickly find the details they need.
 | Agent System | Strategy lifecycle, mutation/repair flow, instability detection, and multi-armed bandits. | [`docs/agent.md`](agent.md), [`core/agent`](../core/agent) |
 | Backtesting | Deterministic walk-forward engine, signal requirements, and diagnostics. | [`docs/backtest.md`](backtest.md), [`backtest/engine.py`](../backtest/engine.py) |
 | Execution & Risk | Order sizing utilities, portfolio heat checks, and integration touchpoints. | [`docs/execution.md`](execution.md), [`execution`](../execution) |
+| Execution Simulation | Latency, queueing, halts, and time-in-force handling for research-grade fills. | [`docs/backtest_execution_simulation.md`](backtest_execution_simulation.md), [`backtest/execution_simulation.py`](../backtest/execution_simulation.py) |
 | CLI & Interfaces | Automations for analysis/backtest/live commands and scripting entrypoints. | [`interfaces/cli.py`](../interfaces/cli.py) |
 
 ---
