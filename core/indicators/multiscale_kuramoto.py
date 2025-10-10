@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Mapping, MutableMapping, Optional, Sequence
+from pathlib import Path
+from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence, cast
 
 import numpy as np
 import pandas as pd
@@ -11,6 +12,13 @@ try:  # SciPy is optional in lightweight environments
     from scipy import signal as _signal
 except Exception:  # pragma: no cover - executed when SciPy unavailable
     _signal = None
+
+from core.utils.cache import (
+    BackfillPlan,
+    IndicatorCache,
+    IndicatorCacheEntry,
+    IndicatorCacheKey,
+)
 
 from .base import BaseFeature, FeatureResult
 
@@ -160,6 +168,7 @@ class MultiScaleKuramoto:
         use_adaptive_window: bool = True,
         min_samples_per_scale: int = 64,
         selector: WaveletWindowSelector | None = None,
+        cache: IndicatorCache | None = None,
     ) -> None:
         if base_window <= 0:
             raise ValueError("base_window must be positive")
@@ -179,6 +188,8 @@ class MultiScaleKuramoto:
             min_window=max(32, self.base_window // 2),
             max_window=self.base_window * 2,
         )
+        self.cache = cache or IndicatorCache(Path(".cache") / "indicators")
+        self._cache_namespace = "MultiScaleKuramoto"
 
     # -- exposed for unit tests -------------------------------------------------
     def _kuramoto_order_parameter(self, phases: np.ndarray) -> tuple[float, float]:
@@ -194,6 +205,25 @@ class MultiScaleKuramoto:
             values_list = values.tolist()
             return int(self.selector.select_window(values_list))
         return self.base_window
+
+    def _context_window(self) -> int:
+        base = self.base_window
+        if self.use_adaptive_window:
+            adaptive_ceiling = max(base, getattr(self.selector, "max_window", base))
+        else:
+            adaptive_ceiling = base
+        context = max(adaptive_ceiling, self.min_samples_per_scale)
+        return max(64, int(context) * 4)
+
+    def _cache_params(self, timeframe: TimeFrame, price_col: str) -> Mapping[str, Any]:
+        return {
+            "timeframe": timeframe.name,
+            "seconds": timeframe.seconds,
+            "base_window": self.base_window,
+            "use_adaptive_window": self.use_adaptive_window,
+            "min_samples_per_scale": self.min_samples_per_scale,
+            "price_col": price_col,
+        }
 
     def analyze(self, df: pd.DataFrame, *, price_col: str = "close") -> MultiScaleResult:
         if price_col not in df.columns:
@@ -215,17 +245,107 @@ class MultiScaleKuramoto:
                 continue
             if sampled.empty:
                 skipped.append(timeframe)
+                cache_key = IndicatorCacheKey(self._cache_namespace, timeframe.name)
+                data_hash_empty = self.cache.hash_series(sampled)
+                fingerprint, params_hash = self.cache.make_fingerprint(
+                    indicator=self._cache_namespace,
+                    params=self._cache_params(timeframe, price_col),
+                    data_hash=data_hash_empty,
+                    code_version=self.cache.code_version,
+                    timeframe=timeframe.name,
+                )
+                self.cache.store_entry(
+                    cache_key,
+                    fingerprint=fingerprint,
+                    data_hash=data_hash_empty,
+                    params_hash=params_hash,
+                    latest_timestamp=None,
+                    row_count=0,
+                    payload=TimeFrameCachePayload(result=None, skipped=True, context_tail=()),
+                )
                 continue
 
-            phases = _hilbert_phase(sampled.values)
-            window = min(self._window_for_series(sampled.values), phases.size)
+            cache_key = IndicatorCacheKey(self._cache_namespace, timeframe.name)
+            data_hash = self.cache.hash_series(sampled)
+            fingerprint, params_hash = self.cache.make_fingerprint(
+                indicator=self._cache_namespace,
+                params=self._cache_params(timeframe, price_col),
+                data_hash=data_hash,
+                code_version=self.cache.code_version,
+                timeframe=timeframe.name,
+            )
+            entry_generic = self.cache.load_entry(cache_key)
+            entry = (
+                IndicatorCacheEntry(
+                    metadata=entry_generic.metadata,
+                    payload=cast(TimeFrameCachePayload, entry_generic.payload),
+                )
+                if entry_generic is not None
+                else None
+            )
+            plan: BackfillPlan = self.cache.plan_backfill(
+                entry,
+                fingerprint=fingerprint,
+                latest_timestamp=sampled.index[-1] if not sampled.empty else None,
+            )
+            if plan.cache_hit and not plan.needs_update and entry is not None:
+                payload = entry.payload
+                if payload.skipped or payload.result is None:
+                    skipped.append(timeframe)
+                    continue
+                timeframe_results[timeframe] = payload.result
+                windows.append(payload.result.window)
+                continue
+
+            values = np.asarray(sampled.values, dtype=float)
+            if plan.incremental and entry is not None:
+                payload = entry.payload
+                previous_ts = entry.metadata.latest_timestamp_pd()
+                if previous_ts is not None:
+                    new_segment = sampled[sampled.index > previous_ts]
+                else:
+                    new_segment = sampled
+                if not new_segment.empty:
+                    context = np.asarray(payload.context_tail, dtype=float)
+                    new_values = np.asarray(new_segment.values, dtype=float)
+                    if context.size:
+                        values = np.concatenate([context, new_values])
+                    else:
+                        values = new_values
+
+            phases = _hilbert_phase(values)
+            window = min(self._window_for_series(values), phases.size)
             if window < self.min_samples_per_scale:
                 skipped.append(timeframe)
+                self.cache.store_entry(
+                    cache_key,
+                    fingerprint=fingerprint,
+                    data_hash=data_hash,
+                    params_hash=params_hash,
+                    latest_timestamp=sampled.index[-1],
+                    row_count=int(sampled.size),
+                    payload=TimeFrameCachePayload(
+                        result=None,
+                        skipped=True,
+                        context_tail=tuple(np.asarray(sampled.values[-self._context_window():], dtype=float)),
+                    ),
+                )
                 continue
 
             R, psi = self._kuramoto_order_parameter(phases[-window:])
-            timeframe_results[timeframe] = KuramotoResult(order_parameter=R, mean_phase=psi, window=window)
+            result = KuramotoResult(order_parameter=R, mean_phase=psi, window=window)
+            timeframe_results[timeframe] = result
             windows.append(window)
+            context_tail = tuple(np.asarray(sampled.values[-self._context_window():], dtype=float))
+            self.cache.store_entry(
+                cache_key,
+                fingerprint=fingerprint,
+                data_hash=data_hash,
+                params_hash=params_hash,
+                latest_timestamp=sampled.index[-1],
+                row_count=int(sampled.size),
+                payload=TimeFrameCachePayload(result=result, skipped=False, context_tail=context_tail),
+            )
 
         if timeframe_results:
             R_values = np.array([res.order_parameter for res in timeframe_results.values()], dtype=float)
@@ -304,4 +424,12 @@ def analyze_simple(
 
     analyzer = MultiScaleKuramoto(use_adaptive_window=False, base_window=window, min_samples_per_scale=min(window, 64))
     return analyzer.analyze(df, price_col=price_col)
+
+@dataclass(slots=True)
+class TimeFrameCachePayload:
+    """Payload stored for each timeframe in the indicator cache."""
+
+    result: KuramotoResult | None
+    skipped: bool
+    context_tail: tuple[float, ...]
 

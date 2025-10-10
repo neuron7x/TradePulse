@@ -33,4 +33,5 @@ Thumbs.db
 *.log
 .env
 .env.local
+.cache/
 apps/web/node_modules/

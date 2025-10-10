@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
 
@@ -24,6 +25,7 @@ from core.indicators.multiscale_kuramoto import (
     TimeFrame,
     WaveletWindowSelector,
 )
+from core.utils.cache import IndicatorCache, IndicatorCacheKey
 
 
 def test_compute_phase_matches_expected_linear_phase(sin_wave: np.ndarray) -> None:
@@ -199,6 +201,78 @@ def test_wavelet_selector_falls_back_without_scipy(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(module, "_signal", None)
     fallback = selector.select_window(prices)
     assert fallback == int(np.sqrt(32 * 256))
+
+
+def test_multiscale_kuramoto_caches_timeframe_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    df = _synth_dataframe(periods=512)
+    cache = IndicatorCache(tmp_path / "cache")
+    analyzer = MultiScaleKuramoto(
+        timeframes=(TimeFrame.M1,),
+        use_adaptive_window=False,
+        base_window=96,
+        cache=cache,
+    )
+
+    import core.indicators.multiscale_kuramoto as module
+
+    original = module._hilbert_phase
+    counter = {"calls": 0}
+
+    def _counting(values: np.ndarray) -> np.ndarray:
+        counter["calls"] += 1
+        return original(values)
+
+    monkeypatch.setattr(module, "_hilbert_phase", _counting)
+
+    analyzer.analyze(df)
+    first_calls = counter["calls"]
+    analyzer.analyze(df)
+    assert counter["calls"] == first_calls
+
+    entry = cache.load_entry(IndicatorCacheKey("MultiScaleKuramoto", "M1"))
+    assert entry is not None
+    assert entry.metadata.latest_timestamp_pd() == df.index[-1]
+
+
+def test_multiscale_kuramoto_incremental_backfill_updates_cache(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    df = _synth_dataframe(periods=512)
+    cache = IndicatorCache(tmp_path / "cache")
+    analyzer = MultiScaleKuramoto(
+        timeframes=(TimeFrame.M1,),
+        use_adaptive_window=False,
+        base_window=96,
+        cache=cache,
+    )
+
+    import core.indicators.multiscale_kuramoto as module
+
+    original = module._hilbert_phase
+    counter = {"calls": 0}
+
+    def _counting(values: np.ndarray) -> np.ndarray:
+        counter["calls"] += 1
+        return original(values)
+
+    monkeypatch.setattr(module, "_hilbert_phase", _counting)
+
+    analyzer.analyze(df)
+    baseline_calls = counter["calls"]
+
+    extension_index = pd.date_range(df.index[-1] + pd.Timedelta(minutes=1), periods=32, freq="1min")
+    extension_values = df["close"].iloc[-32:].to_numpy() + 0.5
+    extension = pd.DataFrame({"close": extension_values}, index=extension_index)
+    extended = pd.concat([df, extension])
+
+    analyzer.analyze(extended)
+    assert counter["calls"] == baseline_calls + 1
+
+    entry = cache.load_entry(IndicatorCacheKey("MultiScaleKuramoto", "M1"))
+    assert entry is not None
+    assert entry.metadata.latest_timestamp_pd() == extended.index[-1]
 
 
 def test_timeframe_properties_expose_human_friendly_metadata() -> None:
