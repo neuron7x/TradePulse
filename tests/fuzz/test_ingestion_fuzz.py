@@ -236,7 +236,13 @@ class TestTickerProperties:
     def test_ticker_creation(self, ts: float, price: float, volume: float) -> None:
         """Ticker should be created with provided values."""
         ticker = Ticker.create(symbol="FUZZ", venue="TEST", price=price, timestamp=ts, volume=volume)
-        assert ticker.ts == pytest.approx(ts)
+        # ``Ticker`` normalises the provided timestamp to a timezone-aware
+        # ``datetime`` under the hood.  Python datetimes carry microsecond
+        # precision, so converting back to epoch seconds can incur a small
+        # absolute rounding error for very small floats.  An explicit absolute
+        # tolerance keeps the property-based test robust without masking
+        # genuine large deviations.
+        assert ticker.ts == pytest.approx(ts, abs=1e-6)
         assert float(ticker.price) == pytest.approx(price)
         assert float(ticker.volume) == pytest.approx(volume)
 
