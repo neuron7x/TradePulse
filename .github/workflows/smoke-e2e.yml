@@ -1,0 +1,33 @@
+name: Nightly Smoke E2E
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+jobs:
+  smoke-e2e:
+    name: smoke-e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run smoke E2E pipeline
+        env:
+          PYTHONHASHSEED: '1337'
+        run: |
+          python scripts/smoke_e2e.py --csv data/sample.csv --seed 1337 --output-dir reports/smoke-e2e
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-e2e-artifacts
+          path: reports/smoke-e2e
+          if-no-files-found: error
