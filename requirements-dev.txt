@@ -13,6 +13,8 @@ pytest-cov==6.0.0
 pytest-asyncio==0.25.2
 hypothesis==6.140.3
 pytest-html==4.1.1
+pytest-xdist==3.6.1
+pytest-profiling==1.7.0
 
 # Security scanning
 bandit==1.8.0
