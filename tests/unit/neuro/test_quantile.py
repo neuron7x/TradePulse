@@ -1,0 +1,32 @@
+from __future__ import annotations
+
+import math
+
+import numpy as np
+
+from core.neuro.quantile import P2Quantile
+
+
+def test_quantile_monotonic_updates() -> None:
+    q = P2Quantile(0.75)
+    data = np.linspace(-1.0, 1.0, 21)
+    outputs = [q.update(float(x)) for x in data]
+    assert math.isclose(outputs[-1], np.quantile(data, 0.75), rel_tol=1e-9)
+    assert outputs == sorted(outputs)
+
+
+def test_quantile_handles_duplicate_values() -> None:
+    q = P2Quantile(0.25)
+    for value in [1.0, 1.0, 1.0, 2.0, -1.0, -1.0]:
+        q.update(value)
+    assert math.isfinite(q.quantile)
+    assert -1.0 <= q.quantile <= 2.0
+
+
+def test_invalid_quantile_raises() -> None:
+    for p in (0.0, 1.0, -0.1, 1.1):
+        try:
+            P2Quantile(p)
+        except AssertionError:
+            continue
+        raise AssertionError("invalid quantile should raise")
