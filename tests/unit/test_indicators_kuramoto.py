@@ -49,6 +49,14 @@ def test_kuramoto_order_is_one_for_aligned_phases() -> None:
     assert pytest.approx(1.0, rel=1e-12) == result
 
 
+def test_kuramoto_order_clips_roundoff_to_unit_circle() -> None:
+    phases = np.zeros(64)
+    # Introduce imperceptible jitter so floating-point reductions may drift
+    phases[:8] = 1e-12
+    result = kuramoto_order(phases)
+    assert 0.0 <= result <= 1.0
+
+
 def test_kuramoto_order_handles_matrix_input() -> None:
     phases = np.vstack([np.zeros(16), np.pi * np.ones(16)])
     result = kuramoto_order(phases)

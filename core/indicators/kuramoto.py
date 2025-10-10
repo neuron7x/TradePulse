@@ -65,7 +65,10 @@ def kuramoto_order(phases: np.ndarray) -> float:
         if not mask.any():
             return 0.0
         z = np.where(mask, z, np.nan + 0j)
-        return float(np.abs(np.nanmean(z)))
+        value = float(np.abs(np.nanmean(z)))
+        # Numerical noise can push the magnitude above one by ~1e-16; clamp to unit
+        # circle bounds so downstream users do not have to special-case tolerance.
+        return float(np.clip(value, 0.0, 1.0))
 
     if z.ndim != 2:
         raise ValueError("kuramoto_order expects 1D or 2D array")
@@ -74,7 +77,8 @@ def kuramoto_order(phases: np.ndarray) -> float:
         return float(0.0)
 
     z = np.where(mask, z, np.nan + 0j)
-    return np.abs(np.nanmean(z, axis=0)).astype(float)
+    values = np.abs(np.nanmean(z, axis=0)).astype(float)
+    return np.clip(values, 0.0, 1.0)
 
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Compute Kuramoto R across multiple synchronized assets (same length).
