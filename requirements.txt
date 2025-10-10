@@ -7,12 +7,19 @@ networkx>=3.2.0
 # Data validation
 pydantic>=2.12.0,<3.0.0
 pydantic-settings>=2.11.0,<3.0.0
+pandera>=0.20.3,<0.21
 
 # Configuration & instrumentation
 PyYAML>=6.0.2
 hydra-core>=1.3.0
 omegaconf>=2.3.0
 prometheus-client>=0.19.0
+httpx>=0.27.0
+websockets>=12.0
+ccxt>=4.3.0
+tenacity>=8.2.3
+aiolimiter>=1.1.0
+pyarrow>=17.0.0
 
 # Templates & packaging helpers
 jinja2>=3.1.6

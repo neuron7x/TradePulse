@@ -40,17 +40,13 @@ from core.utils.logging import get_logger
 if TYPE_CHECKING:  # pragma: no cover - used only for type checking
     from .multiscale_kuramoto import TimeFrame
 
-
 _logger = get_logger(__name__)
-
 
 def _qualified_name(obj: type) -> str:
     return f"{obj.__module__}:{obj.__qualname__}"
 
-
 def _sorted_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
-
 
 def _encode_structure(value: Any) -> Any:
     """Encode arbitrary Python objects into a JSON-friendly payload."""
@@ -100,7 +96,6 @@ def _encode_structure(value: Any) -> Any:
         }
     return {"__type__": "repr", "value": repr(value)}
 
-
 def _locate(symbol: str) -> type[Any]:
     module_name, _, qualname = symbol.partition(":")
     module = importlib.import_module(module_name)
@@ -108,7 +103,6 @@ def _locate(symbol: str) -> type[Any]:
     for part in qualname.split("."):
         attr = getattr(attr, part)
     return attr
-
 
 def _decode_structure(payload: Any) -> Any:
     """Decode payloads produced by :func:`_encode_structure`."""
@@ -156,7 +150,6 @@ def _decode_structure(payload: Any) -> Any:
 
     return {str(key): _decode_structure(value) for key, value in payload.items()}
 
-
 def make_fingerprint(
     indicator_name: str,
     params: Mapping[str, Any],
@@ -173,7 +166,6 @@ def make_fingerprint(
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
 
 def hash_input_data(data: Any) -> str:
     """Hash arbitrary indicator input data."""
@@ -199,7 +191,6 @@ def hash_input_data(data: Any) -> str:
     raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-
 def _resolve_code_version() -> str:
     """Best-effort resolution of the current code version."""
 
@@ -222,7 +213,6 @@ def _resolve_code_version() -> str:
 
     return "0.0.0"
 
-
 @dataclass(slots=True)
 class CacheRecord:
     """Materialized cache entry."""
@@ -234,7 +224,6 @@ class CacheRecord:
     coverage_end: datetime | None
     stored_at: datetime
 
-
 @dataclass(slots=True)
 class BackfillState:
     """Book-keeping for incremental backfill per timeframe."""
@@ -244,7 +233,6 @@ class BackfillState:
     fingerprint: str | None
     updated_at: datetime
     extras: Mapping[str, Any]
-
 
 class FileSystemIndicatorCache:
     """Disk-backed cache that stores indicator outputs per timeframe."""
@@ -266,14 +254,14 @@ class FileSystemIndicatorCache:
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
-    def _timeframe_key(timeframe: TimeFrame | str | None) -> str:
+    def _timeframe_key(timeframe: 'TimeFrame | str | None') -> str:
         if timeframe is None:
             return "_global"
         if hasattr(timeframe, "name"):
             return str(getattr(timeframe, "name"))
         return str(timeframe)
 
-    def _entry_dir(self, timeframe: TimeFrame | str | None, fingerprint: str) -> Path:
+    def _entry_dir(self, timeframe: 'TimeFrame | str | None', fingerprint: str) -> Path:
         timeframe_dir = self.root / self._timeframe_key(timeframe)
         return timeframe_dir / fingerprint
 
@@ -392,9 +380,6 @@ class FileSystemIndicatorCache:
         if fmt == "json":
             payload = json.loads(path.read_text(encoding="utf-8"))
             return _decode_structure(payload)
-        if fmt == "pickle":
-            with path.open("rb") as handle:
-                return self._restricted_unpickle(handle)
         raise ValueError(f"Unsupported cache format '{fmt}'")
 
     # ---------------------------------------------------------------- fingerprint
@@ -421,7 +406,7 @@ class FileSystemIndicatorCache:
         params: Mapping[str, Any],
         data_hash: str,
         value: Any,
-        timeframe: TimeFrame | str | None = None,
+        timeframe: 'TimeFrame | str | None' = None,
         coverage_start: datetime | str | None = None,
         coverage_end: datetime | str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -481,7 +466,7 @@ class FileSystemIndicatorCache:
         indicator_name: str,
         params: Mapping[str, Any],
         data_hash: str,
-        timeframe: TimeFrame | str | None = None,
+        timeframe: 'TimeFrame | str | None' = None,
         code_version: str | None = None,
     ) -> CacheRecord | None:
         fingerprint = self.fingerprint(
@@ -537,10 +522,10 @@ class FileSystemIndicatorCache:
         )
 
     # ---------------------------------------------------------------- backfill API
-    def _backfill_path(self, timeframe: TimeFrame | str) -> Path:
+    def _backfill_path(self, timeframe: 'TimeFrame | str') -> Path:
         return self.root / self._timeframe_key(timeframe) / "backfill.json"
 
-    def get_backfill_state(self, timeframe: TimeFrame | str) -> BackfillState | None:
+    def get_backfill_state(self, timeframe: 'TimeFrame | str') -> BackfillState | None:
         path = self._backfill_path(timeframe)
         if not path.exists():
             return None
@@ -560,7 +545,7 @@ class FileSystemIndicatorCache:
 
     def update_backfill_state(
         self,
-        timeframe: TimeFrame | str,
+        timeframe: 'TimeFrame | str',
         *,
         last_timestamp: datetime | str,
         fingerprint: str | None,
@@ -584,12 +569,11 @@ class FileSystemIndicatorCache:
             last_timestamp=payload["last_timestamp"],
         )
 
-
 def cache_indicator(
     cache: FileSystemIndicatorCache,
     *,
     indicator_name: str | None = None,
-    timeframe: TimeFrame | str | None = None,
+    timeframe: 'TimeFrame | str | None' = None,
     params_fn: Callable[..., Mapping[str, Any]] | None = None,
     data_fn: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -639,7 +623,6 @@ def cache_indicator(
 
     return decorator
 
-
 __all__ = [
     "BackfillState",
     "CacheRecord",
@@ -648,4 +631,3 @@ __all__ = [
     "hash_input_data",
     "make_fingerprint",
 ]
-
