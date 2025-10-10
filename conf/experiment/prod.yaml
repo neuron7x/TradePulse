@@ -1,5 +1,5 @@
 name: prod
-db_uri: "postgresql://prod:pwd@host/prod"
+db_uri: "postgresql://prod:${PROD_DB_PASSWORD:-secure}@host/prod"
 debug: false
 log_level: WARNING
 random_seed: 7

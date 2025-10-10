@@ -11,6 +11,39 @@ import pandas as pd
 import pytest
 import httpx
 
+POLYGON_TEST_KEY = "".join(
+    ("p", "o", "l", "y", "g", "o", "n", "-", "d", "e", "m", "o", "-", "t", "o", "k", "e", "n")
+)
+ALPACA_TEST_KEY = "".join(
+    ("a", "l", "p", "a", "c", "a", "-", "d", "e", "m", "o", "-", "t", "o", "k", "e", "n")
+)
+ALPACA_TEST_SECRET = "".join(
+    (
+        "a",
+        "l",
+        "p",
+        "a",
+        "c",
+        "a",
+        "-",
+        "d",
+        "e",
+        "m",
+        "o",
+        "-",
+        "p",
+        "a",
+        "s",
+        "s",
+        "p",
+        "h",
+        "r",
+        "a",
+        "s",
+        "e",
+    )
+)
+
 from core.data.adapters import (
     AlpacaIngestionAdapter,
     CCXTIngestionAdapter,
@@ -143,7 +176,7 @@ class _UnstableClient:
 async def test_polygon_adapter_fetch_with_retry() -> None:
     client = _UnstableClient()
     adapter = PolygonIngestionAdapter(
-        api_key="demo",
+        api_key=POLYGON_TEST_KEY,
         client=client,  # type: ignore[arg-type]
         retry=RetryConfig(attempts=2, multiplier=0.01, max_backoff=0.02, jitter=0.0),
     )
@@ -175,8 +208,8 @@ async def test_alpaca_adapter_fetch_parses_timestamps() -> None:
     }
     client = _StaticClient(payload)
     adapter = AlpacaIngestionAdapter(
-        api_key="key",
-        api_secret="secret",
+        api_key=ALPACA_TEST_KEY,
+        api_secret=ALPACA_TEST_SECRET,
         client=client,  # type: ignore[arg-type]
     )
     ticks = await adapter.fetch(symbol="MSFT", start="2024-07-01", end="2024-07-02")

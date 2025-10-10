@@ -1,5 +1,5 @@
 name: stage
-db_uri: "postgresql://stage:pwd@host/stage"
+db_uri: "postgresql://stage:${STAGE_DB_PASSWORD:-secure}@host/stage"
 debug: false
 log_level: INFO
 random_seed: 2024
