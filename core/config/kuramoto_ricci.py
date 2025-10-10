@@ -5,111 +5,22 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import yaml
-import pydantic
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from pydantic.fields import FieldInfo
-from importlib import import_module
-from importlib.util import find_spec
 import os
 
-_FORCE_LEGACY_SETTINGS = os.getenv("TRADEPULSE_FORCE_LEGACY_SETTINGS") == "1"
-_SETTINGS_SPEC = None if _FORCE_LEGACY_SETTINGS else find_spec("pydantic_settings")
-
-if _SETTINGS_SPEC is not None:
-    pydantic_settings = import_module("pydantic_settings")
-    settings_sources = import_module("pydantic_settings.sources")
-
-    BaseSettings = pydantic_settings.BaseSettings  # type: ignore[attr-defined]
-    SettingsConfigDict = pydantic_settings.SettingsConfigDict  # type: ignore[attr-defined]
-    SettingsError = pydantic_settings.SettingsError  # type: ignore[attr-defined]
-    PydanticBaseSettingsSource = settings_sources.PydanticBaseSettingsSource  # type: ignore[attr-defined]
-    HAS_PYDANTIC_SETTINGS = True
-else:  # pragma: no cover - exercised indirectly under legacy environments
-    try:
-        BaseSettings = pydantic.BaseSettings  # type: ignore[attr-defined]
-    except Exception:  # pragma: no cover - executed under pydantic v2 without legacy shim
-        from pydantic.v1 import BaseSettings as BaseSettingsV1  # type: ignore[import]
-
-        BaseSettings = BaseSettingsV1  # type: ignore[assignment]
-    SettingsConfigDict = dict  # type: ignore[assignment]
-
-    class SettingsError(ValueError):
-        """Fallback settings error used when ``pydantic-settings`` is unavailable."""
-
-    class PydanticBaseSettingsSource:  # type: ignore[too-many-ancestors]
-        """Minimal shim that mimics the :mod:`pydantic-settings` API."""
-
-        def __init__(self, settings_cls: type[BaseSettings], *sources: Any) -> None:
-            self.settings_cls = settings_cls
-
-        def __call__(self, settings_cls: type[BaseSettings] | None = None) -> dict[str, Any]:
-            if settings_cls is not None:
-                self.settings_cls = settings_cls
-            return {}
-
-        def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
-            return None, field_name, False
-
-    def _expand_env_pairs(pairs: Sequence[tuple[str, str]]) -> dict[str, Any]:
-        prefix = getattr(TradePulseSettings.Config, "env_prefix", "") or ""
-        delimiter = getattr(TradePulseSettings.Config, "env_nested_delimiter", "__") or "__"
-        expanded: dict[str, Any] = {}
-        for key, raw_value in pairs:
-            cleaned_key = key.strip()
-            if prefix and cleaned_key.startswith(prefix):
-                cleaned_key = cleaned_key[len(prefix) :]
-            parts = [segment.strip().lower() for segment in cleaned_key.split(delimiter) if segment.strip()]
-            if not parts:
-                continue
-            target: dict[str, Any] = expanded
-            for segment in parts[:-1]:
-                current = target.get(segment)
-                if not isinstance(current, dict):
-                    current = {}
-                    target[segment] = current
-                target = current
-            try:
-                parsed_value: Any = yaml.safe_load(raw_value)
-            except yaml.YAMLError:
-                parsed_value = raw_value.strip()
-            target[parts[-1]] = parsed_value
-        return expanded
-
-    class DotEnvSettingsSource(PydanticBaseSettingsSource):
-        """Lightweight ``.env`` reader used when ``python-dotenv`` is unavailable."""
-
-        def __init__(
-            self,
-            settings_cls: type[BaseSettings],
-            env_file: str | os.PathLike[str] | None,
-        ) -> None:
-            super().__init__(settings_cls)
-            self._env_file = Path(env_file).expanduser() if env_file else None
-
-        def __call__(self, settings_cls: type[BaseSettings] | None = None) -> dict[str, Any]:
-            super().__call__(settings_cls)
-            if self._env_file is None:
-                return {}
-            path = self._env_file
-            if not path.is_absolute():
-                path = Path.cwd() / path
-            try:
-                text = path.read_text(encoding="utf8")
-            except FileNotFoundError:
-                return {}
-            pairs: list[tuple[str, str]] = []
-            for raw_line in text.splitlines():
-                line = raw_line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" not in line:
-                    continue
-                key, value = line.split("=", 1)
-                pairs.append((key, value))
-            return _expand_env_pairs(pairs)
-
-    HAS_PYDANTIC_SETTINGS = False
+import yaml
+import pydantic
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
+from pydantic_settings.sources import PydanticBaseSettingsSource
 
 AliasChoices = getattr(pydantic, "AliasChoices", None)
 
@@ -129,15 +40,6 @@ if AliasChoices is None:  # pragma: no cover - exercised implicitly via configur
         def __repr__(self) -> str:  # pragma: no cover - debug helper
             joined = ", ".join(self)
             return f"AliasChoices({joined})"
-_FORCE_PYDANTIC_V1 = os.getenv("TRADEPULSE_FORCE_PYDANTIC_V1") == "1"
-
-
-PYDANTIC_V2 = hasattr(BaseModel, "model_fields") and not _FORCE_PYDANTIC_V1
-
-if PYDANTIC_V2:
-    from pydantic import field_validator, model_validator
-else:  # pragma: no cover - exercised indirectly by tests under pydantic v1
-    from pydantic import root_validator, validator
 
 from core.indicators.multiscale_kuramoto import TimeFrame
 
@@ -196,26 +98,45 @@ def _ensure_timeframes_non_empty_payload(timeframes: Sequence[TimeFrame] | None)
         raise ValueError("kuramoto.timeframes cannot be empty")
 
 
-def _deep_merge(base: Mapping[str, Any] | None, updates: Mapping[str, Any] | None) -> dict[str, Any]:
-    result: dict[str, Any] = dict(base or {})
-    for key, value in (updates or {}).items():
-        if isinstance(value, Mapping) and isinstance(result.get(key), Mapping):
-            result[key] = _deep_merge(result.get(key), value)
-        else:
-            result[key] = value
-    return result
+def _coerce_int_value(value: Any, field_name: str) -> Any:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError(f"{field_name} cannot be blank")
+        try:
+            return int(stripped)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be an integer") from exc
+    return value
+
+
+def _coerce_float_value(value: Any, field_name: str) -> Any:
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError(f"{field_name} cannot be blank")
+        try:
+            return float(stripped)
+        except ValueError as exc:
+            raise ValueError(f"{field_name} must be a number") from exc
+    return value
+
+
+def _coerce_bool_value(value: Any, field_name: str) -> Any:
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y"}:
+            return True
+        if normalized in {"false", "0", "no", "n"}:
+            return False
+        raise ValueError(f"{field_name} must be a boolean value")
+    return value
 
 
 class KuramotoConfig(BaseModel):
     """Configuration payload for :class:`MultiScaleKuramoto`."""
 
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     timeframes: tuple[TimeFrame, ...] = Field(
         default=(TimeFrame.M1, TimeFrame.M5, TimeFrame.M15, TimeFrame.H1),
@@ -236,37 +157,30 @@ class KuramotoConfig(BaseModel):
         description="Minimum number of samples required per analysed scale.",
     )
 
-    if PYDANTIC_V2:
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
+        return _merge_adaptive_window_payload(data)
 
-        @model_validator(mode="before")
-        @classmethod
-        def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
-            return _merge_adaptive_window_payload(data)
+    @field_validator("timeframes", mode="before")
+    @classmethod
+    def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
+        return _coerce_timeframes_payload(value)
 
-        @field_validator("timeframes", mode="before")
-        @classmethod
-        def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
-            return _coerce_timeframes_payload(value)
+    @field_validator("base_window", "min_samples_per_scale", mode="before")
+    @classmethod
+    def _coerce_positive_ints(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_int_value(value, info.field_name)
 
-        @model_validator(mode="after")
-        def _ensure_timeframes_non_empty(self) -> "KuramotoConfig":
-            _ensure_timeframes_non_empty_payload(self.timeframes)
-            return self
+    @field_validator("use_adaptive_window", mode="before")
+    @classmethod
+    def _coerce_use_adaptive(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_bool_value(value, info.field_name)
 
-    else:
-
-        @root_validator(pre=True, skip_on_failure=True)
-        def _merge_adaptive_window(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
-            return _merge_adaptive_window_payload(values)
-
-        @validator("timeframes", pre=True)
-        def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
-            return _coerce_timeframes_payload(value)
-
-        @root_validator(skip_on_failure=True)
-        def _ensure_timeframes_non_empty(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
-            _ensure_timeframes_non_empty_payload(values.get("timeframes"))
-            return values
+    @model_validator(mode="after")
+    def _ensure_timeframes_non_empty(self) -> "KuramotoConfig":
+        _ensure_timeframes_non_empty_payload(self.timeframes)
+        return self
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -278,40 +192,42 @@ class KuramotoConfig(BaseModel):
 
 
 class RicciTemporalConfig(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     window_size: int = Field(default=100, gt=0)
     n_snapshots: int = Field(default=8, gt=0)
     retain_history: bool = Field(default=True)
 
+    @field_validator("window_size", "n_snapshots", mode="before")
+    @classmethod
+    def _coerce_temporal_ints(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_int_value(value, info.field_name)
+
+    @field_validator("retain_history", mode="before")
+    @classmethod
+    def _coerce_retain_history(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_bool_value(value, info.field_name)
+
 
 class RicciGraphConfig(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     n_levels: int = Field(default=20, gt=0)
     connection_threshold: float = Field(default=0.1, gt=0, lt=1)
 
+    @field_validator("n_levels", mode="before")
+    @classmethod
+    def _coerce_level_count(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_int_value(value, info.field_name)
+
+    @field_validator("connection_threshold", mode="before")
+    @classmethod
+    def _coerce_connection_threshold(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_float_value(value, info.field_name)
+
 
 class RicciConfig(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     temporal: RicciTemporalConfig = Field(default_factory=RicciTemporalConfig)
     graph: RicciGraphConfig = Field(default_factory=RicciGraphConfig)
@@ -327,13 +243,7 @@ class RicciConfig(BaseModel):
 
 
 class CompositeThresholds(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     R_strong_emergent: float = Field(default=0.8, ge=0, le=1)
     R_proto_emergent: float = Field(default=0.4, ge=0, le=1)
@@ -342,43 +252,39 @@ class CompositeThresholds(BaseModel):
     temporal_ricci: float = Field(default=-0.2)
     topological_transition: float = Field(default=0.7, ge=0, le=1)
 
-    if PYDANTIC_V2:
+    @field_validator(
+        "R_strong_emergent",
+        "R_proto_emergent",
+        "coherence_min",
+        "ricci_negative",
+        "temporal_ricci",
+        "topological_transition",
+        mode="before",
+    )
+    @classmethod
+    def _coerce_threshold_numbers(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_float_value(value, info.field_name)
 
-        @model_validator(mode="after")
-        def _validate_thresholds(self) -> "CompositeThresholds":
-            if self.R_strong_emergent <= self.R_proto_emergent:
-                raise ValueError("R_strong_emergent must exceed R_proto_emergent")
-            return self
-
-    else:
-
-        @root_validator(skip_on_failure=True)
-        def _validate_thresholds(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
-            if values.get("R_strong_emergent") <= values.get("R_proto_emergent"):
-                raise ValueError("R_strong_emergent must exceed R_proto_emergent")
-            return values
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> "CompositeThresholds":
+        if self.R_strong_emergent <= self.R_proto_emergent:
+            raise ValueError("R_strong_emergent must exceed R_proto_emergent")
+        return self
 
 
 class CompositeSignals(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     min_confidence: float = Field(default=0.5, ge=0, le=1)
 
+    @field_validator("min_confidence", mode="before")
+    @classmethod
+    def _coerce_min_confidence(cls, value: Any, info: ValidationInfo) -> Any:
+        return _coerce_float_value(value, info.field_name)
+
 
 class CompositeConfig(BaseModel):
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     thresholds: CompositeThresholds = Field(default_factory=CompositeThresholds)
     signals: CompositeSignals = Field(default_factory=CompositeSignals)
@@ -398,13 +304,7 @@ class CompositeConfig(BaseModel):
 class KuramotoRicciIntegrationConfig(BaseModel):
     """Composite configuration for the Kuramoto–Ricci integration workflow."""
 
-    if PYDANTIC_V2:
-        model_config = ConfigDict(extra="forbid", frozen=True)
-
-    if not PYDANTIC_V2:
-        class Config:
-            extra = "forbid"
-            allow_mutation = False
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
     ricci: RicciConfig = Field(default_factory=RicciConfig)
@@ -413,9 +313,7 @@ class KuramotoRicciIntegrationConfig(BaseModel):
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoRicciIntegrationConfig":
         try:
-            if PYDANTIC_V2:
-                return cls.model_validate(data or {})
-            return cls.parse_obj(data or {})
+            return cls.model_validate(data or {})
         except ValidationError as exc:  # pragma: no cover - error propagation
             messages = "; ".join(error["msg"] for error in exc.errors())
             raise ConfigError(messages) from exc
@@ -493,14 +391,9 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
             if candidate:
                 return Path(candidate).expanduser()
 
-        if PYDANTIC_V2:
-            field = self.settings_cls.model_fields.get("config_file")
-            default_value = getattr(field, "default", None) if field else None
-            default_factory = getattr(field, "default_factory", None) if field else None
-        else:
-            field = getattr(self.settings_cls, "__fields__", {}).get("config_file")
-            default_value = getattr(field, "default", None) if field else None
-            default_factory = getattr(field, "default_factory", None) if field else None
+        field = self.settings_cls.model_fields.get("config_file")
+        default_value = getattr(field, "default", None) if field else None
+        default_factory = getattr(field, "default_factory", None) if field else None
         if default_value is None and callable(default_factory):
             default_value = default_factory()
         if default_value:
@@ -511,21 +404,14 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
 class TradePulseSettings(BaseSettings):
     """Application-wide configuration powered by ``pydantic-settings``."""
 
-    if PYDANTIC_V2:
-        model_config = SettingsConfigDict(
-            env_prefix="TRADEPULSE_",
-            env_nested_delimiter="__",
-            env_file=".env",
-            extra="ignore",
-        )
-
-    if not PYDANTIC_V2:
-        class Config:
-            env_prefix = "TRADEPULSE_"
-            env_nested_delimiter = "__"
-            env_file = None
-            extra = "ignore"
-            dotenv_path = Path(".env")
+    model_config = SettingsConfigDict(
+        env_prefix="TRADEPULSE_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        env_file_encoding="utf8",
+        extra="ignore",
+        strict=True,
+    )
 
     config_file: Path | None = Field(
         default=DEFAULT_CONFIG_PATH,
@@ -536,25 +422,23 @@ class TradePulseSettings(BaseSettings):
     ricci: RicciConfig = Field(default_factory=RicciConfig)
     composite: CompositeConfig = Field(default_factory=CompositeConfig)
 
-    if HAS_PYDANTIC_SETTINGS:
-
-        @classmethod
-        def settings_customise_sources(
-            cls,
-            settings_cls: type[BaseSettings],
-            init_settings: PydanticBaseSettingsSource,
-            env_settings: PydanticBaseSettingsSource,
-            dotenv_settings: PydanticBaseSettingsSource,
-            file_secret_settings: PydanticBaseSettingsSource,
-        ) -> tuple[PydanticBaseSettingsSource, ...]:
-            yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
-            return (
-                init_settings,
-                env_settings,
-                dotenv_settings,
-                yaml_source,
-                file_secret_settings,
-            )
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            yaml_source,
+            file_secret_settings,
+        )
 
     def as_kuramoto_ricci_config(self) -> KuramotoRicciIntegrationConfig:
         return KuramotoRicciIntegrationConfig(
@@ -562,23 +446,6 @@ class TradePulseSettings(BaseSettings):
             ricci=self.ricci,
             composite=self.composite,
         )
-
-
-if not HAS_PYDANTIC_SETTINGS:
-
-    def _customise_sources(cls, init_settings, env_settings, file_secret_settings):
-        env_file = getattr(TradePulseSettings.Config, "dotenv_path", None)
-        dotenv_source = DotEnvSettingsSource(TradePulseSettings, env_file)
-        yaml_source = YamlSettingsSource(TradePulseSettings, init_settings, env_settings, dotenv_source)
-        return (
-            init_settings,
-            env_settings,
-            dotenv_source,
-            yaml_source,
-            file_secret_settings,
-        )
-
-    TradePulseSettings.Config.customise_sources = classmethod(_customise_sources)  # type: ignore[attr-defined]
 
 
 def parse_cli_overrides(pairs: Sequence[str] | None) -> dict[str, Any]:
@@ -619,38 +486,6 @@ def load_kuramoto_ricci_config(
     cli_overrides: Mapping[str, Any] | None = None,
 ) -> KuramotoRicciIntegrationConfig:
     """Load a Kuramoto–Ricci integration config with layered sources."""
-
-    if not HAS_PYDANTIC_SETTINGS:
-        payload: dict[str, Any] = {}
-        config_path: Path | None = Path(path) if path is not None else None
-        if config_path is not None and config_path.exists():
-            with config_path.open("r", encoding="utf8") as handle:
-                loaded = yaml.safe_load(handle) or {}
-            if not isinstance(loaded, Mapping):
-                raise ConfigError("configuration file must define a mapping")
-            payload = _deep_merge(payload, loaded)
-        dotenv_file = getattr(TradePulseSettings.Config, "dotenv_path", None)
-        if dotenv_file:
-            pairs: list[tuple[str, str]] = []
-            dotenv_path = Path(dotenv_file)
-            if not dotenv_path.is_absolute():
-                dotenv_path = Path.cwd() / dotenv_path
-            if dotenv_path.exists():
-                for raw_line in dotenv_path.read_text(encoding="utf8").splitlines():
-                    line = raw_line.strip()
-                    if not line or line.startswith("#") or "=" not in line:
-                        continue
-                    key, value = line.split("=", 1)
-                    pairs.append((key, value))
-            payload = _deep_merge(payload, _expand_env_pairs(pairs))
-        env_pairs = [
-            (key, value)
-            for key, value in os.environ.items()
-            if key.startswith((getattr(TradePulseSettings.Config, "env_prefix", "") or ""))
-        ]
-        payload = _deep_merge(payload, _expand_env_pairs(env_pairs))
-        payload = _deep_merge(payload, cli_overrides)
-        return KuramotoRicciIntegrationConfig.from_mapping(payload)
 
     overrides = dict(cli_overrides or {})
     if path is not None:
