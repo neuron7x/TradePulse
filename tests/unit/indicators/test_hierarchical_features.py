@@ -1,0 +1,61 @@
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from core.data.resampling import resample_order_book
+from core.indicators.hierarchical_features import (
+    FeatureBufferCache,
+    HierarchicalFeatureResult,
+    compute_hierarchical_features,
+)
+
+
+def _ohlcv(freq: str) -> pd.DataFrame:
+    index = pd.date_range("2024-01-01", periods=10, freq=freq, tz="UTC")
+    return pd.DataFrame(
+        {
+            "open": np.linspace(100, 101, len(index)),
+            "high": np.linspace(101, 102, len(index)),
+            "low": np.linspace(99, 100, len(index)),
+            "close": np.linspace(100, 101, len(index)),
+            "volume": np.random.default_rng(1).uniform(1, 5, size=len(index)),
+        },
+        index=index,
+    )
+
+
+def _order_book(freq: str) -> pd.DataFrame:
+    index = pd.date_range("2024-01-01", periods=10, freq=freq, tz="UTC")
+    levels = pd.DataFrame(
+        {
+            "bid_price": 99 + np.random.default_rng(2).uniform(0, 0.1, size=len(index)),
+            "ask_price": 101 + np.random.default_rng(4).uniform(0, 0.1, size=len(index)),
+            "bid_size_1": np.random.default_rng(6).uniform(0.5, 2.0, size=len(index)),
+            "bid_size_2": np.random.default_rng(7).uniform(0.5, 2.0, size=len(index)),
+            "ask_size_1": np.random.default_rng(8).uniform(0.5, 2.0, size=len(index)),
+            "ask_size_2": np.random.default_rng(9).uniform(0.5, 2.0, size=len(index)),
+        },
+        index=index,
+    )
+    return resample_order_book(
+        levels,
+        freq=freq,
+        bid_cols=["bid_size_1", "bid_size_2"],
+        ask_cols=["ask_size_1", "ask_size_2"],
+        bid_price_col="bid_price",
+        ask_price_col="ask_price",
+    )
+
+
+def test_hierarchical_features_with_benchmarks():
+    ohlcv = {"1min": _ohlcv("1min"), "5min": _ohlcv("5min")}
+    book = {"1min": _order_book("1min")}
+    cache = FeatureBufferCache()
+    result = compute_hierarchical_features(ohlcv, book_by_tf=book, cache=cache)
+    assert isinstance(result, HierarchicalFeatureResult)
+    assert result.multi_tf_phase_coherence >= 0.0
+    flat = {k: v for tf in result.features.values() for k, v in tf.items()}
+    assert "entropy" in result.features["1min"]
+    assert any(key.startswith("microprice") for key in flat)
+
