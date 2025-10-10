@@ -47,14 +47,33 @@ jobs:
           combined = Path('sbom/combined-requirements.txt')
           combined.parent.mkdir(parents=True, exist_ok=True)
 
-          with combined.open('w', encoding='utf-8') as fh:
-              for source in sources:
-                  if not source.is_file():
+          def write_requirements(source: Path, fh, seen: set[Path]) -> None:
+              source = source.resolve()
+              if source in seen or not source.is_file():
+                  return
+              seen.add(source)
+
+              for line in source.read_text(encoding='utf-8').splitlines():
+                  stripped = line.strip()
+                  if not stripped or stripped.startswith('#'):
+                      fh.write(line + '\n')
                       continue
-                  content = source.read_text(encoding='utf-8')
-                  fh.write(content)
-                  if not content.endswith('\n'):
-                      fh.write('\n')
+
+                  if stripped.startswith('-r') or stripped.startswith('--requirement'):
+                      try:
+                          _, include_path = stripped.split(None, 1)
+                      except ValueError:
+                          continue
+                      include = (source.parent / include_path).resolve()
+                      write_requirements(include, fh, seen)
+                      continue
+
+                  fh.write(line + '\n')
+
+          with combined.open('w', encoding='utf-8') as fh:
+              seen: set[Path] = set()
+              for source in sources:
+                  write_requirements(source, fh, seen)
           PY
 
       - name: Generate CycloneDX SBOM (JSON)
