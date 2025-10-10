@@ -3,33 +3,57 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
-from typing import Dict, Iterable, Optional
+from typing import Dict, FrozenSet, Iterable
 
-from pydantic import BaseModel, ConfigDict, Field
 from zoneinfo import ZoneInfo
 
+__all__ = [
+    "MarketCalendar",
+    "MarketCalendarRegistry",
+    "convert_timestamp",
+    "get_market_calendar",
+    "is_market_open",
+    "normalize_timestamp",
+    "to_utc",
+]
 
-class MarketCalendar(BaseModel):
+
+def _ensure_iterable(values: Iterable[int] | None, *, default: Iterable[int]) -> FrozenSet[int]:
+    if values is None:
+        return frozenset(default)
+    return frozenset(values)
+
+
+@dataclass(frozen=True)
+class MarketCalendar:
     """Defines opening hours and timezone for a market venue."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    market: str
+    timezone: str
+    open_time: time = time(0, 0)
+    close_time: time = time(23, 59, 59)
+    weekend_closure: Iterable[int] | None = field(default_factory=lambda: {5, 6})
+    holidays: Iterable[date] | None = None
 
-    market: str = Field(min_length=1)
-    timezone: str = Field(min_length=1)
-    open_time: time = Field(default=time(0, 0))
-    close_time: time = Field(default=time(23, 59, 59))
-    weekend_closure: Iterable[int] = Field(default_factory=lambda: {5, 6})
-    holidays: Iterable[date] = Field(default_factory=tuple)
+    def __post_init__(self) -> None:
+        if not self.market:
+            raise ValueError("market must be a non-empty string")
+        if not self.timezone:
+            raise ValueError("timezone must be a non-empty string")
+        object.__setattr__(self, "weekend_closure", _ensure_iterable(self.weekend_closure, default=(5, 6)))
+        holidays = tuple(self.holidays or ())
+        object.__setattr__(self, "holidays", holidays)
 
     def tzinfo(self) -> ZoneInfo:
         return ZoneInfo(self.timezone)
 
     def is_open(self, when: datetime) -> bool:
         local_time = convert_timestamp(when, self.market)
-        if local_time.date() in set(self.holidays):
+        if local_time.date() in self.holidays:
             return False
-        if local_time.weekday() in set(self.weekend_closure):
+        if local_time.weekday() in self.weekend_closure:
             return False
         current_time = local_time.time()
         if self.open_time <= self.close_time:
@@ -51,7 +75,7 @@ _DEFAULT_CALENDARS: Dict[str, MarketCalendar] = {
         timezone="America/Chicago",
         open_time=time(17, 0),
         close_time=time(16, 0),
-        weekend_closure={5, 6},
+        weekend_closure=(5, 6),
     ),
 }
 
@@ -98,7 +122,7 @@ def to_utc(ts: datetime) -> datetime:
     return ts.astimezone(timezone.utc)
 
 
-def normalize_timestamp(value: datetime | float | int, *, market: Optional[str] = None) -> datetime:
+def normalize_timestamp(value: datetime | float | int, *, market: str | None = None) -> datetime:
     """Normalise raw timestamp inputs to a timezone-aware UTC datetime."""
 
     if isinstance(value, (int, float)):
@@ -121,13 +145,3 @@ def is_market_open(ts: datetime, market: str) -> bool:
     calendar = get_market_calendar(market)
     return calendar.is_open(ts)
 
-
-__all__ = [
-    "MarketCalendar",
-    "MarketCalendarRegistry",
-    "convert_timestamp",
-    "get_market_calendar",
-    "is_market_open",
-    "normalize_timestamp",
-    "to_utc",
-]

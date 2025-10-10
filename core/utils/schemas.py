@@ -1,13 +1,12 @@
 # SPDX-License-Identifier: MIT
-"""JSON Schema generation for TradePulse data structures.
-
-This module provides JSON schemas for all public payloads and integrates
-with documentation generation.
-"""
+"""JSON Schema generation for TradePulse data structures."""
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, fields, is_dataclass
+from datetime import date, datetime, time
+from decimal import Decimal
+from enum import Enum
 from typing import Any, Dict, Type, get_type_hints, get_origin, get_args
 
 
@@ -68,20 +67,31 @@ def dataclass_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[s
 
 def _type_to_schema(typ: Any) -> Dict[str, Any]:
     """Convert a Python type to JSON Schema type."""
+
     origin = get_origin(typ)
     args = get_args(typ)
-    
+
     # Handle None/Optional
     if typ is type(None):
         return {"type": "null"}
-        
+
+    # Handle Annotated types (PEP 593)
+    from typing import Annotated, Union  # Local import to avoid circular deps at module import
+
+    if origin is Annotated:
+        return _type_to_schema(args[0])
+
     # Handle Union types (including Optional)
-    if origin is type(None) or (origin and str(origin).startswith("typing.Union")):
+    if origin is Union:
         schemas = [_type_to_schema(arg) for arg in args if arg is not type(None)]
         if len(schemas) == 1:
             return schemas[0]
         return {"anyOf": schemas}
-        
+
+    # Handle typing.Any explicitly
+    if typ is Any:
+        return {}
+
     # Handle basic types
     type_mapping = {
         int: {"type": "integer"},
@@ -90,36 +100,58 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
         bool: {"type": "boolean"},
         dict: {"type": "object"},
         list: {"type": "array"},
+        Decimal: {"type": "number"},
+        datetime: {"type": "string", "format": "date-time"},
+        date: {"type": "string", "format": "date"},
+        time: {"type": "string", "format": "time"},
     }
-    
+
     if typ in type_mapping:
         return type_mapping[typ]
-        
+
+    # Handle Enum types
+    if isinstance(typ, type) and issubclass(typ, Enum):
+        return {"type": "string", "enum": [member.value for member in typ]}
+
+    # Handle dataclass types
+    if isinstance(typ, type) and is_dataclass(typ):
+        return dataclass_to_json_schema(typ)
+
     # Handle Dict types
     if origin is dict or typ is dict:
         result_schema: Dict[str, Any] = {"type": "object"}
         if args and len(args) == 2:
-            # Dict[str, int] etc
             value_schema = _type_to_schema(args[1])
             result_schema["additionalProperties"] = value_schema
         return result_schema
-        
-    # Handle List/Sequence types
-    if origin is list or origin is tuple or typ is list:
+
+    # Handle List/Sequence/Set types
+    if origin in {list, tuple, set, frozenset} or typ in {list, tuple, set, frozenset}:
         list_schema: Dict[str, Any] = {"type": "array"}
         if args:
-            items_schema = _type_to_schema(args[0])
-            list_schema["items"] = items_schema
+            list_schema["items"] = _type_to_schema(args[0])
+        if origin in {set, frozenset} or typ in {set, frozenset}:
+            list_schema["uniqueItems"] = True
         return list_schema
-        
+
+    # Handle generic Iterable[...] as arrays
+    from collections.abc import Iterable as ABCIterable
+
+    if origin and issubclass(origin, ABCIterable):
+        list_schema = {"type": "array"}
+        if args:
+            list_schema["items"] = _type_to_schema(args[0])
+        return list_schema
+
     # Handle Mapping types
-    if hasattr(typ, "__origin__") and "Mapping" in str(typ.__origin__):
+    from collections.abc import Mapping
+
+    if origin and issubclass(origin, Mapping):
         mapping_schema: Dict[str, Any] = {"type": "object"}
         if args and len(args) == 2:
-            value_schema = _type_to_schema(args[1])
-            mapping_schema["additionalProperties"] = value_schema
+            mapping_schema["additionalProperties"] = _type_to_schema(args[1])
         return mapping_schema
-        
+
     # Default to Any
     return {}
 
@@ -155,8 +187,7 @@ def generate_all_schemas() -> Dict[str, Dict[str, Any]]:
         "and number of trades."
     )
     
-    schemas["Ticker"] = Ticker.model_json_schema()
-    schemas["Ticker"]["title"] = "Ticker"
+    schemas["Ticker"] = dataclass_to_json_schema(Ticker, title="Ticker")
     schemas["Ticker"]["description"] = (
         "Market data tick with instrument metadata, price and volume information."
     )

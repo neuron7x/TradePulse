@@ -1,51 +1,35 @@
 # SPDX-License-Identifier: MIT
 """Canonical market data models used across TradePulse.
 
-The project historically relied on light-weight ``dataclass`` definitions for
-tick data.  As the ingestion stack grew, the lack of a shared contract for
-different market data shapes (ticks, OHLCV bars, aggregated metrics and
-derivatives) started to surface bugs.  This module introduces a strict
-Pydantic-powered schema that normalises how market data travels through the
-system while still remaining light-weight enough for analytics workloads.
+This module intentionally avoids heavyweight runtime dependencies so it can be
+used from lightweight ingestion scripts as well as the core application.  The
+previous iteration relied on ``pydantic`` for validation which introduced an
+optional dependency that is not available in minimal environments (and broke
+the test suite).  The implementation below keeps the strong validation
+semantics but expresses the models as frozen ``dataclass`` structures.
 
-The goal of this module is twofold:
-
-* Provide strongly-typed models with validation for common market payloads.
-* Encode instrument metadata (spot vs futures) in a consistent way.
-
-The models are frozen to make accidental mutation impossible.  All
-timestamps are normalised to timezone-aware ``datetime`` instances using the
-UTC timezone by default.  Consumers who need the exchange-local timestamp can
-use the helper utilities from :mod:`core.data.timeutils`.
+The helpers mirror the behaviour that the rest of the codebase expects from the
+``Ticker`` interface while adding dedicated classes for OHLCV bars and
+aggregated metrics.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from enum import Enum
-from typing import Annotated, Literal, Optional, Union
+from typing import Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-
-StrictPrice = Annotated[
-    Decimal,
-    Field(
-        ge=Decimal("0"),
-        max_digits=28,
-        decimal_places=12,
-        description="Non-negative monetary value",
-    ),
-]
-StrictVolume = Annotated[
-    Decimal,
-    Field(
-        ge=Decimal("0"),
-        max_digits=28,
-        decimal_places=12,
-        description="Non-negative traded size",
-    ),
+__all__ = [
+    "AggregateMetric",
+    "DataKind",
+    "InstrumentType",
+    "MarketDataPoint",
+    "MarketMetadata",
+    "OHLCVBar",
+    "PriceTick",
+    "Ticker",
 ]
 
 
@@ -64,31 +48,53 @@ class DataKind(str, Enum):
     AGGREGATE = "aggregate"
 
 
-class MarketMetadata(BaseModel):
+def _to_decimal(value: Union[Decimal, float, int, str]) -> Decimal:
+    """Convert arbitrary numeric inputs to ``Decimal`` safely."""
+
+    if isinstance(value, Decimal):
+        return value
+    # ``bool`` is a subclass of ``int`` – explicitly forbid it because it is
+    # almost always a bug when passed as a price/volume value.
+    if isinstance(value, bool):
+        raise TypeError("boolean values are not valid decimal inputs")
+    try:
+        return Decimal(str(value))
+    except (InvalidOperation, ValueError, TypeError) as exc:  # pragma: no cover - defensive guard
+        raise TypeError(f"Unable to convert {value!r} to Decimal") from exc
+
+
+@dataclass(frozen=True)
+class MarketMetadata:
     """Common metadata shared by all market data payloads."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_enum_values=True)
-
-    symbol: str = Field(min_length=1)
-    venue: str = Field(min_length=1)
+    symbol: str
+    venue: str
     instrument_type: InstrumentType = InstrumentType.SPOT
 
+    def __post_init__(self) -> None:
+        if not self.symbol:
+            raise ValueError("symbol must be a non-empty string")
+        if not self.venue:
+            raise ValueError("venue must be a non-empty string")
 
-class MarketDataPoint(BaseModel):
+
+@dataclass(frozen=True)
+class MarketDataPoint:
     """Base class for all market data records."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True, use_enum_values=True)
-
     metadata: MarketMetadata
-    timestamp: datetime = Field(description="UTC timestamp of the data point")
+    timestamp: datetime
     kind: DataKind
 
-    @field_validator("timestamp", mode="after")
-    @classmethod
-    def _ensure_timezone(cls, value: datetime) -> datetime:
-        if value.tzinfo is None:
-            return value.replace(tzinfo=timezone.utc)
-        return value.astimezone(timezone.utc)
+    def __post_init__(self) -> None:
+        ts = self.timestamp
+        if not isinstance(ts, datetime):
+            raise TypeError("timestamp must be a datetime instance")
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            ts = ts.astimezone(timezone.utc)
+        object.__setattr__(self, "timestamp", ts)
 
     @property
     def symbol(self) -> str:
@@ -107,13 +113,25 @@ class MarketDataPoint(BaseModel):
         return self.timestamp.timestamp()
 
 
+@dataclass(frozen=True)
 class PriceTick(MarketDataPoint):
     """Tick-level price update."""
 
-    kind: Literal[DataKind.TICK] = DataKind.TICK
-    price: StrictPrice
-    volume: StrictVolume = Field(default=Decimal("0"))
-    trade_id: Optional[str] = Field(default=None, description="Exchange trade identifier")
+    price: Decimal
+    volume: Decimal = Decimal("0")
+    trade_id: Optional[str] = None
+    kind: DataKind = field(default=DataKind.TICK, init=False)
+
+    def __post_init__(self) -> None:  # type: ignore[override]
+        super().__post_init__()
+        price = _to_decimal(self.price)
+        volume = _to_decimal(self.volume)
+        if price < 0:
+            raise ValueError("price must be non-negative")
+        if volume < 0:
+            raise ValueError("volume must be non-negative")
+        object.__setattr__(self, "price", price)
+        object.__setattr__(self, "volume", volume)
 
     @classmethod
     def create(
@@ -121,78 +139,91 @@ class PriceTick(MarketDataPoint):
         *,
         symbol: str,
         venue: str,
-        price: Union[Decimal, float, str],
+        price: Union[Decimal, float, int, str],
         timestamp: Union[datetime, float, int],
-        volume: Union[Decimal, float, str, None] = None,
+        volume: Union[Decimal, float, int, str, None] = None,
         instrument_type: InstrumentType = InstrumentType.SPOT,
         trade_id: Optional[str] = None,
     ) -> "PriceTick":
         """Factory helper that builds the metadata block for convenience."""
 
         meta = MarketMetadata(symbol=symbol, venue=venue, instrument_type=instrument_type)
-        vol = Decimal("0") if volume is None else Decimal(str(volume))
-        price_decimal = Decimal(str(price))
         if isinstance(timestamp, (int, float)):
             dt = datetime.fromtimestamp(float(timestamp), tz=timezone.utc)
         elif isinstance(timestamp, datetime):
             dt = timestamp
-        else:  # pragma: no cover - defensive path
+        else:
             raise TypeError("timestamp must be datetime or unix epoch")
+        vol_value: Union[Decimal, float, int, str]
+        if volume is None:
+            vol_value = Decimal("0")
+        else:
+            vol_value = volume
         return cls(
             metadata=meta,
             timestamp=dt,
-            price=price_decimal,
-            volume=vol,
+            price=_to_decimal(price),
+            volume=_to_decimal(vol_value),
             trade_id=trade_id,
         )
 
 
+@dataclass(frozen=True)
 class OHLCVBar(MarketDataPoint):
     """OHLCV bar representing aggregated price information."""
 
-    kind: Literal[DataKind.OHLCV] = DataKind.OHLCV
-    open: StrictPrice
-    high: StrictPrice
-    low: StrictPrice
-    close: StrictPrice
-    volume: StrictVolume
-    interval_seconds: int = Field(ge=1)
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal
+    interval_seconds: int
+    kind: DataKind = field(default=DataKind.OHLCV, init=False)
 
-    @model_validator(mode="after")
-    def _validate_bar(self) -> "OHLCVBar":
-        if self.high < self.low:
+    def __post_init__(self) -> None:  # type: ignore[override]
+        super().__post_init__()
+        open_price = _to_decimal(self.open)
+        high_price = _to_decimal(self.high)
+        low_price = _to_decimal(self.low)
+        close_price = _to_decimal(self.close)
+        volume = _to_decimal(self.volume)
+        if any(value < 0 for value in (open_price, high_price, low_price, close_price, volume)):
+            raise ValueError("OHLCV values must be non-negative")
+        if high_price < low_price:
             raise ValueError("high price must be greater or equal to low price")
-        if not (self.low <= self.open <= self.high):
+        if not (low_price <= open_price <= high_price):
             raise ValueError("open price must lie between low and high")
-        if not (self.low <= self.close <= self.high):
+        if not (low_price <= close_price <= high_price):
             raise ValueError("close price must lie between low and high")
-        return self
+        if self.interval_seconds < 1:
+            raise ValueError("interval_seconds must be positive")
+        object.__setattr__(self, "open", open_price)
+        object.__setattr__(self, "high", high_price)
+        object.__setattr__(self, "low", low_price)
+        object.__setattr__(self, "close", close_price)
+        object.__setattr__(self, "volume", volume)
 
 
+@dataclass(frozen=True)
 class AggregateMetric(MarketDataPoint):
     """Generic aggregated value produced from raw market data."""
 
-    kind: Literal[DataKind.AGGREGATE] = DataKind.AGGREGATE
-    metric: str = Field(min_length=1)
+    metric: str
     value: Decimal
-    window_seconds: int = Field(ge=1)
+    window_seconds: int
+    kind: DataKind = field(default=DataKind.AGGREGATE, init=False)
+
+    def __post_init__(self) -> None:  # type: ignore[override]
+        super().__post_init__()
+        if not self.metric:
+            raise ValueError("metric must be a non-empty string")
+        value = _to_decimal(self.value)
+        if self.window_seconds < 1:
+            raise ValueError("window_seconds must be positive")
+        object.__setattr__(self, "value", value)
 
 
-# Backwards compatibility export ------------------------------------------------
+# Backwards compatibility export ---------------------------------------------------------
 
-# ``Ticker`` used to be a ``dataclass`` consumed widely across the code base.
-# Re-export the new ``PriceTick`` under the legacy name so dependent modules
-# continue to work while benefitting from the stricter validation layer.
 Ticker = PriceTick
 
-
-__all__ = [
-    "AggregateMetric",
-    "DataKind",
-    "InstrumentType",
-    "MarketDataPoint",
-    "MarketMetadata",
-    "OHLCVBar",
-    "PriceTick",
-    "Ticker",
-]
