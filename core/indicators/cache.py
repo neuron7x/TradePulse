@@ -18,11 +18,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 import functools
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 import shutil
 import importlib
 import hmac
@@ -60,6 +61,10 @@ def _encode_structure(value: Any) -> Any:
         return {"__type__": "pd.Timestamp", "value": value.isoformat()}
     if isinstance(value, datetime):
         return {"__type__": "datetime", "value": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"__type__": "decimal", "value": format(value, "f")}
+    if isinstance(value, PurePath):
+        return {"__type__": "path", "value": str(value)}
     if is_dataclass(value):
         return {
             "__type__": "dataclass",
@@ -118,6 +123,10 @@ def _decode_structure(payload: Any) -> Any:
         return pd.Timestamp(payload["value"])
     if marker == "datetime":
         return datetime.fromisoformat(payload["value"])
+    if marker == "decimal":
+        return Decimal(payload["value"])
+    if marker == "path":
+        return Path(payload["value"])
     if marker == "dataclass":
         cls = _locate(payload["cls"])
         field_values = {key: _decode_structure(val) for key, val in payload["fields"].items()}
