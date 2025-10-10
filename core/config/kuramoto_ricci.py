@@ -1,19 +1,47 @@
-"""Structured configuration for Kuramoto–Ricci composite workflows."""
+# SPDX-License-Identifier: MIT
+"""Configuration utilities for the Kuramoto–Ricci analytics stack."""
+
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, MutableMapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Dict, Iterator
+from typing import Any, Callable, Dict
 
 import yaml
-from pydantic import BaseModel, BaseSettings, Field, ValidationError, root_validator, validator
-from pydantic.env_settings import SettingsSourceCallable
+from pydantic import BaseModel, Field, ValidationError
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import ConfigDict, field_validator, model_validator
+except ImportError:  # pragma: no cover - executed on pydantic < 2
+    ConfigDict = None  # type: ignore[assignment]
+    field_validator = None  # type: ignore[assignment]
+    model_validator = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import validator as v1_validator
+except ImportError:  # pragma: no cover - executed on pydantic >= 2
+    v1_validator = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import root_validator as v1_root_validator
+except ImportError:  # pragma: no cover - executed on pydantic >= 2
+    v1_root_validator = None  # type: ignore[assignment]
+
+if v1_validator is None:  # pragma: no cover - type checking helper
+    def v1_validator(*_: Any, **__: Any) -> Any:  # type: ignore[no-redef]
+        raise RuntimeError("Pydantic v1 validator helpers unavailable")
+
+if v1_root_validator is None:  # pragma: no cover - type checking helper
+    def v1_root_validator(*_: Any, **__: Any) -> Any:  # type: ignore[no-redef]
+        raise RuntimeError("Pydantic v1 root validator helpers unavailable")
 
 from core.indicators.multiscale_kuramoto import TimeFrame
 
 DEFAULT_CONFIG_PATH = Path("configs/kuramoto_ricci_composite.yaml")
+
+SettingsSource = Callable[[], Mapping[str, Any]]
 
 
 class ConfigError(ValueError):
@@ -22,6 +50,25 @@ class ConfigError(ValueError):
 
 class SettingsError(ValueError):
     """Raised when settings configuration cannot be resolved."""
+
+
+class ImmutableModel(BaseModel):
+    """Base model that is strict and immutable across Pydantic releases."""
+
+    if ConfigDict is not None:  # pragma: no branch - runtime flag
+        model_config = ConfigDict(extra="forbid", frozen=True)
+    else:
+        class Config:  # type: ignore[too-many-ancestors]
+            extra = "forbid"
+            allow_mutation = False
+
+
+def _parse_scalar(value: str) -> Any:
+    try:
+        parsed = yaml.safe_load(value)
+    except yaml.YAMLError:  # pragma: no cover - defensive guard
+        return value
+    return parsed
 
 
 def _parse_timeframe(value: Any) -> TimeFrame:
@@ -59,6 +106,75 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return entries
 
 
+def _normalise_mapping(payload: Mapping[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in payload.items():
+        normalized_key = key
+        if isinstance(key, str) and key.isupper():
+            normalized_key = key.lower()
+        if isinstance(value, Mapping):
+            result[str(normalized_key)] = _normalise_mapping(value)
+        else:
+            result[str(normalized_key)] = value
+    return result
+
+
+def _deep_update(target: MutableMapping[str, Any], updates: Mapping[str, Any]) -> MutableMapping[str, Any]:
+    for key, value in updates.items():
+        if isinstance(value, Mapping) and isinstance(target.get(key), MutableMapping):
+            _deep_update(target[key], value)  # type: ignore[index]
+        else:
+            target[key] = value  # type: ignore[index]
+    return target
+
+
+def _parse_env_variables(prefix: str, delimiter: str = "__") -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in os.environ.items():
+        if not key.startswith(prefix):
+            continue
+        remainder = key[len(prefix) :]
+        if remainder.startswith("_"):
+            remainder = remainder[1:]
+        parts = [segment.strip().lower() for segment in remainder.split(delimiter) if segment.strip()]
+        if not parts:
+            continue
+        cursor: MutableMapping[str, Any] = result
+        for segment in parts[:-1]:
+            next_value = cursor.get(segment)
+            if not isinstance(next_value, MutableMapping):
+                next_value = {}
+                cursor[segment] = next_value
+            cursor = next_value  # type: ignore[assignment]
+        cursor[parts[-1]] = _parse_scalar(value)
+    return result
+
+
+def _load_yaml_mapping(path: Path) -> dict[str, Any]:
+    try:
+        text = path.read_text(encoding="utf8")
+    except FileNotFoundError:
+        return {}
+    try:
+        payload = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
+        raise SettingsError(f"failed to parse YAML configuration at {path}: {exc}") from exc
+    if not isinstance(payload, Mapping):
+        raise SettingsError(f"configuration file {path} must define a mapping")
+    return _normalise_mapping(payload)
+
+
+def _resolve_config_path(*sources: Mapping[str, Any], default: Path | None = None) -> Path | None:
+    for source in sources:
+        if not source:
+            continue
+        candidate = source.get("config_file") or source.get("config")
+        if candidate is None:
+            continue
+        return Path(candidate).expanduser()
+    return default
+
+
 @contextmanager
 def _temporary_env_overrides(assignments: Mapping[str, str]) -> Iterator[None]:
     added_keys: list[str] = []
@@ -74,12 +190,8 @@ def _temporary_env_overrides(assignments: Mapping[str, str]) -> Iterator[None]:
             os.environ.pop(key, None)
 
 
-class KuramotoConfig(BaseModel):
+class KuramotoConfig(ImmutableModel):
     """Configuration payload for :class:`MultiScaleKuramoto`."""
-
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
 
     timeframes: tuple[TimeFrame, ...] = Field(
         default=(TimeFrame.M1, TimeFrame.M5, TimeFrame.M15, TimeFrame.H1),
@@ -100,37 +212,64 @@ class KuramotoConfig(BaseModel):
         description="Minimum number of samples required per analysed scale.",
     )
 
-    @root_validator(pre=True)
-    def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
-        if data is None:
-            return {}
-        if not isinstance(data, Mapping):
-            raise TypeError("kuramoto configuration must be a mapping")
-        payload = dict(data)
-        adaptive = payload.pop("adaptive_window", None)
-        if isinstance(adaptive, Mapping):
-            if "enabled" in adaptive and "use_adaptive_window" not in payload:
-                payload["use_adaptive_window"] = adaptive["enabled"]
-            if "base_window" in adaptive and "base_window" not in payload:
-                payload["base_window"] = adaptive["base_window"]
-        return payload
-
-    @validator("timeframes", pre=True)
-    def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
-        if value is None:
-            return value
-        if isinstance(value, (str, bytes)):
+    if field_validator is not None:
+        @field_validator("timeframes", mode="before")
+        def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
+            if value is None:
+                return value
+            if isinstance(value, (str, bytes)):
+                raise TypeError("kuramoto.timeframes must be a sequence")
+            if isinstance(value, Iterable):
+                sequence = tuple(_parse_timeframe(item) for item in value)
+                if not sequence:
+                    raise ValueError("kuramoto.timeframes cannot be empty")
+                return sequence
             raise TypeError("kuramoto.timeframes must be a sequence")
-        if isinstance(value, Iterable):
-            return tuple(_parse_timeframe(item) for item in value)
-        raise TypeError("kuramoto.timeframes must be a sequence")
 
-    @root_validator
-    def _ensure_timeframes_non_empty(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        timeframes = values.get("timeframes")
-        if not timeframes:
-            raise ValueError("kuramoto.timeframes cannot be empty")
-        return values
+        @model_validator(mode="before")
+        def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
+            if data is None:
+                return {}
+            if not isinstance(data, Mapping):
+                raise TypeError("kuramoto configuration must be a mapping")
+            payload = dict(data)
+            adaptive = payload.pop("adaptive_window", None)
+            if isinstance(adaptive, Mapping):
+                if "enabled" in adaptive and "use_adaptive_window" not in payload:
+                    payload["use_adaptive_window"] = adaptive["enabled"]
+                if "base_window" in adaptive and "base_window" not in payload:
+                    payload["base_window"] = adaptive["base_window"]
+            return payload
+
+    else:
+        @v1_validator("timeframes", pre=True)  # type: ignore[misc]
+        def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
+            if value is None:
+                return value
+            if isinstance(value, (str, bytes)):
+                raise TypeError("kuramoto.timeframes must be a sequence")
+            if isinstance(value, Iterable):
+                sequence = tuple(_parse_timeframe(item) for item in value)
+                if not sequence:
+                    raise ValueError("kuramoto.timeframes cannot be empty")
+                return sequence
+            raise TypeError("kuramoto.timeframes must be a sequence")
+
+        @v1_root_validator(pre=True)  # type: ignore[misc]
+        def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
+            if data is None:
+                return {}
+            if not isinstance(data, Mapping):
+                raise TypeError("kuramoto configuration must be a mapping")
+            payload = dict(data)
+            adaptive = payload.pop("adaptive_window", None)
+            if isinstance(adaptive, Mapping):
+                if "enabled" in adaptive and "use_adaptive_window" not in payload:
+                    payload["use_adaptive_window"] = adaptive["enabled"]
+                if "base_window" in adaptive and "base_window" not in payload:
+                    payload["base_window"] = adaptive["base_window"]
+            return payload
+
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -141,30 +280,18 @@ class KuramotoConfig(BaseModel):
         }
 
 
-class RicciTemporalConfig(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class RicciTemporalConfig(ImmutableModel):
     window_size: int = Field(default=100, gt=0)
     n_snapshots: int = Field(default=8, gt=0)
     retain_history: bool = Field(default=True)
 
 
-class RicciGraphConfig(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class RicciGraphConfig(ImmutableModel):
     n_levels: int = Field(default=20, gt=0)
     connection_threshold: float = Field(default=0.1, gt=0, lt=1)
 
 
-class RicciConfig(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class RicciConfig(ImmutableModel):
     temporal: RicciTemporalConfig = Field(default_factory=RicciTemporalConfig)
     graph: RicciGraphConfig = Field(default_factory=RicciGraphConfig)
 
@@ -178,11 +305,7 @@ class RicciConfig(BaseModel):
         }
 
 
-class CompositeThresholds(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class CompositeThresholds(ImmutableModel):
     R_strong_emergent: float = Field(default=0.8, ge=0, le=1)
     R_proto_emergent: float = Field(default=0.4, ge=0, le=1)
     coherence_min: float = Field(default=0.6, ge=0, le=1)
@@ -190,28 +313,17 @@ class CompositeThresholds(BaseModel):
     temporal_ricci: float = Field(default=-0.2)
     topological_transition: float = Field(default=0.7, ge=0, le=1)
 
-    @root_validator
-    def _validate_thresholds(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        strong = values.get("R_strong_emergent")
-        proto = values.get("R_proto_emergent")
-        if strong is not None and proto is not None and strong <= proto:
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        if self.R_strong_emergent <= self.R_proto_emergent:
             raise ValueError("R_strong_emergent must exceed R_proto_emergent")
-        return values
 
 
-class CompositeSignals(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class CompositeSignals(ImmutableModel):
     min_confidence: float = Field(default=0.5, ge=0, le=1)
 
 
-class CompositeConfig(BaseModel):
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
-
+class CompositeConfig(ImmutableModel):
     thresholds: CompositeThresholds = Field(default_factory=CompositeThresholds)
     signals: CompositeSignals = Field(default_factory=CompositeSignals)
 
@@ -227,12 +339,8 @@ class CompositeConfig(BaseModel):
         }
 
 
-class KuramotoRicciIntegrationConfig(BaseModel):
+class KuramotoRicciIntegrationConfig(ImmutableModel):
     """Composite configuration for the Kuramoto–Ricci integration workflow."""
-
-    class Config:
-        extra = "forbid"
-        allow_mutation = False
 
     kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
     ricci: RicciConfig = Field(default_factory=RicciConfig)
@@ -240,8 +348,11 @@ class KuramotoRicciIntegrationConfig(BaseModel):
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoRicciIntegrationConfig":
+        normalised = _normalise_mapping(data or {})
         try:
-            return cls.parse_obj(data or {})
+            if ConfigDict is not None:
+                return cls.model_validate(normalised)
+            return cls.parse_obj(normalised)
         except ValidationError as exc:  # pragma: no cover - error propagation
             messages = "; ".join(error["msg"] for error in exc.errors())
             raise ConfigError(messages) from exc
@@ -251,13 +362,8 @@ class KuramotoRicciIntegrationConfig(BaseModel):
         if path is None:
             return cls()
         payload_path = Path(path)
-        if not payload_path.exists():
-            raise FileNotFoundError(payload_path)
-        with payload_path.open("r", encoding="utf8") as handle:
-            loaded = yaml.safe_load(handle) or {}
-        if not isinstance(loaded, Mapping):
-            raise ConfigError("configuration file must define a mapping")
-        return cls.from_mapping(loaded)
+        payload = _load_yaml_mapping(payload_path)
+        return cls.from_mapping(payload)
 
     def to_engine_kwargs(self) -> dict[str, dict[str, Any]]:
         return {
@@ -273,77 +379,33 @@ class YamlSettingsSource:
     def __init__(
         self,
         settings_cls: type["TradePulseSettings"],
-        init_source: SettingsSourceCallable,
-        env_source: SettingsSourceCallable,
-        dotenv_source: SettingsSourceCallable | None = None,
+        init_source: SettingsSource,
+        env_source: SettingsSource,
+        dotenv_source: SettingsSource | None = None,
     ) -> None:
         self._settings_cls = settings_cls
         self._init_source = init_source
         self._env_source = env_source
         self._dotenv_source = dotenv_source
 
-    def __call__(self, settings: BaseSettings | None = None) -> dict[str, Any]:
-        config_path = self._resolve_path(settings)
+    def __call__(self) -> dict[str, Any]:
+        config_path = self._resolve_path()
         if config_path is None:
             return {}
-        try:
-            text = config_path.read_text(encoding="utf8")
-        except FileNotFoundError:
-            return {}
-        try:
-            payload = yaml.safe_load(text) or {}
-        except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
-            raise SettingsError(f"failed to parse YAML configuration at {config_path}: {exc}") from exc
-        if not isinstance(payload, Mapping):
-            raise SettingsError(f"configuration file {config_path} must define a mapping")
-        return dict(payload)
+        return _load_yaml_mapping(config_path)
 
-    def _resolve_path(self, settings: BaseSettings | None) -> Path | None:
-        for source in (self._init_source, self._env_source, self._dotenv_source):
-            if source is None:
-                continue
-            data = self._invoke_source(source, settings)
-            candidate = data.get("config_file") or data.get("config")
-            if candidate:
-                return Path(candidate).expanduser()
-
-        default_path = self._default_config_path()
-        if default_path is not None:
-            return default_path
-        return None
-
-    def _invoke_source(
-        self,
-        source: SettingsSourceCallable,
-        settings: BaseSettings | None,
-    ) -> Mapping[str, Any]:
-        if settings is not None:
-            try:
-                return source(settings)  # type: ignore[arg-type]
-            except TypeError:
-                pass
-            except Exception:  # pragma: no cover - defensive guard
-                return {}
-        try:
-            return source()  # type: ignore[call-arg]
-        except Exception:  # pragma: no cover - defensive guard
-            return {}
-
-    def _default_config_path(self) -> Path | None:
-        fields: Dict[str, Any] = {}
-        if hasattr(self._settings_cls, "model_fields"):
-            fields = getattr(self._settings_cls, "model_fields")
-        elif hasattr(self._settings_cls, "__fields__"):
-            fields = getattr(self._settings_cls, "__fields__")
-        field = fields.get("config_file")
-        default_value = getattr(field, "default", None)
-        if default_value:
-            return Path(default_value).expanduser()
-        return None
+    def _resolve_path(self) -> Path | None:
+        init_payload = _normalise_mapping(dict(self._init_source()))
+        env_payload = _normalise_mapping(dict(self._env_source()))
+        dotenv_payload: Mapping[str, Any] = {}
+        if self._dotenv_source is not None:
+            dotenv_payload = _normalise_mapping(dict(self._dotenv_source()))
+        default = self._settings_cls.default_config_path()
+        return _resolve_config_path(init_payload, env_payload, dotenv_payload, default=default)
 
 
-class TradePulseSettings(BaseSettings):
-    """Application-wide configuration powered by ``pydantic`` settings."""
+class TradePulseSettings(ImmutableModel):
+    """Application-wide configuration powered by layered sources."""
 
     config_file: Path | None = Field(
         default=DEFAULT_CONFIG_PATH,
@@ -353,49 +415,68 @@ class TradePulseSettings(BaseSettings):
     ricci: RicciConfig = Field(default_factory=RicciConfig)
     composite: CompositeConfig = Field(default_factory=CompositeConfig)
 
-    @root_validator(pre=True)
-    def _apply_config_alias(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        if "config" in values and "config_file" not in values:
-            values["config_file"] = values.pop("config")
-        return values
+    if field_validator is not None:
+        @field_validator("config_file", mode="before")
+        def _coerce_config_path(cls, value: Any) -> Path | None:
+            if value is None or isinstance(value, Path):
+                return value
+            return Path(str(value)).expanduser()
 
-    class Config:
-        env_prefix = "TRADEPULSE_"
-        env_nested_delimiter = "__"
-        extra = "ignore"
+        @model_validator(mode="before")
+        def _apply_config_alias(cls, data: Any) -> Mapping[str, Any]:
+            if data is None:
+                return {}
+            if not isinstance(data, Mapping):
+                raise TypeError("settings payload must be a mapping")
+            payload = dict(data)
+            if "config" in payload and "config_file" not in payload:
+                payload["config_file"] = payload.pop("config")
+            return payload
+    else:
+        @v1_validator("config_file", pre=True)  # type: ignore[misc]
+        def _coerce_config_path(cls, value: Any) -> Path | None:
+            if value is None or isinstance(value, Path):
+                return value
+            return Path(str(value)).expanduser()
 
-        @classmethod
-        def customise_sources(
-            cls,
-            init_settings: SettingsSourceCallable,
-            env_settings: SettingsSourceCallable,
-            file_secret_settings: SettingsSourceCallable,
-        ) -> tuple[SettingsSourceCallable, ...]:
-            yaml_source = YamlSettingsSource(TradePulseSettings, init_settings, env_settings)
-            return (
-                init_settings,
-                env_settings,
-                yaml_source,
-                file_secret_settings,
-            )
+        @v1_root_validator(pre=True)  # type: ignore[misc]
+        def _apply_config_alias(cls, data: Any) -> Mapping[str, Any]:
+            if data is None:
+                return {}
+            if not isinstance(data, Mapping):
+                raise TypeError("settings payload must be a mapping")
+            payload = dict(data)
+            if "config" in payload and "config_file" not in payload:
+                payload["config_file"] = payload.pop("config")
+            return payload
 
     @classmethod
-    def settings_customise_sources(
+    def default_config_path(cls) -> Path | None:
+        return DEFAULT_CONFIG_PATH
+
+    @classmethod
+    def load(
         cls,
-        settings_cls: type[BaseSettings],
-        init_settings: SettingsSourceCallable,
-        env_settings: SettingsSourceCallable,
-        dotenv_settings: SettingsSourceCallable,
-        file_secret_settings: SettingsSourceCallable,
-    ) -> tuple[SettingsSourceCallable, ...]:
-        yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
-        return (
-            init_settings,
-            env_settings,
-            dotenv_settings,
-            yaml_source,
-            file_secret_settings,
-        )
+        *,
+        cli_overrides: Mapping[str, Any] | None = None,
+        env_prefix: str = "TRADEPULSE_",
+        env_delimiter: str = "__",
+    ) -> "TradePulseSettings":
+        init_payload = _normalise_mapping(dict(cli_overrides or {}))
+        env_payload = _parse_env_variables(env_prefix, env_delimiter)
+        config_path = _resolve_config_path(init_payload, env_payload, default=cls.default_config_path())
+        yaml_payload: Mapping[str, Any] = {}
+        if config_path is not None:
+            yaml_payload = _load_yaml_mapping(config_path)
+        merged: dict[str, Any] = {}
+        _deep_update(merged, yaml_payload)
+        _deep_update(merged, env_payload)
+        _deep_update(merged, init_payload)
+        if config_path is not None:
+            merged.setdefault("config_file", config_path)
+        if ConfigDict is not None:
+            return cls.model_validate(merged)
+        return cls.parse_obj(merged)
 
     def as_kuramoto_ricci_config(self) -> KuramotoRicciIntegrationConfig:
         return KuramotoRicciIntegrationConfig(
@@ -424,10 +505,10 @@ def parse_cli_overrides(pairs: Sequence[str] | None) -> dict[str, Any]:
         if not parts:
             raise ConfigError("Override keys cannot be empty")
         for segment in parts[:-1]:
-            target = target.setdefault(segment, {})
-            if not isinstance(target, dict):
+            next_value = target.setdefault(segment, {})
+            if not isinstance(next_value, dict):
                 raise ConfigError(f"Override path '{key}' collides with a scalar value")
-        parsed_value: Any
+            target = next_value
         try:
             parsed_value = yaml.safe_load(value)
         except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
@@ -452,7 +533,7 @@ def load_kuramoto_ricci_config(
     if dotenv_path.exists():
         assignments = _parse_env_file(dotenv_path)
     with _temporary_env_overrides(assignments):
-        settings = TradePulseSettings(**overrides)
+        settings = TradePulseSettings.load(cli_overrides=overrides)
     return settings.as_kuramoto_ricci_config()
 
 

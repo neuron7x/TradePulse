@@ -20,7 +20,32 @@ from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Dict, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, StrictStr, root_validator, validator
+from pydantic import BaseModel, Field, StrictStr, root_validator
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import ConfigDict
+except ImportError:  # pragma: no cover - executed on pydantic < 2
+    ConfigDict = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import field_validator, field_serializer
+except ImportError:  # pragma: no cover - executed on pydantic < 2
+    field_validator = None  # type: ignore[assignment]
+    field_serializer = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import validator as v1_validator
+except ImportError:  # pragma: no cover - executed on pydantic >= 2
+    v1_validator = None  # type: ignore[assignment]
+
+try:  # pragma: no cover - runtime feature detection
+    from pydantic import model_validator
+except ImportError:  # pragma: no cover - executed on pydantic < 2
+    model_validator = None  # type: ignore[assignment]
+
+if v1_validator is None:  # pragma: no cover - type-checking helper
+    def v1_validator(*_: Any, **__: Any) -> Any:  # type: ignore[no-redef]
+        raise RuntimeError("Pydantic v1 validator unavailable")
 
 __all__ = [
     "AggregateMetric",
@@ -65,12 +90,29 @@ def _to_decimal(value: Union[Decimal, float, int, str]) -> Decimal:
 class _FrozenModel(BaseModel):
     """Base configuration shared by immutable market data models."""
 
-    class Config:
-        allow_mutation = False
-        anystr_strip_whitespace = True
-        extra = "forbid"
-        use_enum_values = False
-        json_encoders = {Decimal: str}
+    if ConfigDict is not None:  # pragma: no branch - simple feature flag
+        model_config = ConfigDict(
+            allow_mutation=False,
+            str_strip_whitespace=True,
+            extra="forbid",
+            use_enum_values=False,
+        )
+
+        if field_serializer is not None:
+            @field_serializer("*", when_used="json")
+            def _serialize_decimal(cls, value: Any) -> Any:
+                if isinstance(value, Decimal):
+                    return str(value)
+                return value
+    else:
+        # ``Config`` keeps backwards compatibility with Pydantic 1.x without
+        # triggering the deprecation warning emitted by v2 once it is removed.
+        class Config:  # type: ignore[too-many-ancestors]
+            allow_mutation = False
+            anystr_strip_whitespace = True
+            extra = "forbid"
+            use_enum_values = False
+            json_encoders = {Decimal: str}
 
 
 class MarketMetadata(_FrozenModel):
@@ -83,12 +125,20 @@ class MarketMetadata(_FrozenModel):
         description="Instrument category (spot or futures)",
     )
 
-    @validator("symbol", "venue")
-    def _ensure_non_empty(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("value must be a non-empty string")
-        return stripped
+    if field_validator is not None:
+        @field_validator("symbol", "venue", mode="after")
+        def _ensure_non_empty(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("value must be a non-empty string")
+            return stripped
+    else:
+        @v1_validator("symbol", "venue")  # type: ignore[misc]
+        def _ensure_non_empty(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("value must be a non-empty string")
+            return stripped
 
 
 class MarketDataPoint(_FrozenModel):
@@ -98,28 +148,52 @@ class MarketDataPoint(_FrozenModel):
     timestamp: datetime
     kind: DataKind
 
-    @validator("timestamp", pre=True)
-    def _coerce_timestamp(cls, value: Union[datetime, float, int]) -> datetime:
-        if isinstance(value, (int, float)):
-            dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
-        elif isinstance(value, datetime):
-            dt = value
-        else:  # pragma: no cover - defensive guard
-            raise TypeError("timestamp must be datetime or epoch seconds")
+    if field_validator is not None:
+        @field_validator("timestamp", mode="before")
+        def _coerce_timestamp(cls, value: Union[datetime, float, int]) -> datetime:
+            if isinstance(value, (int, float)):
+                dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            elif isinstance(value, datetime):
+                dt = value
+            else:  # pragma: no cover - defensive guard
+                raise TypeError("timestamp must be datetime or epoch seconds")
 
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        else:
-            dt = dt.astimezone(timezone.utc)
-        return dt
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            return dt
 
-    @validator("kind", pre=True)
-    def _ensure_kind(cls, value: Union[None, DataKind, str]) -> DataKind:
-        if value is None:
-            raise ValueError("kind must be provided")
-        if isinstance(value, DataKind):
-            return value
-        return DataKind(str(value))
+        @field_validator("kind", mode="before")
+        def _ensure_kind(cls, value: Union[None, DataKind, str]) -> DataKind:
+            if value is None:
+                raise ValueError("kind must be provided")
+            if isinstance(value, DataKind):
+                return value
+            return DataKind(str(value))
+    else:
+        @v1_validator("timestamp", pre=True)  # type: ignore[misc]
+        def _coerce_timestamp(cls, value: Union[datetime, float, int]) -> datetime:
+            if isinstance(value, (int, float)):
+                dt = datetime.fromtimestamp(float(value), tz=timezone.utc)
+            elif isinstance(value, datetime):
+                dt = value
+            else:  # pragma: no cover - defensive guard
+                raise TypeError("timestamp must be datetime or epoch seconds")
+
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            else:
+                dt = dt.astimezone(timezone.utc)
+            return dt
+
+        @v1_validator("kind", pre=True)  # type: ignore[misc]
+        def _ensure_kind(cls, value: Union[None, DataKind, str]) -> DataKind:
+            if value is None:
+                raise ValueError("kind must be provided")
+            if isinstance(value, DataKind):
+                return value
+            return DataKind(str(value))
 
     @property
     def symbol(self) -> str:
@@ -148,36 +222,68 @@ class PriceTick(MarketDataPoint):
     trade_id: Optional[str] = Field(default=None, description="Exchange trade identifier")
     kind: Literal[DataKind.TICK] = DataKind.TICK
 
-    @validator("price", pre=True)
-    def _coerce_price(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
-        if value is None:
-            raise ValueError("price must be provided")
-        try:
-            return _to_decimal(value)
-        except TypeError as exc:  # pragma: no cover - propagated via ValidationError
-            raise ValueError(str(exc)) from exc
+    if field_validator is not None:
+        @field_validator("price", mode="before")
+        def _coerce_price(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
+            if value is None:
+                raise ValueError("price must be provided")
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
 
-    @validator("volume", pre=True)
-    def _coerce_volume(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
-        if value is None:
-            return Decimal("0")
-        try:
-            return _to_decimal(value)
-        except TypeError as exc:  # pragma: no cover - propagated via ValidationError
-            raise ValueError(str(exc)) from exc
+        @field_validator("volume", mode="before")
+        def _coerce_volume(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
+            if value is None:
+                return Decimal("0")
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
 
-    @validator("price", "volume")
-    def _validate_non_negative(cls, value: Decimal) -> Decimal:
-        if value < 0:
-            raise ValueError("numeric values must be non-negative")
-        return value
+        @field_validator("price", "volume", mode="after")
+        def _validate_non_negative(cls, value: Decimal) -> Decimal:
+            if value < 0:
+                raise ValueError("numeric values must be non-negative")
+            return value
 
-    @validator("trade_id")
-    def _strip_trade_id(cls, value: Optional[str]) -> Optional[str]:
-        if value is None:
-            return None
-        stripped = value.strip()
-        return stripped or None
+        @field_validator("trade_id", mode="after")
+        def _strip_trade_id(cls, value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            stripped = value.strip()
+            return stripped or None
+    else:
+        @v1_validator("price", pre=True)  # type: ignore[misc]
+        def _coerce_price(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
+            if value is None:
+                raise ValueError("price must be provided")
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
+
+        @v1_validator("volume", pre=True)  # type: ignore[misc]
+        def _coerce_volume(cls, value: Union[Decimal, float, int, str, None]) -> Decimal:
+            if value is None:
+                return Decimal("0")
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
+
+        @v1_validator("price", "volume")  # type: ignore[misc]
+        def _validate_non_negative(cls, value: Decimal) -> Decimal:
+            if value < 0:
+                raise ValueError("numeric values must be non-negative")
+            return value
+
+        @v1_validator("trade_id")  # type: ignore[misc]
+        def _strip_trade_id(cls, value: Optional[str]) -> Optional[str]:
+            if value is None:
+                return None
+            stripped = value.strip()
+            return stripped or None
 
     @classmethod
     def create(
@@ -214,33 +320,61 @@ class OHLCVBar(MarketDataPoint):
     interval_seconds: int = Field(..., gt=0, description="Bar interval in seconds")
     kind: Literal[DataKind.OHLCV] = DataKind.OHLCV
 
-    @validator("open", "high", "low", "close", "volume", pre=True)
-    def _coerce_decimal_values(cls, value: Union[Decimal, float, int, str]) -> Decimal:
-        try:
-            return _to_decimal(value)
-        except TypeError as exc:  # pragma: no cover - propagated via ValidationError
-            raise ValueError(str(exc)) from exc
+    if field_validator is not None:
+        @field_validator("open", "high", "low", "close", "volume", mode="before")
+        def _coerce_decimal_values(cls, value: Union[Decimal, float, int, str]) -> Decimal:
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
 
-    @validator("open", "high", "low", "close", "volume")
-    def _validate_non_negative(cls, value: Decimal) -> Decimal:
-        if value < 0:
-            raise ValueError("OHLCV values must be non-negative")
-        return value
+        @field_validator("open", "high", "low", "close", "volume", mode="after")
+        def _validate_non_negative(cls, value: Decimal) -> Decimal:
+            if value < 0:
+                raise ValueError("OHLCV values must be non-negative")
+            return value
+    else:
+        @v1_validator("open", "high", "low", "close", "volume", pre=True)  # type: ignore[misc]
+        def _coerce_decimal_values(cls, value: Union[Decimal, float, int, str]) -> Decimal:
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
 
-    @root_validator
-    def _validate_price_relationships(cls, values: Dict[str, Any]) -> Dict[str, Any]:
-        low = values.get("low")
-        high = values.get("high")
-        open_price = values.get("open")
-        close_price = values.get("close")
-        if low is not None and high is not None and high < low:
+        @v1_validator("open", "high", "low", "close", "volume")  # type: ignore[misc]
+        def _validate_non_negative(cls, value: Decimal) -> Decimal:
+            if value < 0:
+                raise ValueError("OHLCV values must be non-negative")
+            return value
+
+    if model_validator is None:
+        @root_validator
+        def _validate_price_relationships(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+            low = values.get("low")
+            high = values.get("high")
+            open_price = values.get("open")
+            close_price = values.get("close")
+            if low is not None and high is not None and high < low:
+                raise ValueError("high price must be greater or equal to low price")
+            if low is not None and high is not None:
+                if open_price is not None and not (low <= open_price <= high):
+                    raise ValueError("open price must lie between low and high")
+                if close_price is not None and not (low <= close_price <= high):
+                    raise ValueError("close price must lie between low and high")
+            return values
+
+    def __init__(self, **data: Any) -> None:
+        super().__init__(**data)
+        low = self.low
+        high = self.high
+        open_price = self.open
+        close_price = self.close
+        if high < low:
             raise ValueError("high price must be greater or equal to low price")
-        if low is not None and high is not None:
-            if open_price is not None and not (low <= open_price <= high):
-                raise ValueError("open price must lie between low and high")
-            if close_price is not None and not (low <= close_price <= high):
-                raise ValueError("close price must lie between low and high")
-        return values
+        if open_price < low or open_price > high:
+            raise ValueError("open price must lie between low and high")
+        if close_price < low or close_price > high:
+            raise ValueError("close price must lie between low and high")
 
 
 class AggregateMetric(MarketDataPoint):
@@ -251,19 +385,34 @@ class AggregateMetric(MarketDataPoint):
     window_seconds: int = Field(..., gt=0, description="Window size in seconds")
     kind: Literal[DataKind.AGGREGATE] = DataKind.AGGREGATE
 
-    @validator("metric")
-    def _validate_metric(cls, value: str) -> str:
-        stripped = value.strip()
-        if not stripped:
-            raise ValueError("metric must be a non-empty string")
-        return stripped
+    if field_validator is not None:
+        @field_validator("metric", mode="after")
+        def _validate_metric(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("metric must be a non-empty string")
+            return stripped
 
-    @validator("value", pre=True)
-    def _coerce_value(cls, value: Union[Decimal, float, int, str]) -> Decimal:
-        try:
-            return _to_decimal(value)
-        except TypeError as exc:  # pragma: no cover - propagated via ValidationError
-            raise ValueError(str(exc)) from exc
+        @field_validator("value", mode="before")
+        def _coerce_value(cls, value: Union[Decimal, float, int, str]) -> Decimal:
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
+    else:
+        @v1_validator("metric")  # type: ignore[misc]
+        def _validate_metric(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise ValueError("metric must be a non-empty string")
+            return stripped
+
+        @v1_validator("value", pre=True)  # type: ignore[misc]
+        def _coerce_value(cls, value: Union[Decimal, float, int, str]) -> Decimal:
+            try:
+                return _to_decimal(value)
+            except TypeError as exc:  # pragma: no cover - propagated via ValidationError
+                raise ValueError(str(exc)) from exc
 
 
 # Backwards compatibility export ---------------------------------------------------------
