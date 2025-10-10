@@ -31,9 +31,11 @@ from .timeutils import (
     MarketCalendarRegistry,
     convert_timestamp,
     get_market_calendar,
+    get_timezone,
     is_market_open,
     normalize_timestamp,
     to_utc,
+    validate_bar_alignment,
 )
 
 __all__ = [
@@ -59,4 +61,6 @@ __all__ = [
     "is_market_open",
     "normalize_timestamp",
     "to_utc",
+    "get_timezone",
+    "validate_bar_alignment",
 ]

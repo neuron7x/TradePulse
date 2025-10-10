@@ -30,6 +30,8 @@ from typing import Iterable, List, Optional, Sequence
 
 import pandas as pd
 
+from core.data.timeutils import get_timezone
+
 try:  # pragma: no cover - exercised when pandera is installed
     import pandera as pa
     from pandera import Check, Column, DataFrameSchema
@@ -222,8 +224,8 @@ def _resolve_timezone(name: str) -> ZoneInfo:
     """Resolve the provided timezone name into a :class:`~zoneinfo.ZoneInfo` instance."""
 
     try:
-        return ZoneInfo(name)
-    except Exception as exc:  # pragma: no cover - zoneinfo raises ValueError/OSError
+        return get_timezone(name)
+    except ValueError as exc:
         raise TimeSeriesValidationError(f"Unknown timezone identifier: {name}") from exc
 
 
