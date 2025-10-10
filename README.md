@@ -2,9 +2,9 @@
 
 **Advanced algorithmic trading framework powered by geometric market indicators**
 
-[![Tests](https://github.com/neuron7x/TradePulse/workflows/Tests/badge.svg)](https://github.com/neuron7x/TradePulse/actions)
-[![Security](https://github.com/neuron7x/TradePulse/workflows/Security%20Scan/badge.svg)](https://github.com/neuron7x/TradePulse/actions)
-[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen.svg)](./TESTING.md)
+[![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml)
+[![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -12,23 +12,57 @@
 [![Async: asyncio](https://img.shields.io/badge/async-asyncio-green.svg)](https://docs.python.org/3/library/asyncio.html)
 [![Metrics: Prometheus](https://img.shields.io/badge/metrics-Prometheus-orange.svg)](https://prometheus.io/)
 
-TradePulse is a professional algorithmic trading platform that combines advanced mathematical indicators (Kuramoto synchronization, Ricci curvature, entropy metrics) with modern backtesting and execution capabilities. The framework emphasizes geometric and topological market analysis to detect regime transitions and generate trading signals.
+TradePulse is a professional algorithmic trading platform that combines advanced mathematical indicators (Kuramoto synchronization, Ricci curvature, entropy metrics) with modern backtesting and execution capabilities. The framework emphasizes geometric and topological market analysis to detect regime transitions and generate trading signals with confidence.
 
-**✨ Key Features:**
-- 🔬 **Advanced Indicators**: Kuramoto, Ricci curvature, entropy, Hurst exponent
-- ⚡ **Async Support**: Full async/await for data ingestion and processing
-- 🚀 **Performance Optimized**: Float32 precision, chunked processing, GPU acceleration
-- 📊 **Observability**: Structured JSON logging + Prometheus metrics
-- 🔒 **Type Safe**: 100% type hints with mypy validation
-- 🧪 **Well Tested**: 192 tests with 98% coverage
-- 📚 **Documentation**: API docs, tutorials, Jupyter notebooks
-- 🔐 **Secure**: Automated security scanning and secret detection
+---
+
+## 📚 Table of Contents
+
+- [Overview](#-overview)
+- [Continuous Integration & Quality](#-continuous-integration--quality)
+- [Quick Start](#-quick-start)
+- [Feature Highlights](#-feature-highlights)
+- [Documentation](#-documentation)
+- [Usage Examples](#-usage-examples)
+- [Testing](#-testing)
+- [Architecture](#-architecture)
+- [Security](#-security)
+- [Monitoring](#-monitoring)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Acknowledgments](#-acknowledgments)
+- [Contact](#-contact)
+
+---
+
+## 🔍 Overview
+
+TradePulse delivers end-to-end tooling for quantitative research teams:
+
+- High-fidelity indicators derived from differential geometry and dynamical systems.
+- Walk-forward backtesting and live execution loops powered by async pipelines.
+- GPU-accelerated performance primitives and observability baked in.
+- A cross-language architecture spanning Python and Go for mission-critical workloads.
+
+Whether you are prototyping strategies or orchestrating production trading bots, TradePulse provides production-ready scaffolding that remains flexible for experimentation.
+
+---
+
+## ✅ Continuous Integration & Quality
+
+| Signal | Description |
+| --- | --- |
+| [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml) | Pytest suite covering unit, integration, async, fuzz and property-based checks. |
+| [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Codecov uploads the latest coverage.xml artifact from CI for transparent coverage tracking. |
+| [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Automated secret detection, dependency auditing, and supply-chain checks. |
+
+Additional badges above surface Python support, static analysis (ruff, mypy), and observability integrations (Prometheus). For deeper insight into release readiness, review [`reports/`](reports/) for CI health, security posture, and technical debt snapshots.
 
 ---
 
 ## 🚀 Quick Start
 
-### Installation with pip
+### Installation with `pip`
 
 ```bash
 # Clone the repository
@@ -39,7 +73,7 @@ cd TradePulse
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install runtime dependencies (skip if you only need dev setup below)
+# Install runtime dependencies (skip if you only need the dev stack)
 pip install -r requirements.txt
 
 # Install development & test dependencies (includes runtime stack)
@@ -59,145 +93,81 @@ docker compose logs -f
 docker compose down
 ```
 
-See [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructions.
+See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructions, including GPU setup and troubleshooting tips.
 
 ---
 
-## 📋 Features
+## 🌟 Feature Highlights
 
-### Core Indicators
-- **Kuramoto Synchronization**: Phase coherence analysis for market synchronization detection
-- **Ricci Curvature**: Geometric curvature analysis on price graphs for regime detection
-- **Entropy Metrics**: Shannon entropy and delta entropy for market uncertainty quantification
-- **Hurst Exponent**: Long-memory process detection and trend persistence analysis
-- **VPIN (Volume-Synchronized Probability of Informed Trading)**: Order flow toxicity metrics
+### Advanced Indicators
+- **Kuramoto Synchronization**: Phase coherence analysis for market synchronization detection.
+- **Ricci Curvature**: Geometric curvature analysis on price graphs for regime detection.
+- **Entropy Metrics**: Shannon entropy and delta entropy for market uncertainty quantification.
+- **Hurst Exponent**: Long-memory process detection and trend persistence analysis.
+- **VPIN (Volume-Synchronized Probability of Informed Trading)**: Order flow toxicity metrics.
 
 ### Trading Capabilities
-- **Walk-forward Backtesting**: Realistic simulation with configurable windows
-- **Risk Management**: Position sizing, stop-loss, take-profit automation
-- **Multi-strategy Support**: Genetic algorithm-driven strategy optimization
-- **Async Data Ingestion**: Full async/await support for CSV and streaming data
-- **Real-time Execution**: Live trading interface with multiple data sources
+- **Walk-forward Backtesting**: Realistic simulation with configurable windows.
+- **Risk Management**: Position sizing, stop-loss, take-profit automation.
+- **Multi-strategy Support**: Genetic algorithm-driven strategy optimization.
+- **Async Data Ingestion**: Full async/await support for CSV and streaming data.
+- **Real-time Execution**: Live trading interface with multiple data sources.
 
 ### Observability & Operations
-- **Structured JSON Logging**: Correlation IDs, operation tracking, hierarchical logging
-- **Prometheus Metrics**: Complete instrumentation of features, backtests, data pipelines
-- **Performance Profiling**: Automatic execution time tracking for all critical functions
-- **JSON Schemas**: Auto-generated schemas for all public payloads (OpenAPI compatible)
-- **Security Scanning**: Automated secret detection and dependency vulnerability checks
-- **Type Safety**: 100% type hints with strict mypy validation (0 errors)
+- **Structured JSON Logging**: Correlation IDs, operation tracking, hierarchical logging.
+- **Prometheus Metrics**: Complete instrumentation of features, backtests, data pipelines.
+- **Performance Profiling**: Automatic execution time tracking for critical functions.
+- **JSON Schemas**: Auto-generated schemas for public payloads (OpenAPI compatible).
+- **Security Scanning**: Automated secret detection and dependency vulnerability checks.
+- **Type Safety**: Strict mypy validation across Python modules.
 
 ### Performance Optimization
-- **Float32 Precision**: 50% memory reduction with minimal accuracy loss
-- **Chunked Processing**: Handle unlimited dataset sizes efficiently
-- **GPU Acceleration**: CuPy integration for phase computation (5-50x speedup)
-- **Memory Profiling**: Built-in tools for identifying memory bottlenecks
-- **Production Ready**: Optimized for large-scale data processing
+- **Float32 Precision**: 50% memory reduction with minimal accuracy loss.
+- **Chunked Processing**: Efficiently handle unlimited dataset sizes.
+- **GPU Acceleration**: CuPy integration for phase computation (5-50x speedup).
+- **Memory Profiling**: Built-in tools for identifying memory bottlenecks.
+- **Production Ready**: Optimized for large-scale data processing.
 
-### Architecture
-- **Contracts-first Design**: Protocol Buffers for all data interfaces
-- **Fractal Modular Architecture (FPM-A)**: Clean separation of concerns
-- **Microservices Ready**: Go engines for performance-critical components
-- **Python Execution Loop**: Flexible strategy development and backtesting
+### Architecture Principles
+- **Contracts-first Design**: Protocol Buffers for all data interfaces.
+- **Fractal Modular Architecture (FPM-A)**: Clean separation of concerns.
+- **Microservices Ready**: Go engines for performance-critical components.
+- **Python Execution Loop**: Flexible strategy development and backtesting.
 
 ---
 
 ## 📖 Documentation
 
 ### Getting Started
-- [Quick Start Guide](docs/quickstart.md) - Get up and running in 5 minutes
-- [Installation Guide](docs/installation.md) - Detailed installation instructions
-- [Architecture Overview](docs/ARCHITECTURE.md) - System design and principles
-- [Roadmap](docs/roadmap.md) - Development map aligned with quarterly goals
-- [FAQ](docs/faq.md) - Frequently asked questions
-- [Troubleshooting](docs/troubleshooting.md) - Common issues and solutions
+- [Quick Start Guide](docs/quickstart.md) – Get up and running in minutes.
+- [Installation Guide](docs/installation.md) – Detailed installation instructions.
+- [Architecture Overview](docs/ARCHITECTURE.md) – System design and principles.
+- [Roadmap](docs/roadmap.md) – Development map aligned with quarterly goals.
+- [FAQ](docs/faq.md) – Frequently asked questions.
+- [Troubleshooting](docs/troubleshooting.md) – Common issues and solutions.
 
 ### Core Documentation
-- [Indicators](docs/indicators.md) - Mathematical indicators and their usage
-- [Backtesting](docs/backtest.md) - Walk-forward simulation and testing
-- [Execution](docs/execution.md) - Order execution and risk management
-- [Agent System](docs/agent.md) - Genetic algorithm strategy optimization
-- **[Performance Guide](docs/performance.md)** - Optimization techniques and best practices
+- [Indicators](docs/indicators.md) – Mathematical indicators and their usage.
+- [Backtesting](docs/backtest.md) – Walk-forward simulation and testing.
+- [Execution](docs/execution.md) – Order execution and risk management.
+- [Agent System](docs/agent.md) – Genetic algorithm strategy optimization.
+- **[Performance Guide](docs/performance.md)** – Optimization techniques and best practices.
 
 ### Developer Guides
-- [Contributing](CONTRIBUTING.md) - Contribution guidelines and workflow
-- [Testing Guide](TESTING.md) - Comprehensive testing documentation
-- [Extending TradePulse](docs/extending.md) - Adding new indicators and strategies
-- [Integration API](docs/integration-api.md) - API reference and integration patterns
-- [Developer Scenarios](docs/scenarios.md) - Common development tasks
+- [Contributing](CONTRIBUTING.md) – Contribution guidelines and workflow.
+- [Testing Guide](TESTING.md) – Comprehensive testing documentation.
+- [Extending TradePulse](docs/extending.md) – Adding new indicators and strategies.
+- [Integration API](docs/integration-api.md) – API reference and integration patterns.
+- [Developer Scenarios](docs/scenarios.md) – Common development tasks.
 
 ### Operations
-- [Security Policy](SECURITY.md) - Security guidelines and vulnerability reporting
-- [Monitoring Guide](docs/monitoring.md) - Metrics, logging, and alerting
-- [Deployment](docs/deployment.md) - Production deployment guide
+- [Security Policy](SECURITY.md) – Security guidelines and vulnerability reporting.
+- [Monitoring Guide](docs/monitoring.md) – Metrics, logging, and alerting.
+- [Deployment](docs/deployment.md) – Production deployment guide.
 
 ---
 
-## 🧪 Testing
-
-Comprehensive test suite with **98% coverage**:
-
-- **Unit Tests**: Individual module tests (100+ tests)
-- **Integration Tests**: End-to-end workflow tests (20+ tests)
-- **Property-Based Tests**: Hypothesis-driven invariant testing (40+ tests)
-- **Async Tests**: Asynchronous data processing tests (10+ tests)
-- **Fuzz Tests**: Robustness testing with malformed inputs (15+ tests)
-- **Performance Tests**: Stress testing with large datasets (10+ tests)
-
-**Total: 192 tests, all passing**
-- **Property-Based Tests**: Hypothesis-driven invariant testing
-- **Fuzz Tests**: Malformed data and edge case handling
-- **Performance Tests**: Large dataset stress testing
-
-### Quick Test Commands
-
-```bash
-# Run all tests
-pytest tests/
-
-# Run with coverage
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=html
-
-# Skip slow tests during development
-pytest tests/ -m "not slow"
-
-# Run only property-based tests
-pytest tests/property/
-
-# Run only integration tests
-pytest tests/integration/
-```
-
-See [TESTING.md](TESTING.md) for comprehensive testing documentation.
-
----
-
-## 📊 Architecture Overview
-
-```
-TradePulse/
-├── core/               # Core trading logic
-│   ├── indicators/     # Mathematical indicators
-│   ├── agent/          # Strategy optimization
-│   ├── data/           # Data ingestion and preprocessing
-│   └── phase/          # Market regime detection
-├── backtest/           # Backtesting engine
-├── execution/          # Order execution and risk management
-├── interfaces/         # CLI and API interfaces
-├── markets/            # Market-specific engines (Go)
-│   ├── vpin/           # VPIN calculator
-│   └── orderbook/      # Order book analyzer
-├── analytics/          # Analytics engines (Go)
-│   ├── fpma/           # FPM-A complexity analyzer
-│   └── regime/         # Regime detection service
-├── apps/               # Web applications
-│   └── web/            # Next.js dashboard
-└── docs/               # Documentation
-```
-
----
-
-## 🎯 Usage Examples
+## 🛠️ Usage Examples
 
 ### Analyze Market Data
 
@@ -231,8 +201,8 @@ large_data = np.random.randn(1_000_000)
 # Memory-efficient processing with float32 (50% memory savings)
 entropy_feat = EntropyFeature(
     bins=50,
-    use_float32=True,        # Reduce memory usage
-    chunk_size=100_000       # Process in chunks
+    use_float32=True,
+    chunk_size=100_000,
 )
 
 # Compute indicators
@@ -242,7 +212,7 @@ print(f"Entropy: {result.value:.4f}")
 # Scale data efficiently
 scaled = scale_series(large_data, use_float32=True)
 
-# See docs/performance.md for complete guide
+# See docs/performance.md for the complete guide
 ```
 
 ### Live Trading (Demo)
@@ -256,7 +226,59 @@ See [Usage Examples](docs/examples/) and [Performance Demo](examples/performance
 
 ---
 
-## 🔒 Security
+## 🧪 Testing
+
+TradePulse relies on an extensive pytest testbed covering unit, integration, property-based, async, fuzz, and performance scenarios. The latest results and coverage are always available from the CI badges above, and full reports (HTML coverage, `coverage.xml`) are attached to each successful build.
+
+### Quick Commands
+
+```bash
+# Run all tests
+pytest tests/
+
+# Run with coverage and HTML report
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html
+
+# Skip slow tests during development
+pytest tests/ -m "not slow"
+
+# Run only property-based tests
+pytest tests/property/
+
+# Run only integration tests
+pytest tests/integration/
+```
+
+Refer to [TESTING.md](TESTING.md) and [TESTING_SUMMARY.md](TESTING_SUMMARY.md) for deeper insights into coverage targets, fixtures, and workflow integration.
+
+---
+
+## 🧱 Architecture
+
+```
+TradePulse/
+├── core/               # Core trading logic
+│   ├── indicators/     # Mathematical indicators
+│   ├── agent/          # Strategy optimization
+│   ├── data/           # Data ingestion and preprocessing
+│   └── phase/          # Market regime detection
+├── backtest/           # Backtesting engine
+├── execution/          # Order execution and risk management
+├── interfaces/         # CLI and API interfaces
+├── markets/            # Market-specific engines (Go)
+│   ├── vpin/           # VPIN calculator
+│   └── orderbook/      # Order book analyzer
+├── analytics/          # Analytics engines (Go)
+│   ├── fpma/           # FPM-A complexity analyzer
+│   └── regime/         # Regime detection service
+├── apps/               # Web applications
+│   └── web/            # Next.js dashboard
+└── docs/               # Documentation
+```
+
+---
+
+## 🔐 Security
 
 TradePulse takes security seriously. Please see [SECURITY.md](SECURITY.md) for:
 - Vulnerability disclosure process
@@ -274,7 +296,7 @@ The framework includes built-in monitoring capabilities:
 - Alert definitions for critical events
 - Grafana dashboard templates
 
-See [Monitoring Guide](docs/monitoring.md) for setup and configuration.
+See the [Monitoring Guide](docs/monitoring.md) for setup and configuration details.
 
 ---
 
@@ -290,7 +312,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License – see the [LICENSE](LICENSE) file for details.
 
 ---
 
@@ -310,4 +332,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**TradePulse** - Готово до GitHub: лінт, тести, CI | Ready for production: linted, tested, CI/CD
+**TradePulse** – готово до GitHub: лінт, тести, CI | Ready for production: linted, tested, CI/CD
