@@ -16,19 +16,20 @@ large research/replay systems (QuantConnect, Backtrader, etc.).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import UTC, datetime
 import builtins
+from dataclasses import dataclass, fields, is_dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
 import functools
 import hashlib
 import json
 import os
-# Pickle import required for cache serialization hardened with restricted unpickler.
-import pickle  # nosec B403
-from pathlib import Path
+import pickle  # nosec B403 - guarded by restricted unpickler
+from pathlib import Path, PurePath
 import shutil
 import importlib
 import hmac
+import enum
 from typing import Any, Callable, Mapping, MutableMapping, Sequence, TYPE_CHECKING
 
 import numpy as np
@@ -39,26 +40,115 @@ from core.utils.logging import get_logger
 if TYPE_CHECKING:  # pragma: no cover - used only for type checking
     from .multiscale_kuramoto import TimeFrame
 
-
 _logger = get_logger(__name__)
 
+def _qualified_name(obj: type) -> str:
+    return f"{obj.__module__}:{obj.__qualname__}"
 
-def _normalize_json(value: Any) -> Any:
-    """Convert arbitrary Python objects into JSON-friendly structures."""
+def _sorted_json(value: Any) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+def _encode_structure(value: Any) -> Any:
+    """Encode arbitrary Python objects into a JSON-friendly payload."""
 
     if isinstance(value, (str, int, float, bool)) or value is None:
         return value
-    if isinstance(value, np.generic):  # numpy scalar
+    if isinstance(value, np.generic):
         return value.item()
+    if isinstance(value, pd.Timestamp):
+        return {"__type__": "pd.Timestamp", "value": value.isoformat()}
+    if isinstance(value, datetime):
+        return {"__type__": "datetime", "value": value.isoformat()}
+    if isinstance(value, Decimal):
+        return {"__type__": "decimal", "value": format(value, "f")}
+    if isinstance(value, PurePath):
+        return {"__type__": "path", "value": str(value)}
+    if is_dataclass(value):
+        return {
+            "__type__": "dataclass",
+            "cls": _qualified_name(type(value)),
+            "fields": {field.name: _encode_structure(getattr(value, field.name)) for field in fields(value)},
+        }
+    if isinstance(value, enum.Enum):
+        return {
+            "__type__": "enum",
+            "cls": _qualified_name(type(value)),
+            "name": value.name,
+        }
     if isinstance(value, Mapping):
-        return {str(key): _normalize_json(value[key]) for key in sorted(value)}
+        encoded_items = [
+            (_encode_structure(key), _encode_structure(val)) for key, val in value.items()
+        ]
+        encoded_items.sort(key=lambda item: _sorted_json(item[0]))
+        return {
+            "__type__": "mapping",
+            "items": [[key, val] for key, val in encoded_items],
+        }
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
-        return [_normalize_json(item) for item in value]
-    if hasattr(value, "name") and hasattr(value, "value"):
-        # Enum support – record both name and value for readability
-        return {"__enum__": value.__class__.__name__, "name": value.name, "value": value.value}
-    return repr(value)
+        kind = type(value).__name__
+        encoded_items = [_encode_structure(item) for item in value]
+        if isinstance(value, (set, frozenset)):
+            encoded_items.sort(key=_sorted_json)
+        return {
+            "__type__": "sequence",
+            "kind": kind,
+            "items": encoded_items,
+        }
+    return {"__type__": "repr", "value": repr(value)}
 
+def _locate(symbol: str) -> type[Any]:
+    module_name, _, qualname = symbol.partition(":")
+    module = importlib.import_module(module_name)
+    attr: Any = module
+    for part in qualname.split("."):
+        attr = getattr(attr, part)
+    return attr
+
+def _decode_structure(payload: Any) -> Any:
+    """Decode payloads produced by :func:`_encode_structure`."""
+
+    if isinstance(payload, (str, int, float, bool)) or payload is None:
+        return payload
+    if isinstance(payload, list):
+        return [_decode_structure(item) for item in payload]
+    if not isinstance(payload, Mapping):
+        return payload
+
+    marker = payload.get("__type__")
+    if marker == "pd.Timestamp":
+        return pd.Timestamp(payload["value"])
+    if marker == "datetime":
+        return datetime.fromisoformat(payload["value"])
+    if marker == "decimal":
+        return Decimal(payload["value"])
+    if marker == "path":
+        return Path(payload["value"])
+    if marker == "dataclass":
+        cls = _locate(payload["cls"])
+        field_values = {key: _decode_structure(val) for key, val in payload["fields"].items()}
+        return cls(**field_values)
+    if marker == "enum":
+        cls = _locate(payload["cls"])
+        return getattr(cls, payload["name"])
+    if marker == "mapping":
+        return {
+            _decode_structure(key): _decode_structure(val)
+            for key, val in payload.get("items", [])
+        }
+    if marker == "sequence":
+        kind = payload.get("kind")
+        items = [_decode_structure(item) for item in payload.get("items", [])]
+        if kind == "tuple":
+            return tuple(items)
+        if kind == "set":
+            return set(items)
+        if kind == "frozenset":
+            return frozenset(items)
+        return items
+    if marker == "repr":
+        return payload["value"]
+
+    return {str(key): _decode_structure(value) for key, value in payload.items()}
 
 def make_fingerprint(
     indicator_name: str,
@@ -70,13 +160,12 @@ def make_fingerprint(
 
     payload = {
         "indicator": indicator_name,
-        "params": _normalize_json(params),
+        "params": _encode_structure(params),
         "data_hash": data_hash,
         "code_version": code_version,
     }
     raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
 
 def hash_input_data(data: Any) -> str:
     """Hash arbitrary indicator input data."""
@@ -91,15 +180,16 @@ def hash_input_data(data: Any) -> str:
         arr = np.ascontiguousarray(data)
         return hashlib.sha256(arr.tobytes()).hexdigest()
     if isinstance(data, Mapping):
-        normalized = _normalize_json(data)
+        normalized = _encode_structure(data)
         raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
     if isinstance(data, Sequence) and not isinstance(data, (str, bytes, bytearray)):
-        normalized = [_normalize_json(item) for item in data]
+        normalized = [_encode_structure(item) for item in data]
         raw = json.dumps(normalized, sort_keys=False, separators=(",", ":"))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    return hashlib.sha256(pickle.dumps(data)).hexdigest()
-
+    normalized = _encode_structure(data)
+    raw = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 def _resolve_code_version() -> str:
     """Best-effort resolution of the current code version."""
@@ -123,7 +213,6 @@ def _resolve_code_version() -> str:
 
     return "0.0.0"
 
-
 @dataclass(slots=True)
 class CacheRecord:
     """Materialized cache entry."""
@@ -135,7 +224,6 @@ class CacheRecord:
     coverage_end: datetime | None
     stored_at: datetime
 
-
 @dataclass(slots=True)
 class BackfillState:
     """Book-keeping for incremental backfill per timeframe."""
@@ -145,7 +233,6 @@ class BackfillState:
     fingerprint: str | None
     updated_at: datetime
     extras: Mapping[str, Any]
-
 
 class FileSystemIndicatorCache:
     """Disk-backed cache that stores indicator outputs per timeframe."""
@@ -167,14 +254,14 @@ class FileSystemIndicatorCache:
 
     # ------------------------------------------------------------------ helpers
     @staticmethod
-    def _timeframe_key(timeframe: TimeFrame | str | None) -> str:
+    def _timeframe_key(timeframe: 'TimeFrame | str | None') -> str:
         if timeframe is None:
             return "_global"
         if hasattr(timeframe, "name"):
             return str(getattr(timeframe, "name"))
         return str(timeframe)
 
-    def _entry_dir(self, timeframe: TimeFrame | str | None, fingerprint: str) -> Path:
+    def _entry_dir(self, timeframe: 'TimeFrame | str | None', fingerprint: str) -> Path:
         timeframe_dir = self.root / self._timeframe_key(timeframe)
         return timeframe_dir / fingerprint
 
@@ -197,27 +284,30 @@ class FileSystemIndicatorCache:
                 value.to_parquet(file_path)
                 return file_path.name, "parquet", self._file_digest(file_path)
             except Exception:  # pragma: no cover - optional dependency
-                file_path = data_path.with_suffix(".pkl")
-                value.to_pickle(file_path)
-                return file_path.name, "pickle", self._file_digest(file_path)
+                file_path = data_path.with_suffix(".json")
+                value.to_json(file_path, orient="split", date_format="iso")
+                return file_path.name, "dataframe-json", self._file_digest(file_path)
         if isinstance(value, pd.Series):
             try:
                 file_path = data_path.with_suffix(".parquet")
                 value.to_frame(name=value.name).to_parquet(file_path)
                 return file_path.name, "parquet", self._file_digest(file_path)
             except Exception:  # pragma: no cover
-                file_path = data_path.with_suffix(".pkl")
-                value.to_pickle(file_path)
-                return file_path.name, "pickle", self._file_digest(file_path)
+                file_path = data_path.with_suffix(".json")
+                value.to_frame(name=value.name).to_json(
+                    file_path, orient="split", date_format="iso"
+                )
+                return file_path.name, "series-json", self._file_digest(file_path)
         if isinstance(value, np.ndarray):
             file_path = data_path.with_suffix(".npy")
             np.save(file_path, value)
             return file_path.name, "numpy", self._file_digest(file_path)
 
-        file_path = data_path.with_suffix(".pkl")
-        with file_path.open("wb") as handle:
-            pickle.dump(value, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        return file_path.name, "pickle", self._file_digest(file_path)
+        file_path = data_path.with_suffix(".json")
+        normalized = _encode_structure(value)
+        with file_path.open("w", encoding="utf-8") as handle:
+            json.dump(normalized, handle, sort_keys=True)
+        return file_path.name, "json", self._file_digest(file_path)
 
     @staticmethod
     def _restricted_unpickle(handle: Any) -> Any:
@@ -280,9 +370,16 @@ class FileSystemIndicatorCache:
             return pd.read_parquet(path)
         if fmt == "numpy":
             return np.load(path, allow_pickle=False)
-        if fmt == "pickle":
-            with path.open("rb") as handle:
-                return self._restricted_unpickle(handle)
+        if fmt == "dataframe-json":
+            return pd.read_json(path, orient="split")
+        if fmt == "series-json":
+            frame = pd.read_json(path, orient="split")
+            series = frame.iloc[:, 0]
+            series.name = frame.columns[0]
+            return series
+        if fmt == "json":
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return _decode_structure(payload)
         raise ValueError(f"Unsupported cache format '{fmt}'")
 
     # ---------------------------------------------------------------- fingerprint
@@ -309,7 +406,7 @@ class FileSystemIndicatorCache:
         params: Mapping[str, Any],
         data_hash: str,
         value: Any,
-        timeframe: TimeFrame | str | None = None,
+        timeframe: 'TimeFrame | str | None' = None,
         coverage_start: datetime | str | None = None,
         coverage_end: datetime | str | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -333,7 +430,7 @@ class FileSystemIndicatorCache:
         payload: MutableMapping[str, Any] = {
             "fingerprint": fingerprint,
             "indicator": indicator_name,
-            "params": _normalize_json(params),
+            "params": _encode_structure(params),
             "data_hash": data_hash,
             "code_version": code_version or self.code_version,
             "timeframe": self._timeframe_key(timeframe),
@@ -347,7 +444,7 @@ class FileSystemIndicatorCache:
             "coverage_end": (
                 coverage_end.isoformat() if isinstance(coverage_end, datetime) else coverage_end
             ),
-            "metadata": _normalize_json(metadata or {}),
+            "metadata": _encode_structure(metadata or {}),
         }
 
         with (directory / "metadata.json").open("w", encoding="utf-8") as handle:
@@ -369,7 +466,7 @@ class FileSystemIndicatorCache:
         indicator_name: str,
         params: Mapping[str, Any],
         data_hash: str,
-        timeframe: TimeFrame | str | None = None,
+        timeframe: 'TimeFrame | str | None' = None,
         code_version: str | None = None,
     ) -> CacheRecord | None:
         fingerprint = self.fingerprint(
@@ -413,9 +510,11 @@ class FileSystemIndicatorCache:
         )
         stored_at = datetime.fromisoformat(meta["stored_at"])
 
+        metadata = _decode_structure(meta.get("metadata", {}))
+
         return CacheRecord(
             value=value,
-            metadata=meta.get("metadata", {}),
+            metadata=metadata,
             fingerprint=fingerprint,
             coverage_start=coverage_start,
             coverage_end=coverage_end,
@@ -423,10 +522,10 @@ class FileSystemIndicatorCache:
         )
 
     # ---------------------------------------------------------------- backfill API
-    def _backfill_path(self, timeframe: TimeFrame | str) -> Path:
+    def _backfill_path(self, timeframe: 'TimeFrame | str') -> Path:
         return self.root / self._timeframe_key(timeframe) / "backfill.json"
 
-    def get_backfill_state(self, timeframe: TimeFrame | str) -> BackfillState | None:
+    def get_backfill_state(self, timeframe: 'TimeFrame | str') -> BackfillState | None:
         path = self._backfill_path(timeframe)
         if not path.exists():
             return None
@@ -441,12 +540,12 @@ class FileSystemIndicatorCache:
             last_timestamp=datetime.fromisoformat(last_ts) if last_ts else None,
             fingerprint=payload.get("fingerprint"),
             updated_at=datetime.fromisoformat(payload["updated_at"]),
-            extras=payload.get("extras", {}),
+            extras=_decode_structure(payload.get("extras", {})),
         )
 
     def update_backfill_state(
         self,
-        timeframe: TimeFrame | str,
+        timeframe: 'TimeFrame | str',
         *,
         last_timestamp: datetime | str,
         fingerprint: str | None,
@@ -458,7 +557,7 @@ class FileSystemIndicatorCache:
             "last_timestamp": timestamp,
             "fingerprint": fingerprint,
             "updated_at": datetime.now(UTC).isoformat(),
-            "extras": _normalize_json(extras or {}),
+            "extras": _encode_structure(extras or {}),
         }
         path = self._backfill_path(timeframe)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -470,12 +569,11 @@ class FileSystemIndicatorCache:
             last_timestamp=payload["last_timestamp"],
         )
 
-
 def cache_indicator(
     cache: FileSystemIndicatorCache,
     *,
     indicator_name: str | None = None,
-    timeframe: TimeFrame | str | None = None,
+    timeframe: 'TimeFrame | str | None' = None,
     params_fn: Callable[..., Mapping[str, Any]] | None = None,
     data_fn: Callable[..., Any] | None = None,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
@@ -525,7 +623,6 @@ def cache_indicator(
 
     return decorator
 
-
 __all__ = [
     "BackfillState",
     "CacheRecord",
@@ -534,4 +631,3 @@ __all__ = [
     "hash_input_data",
     "make_fingerprint",
 ]
-
