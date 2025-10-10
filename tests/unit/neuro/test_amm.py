@@ -44,17 +44,20 @@ def test_bursts_trigger_after_shock() -> None:
 def test_async_interface_matches_sync_output() -> None:
     cfg = AMMConfig()
 
-    async def run() -> tuple[dict, dict]:
+    async def run() -> tuple[dict, dict, dict]:
         amm_sync = AdaptiveMarketMind(cfg)
         amm_async = AdaptiveMarketMind(cfg)
+        amm_offload = AdaptiveMarketMind(cfg)
         sync_out = amm_sync.update(0.001, 0.6, 0.1, None)
         async_out = await amm_async.aupdate(0.001, 0.6, 0.1, None)
-        return sync_out, async_out
+        offload_out = await amm_offload.aupdate(0.001, 0.6, 0.1, None, offload=True)
+        return sync_out, async_out, offload_out
 
-    sync_out, async_out = asyncio.run(run())
+    sync_out, async_out, offload_out = asyncio.run(run())
     for key in ("amm_pulse", "amm_precision", "amm_valence", "pred", "pe", "entropy"):
-        assert key in async_out and isinstance(async_out[key], float)
-        assert pytest.approx(sync_out[key], rel=1e-5, abs=1e-5) == async_out[key]
+        for result in (async_out, offload_out):
+            assert key in result and isinstance(result[key], float)
+            assert pytest.approx(sync_out[key], rel=1e-5, abs=1e-5) == result[key]
 
 
 def test_batch_matches_stream_updates() -> None:

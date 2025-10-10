@@ -23,6 +23,11 @@ def test_quantile_handles_duplicate_values() -> None:
     assert -1.0 <= q.quantile <= 2.0
 
 
+def test_quantile_reports_nan_before_updates() -> None:
+    q = P2Quantile(0.5)
+    assert math.isnan(q.quantile)
+
+
 def test_invalid_quantile_raises() -> None:
     for p in (0.0, 1.0, -0.1, 1.1):
         try:
