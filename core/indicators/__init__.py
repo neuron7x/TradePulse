@@ -1,5 +1,13 @@
 """Public indicator exports for convenient access in tests and notebooks."""
 
+from .cache import (
+    BackfillState,
+    CacheRecord,
+    FileSystemIndicatorCache,
+    cache_indicator,
+    hash_input_data,
+    make_fingerprint,
+)
 from .kuramoto import (
     KuramotoOrderFeature,
     MultiAssetKuramotoFeature,
@@ -30,6 +38,12 @@ __all__ = [
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
     "MultiAssetKuramotoFeature",
+    "BackfillState",
+    "CacheRecord",
+    "FileSystemIndicatorCache",
+    "cache_indicator",
+    "hash_input_data",
+    "make_fingerprint",
     "KuramotoResult",
     "MultiScaleKuramoto",
     "MultiScaleKuramotoFeature",
