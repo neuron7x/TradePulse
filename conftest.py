@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import pathlib
 import sys
+import types
 import warnings
 from typing import Iterable
 
@@ -26,6 +27,37 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+if "exchange_calendars" not in sys.modules:  # pragma: no cover - optional dependency shim
+    stub = types.ModuleType("exchange_calendars")
+
+    class _AlwaysOpenCalendar:
+        tz = types.SimpleNamespace(key="UTC")
+
+        def valid_days(self, start, end):  # noqa: D401 - mimic API
+            """Return continuous range between ``start`` and ``end``."""
+
+            return []
+
+    class _AlwaysOpenNamespace:
+        @staticmethod
+        def AlwaysOpenCalendar():  # noqa: N802 - mirrors third-party API
+            return _AlwaysOpenCalendar()
+
+    class _ErrorsNamespace:
+        class InvalidCalendarName(Exception):
+            pass
+
+    def _get_calendar(name: str):  # noqa: D401 - mimic API signature
+        return _AlwaysOpenCalendar()
+
+    stub.always_open = _AlwaysOpenNamespace()
+    stub.errors = _ErrorsNamespace()
+    stub.ExchangeCalendar = object
+    stub.get_calendar = _get_calendar
+    stub.resolve_alias = lambda value: value  # type: ignore[assignment]
+    sys.modules["exchange_calendars"] = stub
 
 
 def _register_noop_cov_options(parser: "pytest.Parser") -> None:

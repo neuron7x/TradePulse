@@ -16,6 +16,12 @@ from .kuramoto import (
     kuramoto_order,
     multi_asset_kuramoto,
 )
+from .hierarchical_features import (
+    FeatureBufferCache,
+    HierarchicalFeatureResult,
+    TimeFrameSpec,
+    compute_hierarchical_features,
+)
 from .multiscale_kuramoto import (
     KuramotoResult,
     MultiScaleKuramoto,
@@ -38,6 +44,10 @@ __all__ = [
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
     "MultiAssetKuramotoFeature",
+    "FeatureBufferCache",
+    "HierarchicalFeatureResult",
+    "TimeFrameSpec",
+    "compute_hierarchical_features",
     "BackfillState",
     "CacheRecord",
     "FileSystemIndicatorCache",
