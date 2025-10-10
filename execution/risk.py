@@ -7,6 +7,8 @@ from typing import Callable, Dict, Iterable, Mapping, MutableMapping
 
 from interfaces.execution import PortfolioRiskAnalyzer, RiskController
 
+from core.data.catalog import normalize_symbol
+
 
 class RiskError(RuntimeError):
     """Base exception for risk-control violations."""
@@ -73,6 +75,9 @@ class RiskManager(RiskController):
         self._last_notional: MutableMapping[str, float] = {}
         self._submissions: deque[float] = deque()
 
+    def _canonical_symbol(self, symbol: str) -> str:
+        return normalize_symbol(symbol)
+
     def _check_rate_limit(self, now: float) -> None:
         if self.limits.max_orders_per_interval <= 0:
             return
@@ -95,22 +100,23 @@ class RiskManager(RiskController):
 
         self._kill_switch.guard()
         self._validate_inputs(qty, price)
+        canonical_symbol = self._canonical_symbol(symbol)
         now = self._time()
         self._check_rate_limit(now)
 
         side_sign = 1.0 if side.lower() == "buy" else -1.0
-        current_position = float(self._positions.get(symbol, 0.0))
+        current_position = float(self._positions.get(canonical_symbol, 0.0))
         new_position = current_position + side_sign * qty
 
         if abs(new_position) > self.limits.max_position:
             raise LimitViolation(
-                f"Position cap exceeded for {symbol}: {new_position} > {self.limits.max_position}",
+                f"Position cap exceeded for {canonical_symbol}: {new_position} > {self.limits.max_position}",
             )
 
         projected_notional = abs(new_position * price)
         if projected_notional > self.limits.max_notional:
             raise LimitViolation(
-                f"Notional cap exceeded for {symbol}: {projected_notional} > {self.limits.max_notional}",
+                f"Notional cap exceeded for {canonical_symbol}: {projected_notional} > {self.limits.max_notional}",
             )
 
         self._submissions.append(now)
@@ -125,16 +131,19 @@ class RiskManager(RiskController):
         """Update exposure after a confirmed fill."""
 
         self._validate_inputs(qty, price)
+        canonical_symbol = self._canonical_symbol(symbol)
         side_sign = 1.0 if side.lower() == "buy" else -1.0
-        position = float(self._positions.get(symbol, 0.0)) + side_sign * qty
-        self._positions[symbol] = position
-        self._last_notional[symbol] = abs(position * price)
+        position = float(self._positions.get(canonical_symbol, 0.0)) + side_sign * qty
+        self._positions[canonical_symbol] = position
+        self._last_notional[canonical_symbol] = abs(position * price)
 
     def current_position(self, symbol: str) -> float:
-        return float(self._positions.get(symbol, 0.0))
+        canonical_symbol = self._canonical_symbol(symbol)
+        return float(self._positions.get(canonical_symbol, 0.0))
 
     def current_notional(self, symbol: str) -> float:
-        return float(self._last_notional.get(symbol, 0.0))
+        canonical_symbol = self._canonical_symbol(symbol)
+        return float(self._last_notional.get(canonical_symbol, 0.0))
 
 
 class IdempotentRetryExecutor:

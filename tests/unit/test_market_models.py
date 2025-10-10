@@ -60,6 +60,26 @@ def test_price_tick_rejects_invalid_values() -> None:
         )
 
 
+def test_price_tick_rejects_nan_and_outliers() -> None:
+    with pytest.raises(ValidationError):
+        PriceTick.create(
+            symbol="ETHUSDT",
+            venue="binance",
+            price=Decimal("NaN"),
+            volume="1",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+    with pytest.raises(ValidationError):
+        PriceTick.create(
+            symbol="ETHUSDT",
+            venue="binance",
+            price=Decimal("1e20"),
+            volume="1",
+            timestamp=datetime.now(timezone.utc),
+        )
+
+
 def test_price_tick_supports_decimal_inputs_and_timestamp_conversion() -> None:
     tick = PriceTick.create(
         symbol="ETHUSD",
@@ -81,6 +101,22 @@ def test_market_metadata_rejects_blank_inputs() -> None:
 
     with pytest.raises(ValidationError):
         MarketMetadata(symbol="BTCUSD", venue=" ")
+
+
+def test_market_metadata_normalises_symbol_and_venue() -> None:
+    meta = MarketMetadata(symbol=" btc_usdt ", venue="binance-spot")
+    assert meta.symbol == "BTC/USDT"
+    assert meta.venue == "BINANCE"
+
+
+def test_market_metadata_normalises_derivative_symbols() -> None:
+    meta = MarketMetadata(
+        symbol="btc_usdt_perp",
+        venue="binance-futures",
+        instrument_type=InstrumentType.FUTURES,
+    )
+    assert meta.symbol == "BTC-USDT-PERP"
+    assert meta.venue == "BINANCE_FUTURES"
 
 
 def test_ohlcv_bar_enforces_bounds() -> None:

@@ -89,6 +89,14 @@ def test_kill_switch_blocks_all_orders() -> None:
         manager.validate_order("BTC", "buy", qty=1.0, price=10.0)
 
 
+def test_risk_manager_normalises_symbol_aliases() -> None:
+    manager = RiskManager(RiskLimits(max_notional=1_000.0, max_position=10.0))
+    manager.validate_order("btc-usdt", "buy", qty=1.0, price=20.0)
+    manager.register_fill("BTCUSDT", "buy", qty=1.0, price=20.0)
+    assert manager.current_position("btc/usdt") == pytest.approx(1.0)
+    assert manager.current_notional("BTC_USDT") == pytest.approx(20.0)
+
+
 def test_idempotent_retry_executor_retries_and_caches() -> None:
     executor = IdempotentRetryExecutor()
     attempts: list[int] = []
