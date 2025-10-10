@@ -1,23 +1,15 @@
 """Structured configuration for Kuramoto–Ricci composite workflows."""
 from __future__ import annotations
 
+import os
 from collections.abc import Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, Iterator
 
 import yaml
-from pydantic import (
-    AliasChoices,
-    BaseModel,
-    ConfigDict,
-    Field,
-    ValidationError,
-    field_validator,
-    model_validator,
-)
-from pydantic.fields import FieldInfo
-from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
-from pydantic_settings.sources import PydanticBaseSettingsSource
+from pydantic import BaseModel, BaseSettings, Field, ValidationError, root_validator, validator
+from pydantic.env_settings import SettingsSourceCallable
 
 from core.indicators.multiscale_kuramoto import TimeFrame
 
@@ -26,6 +18,10 @@ DEFAULT_CONFIG_PATH = Path("configs/kuramoto_ricci_composite.yaml")
 
 class ConfigError(ValueError):
     """Raised when a configuration value is invalid."""
+
+
+class SettingsError(ValueError):
+    """Raised when settings configuration cannot be resolved."""
 
 
 def _parse_timeframe(value: Any) -> TimeFrame:
@@ -46,10 +42,44 @@ def _parse_timeframe(value: Any) -> TimeFrame:
         raise ValueError(f"invalid timeframe value: {value!r}") from exc
 
 
+def _parse_env_file(path: Path) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip().strip('"').strip("'")
+        entries[key] = value
+    return entries
+
+
+@contextmanager
+def _temporary_env_overrides(assignments: Mapping[str, str]) -> Iterator[None]:
+    added_keys: list[str] = []
+    for key, value in assignments.items():
+        if key in os.environ:
+            continue
+        os.environ[key] = value
+        added_keys.append(key)
+    try:
+        yield
+    finally:
+        for key in added_keys:
+            os.environ.pop(key, None)
+
+
 class KuramotoConfig(BaseModel):
     """Configuration payload for :class:`MultiScaleKuramoto`."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     timeframes: tuple[TimeFrame, ...] = Field(
         default=(TimeFrame.M1, TimeFrame.M5, TimeFrame.M15, TimeFrame.H1),
@@ -70,8 +100,7 @@ class KuramotoConfig(BaseModel):
         description="Minimum number of samples required per analysed scale.",
     )
 
-    @model_validator(mode="before")
-    @classmethod
+    @root_validator(pre=True)
     def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
         if data is None:
             return {}
@@ -86,8 +115,7 @@ class KuramotoConfig(BaseModel):
                 payload["base_window"] = adaptive["base_window"]
         return payload
 
-    @field_validator("timeframes", mode="before")
-    @classmethod
+    @validator("timeframes", pre=True)
     def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
         if value is None:
             return value
@@ -97,11 +125,12 @@ class KuramotoConfig(BaseModel):
             return tuple(_parse_timeframe(item) for item in value)
         raise TypeError("kuramoto.timeframes must be a sequence")
 
-    @model_validator(mode="after")
-    def _ensure_timeframes_non_empty(self) -> "KuramotoConfig":
-        if not self.timeframes:
+    @root_validator
+    def _ensure_timeframes_non_empty(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        timeframes = values.get("timeframes")
+        if not timeframes:
             raise ValueError("kuramoto.timeframes cannot be empty")
-        return self
+        return values
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -113,7 +142,9 @@ class KuramotoConfig(BaseModel):
 
 
 class RicciTemporalConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     window_size: int = Field(default=100, gt=0)
     n_snapshots: int = Field(default=8, gt=0)
@@ -121,14 +152,18 @@ class RicciTemporalConfig(BaseModel):
 
 
 class RicciGraphConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     n_levels: int = Field(default=20, gt=0)
     connection_threshold: float = Field(default=0.1, gt=0, lt=1)
 
 
 class RicciConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     temporal: RicciTemporalConfig = Field(default_factory=RicciTemporalConfig)
     graph: RicciGraphConfig = Field(default_factory=RicciGraphConfig)
@@ -144,7 +179,9 @@ class RicciConfig(BaseModel):
 
 
 class CompositeThresholds(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     R_strong_emergent: float = Field(default=0.8, ge=0, le=1)
     R_proto_emergent: float = Field(default=0.4, ge=0, le=1)
@@ -153,21 +190,27 @@ class CompositeThresholds(BaseModel):
     temporal_ricci: float = Field(default=-0.2)
     topological_transition: float = Field(default=0.7, ge=0, le=1)
 
-    @model_validator(mode="after")
-    def _validate_thresholds(self) -> "CompositeThresholds":
-        if self.R_strong_emergent <= self.R_proto_emergent:
+    @root_validator
+    def _validate_thresholds(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        strong = values.get("R_strong_emergent")
+        proto = values.get("R_proto_emergent")
+        if strong is not None and proto is not None and strong <= proto:
             raise ValueError("R_strong_emergent must exceed R_proto_emergent")
-        return self
+        return values
 
 
 class CompositeSignals(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     min_confidence: float = Field(default=0.5, ge=0, le=1)
 
 
 class CompositeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     thresholds: CompositeThresholds = Field(default_factory=CompositeThresholds)
     signals: CompositeSignals = Field(default_factory=CompositeSignals)
@@ -187,7 +230,9 @@ class CompositeConfig(BaseModel):
 class KuramotoRicciIntegrationConfig(BaseModel):
     """Composite configuration for the Kuramoto–Ricci integration workflow."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    class Config:
+        extra = "forbid"
+        allow_mutation = False
 
     kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
     ricci: RicciConfig = Field(default_factory=RicciConfig)
@@ -196,7 +241,7 @@ class KuramotoRicciIntegrationConfig(BaseModel):
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoRicciIntegrationConfig":
         try:
-            return cls.model_validate(data or {})
+            return cls.parse_obj(data or {})
         except ValidationError as exc:  # pragma: no cover - error propagation
             messages = "; ".join(error["msg"] for error in exc.errors())
             raise ConfigError(messages) from exc
@@ -222,23 +267,23 @@ class KuramotoRicciIntegrationConfig(BaseModel):
         }
 
 
-class YamlSettingsSource(PydanticBaseSettingsSource):
+class YamlSettingsSource:
     """Lowest-priority settings source that loads values from YAML files."""
 
     def __init__(
         self,
-        settings_cls: type[BaseSettings],
-        init_source: PydanticBaseSettingsSource,
-        env_source: PydanticBaseSettingsSource,
-        dotenv_source: PydanticBaseSettingsSource,
+        settings_cls: type["TradePulseSettings"],
+        init_source: SettingsSourceCallable,
+        env_source: SettingsSourceCallable,
+        dotenv_source: SettingsSourceCallable | None = None,
     ) -> None:
-        super().__init__(settings_cls)
+        self._settings_cls = settings_cls
         self._init_source = init_source
         self._env_source = env_source
         self._dotenv_source = dotenv_source
 
-    def __call__(self) -> dict[str, Any]:
-        config_path = self._resolve_path()
+    def __call__(self, settings: BaseSettings | None = None) -> dict[str, Any]:
+        config_path = self._resolve_path(settings)
         if config_path is None:
             return {}
         try:
@@ -253,22 +298,44 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
             raise SettingsError(f"configuration file {config_path} must define a mapping")
         return dict(payload)
 
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
-        return None, field_name, False
-
-    def _resolve_path(self) -> Path | None:
+    def _resolve_path(self, settings: BaseSettings | None) -> Path | None:
         for source in (self._init_source, self._env_source, self._dotenv_source):
-            try:
-                data = source()
-            except SettingsError:  # pragma: no cover - defensive guard
-                data = {}
-            except Exception:  # pragma: no cover - defensive guard
-                data = {}
+            if source is None:
+                continue
+            data = self._invoke_source(source, settings)
             candidate = data.get("config_file") or data.get("config")
             if candidate:
                 return Path(candidate).expanduser()
 
-        field = self.settings_cls.model_fields.get("config_file")
+        default_path = self._default_config_path()
+        if default_path is not None:
+            return default_path
+        return None
+
+    def _invoke_source(
+        self,
+        source: SettingsSourceCallable,
+        settings: BaseSettings | None,
+    ) -> Mapping[str, Any]:
+        if settings is not None:
+            try:
+                return source(settings)  # type: ignore[arg-type]
+            except TypeError:
+                pass
+            except Exception:  # pragma: no cover - defensive guard
+                return {}
+        try:
+            return source()  # type: ignore[call-arg]
+        except Exception:  # pragma: no cover - defensive guard
+            return {}
+
+    def _default_config_path(self) -> Path | None:
+        fields: Dict[str, Any] = {}
+        if hasattr(self._settings_cls, "model_fields"):
+            fields = getattr(self._settings_cls, "model_fields")
+        elif hasattr(self._settings_cls, "__fields__"):
+            fields = getattr(self._settings_cls, "__fields__")
+        field = fields.get("config_file")
         default_value = getattr(field, "default", None)
         if default_value:
             return Path(default_value).expanduser()
@@ -276,33 +343,51 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
 
 
 class TradePulseSettings(BaseSettings):
-    """Application-wide configuration powered by ``pydantic-settings``."""
-
-    model_config = SettingsConfigDict(
-        env_prefix="TRADEPULSE_",
-        env_nested_delimiter="__",
-        env_file=".env",
-        extra="ignore",
-    )
+    """Application-wide configuration powered by ``pydantic`` settings."""
 
     config_file: Path | None = Field(
         default=DEFAULT_CONFIG_PATH,
         description="Primary YAML configuration file.",
-        validation_alias=AliasChoices("config_file", "config"),
     )
     kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
     ricci: RicciConfig = Field(default_factory=RicciConfig)
     composite: CompositeConfig = Field(default_factory=CompositeConfig)
 
+    @root_validator(pre=True)
+    def _apply_config_alias(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        if "config" in values and "config_file" not in values:
+            values["config_file"] = values.pop("config")
+        return values
+
+    class Config:
+        env_prefix = "TRADEPULSE_"
+        env_nested_delimiter = "__"
+        extra = "ignore"
+
+        @classmethod
+        def customise_sources(
+            cls,
+            init_settings: SettingsSourceCallable,
+            env_settings: SettingsSourceCallable,
+            file_secret_settings: SettingsSourceCallable,
+        ) -> tuple[SettingsSourceCallable, ...]:
+            yaml_source = YamlSettingsSource(TradePulseSettings, init_settings, env_settings)
+            return (
+                init_settings,
+                env_settings,
+                yaml_source,
+                file_secret_settings,
+            )
+
     @classmethod
     def settings_customise_sources(
         cls,
         settings_cls: type[BaseSettings],
-        init_settings: PydanticBaseSettingsSource,
-        env_settings: PydanticBaseSettingsSource,
-        dotenv_settings: PydanticBaseSettingsSource,
-        file_secret_settings: PydanticBaseSettingsSource,
-    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        init_settings: SettingsSourceCallable,
+        env_settings: SettingsSourceCallable,
+        dotenv_settings: SettingsSourceCallable,
+        file_secret_settings: SettingsSourceCallable,
+    ) -> tuple[SettingsSourceCallable, ...]:
         yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
         return (
             init_settings,
@@ -362,7 +447,12 @@ def load_kuramoto_ricci_config(
     overrides = dict(cli_overrides or {})
     if path is not None:
         overrides.setdefault("config_file", Path(path))
-    settings = TradePulseSettings(**overrides)
+    dotenv_path = Path.cwd() / ".env"
+    assignments: Mapping[str, str] = {}
+    if dotenv_path.exists():
+        assignments = _parse_env_file(dotenv_path)
+    with _temporary_env_overrides(assignments):
+        settings = TradePulseSettings(**overrides)
     return settings.as_kuramoto_ricci_config()
 
 

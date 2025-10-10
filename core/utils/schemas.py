@@ -15,6 +15,14 @@ except ModuleNotFoundError:  # pragma: no cover - exercised when dependency miss
     BaseModel = None  # type: ignore[assignment]
 
 
+def _render_pydantic_schema(model: Type[Any]) -> Dict[str, Any]:
+    if hasattr(model, "model_json_schema"):
+        schema = model.model_json_schema()  # type: ignore[attr-defined]
+    else:
+        schema = model.schema()  # type: ignore[attr-defined]
+    return dict(schema)
+
+
 def dataclass_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[str, Any]:
     """Convert a dataclass to JSON Schema.
     
@@ -124,7 +132,7 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
 
     # Handle Pydantic models
     if BaseModel is not None and isinstance(typ, type) and issubclass(typ, BaseModel):
-        schema = typ.model_json_schema()
+        schema = _render_pydantic_schema(typ)
         schema.setdefault("title", typ.__name__)
         if typ.__doc__:
             schema.setdefault("description", typ.__doc__.strip())
@@ -284,7 +292,7 @@ def model_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[str, 
     """Return a JSON schema for either a dataclass or a Pydantic model."""
 
     if BaseModel is not None and isinstance(cls, type) and issubclass(cls, BaseModel):
-        schema = cls.model_json_schema()
+        schema = _render_pydantic_schema(cls)
         if title:
             schema["title"] = title
         if cls.__doc__:
