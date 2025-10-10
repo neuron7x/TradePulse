@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "title": "BacktestResult",
-  "description": "Result from a backtest run. Contains profit/loss, maximum drawdown, and number of trades.",
+  "description": "Result from a backtest run. Contains profit/loss, maximum drawdown, number of trades, and performance analytics.",
   "properties": {
     "pnl": {
       "type": "number"
@@ -19,6 +19,24 @@
     },
     "slippage_cost": {
       "type": "number"
+    },
+    "performance": {
+      "type": "object",
+      "description": "Aggregated performance statistics (annualised where applicable).",
+      "properties": {
+        "sharpe_ratio": { "type": ["number", "null"] },
+        "sortino_ratio": { "type": ["number", "null"] },
+        "cagr": { "type": ["number", "null"] },
+        "max_drawdown": { "type": ["number", "null"] },
+        "expected_shortfall": { "type": ["number", "null"] },
+        "turnover": { "type": ["number", "null"] },
+        "hit_ratio": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "report_path": {
+      "type": "string",
+      "description": "Filesystem path to the exported performance report"
     }
   },
   "required": [

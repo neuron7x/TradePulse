@@ -15,6 +15,11 @@ from backtest.transaction_costs import (
     TransactionCostModel,
     load_market_costs,
 )
+from .performance import (
+    PerformanceReport,
+    compute_performance_metrics,
+    export_performance_report,
+)
 
 
 @dataclass(slots=True)
@@ -57,6 +62,8 @@ class Result:
     slippage_cost: float = 0.0
     commission_cost: float = 0.0
     spread_cost: float = 0.0
+    performance: PerformanceReport | None = None
+    report_path: Path | None = None
 
 
 class _SimpleOrderBook:
@@ -252,11 +259,22 @@ class WalkForwardEngine(BacktestEngine[Result]):
             total_spread = float(spread_costs.sum())
             total_slippage = float(slippage_costs.sum())
 
+            performance = compute_performance_metrics(
+                equity_curve=equity_curve,
+                pnl=pnl,
+                position_changes=position_changes,
+                initial_capital=initial_capital,
+                max_drawdown=max_dd,
+            )
+            report_path = export_performance_report(strategy_name, performance)
+
             if metrics.enabled:
                 for step, value in enumerate(equity_curve):
                     metrics.record_equity_point(strategy_name, step, float(value))
 
             ctx["pnl"] = pnl_total
+            ctx["performance"] = performance.as_dict()
+            ctx["report_path"] = str(report_path)
         ctx["max_dd"] = max_dd
         ctx["trades"] = trades
         ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
@@ -273,6 +291,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
             slippage_cost=total_slippage,
             commission_cost=total_commission,
             spread_cost=total_spread,
+            performance=performance,
+            report_path=report_path,
         )
 
 
