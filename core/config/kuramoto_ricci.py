@@ -13,7 +13,10 @@ from importlib import import_module
 from importlib.util import find_spec
 import os
 
-if find_spec("pydantic_settings") is not None:
+_FORCE_LEGACY_SETTINGS = os.getenv("TRADEPULSE_FORCE_LEGACY_SETTINGS") == "1"
+_SETTINGS_SPEC = None if _FORCE_LEGACY_SETTINGS else find_spec("pydantic_settings")
+
+if _SETTINGS_SPEC is not None:
     pydantic_settings = import_module("pydantic_settings")
     settings_sources = import_module("pydantic_settings.sources")
 
@@ -23,7 +26,12 @@ if find_spec("pydantic_settings") is not None:
     PydanticBaseSettingsSource = settings_sources.PydanticBaseSettingsSource  # type: ignore[attr-defined]
     HAS_PYDANTIC_SETTINGS = True
 else:  # pragma: no cover - exercised indirectly under legacy environments
-    BaseSettings = pydantic.BaseSettings  # type: ignore[attr-defined]
+    try:
+        BaseSettings = pydantic.BaseSettings  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - executed under pydantic v2 without legacy shim
+        from pydantic.v1 import BaseSettings as BaseSettingsV1  # type: ignore[import]
+
+        BaseSettings = BaseSettingsV1  # type: ignore[assignment]
     SettingsConfigDict = dict  # type: ignore[assignment]
 
     class SettingsError(ValueError):
@@ -121,9 +129,10 @@ if AliasChoices is None:  # pragma: no cover - exercised implicitly via configur
         def __repr__(self) -> str:  # pragma: no cover - debug helper
             joined = ", ".join(self)
             return f"AliasChoices({joined})"
+_FORCE_PYDANTIC_V1 = os.getenv("TRADEPULSE_FORCE_PYDANTIC_V1") == "1"
 
 
-PYDANTIC_V2 = hasattr(BaseModel, "model_fields")
+PYDANTIC_V2 = hasattr(BaseModel, "model_fields") and not _FORCE_PYDANTIC_V1
 
 if PYDANTIC_V2:
     from pydantic import field_validator, model_validator
@@ -200,7 +209,8 @@ def _deep_merge(base: Mapping[str, Any] | None, updates: Mapping[str, Any] | Non
 class KuramotoConfig(BaseModel):
     """Configuration payload for :class:`MultiScaleKuramoto`."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -245,7 +255,7 @@ class KuramotoConfig(BaseModel):
 
     else:
 
-        @root_validator(pre=True)
+        @root_validator(pre=True, skip_on_failure=True)
         def _merge_adaptive_window(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
             return _merge_adaptive_window_payload(values)
 
@@ -253,7 +263,7 @@ class KuramotoConfig(BaseModel):
         def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
             return _coerce_timeframes_payload(value)
 
-        @root_validator
+        @root_validator(skip_on_failure=True)
         def _ensure_timeframes_non_empty(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
             _ensure_timeframes_non_empty_payload(values.get("timeframes"))
             return values
@@ -268,7 +278,8 @@ class KuramotoConfig(BaseModel):
 
 
 class RicciTemporalConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -281,7 +292,8 @@ class RicciTemporalConfig(BaseModel):
 
 
 class RicciGraphConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -293,7 +305,8 @@ class RicciGraphConfig(BaseModel):
 
 
 class RicciConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -314,7 +327,8 @@ class RicciConfig(BaseModel):
 
 
 class CompositeThresholds(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -338,7 +352,7 @@ class CompositeThresholds(BaseModel):
 
     else:
 
-        @root_validator
+        @root_validator(skip_on_failure=True)
         def _validate_thresholds(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
             if values.get("R_strong_emergent") <= values.get("R_proto_emergent"):
                 raise ValueError("R_strong_emergent must exceed R_proto_emergent")
@@ -346,7 +360,8 @@ class CompositeThresholds(BaseModel):
 
 
 class CompositeSignals(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -357,7 +372,8 @@ class CompositeSignals(BaseModel):
 
 
 class CompositeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -382,7 +398,8 @@ class CompositeConfig(BaseModel):
 class KuramotoRicciIntegrationConfig(BaseModel):
     """Composite configuration for the Kuramoto–Ricci integration workflow."""
 
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    if PYDANTIC_V2:
+        model_config = ConfigDict(extra="forbid", frozen=True)
 
     if not PYDANTIC_V2:
         class Config:
@@ -494,12 +511,13 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
 class TradePulseSettings(BaseSettings):
     """Application-wide configuration powered by ``pydantic-settings``."""
 
-    model_config = SettingsConfigDict(
-        env_prefix="TRADEPULSE_",
-        env_nested_delimiter="__",
-        env_file=".env",
-        extra="ignore",
-    )
+    if PYDANTIC_V2:
+        model_config = SettingsConfigDict(
+            env_prefix="TRADEPULSE_",
+            env_nested_delimiter="__",
+            env_file=".env",
+            extra="ignore",
+        )
 
     if not PYDANTIC_V2:
         class Config:
