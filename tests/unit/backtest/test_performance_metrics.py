@@ -52,3 +52,27 @@ def test_export_performance_report(tmp_path: Path) -> None:
     assert payload["strategy"] == "My Strategy!"
     assert pytest.approx(payload["performance"]["sharpe_ratio"], rel=1e-9) == 1.25
     assert payload["performance"]["sortino_ratio"] is None
+
+
+def test_factor_statistics() -> None:
+    equity_curve = np.array([100.0, 110.0, 104.5], dtype=float)
+    pnl = equity_curve - np.concatenate(([100.0], equity_curve[:-1]))
+    benchmark = np.array([0.05, -0.02], dtype=float)
+
+    report = compute_performance_metrics(
+        equity_curve=equity_curve,
+        pnl=pnl,
+        position_changes=None,
+        initial_capital=100.0,
+        periods_per_year=2,
+        benchmark_returns=benchmark,
+    )
+
+    assert report.beta is not None
+    assert report.beta == pytest.approx(2.142857, rel=1e-6)
+    assert report.alpha is not None
+    assert report.alpha == pytest.approx(-0.0142857, rel=1e-5)
+    assert report.tracking_error is not None
+    assert report.tracking_error == pytest.approx(0.0565685, rel=1e-6)
+    assert report.information_ratio is not None
+    assert report.information_ratio == pytest.approx(0.25, rel=1e-6)
