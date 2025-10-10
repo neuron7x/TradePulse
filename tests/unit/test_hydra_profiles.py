@@ -8,7 +8,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from omegaconf import OmegaConf
+import pytest
+
+omegaconf = pytest.importorskip("omegaconf")
+OmegaConf = omegaconf.OmegaConf
 
 from analytics.runner import (
     apply_reproducibility_settings,
