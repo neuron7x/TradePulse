@@ -16,6 +16,7 @@ large research/replay systems (QuantConnect, Backtrader, etc.).
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass, fields, is_dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -23,6 +24,7 @@ import functools
 import hashlib
 import json
 import os
+import pickle  # nosec B403 - guarded by restricted unpickler
 from pathlib import Path, PurePath
 import shutil
 import importlib
@@ -319,6 +321,62 @@ class FileSystemIndicatorCache:
             json.dump(normalized, handle, sort_keys=True)
         return file_path.name, "json", self._file_digest(file_path)
 
+    @staticmethod
+    def _restricted_unpickle(handle: Any) -> Any:
+        class _SafeUnpickler(pickle.Unpickler):
+            _SAFE_BUILTINS = {
+                "complex",
+                "dict",
+                "frozenset",
+                "list",
+                "set",
+                "tuple",
+                "int",
+                "float",
+                "bool",
+                "str",
+                "bytes",
+                "bytearray",
+                "memoryview",
+                "range",
+                "slice",
+                "NoneType",
+            }
+
+            _SAFE_MODULE_PREFIXES = (
+                "collections",
+                "datetime",
+                "decimal",
+                "fractions",
+                "numpy",
+                "pandas",
+                "core.indicators",
+            )
+
+            _SAFE_MODULES = {
+                "uuid",
+                "math",
+                "statistics",
+                "pathlib",
+                "types",
+            }
+
+            def find_class(self, module: str, name: str) -> Any:  # type: ignore[override]
+                if module == "builtins" and name in self._SAFE_BUILTINS:
+                    return getattr(builtins, name)
+                if module in self._SAFE_MODULES:
+                    mod = importlib.import_module(module)
+                    return getattr(mod, name)
+                for prefix in self._SAFE_MODULE_PREFIXES:
+                    if module == prefix or module.startswith(f"{prefix}."):
+                        mod = importlib.import_module(module)
+                        return getattr(mod, name)
+                raise pickle.UnpicklingError(
+                    f"Attempted to load unsafe module '{module}.{name}' from cache"
+                )
+
+        return _SafeUnpickler(handle).load()
+
     def _deserialize(self, path: Path, fmt: str) -> Any:
         if fmt == "parquet":
             return pd.read_parquet(path)
@@ -335,10 +393,8 @@ class FileSystemIndicatorCache:
             payload = json.loads(path.read_text(encoding="utf-8"))
             return _decode_structure(payload)
         if fmt == "pickle":
-            raise ValueError(
-                "Legacy pickle-based cache entries are no longer supported; "
-                "please purge the cache directory."
-            )
+            with path.open("rb") as handle:
+                return self._restricted_unpickle(handle)
         raise ValueError(f"Unsupported cache format '{fmt}'")
 
     # ---------------------------------------------------------------- fingerprint
