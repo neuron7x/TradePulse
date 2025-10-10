@@ -1,6 +1,13 @@
 # SPDX-License-Identifier: MIT
 """Core data utilities and models for TradePulse."""
 
+import numpy as _np
+
+if not hasattr(_np, "string_"):
+    _np.string_ = _np.bytes_
+if not hasattr(_np, "float_"):
+    _np.float_ = _np.float64
+
 from .models import (
     AggregateMetric,
     DataKind,
