@@ -13,6 +13,18 @@ We actively support the following versions with security updates:
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
+### Responsible Disclosure Policy
+
+We strongly encourage responsible disclosure and commit to working with researchers to promptly address reported issues.
+
+- **Primary contact**: `security@tradepulse.local`
+- **Backup contact**: Direct message the maintainers via the [GitHub Security Advisory](https://github.com/neuron7x/TradePulse/security/advisories/new) form.
+- **SLA overview**:
+  - Acknowledge receipt within **48 hours**.
+  - Provide an initial assessment within **5 business days**.
+  - Deliver fix timelines based on severity (see below) and share remediation status updates at least every **5 business days** until resolution.
+- **Safe harbor**: Good-faith security research that complies with this policy will not be subject to legal action or revocation of access.
+
 ### Disclosure Process
 
 1. **Report**: Send details to **security@tradepulse.local** or via [GitHub Security Advisories](https://github.com/neuron7x/TradePulse/security/advisories/new)
