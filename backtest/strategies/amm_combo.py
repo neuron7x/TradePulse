@@ -32,11 +32,11 @@ class AMMComboStrategy:
         qlo = self._qlo.update(S); qhi = self._qhi.update(S)
 
         action = "HOLD"; direction = 0
-        if R_t >= self.cfg.R_min and S >= qhi:
+        if S <= qlo:
+            action = "EXIT_ALL"; direction = 0
+        elif R_t >= self.cfg.R_min and S >= qhi:
             direction = +1 if out["amm_valence"] > 0 else -1
             action = "ENTER_LONG" if direction > 0 else "ENTER_SHORT"
-        elif S <= qlo:
-            action = "EXIT_ALL"; direction = 0
 
         self._sigma = Float(0.98)*self._sigma + Float(0.02)*Float(abs(out["pe"]))
 
