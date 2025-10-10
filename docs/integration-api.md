@@ -57,35 +57,27 @@ TradePulse provides multiple integration points for connecting with external sys
 Market data tick representation:
 
 ```python
-from dataclasses import dataclass
-from datetime import datetime
-from typing import Dict, Any, Optional
+from datetime import datetime, timezone
+from decimal import Decimal
 
-@dataclass
-class Ticker:
-    """Market data tick.
-    
-    Attributes:
-        symbol: Trading symbol (e.g., "BTCUSD")
-        price: Current price
-        volume: Trade volume (defaults to 0.0 if not available)
-        ts: Timestamp of the tick
-        metadata: Additional metadata (bid, ask, etc.)
-    
-    Example:
-        >>> tick = Ticker(
-        ...     symbol="BTCUSD",
-        ...     price=50000.0,
-        ...     volume=0.5,
-        ...     ts=datetime.now(),
-        ...     metadata={"bid": 49999, "ask": 50001}
-        ... )
-    """
-    symbol: str
-    price: float
-    volume: float
-    ts: datetime
-    metadata: Dict[str, Any]
+from core.data.models import MarketMetadata, Ticker
+
+metadata = MarketMetadata(symbol="BTCUSD", venue="BINANCE")
+tick = Ticker(
+    metadata=metadata,
+    timestamp=datetime.now(timezone.utc),
+    price=Decimal("50000"),
+    volume=Decimal("0.5"),
+)
+
+# Convenience helper for legacy style construction
+tick = Ticker.create(
+    symbol="BTCUSD",
+    venue="BINANCE",
+    price=50000.0,
+    volume=0.5,
+    timestamp=datetime.now(timezone.utc),
+)
 ```
 
 ### Order Interface
@@ -245,7 +237,7 @@ class DataSource(ABC):
 
 ```python
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timezone
 from core.data.ingestion import DataSource, Ticker
 
 class CSVDataSource(DataSource):
@@ -317,13 +309,12 @@ class CSVDataSource(DataSource):
         callback = self.callbacks[symbol]
         
         for _, row in self.df.iterrows():
-            tick = Ticker(
+            tick = Ticker.create(
                 symbol=symbol,
+                venue=self.source.upper(),
                 price=float(row[self.price_column]),
                 volume=float(row.get(self.volume_column, 0.0)),
-                ts=row[self.time_column] if self.time_column in row \
-                   else datetime.now(),
-                metadata=row.to_dict()
+                timestamp=row[self.time_column] if self.time_column in row else datetime.now(timezone.utc),
             )
             callback(tick)
 ```

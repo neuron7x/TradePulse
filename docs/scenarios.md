@@ -276,8 +276,8 @@ best_params = optimize_strategy(
 # core/data/binance_source.py
 import websocket
 import json
+from datetime import datetime, timezone
 from core.data.ingestion import DataSource, Ticker
-from datetime import datetime
 
 class BinanceWebSocketSource(DataSource):
     """Binance WebSocket data source."""
@@ -307,12 +307,12 @@ class BinanceWebSocketSource(DataSource):
     def _on_message(self, ws, message):
         data = json.loads(message)
         if "e" in data and data["e"] == "trade":
-            tick = Ticker(
+            tick = Ticker.create(
                 symbol=data["s"],
+                venue="BINANCE",
                 price=float(data["p"]),
                 volume=float(data["q"]),
-                ts=datetime.fromtimestamp(data["T"] / 1000),
-                metadata={"trade_id": data["t"]}
+                timestamp=datetime.fromtimestamp(data["T"] / 1000, tz=timezone.utc),
             )
             if data["s"].lower() in self.callbacks:
                 self.callbacks[data["s"].lower()](tick)

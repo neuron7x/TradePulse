@@ -1,21 +1,112 @@
 {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "type": "object",
-  "title": "Ticker",
-  "description": "Market data tick with timestamp, price, and volume information.",
+  "$defs": {
+    "InstrumentType": {
+      "description": "Enumerates the supported instrument categories.",
+      "enum": [
+        "spot",
+        "futures"
+      ],
+      "title": "InstrumentType",
+      "type": "string"
+    },
+    "MarketMetadata": {
+      "additionalProperties": false,
+      "description": "Common metadata shared by all market data payloads.",
+      "properties": {
+        "symbol": {
+          "minLength": 1,
+          "title": "Symbol",
+          "type": "string"
+        },
+        "venue": {
+          "minLength": 1,
+          "title": "Venue",
+          "type": "string"
+        },
+        "instrument_type": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/InstrumentType"
+            }
+          ],
+          "default": "spot"
+        }
+      },
+      "required": [
+        "symbol",
+        "venue"
+      ],
+      "title": "MarketMetadata",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Market data tick with instrument metadata, price and volume information.",
   "properties": {
-    "ts": {
-      "type": "number"
+    "metadata": {
+      "$ref": "#/$defs/MarketMetadata"
+    },
+    "timestamp": {
+      "description": "UTC timestamp of the data point",
+      "format": "date-time",
+      "title": "Timestamp",
+      "type": "string"
+    },
+    "kind": {
+      "const": "tick",
+      "default": "tick",
+      "enum": [
+        "tick"
+      ],
+      "title": "Kind",
+      "type": "string"
     },
     "price": {
-      "type": "number"
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "description": "Non-negative monetary value",
+      "title": "Price"
     },
     "volume": {
-      "type": "number"
+      "anyOf": [
+        {
+          "minimum": 0.0,
+          "type": "number"
+        },
+        {
+          "type": "string"
+        }
+      ],
+      "default": "0",
+      "description": "Non-negative traded size",
+      "title": "Volume"
+    },
+    "trade_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Exchange trade identifier",
+      "title": "Trade Id"
     }
   },
   "required": [
-    "ts",
+    "metadata",
+    "timestamp",
     "price"
-  ]
+  ],
+  "title": "Ticker",
+  "type": "object"
 }

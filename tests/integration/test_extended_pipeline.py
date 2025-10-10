@@ -39,7 +39,7 @@ class TestEndToEndPipeline:
         
         # Convert to DataFrame for strategy
         df = pd.DataFrame([
-            {"close": t.price, "volume": t.volume}
+            {"close": float(t.price), "volume": float(t.volume)}
             for t in tickers
         ])
         

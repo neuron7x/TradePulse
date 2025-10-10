@@ -45,8 +45,8 @@ def test_binance_ws_emits_ticks_when_dependency_available(monkeypatch: pytest.Mo
     ingestor = DataIngestor()
     ws = ingestor.binance_ws("BTCUSDT", captured.append)
     assert isinstance(ws, DummyWS)
-    assert captured[0].price == pytest.approx(101.5)
-    assert captured[0].volume == pytest.approx(7.0)
+    assert float(captured[0].price) == pytest.approx(101.5)
+    assert float(captured[0].volume) == pytest.approx(7.0)
 
 
 def test_historical_csv_requires_header(tmp_path: Path) -> None:

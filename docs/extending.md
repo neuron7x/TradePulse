@@ -458,16 +458,9 @@ def test_mean_reversion_insufficient_data():
 # core/data/ingestion.py
 from dataclasses import dataclass
 from typing import Callable, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
-@dataclass
-class Ticker:
-    """Market data tick."""
-    symbol: str
-    price: float
-    volume: float
-    ts: datetime
-    metadata: dict
+from core.data.models import Ticker
 
 class DataSource(ABC):
     """Base class for data sources."""
@@ -569,13 +562,13 @@ class BinanceDataSource(DataSource):
         
         if "e" in data and data["e"] == "trade":
             symbol = data["s"]
-            
-            tick = Ticker(
+
+            tick = Ticker.create(
                 symbol=symbol,
+                venue="BINANCE",
                 price=float(data["p"]),
                 volume=float(data["q"]),
-                ts=datetime.fromtimestamp(data["T"] / 1000),
-                metadata={"trade_id": data["t"]}
+                timestamp=datetime.fromtimestamp(data["T"] / 1000, tz=timezone.utc),
             )
             
             if symbol.lower() in self.callbacks:

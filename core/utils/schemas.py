@@ -132,7 +132,7 @@ def generate_all_schemas() -> Dict[str, Dict[str, Any]]:
     """
     from core.indicators.base import FeatureResult
     from backtest.engine import Result
-    from core.data.ingestion import Ticker
+    from core.data.models import Ticker
     
     schemas = {}
     
@@ -155,12 +155,10 @@ def generate_all_schemas() -> Dict[str, Dict[str, Any]]:
         "and number of trades."
     )
     
-    schemas["Ticker"] = dataclass_to_json_schema(
-        Ticker,
-        title="Ticker"
-    )
+    schemas["Ticker"] = Ticker.model_json_schema()
+    schemas["Ticker"]["title"] = "Ticker"
     schemas["Ticker"]["description"] = (
-        "Market data tick with timestamp, price, and volume information."
+        "Market data tick with instrument metadata, price and volume information."
     )
     
     return schemas
