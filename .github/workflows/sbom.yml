@@ -1,0 +1,105 @@
+name: CycloneDX SBOM
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  release:
+    types: [published]
+
+jobs:
+  generate:
+    name: Generate CycloneDX SBOM
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install CycloneDX tooling
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cyclonedx-bom
+
+      - name: Combine dependency manifests
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          sources = [
+              Path('requirements.txt'),
+              Path('requirements-dev.txt'),
+          ]
+          combined = Path('sbom/combined-requirements.txt')
+          combined.parent.mkdir(parents=True, exist_ok=True)
+
+          with combined.open('w', encoding='utf-8') as fh:
+              for source in sources:
+                  if not source.is_file():
+                      continue
+                  content = source.read_text(encoding='utf-8')
+                  fh.write(content)
+                  if not content.endswith('\n'):
+                      fh.write('\n')
+          PY
+
+      - name: Generate CycloneDX SBOM (JSON)
+        run: |
+          python -m cyclonedx_py requirements sbom/combined-requirements.txt --output-format JSON --output-file sbom/cyclonedx-sbom.json
+
+      - name: Generate CycloneDX SBOM (XML)
+        run: |
+          python -m cyclonedx_py requirements sbom/combined-requirements.txt --output-format XML --output-file sbom/cyclonedx-sbom.xml
+
+      - name: Validate CycloneDX artifacts
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from cyclonedx.validation import make_schemabased_validator, OutputFormat
+          from cyclonedx.schema import SchemaVersion
+
+          sbom_dir = Path('sbom')
+          artifacts = [
+              (sbom_dir / 'cyclonedx-sbom.json', OutputFormat.JSON),
+              (sbom_dir / 'cyclonedx-sbom.xml', OutputFormat.XML),
+          ]
+
+          for path, output_format in artifacts:
+              if not path.is_file():
+                  raise SystemExit(f'Missing SBOM artifact: {path}')
+              validator = make_schemabased_validator(output_format=output_format, schema_version=SchemaVersion.V1_6)
+              validator.validate_str(path.read_text(encoding='utf-8'))
+          print('CycloneDX validation succeeded for all artifacts.')
+          PY
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cyclonedx-sbom
+          path: |
+            sbom/cyclonedx-sbom.json
+            sbom/cyclonedx-sbom.xml
+
+      - name: Attach SBOM to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sbom/cyclonedx-sbom.json
+            sbom/cyclonedx-sbom.xml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
