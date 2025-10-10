@@ -3,7 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from execution.order import Order, position_sizing
+from domain import Order, OrderType
+from execution.order import position_sizing
 from execution.risk import (
     IdempotentRetryExecutor,
     LimitViolation,
@@ -16,8 +17,8 @@ from execution.risk import (
 
 
 def test_order_defaults_to_market_type() -> None:
-    order = Order(side="buy", qty=1.0)
-    assert order.type == "market"
+    order = Order(symbol="BTCUSD", side="buy", quantity=1.0)
+    assert order.order_type == OrderType.MARKET
     assert order.price is None
 
 
