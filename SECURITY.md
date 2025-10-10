@@ -148,6 +148,11 @@ safety check
 - Test thoroughly after updates
 - Pin versions in production
 
+**CycloneDX SBOM generation:**
+- Every push, pull request, and release automatically generates validated CycloneDX SBOMs (JSON and XML).
+- Download SBOM artifacts from the `CycloneDX SBOM` workflow run or from the published release assets.
+- Use these SBOMs to audit dependency inventories and share with stakeholders.
+
 #### 4. Code Review
 
 **Security checklist for PRs:**
