@@ -7,6 +7,7 @@ networkx>=3.2.0
 # Data validation
 pydantic>=2.12.0,<3.0.0
 pydantic-settings>=2.11.0,<3.0.0
+pandera>=0.20.3,<0.21
 
 # Configuration & instrumentation
 PyYAML>=6.0.2

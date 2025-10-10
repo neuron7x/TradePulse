@@ -1,0 +1,327 @@
+# SPDX-License-Identifier: MIT
+"""High-level time series validation helpers built on ``pydantic`` and ``pandera``.
+
+The validation pipeline is split into two layers:
+
+* ``pydantic`` models capture declarative configuration for strict runtime validation
+  (e.g. which columns are expected, the allowed timezone, sampling frequency).
+* ``pandera`` materialises these rules against ``pandas`` ``DataFrame`` instances and
+  raises actionable errors when the data set does not honour them.
+
+Typical usages look like::
+
+    config = TimeSeriesValidationConfig(
+        timestamp_column="timestamp",
+        value_columns=[ValueColumnConfig(name="close", dtype="float64")],
+        frequency="1min",
+    )
+    cleaned_df = validate_timeseries_frame(raw_df, config)
+
+The helpers below enforce several invariants that routinely bite real trading
+pipelines: null values are rejected, duplicate timestamps are flagged, time
+stamps must be strictly increasing with a fixed sampling cadence, and timezone
+drift is prevented by requiring a consistent timezone across the whole series.
+"""
+
+from __future__ import annotations
+
+from datetime import timedelta
+from typing import Iterable, List, Optional, Sequence
+
+import pandas as pd
+import pandera as pa
+from pandera import Check, Column, DataFrameSchema
+from pandera.errors import SchemaError
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
+
+try:  # Python >= 3.9 ships the ``zoneinfo`` module in the stdlib.
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - fallback for very old Python versions
+    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
+
+PYDANTIC_V2 = hasattr(BaseModel, "model_fields")
+
+if PYDANTIC_V2:
+    from pydantic import field_validator, model_validator
+else:  # pragma: no cover - exercised indirectly when running under pydantic v1
+    from pydantic import root_validator, validator
+
+DEFAULT_TIMEZONE = "UTC"
+
+__all__ = [
+    "TimeSeriesValidationError",
+    "TimeSeriesValidationConfig",
+    "ValueColumnConfig",
+    "build_timeseries_schema",
+    "validate_timeseries_frame",
+]
+
+
+class TimeSeriesValidationError(ValueError):
+    """Raised when a DataFrame payload fails the strict validation checks."""
+
+
+class ValueColumnConfig(BaseModel):
+    """Declarative schema for value columns in a time series payload."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    name: StrictStr = Field(..., min_length=1, description="Column name in the dataframe")
+    dtype: Optional[StrictStr] = Field(
+        default=None,
+        description="Optional pandas-compatible dtype string enforced by pandera.",
+    )
+    nullable: bool = Field(
+        default=False,
+        description="Allow null values in the column. Defaults to the strict setting (False).",
+    )
+
+    if PYDANTIC_V2:
+
+        @field_validator("name")
+        @classmethod
+        def _strip_name(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Column names must not be blank")
+            return stripped
+
+    else:  # pragma: no cover - pydantic v1 compatibility shim
+
+        @validator("name")
+        def _strip_name(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Column names must not be blank")
+            return stripped
+
+
+class TimeSeriesValidationConfig(BaseModel):
+    """Configuration describing the shape and quality guarantees of a time series frame."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    timestamp_column: StrictStr = Field(
+        default="timestamp",
+        min_length=1,
+        description="Name of the datetime column used as chronological anchor.",
+    )
+    value_columns: Sequence[ValueColumnConfig] = Field(
+        default_factory=list,
+        description="Collection of value column descriptors enforced by pandera.",
+    )
+    frequency: Optional[pd.Timedelta] = Field(
+        default=None,
+        description="Expected sampling cadence expressed as a pandas-compatible timedelta.",
+    )
+    require_timezone: StrictStr = Field(
+        default=DEFAULT_TIMEZONE,
+        description="Canonical timezone every timestamp must share (defaults to UTC).",
+    )
+    allow_extra_columns: bool = Field(
+        default=False,
+        description="Allow columns outside of ``value_columns`` to be present in the frame.",
+    )
+
+    if PYDANTIC_V2:
+
+        @field_validator("timestamp_column")
+        @classmethod
+        def _strip_timestamp_column(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Timestamp column name must not be blank")
+            return stripped
+
+        @field_validator("frequency", mode="before")
+        @classmethod
+        def _coerce_frequency(cls, value: Optional[object]) -> Optional[pd.Timedelta]:
+            return _coerce_timedelta(value)
+
+        @field_validator("require_timezone")
+        @classmethod
+        def _ensure_timezone(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Timezone requirement must not be blank")
+            _resolve_timezone(stripped)
+            return stripped
+
+        @model_validator(mode="after")
+        def _ensure_unique_columns(self) -> "TimeSeriesValidationConfig":
+            names = [col.name for col in self.value_columns]
+            duplicates = _find_duplicates(names)
+            if duplicates:
+                joined = ", ".join(sorted(duplicates))
+                raise TimeSeriesValidationError(
+                    f"Value columns must be unique, duplicates found for: {joined}"
+                )
+            if self.timestamp_column in names:
+                raise TimeSeriesValidationError(
+                    "Timestamp column cannot also be declared as a value column"
+                )
+            return self
+
+    else:  # pragma: no cover - compatibility layer for pydantic v1
+
+        @validator("timestamp_column")
+        def _strip_timestamp_column(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Timestamp column name must not be blank")
+            return stripped
+
+        @validator("frequency", pre=True)
+        def _coerce_frequency(cls, value: Optional[object]) -> Optional[pd.Timedelta]:
+            return _coerce_timedelta(value)
+
+        @validator("require_timezone")
+        def _ensure_timezone(cls, value: str) -> str:
+            stripped = value.strip()
+            if not stripped:
+                raise TimeSeriesValidationError("Timezone requirement must not be blank")
+            _resolve_timezone(stripped)
+            return stripped
+
+        @root_validator
+        def _ensure_unique_columns(cls, values: dict[str, object]) -> dict[str, object]:
+            names = [col.name for col in values.get("value_columns", [])]
+            duplicates = _find_duplicates(names)
+            if duplicates:
+                joined = ", ".join(sorted(duplicates))
+                raise TimeSeriesValidationError(
+                    f"Value columns must be unique, duplicates found for: {joined}"
+                )
+            timestamp_column = values.get("timestamp_column")
+            if timestamp_column in names:
+                raise TimeSeriesValidationError(
+                    "Timestamp column cannot also be declared as a value column"
+                )
+            return values
+
+
+def _coerce_timedelta(value: Optional[object]) -> Optional[pd.Timedelta]:
+    """Normalise arbitrary timedelta representations to ``pd.Timedelta``."""
+
+    if value is None:
+        return None
+    if isinstance(value, pd.Timedelta):
+        return value
+    if isinstance(value, timedelta):
+        return pd.Timedelta(value)
+    if isinstance(value, (int, float)):
+        raise TimeSeriesValidationError(
+            "Numeric frequencies are ambiguous; provide a pandas-compatible timedelta string"
+        )
+    try:
+        return pd.Timedelta(str(value))
+    except (ValueError, TypeError) as exc:  # pragma: no cover - defensive guard
+        raise TimeSeriesValidationError(f"Unable to coerce frequency {value!r} to Timedelta") from exc
+
+
+def _resolve_timezone(name: str) -> ZoneInfo:
+    """Resolve the provided timezone name into a :class:`~zoneinfo.ZoneInfo` instance."""
+
+    try:
+        return ZoneInfo(name)
+    except Exception as exc:  # pragma: no cover - zoneinfo raises ValueError/OSError
+        raise TimeSeriesValidationError(f"Unknown timezone identifier: {name}") from exc
+
+
+def _find_duplicates(values: Iterable[str]) -> set[str]:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    return duplicates
+
+
+def build_timeseries_schema(config: TimeSeriesValidationConfig) -> DataFrameSchema:
+    """Construct a strict :class:`pandera.DataFrameSchema` for the provided configuration."""
+
+    def _check_monotonic(series: pd.Series) -> bool:
+        if series.size <= 1:
+            return True
+        try:
+            deltas = series.diff().dropna()
+        except TypeError:
+            return False
+        return bool((deltas > pd.Timedelta(0)).all())
+
+    timestamp_checks: List[Check] = [
+        Check(_check_monotonic, error="timestamps must be strictly increasing"),
+    ]
+
+    if config.frequency is not None:
+
+        def _check_frequency(series: pd.Series) -> bool:
+            if series.size <= 1:
+                return True
+            deltas = series.diff().dropna()
+            try:
+                # ``pd.Timedelta`` comparisons work across timezone aware and naive series.
+                return bool((deltas == config.frequency).all())
+            except TypeError:
+                return False
+
+        timestamp_checks.append(
+            Check(
+                _check_frequency,
+                error=(
+                    "timestamp differences must match the configured sampling frequency "
+                    f"({config.frequency})"
+                ),
+            )
+        )
+
+    timezone_name = config.require_timezone
+    timezone_obj = _resolve_timezone(timezone_name)
+    timezone_key = getattr(timezone_obj, "key", None) or str(timezone_obj)
+
+    def _check_timezone(series: pd.Series) -> bool:
+        if series.empty:
+            return True
+        try:
+            tz = series.dt.tz
+        except AttributeError:
+            return False
+        if tz is None:
+            return False
+        tz_name = getattr(tz, "key", None) or str(tz)
+        return tz_name == timezone_key
+
+    timestamp_checks.append(Check(_check_timezone, error=f"timestamps must be in {timezone_key}"))
+
+    columns: dict[str, Column] = {
+        config.timestamp_column: Column(
+            f"datetime64[ns, {timezone_key}]",
+            nullable=False,
+            unique=True,
+            checks=timestamp_checks,
+        )
+    }
+
+    for column in config.value_columns:
+        columns[column.name] = Column(
+            column.dtype or "float64",
+            nullable=column.nullable,
+            checks=[Check(lambda s: not s.isna().any(), error=f"{column.name} contains NaN values")]
+            if not column.nullable
+            else None,
+        )
+
+    return DataFrameSchema(columns=columns, strict=not config.allow_extra_columns)
+
+
+def validate_timeseries_frame(
+    frame: pd.DataFrame, config: TimeSeriesValidationConfig
+) -> pd.DataFrame:
+    """Validate a ``pandas`` DataFrame according to the provided configuration."""
+
+    schema = build_timeseries_schema(config)
+    try:
+        return schema.validate(frame, lazy=False)
+    except SchemaError as exc:  # pragma: no cover - exercised in unit tests
+        raise TimeSeriesValidationError(str(exc)) from exc
