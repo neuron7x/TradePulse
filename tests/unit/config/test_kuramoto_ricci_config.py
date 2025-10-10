@@ -10,9 +10,12 @@ import yaml
 from core.config import (
     ConfigError,
     KuramotoRicciIntegrationConfig,
+    TradePulseSettings,
+    YamlSettingsSource,
     load_kuramoto_ricci_config,
     parse_cli_overrides,
 )
+from core.config.kuramoto_ricci import SettingsError
 from core.indicators.multiscale_kuramoto import TimeFrame
 
 
@@ -119,3 +122,83 @@ def test_settings_source_priority(monkeypatch, tmp_path) -> None:
     dotenv_path.unlink()
     cfg_from_yaml = load_kuramoto_ricci_config(yaml_path)
     assert cfg_from_yaml.kuramoto.base_window == 128
+
+
+def test_parse_cli_overrides_rejects_missing_assignment() -> None:
+    with pytest.raises(ConfigError, match="key=value"):
+        parse_cli_overrides(["kuramoto.base_window"])
+
+
+def test_parse_cli_overrides_rejects_empty_key() -> None:
+    with pytest.raises(ConfigError, match="cannot be empty"):
+        parse_cli_overrides(["=42"])
+
+
+def test_parse_cli_overrides_detects_path_collision() -> None:
+    with pytest.raises(ConfigError, match="collides"):
+        parse_cli_overrides(["kuramoto=1", "kuramoto.timeframes=['M1']"])
+
+
+class _StubSource:
+    def __init__(self, payload: dict[str, object]):
+        self._payload = dict(payload)
+
+    def __call__(self) -> dict[str, object]:
+        return dict(self._payload)
+
+
+def test_yaml_settings_source_uses_default_file() -> None:
+    source = YamlSettingsSource(
+        TradePulseSettings,
+        _StubSource({}),
+        _StubSource({}),
+        _StubSource({}),
+    )
+
+    payload = source()
+    assert "kuramoto" in payload and "ricci" in payload
+
+
+def test_yaml_settings_source_reads_cli_override_path(tmp_path: Path) -> None:
+    config_path = tmp_path / "custom.yaml"
+    config_path.write_text(yaml.safe_dump({"kuramoto": {"base_window": 321}}))
+
+    source = YamlSettingsSource(
+        TradePulseSettings,
+        _StubSource({"config_file": str(config_path)}),
+        _StubSource({}),
+        _StubSource({}),
+    )
+
+    payload = source()
+    assert payload["kuramoto"]["base_window"] == 321
+
+
+def test_yaml_settings_source_rejects_non_mapping_payload(tmp_path: Path) -> None:
+    config_path = tmp_path / "list.yaml"
+    config_path.write_text(yaml.safe_dump([1, 2, 3]))
+
+    source = YamlSettingsSource(
+        TradePulseSettings,
+        _StubSource({"config_file": str(config_path)}),
+        _StubSource({}),
+        _StubSource({}),
+    )
+
+    with pytest.raises(SettingsError, match="must define a mapping"):
+        source()
+
+
+def test_yaml_settings_source_surfaces_yaml_parse_errors(tmp_path: Path) -> None:
+    broken_path = tmp_path / "broken.yaml"
+    broken_path.write_text("invalid: [unterminated")
+
+    source = YamlSettingsSource(
+        TradePulseSettings,
+        _StubSource({"config_file": str(broken_path)}),
+        _StubSource({}),
+        _StubSource({}),
+    )
+
+    with pytest.raises(SettingsError, match="failed to parse YAML"):
+        source()
