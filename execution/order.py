@@ -2,16 +2,23 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from typing import Protocol
 
-from interfaces.execution import PositionSizer
+from domain import Order
 
-@dataclass
-class Order:
-    side: str  # 'buy' or 'sell'
-    qty: float
-    price: float | None = None
-    type: str = "market"  # 'market'|'limit'
+try:  # pragma: no cover - optional dependency boundary
+    from interfaces.execution import PositionSizer
+except ModuleNotFoundError:  # pragma: no cover
+    class PositionSizer(Protocol):
+        def size(
+            self,
+            balance: float,
+            risk: float,
+            price: float,
+            *,
+            max_leverage: float = 5.0,
+        ) -> float:
+            ...
 
 
 class RiskAwarePositionSizer(PositionSizer):
@@ -56,3 +63,6 @@ def position_sizing(balance: float, risk: float, price: float, *, max_leverage: 
         price,
         max_leverage=max_leverage,
     )
+
+
+__all__ = ["Order", "RiskAwarePositionSizer", "position_sizing"]

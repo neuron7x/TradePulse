@@ -8,7 +8,8 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
-from execution.order import Order, position_sizing
+from domain import Order, OrderSide, OrderType
+from execution.order import position_sizing
 from execution.risk import portfolio_heat
 
 
@@ -107,17 +108,17 @@ class TestOrderProperties:
 
     @settings(max_examples=50, deadline=None)
     @given(
-        side=st.sampled_from(["buy", "sell"]),
+        side=st.sampled_from(list(OrderSide)),
         qty=st.floats(min_value=0.001, max_value=1000.0),
         price=st.one_of(st.none(), st.floats(min_value=0.01, max_value=100_000.0)),
-        order_type=st.sampled_from(["market", "limit"]),
+        order_type=st.sampled_from(list(OrderType)),
     )
     def test_order_creation_is_consistent(
-        self, side: str, qty: float, price: float | None, order_type: str
+        self, side: OrderSide, qty: float, price: float | None, order_type: OrderType
     ) -> None:
         """Order should be created with provided fields."""
-        order = Order(side=side, qty=qty, price=price, type=order_type)
+        order = Order(symbol="BTCUSD", side=side, quantity=qty, price=price, order_type=order_type)
         assert order.side == side
-        assert order.qty == qty
+        assert order.quantity == qty
         assert order.price == price
-        assert order.type == order_type
+        assert order.order_type == order_type
