@@ -46,7 +46,9 @@ nav:
       - Troubleshooting: troubleshooting.md
   - Core Concepts:
       - Architecture: ARCHITECTURE.md
-      - Indicators: indicators.md
+      - Indicators:
+          - Overview: indicators.md
+          - Adaptive Market Mind: indicators/amm.md
       - Agent System: agent.md
       - Backtesting: backtest.md
       - Execution: execution.md

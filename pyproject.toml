@@ -1,7 +1,8 @@
 [tool.ruff]
 line-length=100
 select=["E","F","W","I"]
-ignore=["E203","W503"]
+ignore=["E203"]
 
 [tool.mypy]
 ignore_missing_imports=true
+plugins=["numpy.typing.mypy_plugin"]
