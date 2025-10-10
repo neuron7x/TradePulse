@@ -15,7 +15,7 @@ preserve backwards compatibility with existing ingestion pipelines.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Literal, Optional, Union
@@ -28,7 +28,10 @@ from pydantic import (
     field_serializer,
     field_validator,
     model_validator,
+    ValidationInfo,
 )
+
+from core.data.catalog import normalize_symbol, normalize_venue
 
 __all__ = [
     "AggregateMetric",
@@ -98,6 +101,19 @@ class MarketMetadata(_FrozenModel):
         description="Instrument category (spot or futures)",
     )
 
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def _normalize_symbol(
+        cls, value: str, info: ValidationInfo
+    ) -> str:
+        instrument_type = info.data.get("instrument_type")
+        return normalize_symbol(value, instrument_type_hint=instrument_type)
+
+    @field_validator("venue", mode="before")
+    @classmethod
+    def _normalise_venue(cls, value: str) -> str:
+        return normalize_venue(value)
+
     @field_validator("symbol", "venue")
     @classmethod
     def _ensure_non_empty(cls, value: str) -> str:
@@ -138,6 +154,15 @@ class MarketDataPoint(_FrozenModel):
         if isinstance(value, DataKind):
             return value
         return DataKind(str(value))
+
+    @model_validator(mode="after")
+    def _enforce_utc(self) -> "MarketDataPoint":
+        ts = self.timestamp
+        if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+            raise ValueError("timestamp must be timezone-aware")
+        if ts.utcoffset() != timedelta(0):
+            raise ValueError("timestamp must be normalised to UTC")
+        return self
 
     @property
     def symbol(self) -> str:
@@ -200,6 +225,19 @@ class PriceTick(MarketDataPoint):
             return None
         stripped = value.strip()
         return stripped or None
+
+    @model_validator(mode="after")
+    def _guard_finite_values(self) -> "PriceTick":
+        max_magnitude = Decimal("1e12")
+        for field_name in ("price", "volume"):
+            value: Decimal = getattr(self, field_name)
+            if not value.is_finite():
+                raise ValueError(f"{field_name} must be a finite decimal value")
+            if abs(value) > max_magnitude:
+                raise ValueError(
+                    f"{field_name} magnitude {value} exceeds the allowed bound of {max_magnitude}"
+                )
+        return self
 
     @classmethod
     def create(
@@ -266,6 +304,19 @@ class OHLCVBar(MarketDataPoint):
                 raise ValueError("close price must lie between low and high")
         return self
 
+    @model_validator(mode="after")
+    def _guard_finite_ohlcv(self) -> "OHLCVBar":
+        max_magnitude = Decimal("1e12")
+        for field_name in ("open", "high", "low", "close", "volume"):
+            value: Decimal = getattr(self, field_name)
+            if not value.is_finite():
+                raise ValueError(f"{field_name} must be a finite decimal value")
+            if abs(value) > max_magnitude:
+                raise ValueError(
+                    f"{field_name} magnitude {value} exceeds the allowed bound of {max_magnitude}"
+                )
+        return self
+
 
 class AggregateMetric(MarketDataPoint):
     """Generic aggregated value produced from raw market data."""
@@ -290,6 +341,14 @@ class AggregateMetric(MarketDataPoint):
             return _to_decimal(value)
         except TypeError as exc:  # pragma: no cover - propagated via ValidationError
             raise ValueError(str(exc)) from exc
+
+    @model_validator(mode="after")
+    def _guard_finite_value(self) -> "AggregateMetric":
+        if not self.value.is_finite():
+            raise ValueError("value must be a finite decimal")
+        if abs(self.value) > Decimal("1e12"):
+            raise ValueError("value magnitude exceeds the allowed bound of 1e12")
+        return self
 
 
 # Backwards compatibility export ---------------------------------------------------------

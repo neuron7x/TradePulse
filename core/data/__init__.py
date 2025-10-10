@@ -8,6 +8,7 @@ if not hasattr(_np, "string_"):
 if not hasattr(_np, "float_"):
     _np.float_ = _np.float64
 
+from .catalog import normalize_symbol, normalize_venue
 from .models import (
     AggregateMetric,
     DataKind,
@@ -46,6 +47,8 @@ __all__ = [
     "OHLCVBar",
     "PriceTick",
     "Ticker",
+    "normalize_symbol",
+    "normalize_venue",
     "TimeSeriesValidationConfig",
     "TimeSeriesValidationError",
     "ValueColumnConfig",
