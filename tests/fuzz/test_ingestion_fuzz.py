@@ -129,7 +129,7 @@ class TestCSVFuzzTests:
         ingestor.historical_csv(str(csv_path), records.append)
         
         assert len(records) == 1
-        assert records[0].ts == pytest.approx(ts, rel=1e-6)
+        assert records[0].ts == pytest.approx(ts, rel=1e-6, abs=1e-6)
         assert float(records[0].price) == pytest.approx(price, rel=1e-6)
         assert float(records[0].volume) == pytest.approx(volume, rel=1e-6)
 

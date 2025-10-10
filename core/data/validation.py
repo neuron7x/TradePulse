@@ -29,9 +29,58 @@ from datetime import timedelta
 from typing import Iterable, List, Optional, Sequence
 
 import pandas as pd
-import pandera as pa
-from pandera import Check, Column, DataFrameSchema
-from pandera.errors import SchemaError
+
+try:  # pragma: no cover - exercised when pandera is installed
+    import pandera as pa
+    from pandera import Check, Column, DataFrameSchema
+    from pandera.errors import SchemaError
+except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight test envs
+    pa = None  # type: ignore[assignment]
+
+    class SchemaError(ValueError):
+        """Lightweight substitute for ``pandera.errors.SchemaError``."""
+
+    class Check:  # type: ignore[override]
+        def __init__(self, func, error: str | None = None):
+            self.func = func
+            self.error = error or "pandera check failed"
+
+        def __call__(self, series: pd.Series) -> bool:
+            result = self.func(series)
+            if isinstance(result, pd.Series):
+                result = bool(result.all())
+            return bool(result)
+
+    class Column:  # type: ignore[override]
+        def __init__(self, dtype, nullable: bool = False, unique: bool = False, checks=None):
+            self.dtype = dtype
+            self.nullable = nullable
+            self.unique = unique
+            self.checks = [c for c in (checks or []) if c is not None]
+
+    class DataFrameSchema:  # type: ignore[override]
+        def __init__(self, columns: dict[str, Column], strict: bool = False):
+            self.columns = columns
+            self.strict = strict
+
+        def validate(self, frame: pd.DataFrame, lazy: bool = False) -> pd.DataFrame:
+            missing = [name for name in self.columns if name not in frame.columns]
+            if missing:
+                raise SchemaError(f"Missing columns: {missing}")
+            if self.strict:
+                extras = [name for name in frame.columns if name not in self.columns]
+                if extras:
+                    raise SchemaError(f"Unexpected columns: {extras}")
+            for name, column in self.columns.items():
+                series = frame[name]
+                if not column.nullable and series.isna().any():
+                    raise SchemaError(f"{name} contains NaN values")
+                if column.unique and not series.is_unique:
+                    raise SchemaError(f"{name} contains duplicate values")
+                for check in column.checks:
+                    if not check(series):
+                        raise SchemaError(getattr(check, "error", f"Check failed for {name}"))
+            return frame
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
 try:  # Python >= 3.9 ships the ``zoneinfo`` module in the stdlib.
