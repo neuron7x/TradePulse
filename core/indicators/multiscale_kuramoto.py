@@ -1,6 +1,8 @@
+"""Multi-scale Kuramoto synchronisation indicator with rich caching support."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Mapping, MutableMapping, Optional, Sequence, cast
@@ -13,6 +15,7 @@ try:  # SciPy is optional in lightweight environments
 except Exception:  # pragma: no cover - executed when SciPy unavailable
     _signal = None
 
+from core.indicators.cache import FileSystemIndicatorCache, hash_input_data
 from core.utils.cache import (
     BackfillPlan,
     IndicatorCache,
@@ -66,6 +69,7 @@ class MultiScaleResult:
     adaptive_window: int
     timeframe_results: Mapping[TimeFrame, KuramotoResult]
     skipped_timeframes: Sequence[TimeFrame]
+    timeframe_endpoints: Mapping[TimeFrame, pd.Timestamp] = field(default_factory=dict)
 
 
 def _hilbert_phase(series: np.ndarray) -> np.ndarray:
@@ -104,6 +108,20 @@ def _kuramoto(phases: np.ndarray) -> tuple[float, float]:
 
     complex_mean = np.mean(np.exp(1j * phases))
     return float(np.abs(complex_mean)), float(np.angle(complex_mean))
+
+
+def _align_timestamp_to_index(index: pd.DatetimeIndex, ts: pd.Timestamp | None) -> pd.Timestamp | None:
+    """Align ``ts`` to the timezone characteristics of ``index``."""
+
+    if ts is None:
+        return None
+    if index.tz is None:
+        if ts.tzinfo is None:
+            return ts
+        return ts.tz_convert("UTC").tz_localize(None)
+    if ts.tzinfo is None:
+        return ts.tz_localize(index.tz)
+    return ts.tz_convert(index.tz)
 
 
 class WaveletWindowSelector:
@@ -236,6 +254,7 @@ class MultiScaleKuramoto:
         timeframe_results: MutableMapping[TimeFrame, KuramotoResult] = {}
         skipped: list[TimeFrame] = []
         windows: list[int] = []
+        endpoints: MutableMapping[TimeFrame, pd.Timestamp] = {}
 
         for timeframe in self.timeframes:
             try:
@@ -295,14 +314,18 @@ class MultiScaleKuramoto:
                     continue
                 timeframe_results[timeframe] = payload.result
                 windows.append(payload.result.window)
+                latest_ts = entry.metadata.latest_timestamp_pd()
+                if latest_ts is not None:
+                    endpoints[timeframe] = latest_ts
                 continue
 
             values = np.asarray(sampled.values, dtype=float)
             if plan.incremental and entry is not None:
                 payload = entry.payload
                 previous_ts = entry.metadata.latest_timestamp_pd()
-                if previous_ts is not None:
-                    new_segment = sampled[sampled.index > previous_ts]
+                aligned_previous = _align_timestamp_to_index(sampled.index, previous_ts)
+                if aligned_previous is not None:
+                    new_segment = sampled[sampled.index > aligned_previous]
                 else:
                     new_segment = sampled
                 if not new_segment.empty:
@@ -336,6 +359,7 @@ class MultiScaleKuramoto:
             result = KuramotoResult(order_parameter=R, mean_phase=psi, window=window)
             timeframe_results[timeframe] = result
             windows.append(window)
+            endpoints[timeframe] = sampled.index[-1]
             context_tail = tuple(np.asarray(sampled.values[-self._context_window():], dtype=float))
             self.cache.store_entry(
                 cache_key,
@@ -373,26 +397,59 @@ class MultiScaleKuramoto:
             adaptive_window=adaptive_window,
             timeframe_results=dict(timeframe_results),
             skipped_timeframes=tuple(skipped),
+            timeframe_endpoints=dict(endpoints),
         )
 
 
 class MultiScaleKuramotoFeature(BaseFeature):
     """Feature wrapper exposing multi-scale Kuramoto consensus as a metric."""
 
-    def __init__(self, analyzer: MultiScaleKuramoto | None = None, *, name: str | None = None) -> None:
+    def __init__(
+        self,
+        analyzer: MultiScaleKuramoto | None = None,
+        *,
+        name: str | None = None,
+        cache: FileSystemIndicatorCache | None = None,
+    ) -> None:
         super().__init__(name or "multi_scale_kuramoto")
         self.analyzer = analyzer or MultiScaleKuramoto()
+        self.cache = cache
 
-    def transform(self, data: pd.DataFrame, **kwargs: object) -> FeatureResult:
-        # Extract price_col if passed
-        price_col = kwargs.get("price_col", "close")
-        if not isinstance(price_col, str):
-            price_col = "close"
-        result = self.analyzer.analyze(data, price_col=price_col)
+    def _selector_params(self) -> Mapping[str, Any]:
+        selector = getattr(self.analyzer, "selector", None)
+        if selector is None:
+            return {}
+        params: dict[str, Any] = {"class": selector.__class__.__name__}
+        for attr in ("min_window", "max_window", "wavelet", "levels"):
+            if hasattr(selector, attr):
+                params[attr] = getattr(selector, attr)
+        return params
+
+    def _cache_params(self, price_col: str) -> Mapping[str, Any]:
+        timeframes = getattr(self.analyzer, "timeframes", ())
+        base_window = getattr(self.analyzer, "base_window", None)
+        use_adaptive = getattr(self.analyzer, "use_adaptive_window", None)
+        min_samples = getattr(self.analyzer, "min_samples_per_scale", None)
+        params: dict[str, Any] = {
+            "timeframes": [tf.name for tf in timeframes] if timeframes else [],
+            "price_col": price_col,
+            "selector": self._selector_params(),
+        }
+        if base_window is not None:
+            params["base_window"] = base_window
+        if use_adaptive is not None:
+            params["use_adaptive_window"] = use_adaptive
+        if min_samples is not None:
+            params["min_samples_per_scale"] = min_samples
+        return params
+
+    @staticmethod
+    def _metadata_from_result(result: MultiScaleResult) -> Dict[str, object]:
         metadata: Dict[str, object] = {
             "adaptive_window": result.adaptive_window,
             "timeframes": [tf.name for tf in result.timeframe_results.keys()],
             "skipped_timeframes": [tf.name for tf in result.skipped_timeframes],
+            "cross_scale_coherence": result.cross_scale_coherence,
         }
         for tf, res in result.timeframe_results.items():
             metadata[f"R_{tf.name}"] = res.order_parameter
@@ -400,8 +457,107 @@ class MultiScaleKuramotoFeature(BaseFeature):
             metadata[f"window_{tf.name}"] = res.window
         if result.dominant_scale is not None:
             metadata["dominant_timeframe"] = result.dominant_scale.name
-        metadata["cross_scale_coherence"] = result.cross_scale_coherence
-        return FeatureResult(name=self.name, value=result.consensus_R, metadata=metadata)
+        for tf, ts in result.timeframe_endpoints.items():
+            metadata[f"endpoint_{tf.name}"] = ts.isoformat()
+        return metadata
+
+    def _store_timeframe_cache(
+        self,
+        df: pd.DataFrame,
+        price_col: str,
+        params: Mapping[str, Any],
+        result: MultiScaleResult,
+    ) -> None:
+        if self.cache is None:
+            return
+
+        price_series = df[price_col]
+        for timeframe, tf_result in result.timeframe_results.items():
+            sampled = self.analyzer._resample_prices(price_series, timeframe)
+            if sampled.empty:
+                continue
+            timeframe_hash = hash_input_data(sampled.to_frame(name=price_col))
+            coverage_start = sampled.index[0].to_pydatetime()
+            coverage_end = sampled.index[-1].to_pydatetime()
+            fingerprint = self.cache.store(
+                indicator_name=f"{self.name}:{timeframe.name}",
+                params={**params, "timeframe": timeframe.name, "window": tf_result.window},
+                data_hash=timeframe_hash,
+                value=tf_result,
+                timeframe=timeframe,
+                coverage_start=coverage_start,
+                coverage_end=coverage_end,
+                metadata={
+                    "order_parameter": tf_result.order_parameter,
+                    "mean_phase": tf_result.mean_phase,
+                    "window": tf_result.window,
+                },
+            )
+            self.cache.update_backfill_state(
+                timeframe,
+                last_timestamp=coverage_end,
+                fingerprint=fingerprint,
+                extras={
+                    "records": int(sampled.size),
+                    "coverage_start": coverage_start.isoformat(),
+                    "coverage_end": coverage_end.isoformat(),
+                },
+            )
+
+    def transform(self, data: pd.DataFrame, **kwargs: object) -> FeatureResult:
+        price_col = kwargs.get("price_col", "close")
+        if not isinstance(price_col, str):
+            price_col = "close"
+
+        df = data.sort_index()
+        params = self._cache_params(price_col)
+        cached_result: MultiScaleResult | None = None
+        latest_timestamp = None
+        if isinstance(df.index, pd.DatetimeIndex) and not df.empty:
+            latest_timestamp = df.index[-1].to_pydatetime()
+
+        if self.cache is not None and not df.empty:
+            target = df[[price_col]] if price_col in df.columns else df
+            data_hash = hash_input_data(target)
+            record = self.cache.load(
+                indicator_name=self.name,
+                params=params,
+                data_hash=data_hash,
+                timeframe=None,
+            )
+            if record is not None and (
+                latest_timestamp is None
+                or record.coverage_end is None
+                or record.coverage_end >= latest_timestamp
+            ):
+                cached_result = record.value
+
+        if cached_result is None:
+            result = self.analyzer.analyze(df, price_col=price_col)
+        else:
+            result = cached_result
+
+        metadata = self._metadata_from_result(result)
+        feature = FeatureResult(name=self.name, value=result.consensus_R, metadata=metadata)
+
+        if self.cache is not None and cached_result is None and not df.empty:
+            target = df[[price_col]] if price_col in df.columns else df
+            data_hash = hash_input_data(target)
+            coverage_start = df.index[0].to_pydatetime()
+            coverage_end = df.index[-1].to_pydatetime()
+            self.cache.store(
+                indicator_name=self.name,
+                params=params,
+                data_hash=data_hash,
+                value=result,
+                timeframe=None,
+                coverage_start=coverage_start,
+                coverage_end=coverage_end,
+                metadata=metadata,
+            )
+            self._store_timeframe_cache(df, price_col, params, result)
+
+        return feature
 
 
 __all__ = [
@@ -411,6 +567,7 @@ __all__ = [
     "KuramotoResult",
     "TimeFrame",
     "WaveletWindowSelector",
+    "analyze_simple",
 ]
 
 
@@ -425,6 +582,7 @@ def analyze_simple(
     analyzer = MultiScaleKuramoto(use_adaptive_window=False, base_window=window, min_samples_per_scale=min(window, 64))
     return analyzer.analyze(df, price_col=price_col)
 
+
 @dataclass(slots=True)
 class TimeFrameCachePayload:
     """Payload stored for each timeframe in the indicator cache."""
@@ -432,4 +590,3 @@ class TimeFrameCachePayload:
     result: KuramotoResult | None
     skipped: bool
     context_tail: tuple[float, ...]
-

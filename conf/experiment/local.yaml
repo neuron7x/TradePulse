@@ -1,0 +1,15 @@
+name: local
+db_uri: "sqlite:///local.db"
+debug: true
+log_level: DEBUG
+random_seed: 42
+data:
+  price_csv: sample.csv
+  price_column: price
+analytics:
+  window: 256
+  bins: 48
+  delta: 0.005
+tracking:
+  enabled: true
+  base_dir: ${hydra.run.dir}

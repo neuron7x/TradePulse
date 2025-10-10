@@ -1,0 +1,15 @@
+name: ci
+db_uri: "sqlite:///ci.db"
+debug: false
+log_level: INFO
+random_seed: 1337
+data:
+  price_csv: sample.csv
+  price_column: price
+analytics:
+  window: 128
+  bins: 32
+  delta: 0.01
+tracking:
+  enabled: true
+  base_dir: ${hydra.run.dir}

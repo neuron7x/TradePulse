@@ -47,6 +47,16 @@ def _json_safe(value: Any) -> Any:
     return repr(value)
 
 
+def _normalize_timestamp(ts: pd.Timestamp | None) -> pd.Timestamp | None:
+    """Return a timezone-aware timestamp normalised to UTC."""
+
+    if ts is None:
+        return None
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
+
+
 def _read_version_file() -> str | None:
     try:
         return Path("VERSION").read_text(encoding="utf-8").strip()
@@ -327,8 +337,10 @@ class IndicatorCache:
                 incremental=False,
                 start_timestamp=None,
             )
-        previous_ts = metadata.latest_timestamp_pd()
-        if latest_timestamp is None or previous_ts is None:
+        raw_previous = metadata.latest_timestamp_pd()
+        previous_ts = _normalize_timestamp(raw_previous)
+        normalized_latest = _normalize_timestamp(latest_timestamp)
+        if normalized_latest is None or previous_ts is None:
             return BackfillPlan(
                 fingerprint=fingerprint,
                 cache_hit=True,
@@ -336,7 +348,7 @@ class IndicatorCache:
                 incremental=False,
                 start_timestamp=None,
             )
-        if latest_timestamp <= previous_ts:
+        if normalized_latest <= previous_ts:
             # Data changed but not advanced in time – force full recompute.
             return BackfillPlan(
                 fingerprint=fingerprint,
@@ -350,7 +362,7 @@ class IndicatorCache:
             cache_hit=True,
             needs_update=True,
             incremental=True,
-            start_timestamp=previous_ts,
+            start_timestamp=raw_previous,
         )
 
 

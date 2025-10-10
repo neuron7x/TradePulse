@@ -89,21 +89,34 @@ def _parse_timeframe(value: Any) -> TimeFrame:
         raise ValueError(f"invalid timeframe value: {value!r}") from exc
 
 
-def _parse_env_file(path: Path) -> dict[str, str]:
-    entries: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if not key:
-            continue
-        value = value.strip().strip('"').strip("'")
-        entries[key] = value
-    return entries
+def _merge_adaptive_window_payload(data: Any) -> Mapping[str, Any]:
+    if data is None:
+        return {}
+    if not isinstance(data, Mapping):
+        raise TypeError("kuramoto configuration must be a mapping")
+    payload = dict(data)
+    adaptive = payload.pop("adaptive_window", None)
+    if isinstance(adaptive, Mapping):
+        if "enabled" in adaptive and "use_adaptive_window" not in payload:
+            payload["use_adaptive_window"] = adaptive["enabled"]
+        if "base_window" in adaptive and "base_window" not in payload:
+            payload["base_window"] = adaptive["base_window"]
+    return payload
+
+
+def _coerce_timeframes_payload(value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
+    if value is None:
+        return value
+    if isinstance(value, (str, bytes)):
+        raise TypeError("kuramoto.timeframes must be a sequence")
+    if isinstance(value, Iterable):
+        return tuple(_parse_timeframe(item) for item in value)
+    raise TypeError("kuramoto.timeframes must be a sequence")
+
+
+def _ensure_timeframes_non_empty_payload(timeframes: Sequence[TimeFrame] | None) -> None:
+    if not timeframes:
+        raise ValueError("kuramoto.timeframes cannot be empty")
 
 
 def _normalise_mapping(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -215,61 +228,30 @@ class KuramotoConfig(ImmutableModel):
     if field_validator is not None:
         @field_validator("timeframes", mode="before")
         def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
-            if value is None:
-                return value
-            if isinstance(value, (str, bytes)):
-                raise TypeError("kuramoto.timeframes must be a sequence")
-            if isinstance(value, Iterable):
-                sequence = tuple(_parse_timeframe(item) for item in value)
-                if not sequence:
-                    raise ValueError("kuramoto.timeframes cannot be empty")
-                return sequence
-            raise TypeError("kuramoto.timeframes must be a sequence")
+            return _coerce_timeframes_payload(value)
 
         @model_validator(mode="before")
         def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
-            if data is None:
-                return {}
-            if not isinstance(data, Mapping):
-                raise TypeError("kuramoto configuration must be a mapping")
-            payload = dict(data)
-            adaptive = payload.pop("adaptive_window", None)
-            if isinstance(adaptive, Mapping):
-                if "enabled" in adaptive and "use_adaptive_window" not in payload:
-                    payload["use_adaptive_window"] = adaptive["enabled"]
-                if "base_window" in adaptive and "base_window" not in payload:
-                    payload["base_window"] = adaptive["base_window"]
-            return payload
+            return _merge_adaptive_window_payload(data)
+
+        @model_validator(mode="after")
+        def _ensure_timeframes_non_empty(self) -> "KuramotoConfig":
+            _ensure_timeframes_non_empty_payload(self.timeframes)
+            return self
 
     else:
         @v1_validator("timeframes", pre=True)  # type: ignore[misc]
         def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
-            if value is None:
-                return value
-            if isinstance(value, (str, bytes)):
-                raise TypeError("kuramoto.timeframes must be a sequence")
-            if isinstance(value, Iterable):
-                sequence = tuple(_parse_timeframe(item) for item in value)
-                if not sequence:
-                    raise ValueError("kuramoto.timeframes cannot be empty")
-                return sequence
-            raise TypeError("kuramoto.timeframes must be a sequence")
+            return _coerce_timeframes_payload(value)
 
         @v1_root_validator(pre=True)  # type: ignore[misc]
         def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
-            if data is None:
-                return {}
-            if not isinstance(data, Mapping):
-                raise TypeError("kuramoto configuration must be a mapping")
-            payload = dict(data)
-            adaptive = payload.pop("adaptive_window", None)
-            if isinstance(adaptive, Mapping):
-                if "enabled" in adaptive and "use_adaptive_window" not in payload:
-                    payload["use_adaptive_window"] = adaptive["enabled"]
-                if "base_window" in adaptive and "base_window" not in payload:
-                    payload["base_window"] = adaptive["base_window"]
-            return payload
+            return _merge_adaptive_window_payload(data)
 
+        @v1_root_validator  # type: ignore[misc]
+        def _ensure_timeframes_non_empty(cls, values: Mapping[str, Any]) -> Mapping[str, Any]:
+            _ensure_timeframes_non_empty_payload(values.get("timeframes"))
+            return values
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -432,6 +414,7 @@ class TradePulseSettings(ImmutableModel):
             if "config" in payload and "config_file" not in payload:
                 payload["config_file"] = payload.pop("config")
             return payload
+
     else:
         @v1_validator("config_file", pre=True)  # type: ignore[misc]
         def _coerce_config_path(cls, value: Any) -> Path | None:
@@ -535,6 +518,27 @@ def load_kuramoto_ricci_config(
     with _temporary_env_overrides(assignments):
         settings = TradePulseSettings.load(cli_overrides=overrides)
     return settings.as_kuramoto_ricci_config()
+
+
+def _parse_env_file(path: Path) -> dict[str, str]:
+    entries: dict[str, str] = {}
+    try:
+        contents = path.read_text(encoding="utf8")
+    except FileNotFoundError:
+        return entries
+    for raw_line in contents.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        value = value.strip().strip('"').strip("'")
+        entries[key] = value
+    return entries
 
 
 __all__ = [
