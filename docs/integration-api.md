@@ -54,7 +54,9 @@ TradePulse provides multiple integration points for connecting with external sys
 
 ### Ticker Interface
 
-Market data tick representation:
+Market data ticks are represented by immutable Pydantic models so every
+ingestion path enforces the same validation (strict decimals, UTC timestamps,
+and instrument metadata):
 
 ```python
 from datetime import datetime, timezone
@@ -69,6 +71,9 @@ tick = Ticker(
     price=Decimal("50000"),
     volume=Decimal("0.5"),
 )
+
+assert tick.kind.value == "tick"
+assert tick.timestamp.tzinfo is timezone.utc
 
 # Convenience helper for legacy style construction
 tick = Ticker.create(

@@ -7,7 +7,12 @@ from dataclasses import dataclass, fields, is_dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, Type, get_type_hints, get_origin, get_args
+from typing import Any, Dict, Type, get_args, get_origin, get_type_hints
+
+try:  # pragma: no cover - optional dependency shim
+    from pydantic import BaseModel
+except ModuleNotFoundError:  # pragma: no cover - exercised when dependency missing
+    BaseModel = None  # type: ignore[assignment]
 
 
 def dataclass_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[str, Any]:
@@ -117,6 +122,14 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
     if isinstance(typ, type) and is_dataclass(typ):
         return dataclass_to_json_schema(typ)
 
+    # Handle Pydantic models
+    if BaseModel is not None and isinstance(typ, type) and issubclass(typ, BaseModel):
+        schema = typ.schema()
+        schema.setdefault("title", typ.__name__)
+        if typ.__doc__:
+            schema.setdefault("description", typ.__doc__.strip())
+        return schema
+
     # Handle Dict types
     if origin is dict or typ is dict:
         result_schema: Dict[str, Any] = {"type": "object"}
@@ -124,6 +137,15 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
             value_schema = _type_to_schema(args[1])
             result_schema["additionalProperties"] = value_schema
         return result_schema
+
+    # Handle Mapping types
+    from collections.abc import Mapping
+
+    if origin and issubclass(origin, Mapping):
+        mapping_schema: Dict[str, Any] = {"type": "object"}
+        if args and len(args) == 2:
+            mapping_schema["additionalProperties"] = _type_to_schema(args[1])
+        return mapping_schema
 
     # Handle List/Sequence/Set types
     if origin in {list, tuple, set, frozenset} or typ in {list, tuple, set, frozenset}:
@@ -142,15 +164,6 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
         if args:
             list_schema["items"] = _type_to_schema(args[0])
         return list_schema
-
-    # Handle Mapping types
-    from collections.abc import Mapping
-
-    if origin and issubclass(origin, Mapping):
-        mapping_schema: Dict[str, Any] = {"type": "object"}
-        if args and len(args) == 2:
-            mapping_schema["additionalProperties"] = _type_to_schema(args[1])
-        return mapping_schema
 
     # Default to Any
     return {}
@@ -187,7 +200,7 @@ def generate_all_schemas() -> Dict[str, Dict[str, Any]]:
         "and number of trades."
     )
     
-    schemas["Ticker"] = dataclass_to_json_schema(Ticker, title="Ticker")
+    schemas["Ticker"] = model_to_json_schema(Ticker, title="Ticker")
     schemas["Ticker"]["description"] = (
         "Market data tick with instrument metadata, price and volume information."
     )
@@ -267,9 +280,27 @@ def validate_against_schema(data: Dict[str, Any], schema: Dict[str, Any]) -> boo
     return True
 
 
+def model_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[str, Any]:
+    """Return a JSON schema for either a dataclass or a Pydantic model."""
+
+    if BaseModel is not None and isinstance(cls, type) and issubclass(cls, BaseModel):
+        schema = cls.schema()
+        if title:
+            schema["title"] = title
+        if cls.__doc__:
+            schema.setdefault("description", cls.__doc__.strip())
+        return schema
+
+    if is_dataclass(cls):
+        return dataclass_to_json_schema(cls, title=title)
+
+    raise TypeError(f"{cls} is neither a dataclass nor a Pydantic BaseModel")
+
+
 __all__ = [
     "dataclass_to_json_schema",
     "generate_all_schemas",
+    "model_to_json_schema",
     "save_schemas",
     "validate_against_schema",
 ]

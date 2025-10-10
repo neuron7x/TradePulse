@@ -456,7 +456,6 @@ def test_mean_reversion_insufficient_data():
 
 ```python
 # core/data/ingestion.py
-from dataclasses import dataclass
 from typing import Callable, Optional
 from datetime import datetime, timezone
 
@@ -464,17 +463,17 @@ from core.data.models import Ticker
 
 class DataSource(ABC):
     """Base class for data sources."""
-    
+
     @abstractmethod
     def connect(self) -> None:
         """Establish connection to data source."""
         pass
-    
+
     @abstractmethod
     def disconnect(self) -> None:
         """Close connection to data source."""
         pass
-    
+
     @abstractmethod
     def subscribe(
         self,
@@ -484,6 +483,10 @@ class DataSource(ABC):
         """Subscribe to symbol updates."""
         pass
 ```
+
+> **Note**: `Ticker` is an immutable Pydantic model.  Any callback you register
+> receives a fully validated payload with UTC timestamps and Decimal-backed
+> prices/volumes, so downstream code can rely on strict typing.
 
 ### Step 2: Implement Your Data Source
 
