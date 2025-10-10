@@ -1,42 +1,34 @@
 """Structured configuration for Kuramoto–Ricci composite workflows."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import yaml
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+from pydantic.fields import FieldInfo
+from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
+from pydantic_settings.sources import PydanticBaseSettingsSource
 
 from core.indicators.multiscale_kuramoto import TimeFrame
+
+DEFAULT_CONFIG_PATH = Path("configs/kuramoto_ricci_composite.yaml")
 
 
 class ConfigError(ValueError):
     """Raised when a configuration value is invalid."""
 
 
-def _as_positive_int(value: Any, *, name: str) -> int:
-    try:
-        ivalue = int(value)
-    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
-        raise ConfigError(f"{name} must be an integer") from exc
-    if ivalue <= 0:
-        raise ConfigError(f"{name} must be positive")
-    return ivalue
-
-
-def _as_bool(value: Any, *, name: str) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        lowered = value.strip().lower()
-        if lowered in {"true", "1", "yes", "on"}:
-            return True
-        if lowered in {"false", "0", "no", "off"}:
-            return False
-    raise ConfigError(f"{name} must be a boolean")
-
-
-def _as_timeframe(value: Any) -> TimeFrame:
+def _parse_timeframe(value: Any) -> TimeFrame:
     if isinstance(value, TimeFrame):
         return value
     if isinstance(value, str):
@@ -47,69 +39,69 @@ def _as_timeframe(value: Any) -> TimeFrame:
             try:
                 return TimeFrame[token]
             except KeyError as exc:  # pragma: no cover - defensive branch
-                raise ConfigError(f"unknown timeframe label '{token}'") from exc
+                raise ValueError(f"unknown timeframe label '{token}'") from exc
     try:
         return TimeFrame(int(value))
-    except (ValueError, TypeError) as exc:
-        raise ConfigError(f"invalid timeframe value: {value!r}") from exc
+    except (ValueError, TypeError) as exc:  # pragma: no cover - defensive branch
+        raise ValueError(f"invalid timeframe value: {value!r}") from exc
 
 
-def _as_float(value: Any, *, name: str) -> float:
-    try:
-        return float(value)
-    except (TypeError, ValueError) as exc:  # pragma: no cover - defensive branch
-        raise ConfigError(f"{name} must be numeric") from exc
-
-
-@dataclass(frozen=True)
-class KuramotoConfig:
+class KuramotoConfig(BaseModel):
     """Configuration payload for :class:`MultiScaleKuramoto`."""
 
-    timeframes: tuple[TimeFrame, ...] = field(
-        default_factory=lambda: (
-            TimeFrame.M1,
-            TimeFrame.M5,
-            TimeFrame.M15,
-            TimeFrame.H1,
-        )
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    timeframes: tuple[TimeFrame, ...] = Field(
+        default=(TimeFrame.M1, TimeFrame.M5, TimeFrame.M15, TimeFrame.H1),
+        description="Ordered set of timeframes analysed by the indicator.",
     )
-    use_adaptive_window: bool = True
-    base_window: int = 200
-    min_samples_per_scale: int = 64
+    use_adaptive_window: bool = Field(
+        default=True,
+        description="Whether to adapt the base window dynamically.",
+    )
+    base_window: int = Field(
+        default=200,
+        gt=0,
+        description="Base lookback window used by the Kuramoto estimator.",
+    )
+    min_samples_per_scale: int = Field(
+        default=64,
+        gt=0,
+        description="Minimum number of samples required per analysed scale.",
+    )
 
+    @model_validator(mode="before")
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoConfig":
-        data = data or {}
-        raw_timeframes = data.get("timeframes")
-        if raw_timeframes is None:
-            timeframes: tuple[TimeFrame, ...] = cls().timeframes
-        else:
-            if not isinstance(raw_timeframes, Iterable) or isinstance(raw_timeframes, (str, bytes)):
-                raise ConfigError("kuramoto.timeframes must be a sequence")
-            parsed = tuple(_as_timeframe(v) for v in raw_timeframes)
-            if not parsed:
-                raise ConfigError("kuramoto.timeframes cannot be empty")
-            timeframes = parsed
+    def _merge_adaptive_window(cls, data: Any) -> Mapping[str, Any]:
+        if data is None:
+            return {}
+        if not isinstance(data, Mapping):
+            raise TypeError("kuramoto configuration must be a mapping")
+        payload = dict(data)
+        adaptive = payload.pop("adaptive_window", None)
+        if isinstance(adaptive, Mapping):
+            if "enabled" in adaptive and "use_adaptive_window" not in payload:
+                payload["use_adaptive_window"] = adaptive["enabled"]
+            if "base_window" in adaptive and "base_window" not in payload:
+                payload["base_window"] = adaptive["base_window"]
+        return payload
 
-        base_window = _as_positive_int(data.get("base_window", cls().base_window), name="kuramoto.base_window")
-        min_samples = _as_positive_int(
-            data.get("min_samples_per_scale", cls().min_samples_per_scale), name="kuramoto.min_samples_per_scale"
-        )
-        adaptive_cfg_raw = data.get("adaptive_window")
-        adaptive_cfg = adaptive_cfg_raw if isinstance(adaptive_cfg_raw, Mapping) else {}
+    @field_validator("timeframes", mode="before")
+    @classmethod
+    def _coerce_timeframes(cls, value: Any) -> Sequence[Any] | tuple[TimeFrame, ...]:
+        if value is None:
+            return value
+        if isinstance(value, (str, bytes)):
+            raise TypeError("kuramoto.timeframes must be a sequence")
+        if isinstance(value, Iterable):
+            return tuple(_parse_timeframe(item) for item in value)
+        raise TypeError("kuramoto.timeframes must be a sequence")
 
-        use_adaptive_value = data.get("use_adaptive_window")
-        if use_adaptive_value is not None:
-            use_adaptive = _as_bool(use_adaptive_value, name="kuramoto.use_adaptive_window")
-        elif "enabled" in adaptive_cfg:
-            use_adaptive = _as_bool(adaptive_cfg["enabled"], name="kuramoto.adaptive_window.enabled")
-        else:
-            use_adaptive = cls().use_adaptive_window
-
-        if "base_window" in adaptive_cfg:
-            base_window = _as_positive_int(adaptive_cfg["base_window"], name="kuramoto.adaptive_window.base_window")
-
-        return cls(timeframes=timeframes, use_adaptive_window=use_adaptive, base_window=base_window, min_samples_per_scale=min_samples)
+    @model_validator(mode="after")
+    def _ensure_timeframes_non_empty(self) -> "KuramotoConfig":
+        if not self.timeframes:
+            raise ValueError("kuramoto.timeframes cannot be empty")
+        return self
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -120,47 +112,26 @@ class KuramotoConfig:
         }
 
 
-@dataclass(frozen=True)
-class RicciTemporalConfig:
-    window_size: int = 100
-    n_snapshots: int = 8
-    retain_history: bool = True
+class RicciTemporalConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "RicciTemporalConfig":
-        data = data or {}
-        window = _as_positive_int(data.get("window_size", cls().window_size), name="ricci.temporal.window_size")
-        n_snaps = _as_positive_int(data.get("n_snapshots", cls().n_snapshots), name="ricci.temporal.n_snapshots")
-        retain = _as_bool(data.get("retain_history", cls().retain_history), name="ricci.temporal.retain_history")
-        return cls(window_size=window, n_snapshots=n_snaps, retain_history=retain)
+    window_size: int = Field(default=100, gt=0)
+    n_snapshots: int = Field(default=8, gt=0)
+    retain_history: bool = Field(default=True)
 
 
-@dataclass(frozen=True)
-class RicciGraphConfig:
-    n_levels: int = 20
-    connection_threshold: float = 0.1
+class RicciGraphConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "RicciGraphConfig":
-        data = data or {}
-        n_levels = _as_positive_int(data.get("n_levels", cls().n_levels), name="ricci.graph.n_levels")
-        conn = _as_float(data.get("connection_threshold", cls().connection_threshold), name="ricci.graph.connection_threshold")
-        if conn <= 0 or conn >= 1:
-            raise ConfigError("ricci.graph.connection_threshold must be between 0 and 1")
-        return cls(n_levels=n_levels, connection_threshold=conn)
+    n_levels: int = Field(default=20, gt=0)
+    connection_threshold: float = Field(default=0.1, gt=0, lt=1)
 
 
-@dataclass(frozen=True)
-class RicciConfig:
-    temporal: RicciTemporalConfig = field(default_factory=RicciTemporalConfig)
-    graph: RicciGraphConfig = field(default_factory=RicciGraphConfig)
+class RicciConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "RicciConfig":
-        data = data or {}
-        temporal = RicciTemporalConfig.from_mapping(data.get("temporal"))
-        graph = RicciGraphConfig.from_mapping(data.get("graph"))
-        return cls(temporal=temporal, graph=graph)
+    temporal: RicciTemporalConfig = Field(default_factory=RicciTemporalConfig)
+    graph: RicciGraphConfig = Field(default_factory=RicciGraphConfig)
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -172,67 +143,34 @@ class RicciConfig:
         }
 
 
-@dataclass(frozen=True)
-class CompositeThresholds:
-    R_strong_emergent: float = 0.8
-    R_proto_emergent: float = 0.4
-    coherence_min: float = 0.6
-    ricci_negative: float = -0.3
-    temporal_ricci: float = -0.2
-    topological_transition: float = 0.7
+class CompositeThresholds(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "CompositeThresholds":
-        data = data or {}
-        strong = _as_float(data.get("R_strong_emergent", cls().R_strong_emergent), name="composite.thresholds.R_strong_emergent")
-        proto = _as_float(data.get("R_proto_emergent", cls().R_proto_emergent), name="composite.thresholds.R_proto_emergent")
-        coherence = _as_float(data.get("coherence_min", cls().coherence_min), name="composite.thresholds.coherence_min")
-        ricci_neg = _as_float(data.get("ricci_negative", cls().ricci_negative), name="composite.thresholds.ricci_negative")
-        temporal = _as_float(data.get("temporal_ricci", cls().temporal_ricci), name="composite.thresholds.temporal_ricci")
-        transition = _as_float(data.get("topological_transition", cls().topological_transition), name="composite.thresholds.topological_transition")
+    R_strong_emergent: float = Field(default=0.8, ge=0, le=1)
+    R_proto_emergent: float = Field(default=0.4, ge=0, le=1)
+    coherence_min: float = Field(default=0.6, ge=0, le=1)
+    ricci_negative: float = Field(default=-0.3)
+    temporal_ricci: float = Field(default=-0.2)
+    topological_transition: float = Field(default=0.7, ge=0, le=1)
 
-        if not (0.0 <= proto <= 1.0 and 0.0 <= strong <= 1.0):
-            raise ConfigError("composite.thresholds R values must be between 0 and 1")
-        if strong <= proto:
-            raise ConfigError("R_strong_emergent must exceed R_proto_emergent")
-        if not (0.0 <= coherence <= 1.0):
-            raise ConfigError("coherence_min must be between 0 and 1")
-        if not (0.0 <= transition <= 1.0):
-            raise ConfigError("topological_transition must be between 0 and 1")
-        return cls(
-            R_strong_emergent=strong,
-            R_proto_emergent=proto,
-            coherence_min=coherence,
-            ricci_negative=ricci_neg,
-            temporal_ricci=temporal,
-            topological_transition=transition,
-        )
+    @model_validator(mode="after")
+    def _validate_thresholds(self) -> "CompositeThresholds":
+        if self.R_strong_emergent <= self.R_proto_emergent:
+            raise ValueError("R_strong_emergent must exceed R_proto_emergent")
+        return self
 
 
-@dataclass(frozen=True)
-class CompositeSignals:
-    min_confidence: float = 0.5
+class CompositeSignals(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "CompositeSignals":
-        data = data or {}
-        min_conf = _as_float(data.get("min_confidence", cls().min_confidence), name="composite.signals.min_confidence")
-        if not (0.0 <= min_conf <= 1.0):
-            raise ConfigError("min_confidence must be between 0 and 1")
-        return cls(min_confidence=min_conf)
+    min_confidence: float = Field(default=0.5, ge=0, le=1)
 
 
-@dataclass(frozen=True)
-class CompositeConfig:
-    thresholds: CompositeThresholds = field(default_factory=CompositeThresholds)
-    signals: CompositeSignals = field(default_factory=CompositeSignals)
+class CompositeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "CompositeConfig":
-        data = data or {}
-        thresholds = CompositeThresholds.from_mapping(data.get("thresholds"))
-        signals = CompositeSignals.from_mapping(data.get("signals"))
-        return cls(thresholds=thresholds, signals=signals)
+    thresholds: CompositeThresholds = Field(default_factory=CompositeThresholds)
+    signals: CompositeSignals = Field(default_factory=CompositeSignals)
 
     def to_engine_kwargs(self) -> dict[str, Any]:
         return {
@@ -246,32 +184,35 @@ class CompositeConfig:
         }
 
 
-@dataclass(frozen=True)
-class KuramotoRicciIntegrationConfig:
-    kuramoto: KuramotoConfig = field(default_factory=KuramotoConfig)
-    ricci: RicciConfig = field(default_factory=RicciConfig)
-    composite: CompositeConfig = field(default_factory=CompositeConfig)
+class KuramotoRicciIntegrationConfig(BaseModel):
+    """Composite configuration for the Kuramoto–Ricci integration workflow."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
+    ricci: RicciConfig = Field(default_factory=RicciConfig)
+    composite: CompositeConfig = Field(default_factory=CompositeConfig)
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoRicciIntegrationConfig":
-        data = data or {}
-        kuramoto = KuramotoConfig.from_mapping(data.get("kuramoto"))
-        ricci = RicciConfig.from_mapping(data.get("ricci"))
-        composite = CompositeConfig.from_mapping(data.get("composite"))
-        return cls(kuramoto=kuramoto, ricci=ricci, composite=composite)
+        try:
+            return cls.model_validate(data or {})
+        except ValidationError as exc:  # pragma: no cover - error propagation
+            messages = "; ".join(error["msg"] for error in exc.errors())
+            raise ConfigError(messages) from exc
 
     @classmethod
     def from_file(cls, path: str | Path | None) -> "KuramotoRicciIntegrationConfig":
         if path is None:
             return cls()
-        path = Path(path)
-        if not path.exists():
-            raise FileNotFoundError(path)
-        with path.open("r", encoding="utf8") as fh:
-            payload = yaml.safe_load(fh) or {}
-        if not isinstance(payload, Mapping):
+        payload_path = Path(path)
+        if not payload_path.exists():
+            raise FileNotFoundError(payload_path)
+        with payload_path.open("r", encoding="utf8") as handle:
+            loaded = yaml.safe_load(handle) or {}
+        if not isinstance(loaded, Mapping):
             raise ConfigError("configuration file must define a mapping")
-        return cls.from_mapping(payload)
+        return cls.from_mapping(loaded)
 
     def to_engine_kwargs(self) -> dict[str, dict[str, Any]]:
         return {
@@ -281,12 +222,162 @@ class KuramotoRicciIntegrationConfig:
         }
 
 
-def load_kuramoto_ricci_config(path: str | Path | None) -> KuramotoRicciIntegrationConfig:
-    """Load a Kuramoto–Ricci integration config, falling back to defaults."""
+class YamlSettingsSource(PydanticBaseSettingsSource):
+    """Lowest-priority settings source that loads values from YAML files."""
 
-    if path is None:
-        return KuramotoRicciIntegrationConfig()
-    try:
-        return KuramotoRicciIntegrationConfig.from_file(path)
-    except FileNotFoundError:
-        return KuramotoRicciIntegrationConfig()
+    def __init__(
+        self,
+        settings_cls: type[BaseSettings],
+        init_source: PydanticBaseSettingsSource,
+        env_source: PydanticBaseSettingsSource,
+        dotenv_source: PydanticBaseSettingsSource,
+    ) -> None:
+        super().__init__(settings_cls)
+        self._init_source = init_source
+        self._env_source = env_source
+        self._dotenv_source = dotenv_source
+
+    def __call__(self) -> dict[str, Any]:
+        config_path = self._resolve_path()
+        if config_path is None:
+            return {}
+        try:
+            text = config_path.read_text(encoding="utf8")
+        except FileNotFoundError:
+            return {}
+        try:
+            payload = yaml.safe_load(text) or {}
+        except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
+            raise SettingsError(f"failed to parse YAML configuration at {config_path}: {exc}") from exc
+        if not isinstance(payload, Mapping):
+            raise SettingsError(f"configuration file {config_path} must define a mapping")
+        return dict(payload)
+
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        return None, field_name, False
+
+    def _resolve_path(self) -> Path | None:
+        for source in (self._init_source, self._env_source, self._dotenv_source):
+            try:
+                data = source()
+            except SettingsError:  # pragma: no cover - defensive guard
+                data = {}
+            except Exception:  # pragma: no cover - defensive guard
+                data = {}
+            candidate = data.get("config_file") or data.get("config")
+            if candidate:
+                return Path(candidate).expanduser()
+
+        field = self.settings_cls.model_fields.get("config_file")
+        default_value = getattr(field, "default", None)
+        if default_value:
+            return Path(default_value).expanduser()
+        return None
+
+
+class TradePulseSettings(BaseSettings):
+    """Application-wide configuration powered by ``pydantic-settings``."""
+
+    model_config = SettingsConfigDict(
+        env_prefix="TRADEPULSE_",
+        env_nested_delimiter="__",
+        env_file=".env",
+        extra="ignore",
+    )
+
+    config_file: Path | None = Field(
+        default=DEFAULT_CONFIG_PATH,
+        description="Primary YAML configuration file.",
+        validation_alias=AliasChoices("config_file", "config"),
+    )
+    kuramoto: KuramotoConfig = Field(default_factory=KuramotoConfig)
+    ricci: RicciConfig = Field(default_factory=RicciConfig)
+    composite: CompositeConfig = Field(default_factory=CompositeConfig)
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            yaml_source,
+            file_secret_settings,
+        )
+
+    def as_kuramoto_ricci_config(self) -> KuramotoRicciIntegrationConfig:
+        return KuramotoRicciIntegrationConfig(
+            kuramoto=self.kuramoto,
+            ricci=self.ricci,
+            composite=self.composite,
+        )
+
+
+def parse_cli_overrides(pairs: Sequence[str] | None) -> dict[str, Any]:
+    """Convert CLI ``key=value`` pairs into nested dictionaries."""
+
+    overrides: dict[str, Any] = {}
+    if not pairs:
+        return overrides
+
+    for raw in pairs:
+        if "=" not in raw:
+            raise ConfigError(f"Invalid override '{raw}', expected format key=value")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ConfigError("Override keys cannot be empty")
+        target = overrides
+        parts = [segment.strip() for segment in key.split(".") if segment.strip()]
+        if not parts:
+            raise ConfigError("Override keys cannot be empty")
+        for segment in parts[:-1]:
+            target = target.setdefault(segment, {})
+            if not isinstance(target, dict):
+                raise ConfigError(f"Override path '{key}' collides with a scalar value")
+        parsed_value: Any
+        try:
+            parsed_value = yaml.safe_load(value)
+        except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
+            raise ConfigError(f"Unable to parse override '{raw}': {exc}") from exc
+        target[parts[-1]] = parsed_value
+
+    return overrides
+
+
+def load_kuramoto_ricci_config(
+    path: str | Path | None,
+    *,
+    cli_overrides: Mapping[str, Any] | None = None,
+) -> KuramotoRicciIntegrationConfig:
+    """Load a Kuramoto–Ricci integration config with layered sources."""
+
+    overrides = dict(cli_overrides or {})
+    if path is not None:
+        overrides.setdefault("config_file", Path(path))
+    settings = TradePulseSettings(**overrides)
+    return settings.as_kuramoto_ricci_config()
+
+
+__all__ = [
+    "ConfigError",
+    "CompositeConfig",
+    "CompositeSignals",
+    "CompositeThresholds",
+    "KuramotoConfig",
+    "KuramotoRicciIntegrationConfig",
+    "RicciConfig",
+    "RicciGraphConfig",
+    "RicciTemporalConfig",
+    "TradePulseSettings",
+    "YamlSettingsSource",
+    "load_kuramoto_ricci_config",
+    "parse_cli_overrides",
+]

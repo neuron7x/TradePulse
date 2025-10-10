@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from core.config import load_kuramoto_ricci_config
+from core.config import load_kuramoto_ricci_config, parse_cli_overrides
 from core.indicators.kuramoto_ricci_composite import TradePulseCompositeEngine
 
 def main():
@@ -14,13 +14,25 @@ def main():
     ap.add_argument("--config", type=str, default="configs/kuramoto_ricci_composite.yaml")
     ap.add_argument("--mode", choices=["analyze","backtest"], default="analyze")
     ap.add_argument("--output", type=str, default="outputs")
+    ap.add_argument(
+        "--config-override",
+        action="append",
+        dest="config_overrides",
+        default=[],
+        metavar="KEY=VALUE",
+        help=(
+            "Override configuration values using dot-delimited keys. "
+            "Example: --config-override kuramoto.base_window=256"
+        ),
+    )
     args = ap.parse_args()
 
     df = pd.read_csv(args.data, index_col=0, parse_dates=True)
     if "volume" not in df.columns:
         df["volume"] = 1.0
 
-    cfg = load_kuramoto_ricci_config(args.config)
+    overrides = parse_cli_overrides(args.config_overrides)
+    cfg = load_kuramoto_ricci_config(args.config, cli_overrides=overrides)
     engine = TradePulseCompositeEngine(**cfg.to_engine_kwargs())
     sig = engine.analyze_market(df)
 
