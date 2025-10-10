@@ -81,19 +81,19 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight t
                     if not check(series):
                         raise SchemaError(getattr(check, "error", f"Check failed for {name}"))
             return frame
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 try:  # Python >= 3.9 ships the ``zoneinfo`` module in the stdlib.
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - fallback for very old Python versions
     from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
-
-PYDANTIC_V2 = hasattr(BaseModel, "model_fields")
-
-if PYDANTIC_V2:
-    from pydantic import field_validator, model_validator
-else:  # pragma: no cover - exercised indirectly when running under pydantic v1
-    from pydantic import root_validator, validator
 
 DEFAULT_TIMEZONE = "UTC"
 
@@ -113,7 +113,7 @@ class TimeSeriesValidationError(ValueError):
 class ValueColumnConfig(BaseModel):
     """Declarative schema for value columns in a time series payload."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, strict=True)
 
     name: StrictStr = Field(..., min_length=1, description="Column name in the dataframe")
     dtype: Optional[StrictStr] = Field(
@@ -125,30 +125,19 @@ class ValueColumnConfig(BaseModel):
         description="Allow null values in the column. Defaults to the strict setting (False).",
     )
 
-    if PYDANTIC_V2:
-
-        @field_validator("name")
-        @classmethod
-        def _strip_name(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Column names must not be blank")
-            return stripped
-
-    else:  # pragma: no cover - pydantic v1 compatibility shim
-
-        @validator("name")
-        def _strip_name(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Column names must not be blank")
-            return stripped
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise TimeSeriesValidationError("Column names must not be blank")
+        return stripped
 
 
 class TimeSeriesValidationConfig(BaseModel):
     """Configuration describing the shape and quality guarantees of a time series frame."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, strict=True)
 
     timestamp_column: StrictStr = Field(
         default="timestamp",
@@ -172,81 +161,42 @@ class TimeSeriesValidationConfig(BaseModel):
         description="Allow columns outside of ``value_columns`` to be present in the frame.",
     )
 
-    if PYDANTIC_V2:
+    @field_validator("timestamp_column")
+    @classmethod
+    def _strip_timestamp_column(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise TimeSeriesValidationError("Timestamp column name must not be blank")
+        return stripped
 
-        @field_validator("timestamp_column")
-        @classmethod
-        def _strip_timestamp_column(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Timestamp column name must not be blank")
-            return stripped
+    @field_validator("frequency", mode="before")
+    @classmethod
+    def _coerce_frequency(cls, value: Optional[object]) -> Optional[pd.Timedelta]:
+        return _coerce_timedelta(value)
 
-        @field_validator("frequency", mode="before")
-        @classmethod
-        def _coerce_frequency(cls, value: Optional[object]) -> Optional[pd.Timedelta]:
-            return _coerce_timedelta(value)
+    @field_validator("require_timezone")
+    @classmethod
+    def _ensure_timezone(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise TimeSeriesValidationError("Timezone requirement must not be blank")
+        _resolve_timezone(stripped)
+        return stripped
 
-        @field_validator("require_timezone")
-        @classmethod
-        def _ensure_timezone(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Timezone requirement must not be blank")
-            _resolve_timezone(stripped)
-            return stripped
-
-        @model_validator(mode="after")
-        def _ensure_unique_columns(self) -> "TimeSeriesValidationConfig":
-            names = [col.name for col in self.value_columns]
-            duplicates = _find_duplicates(names)
-            if duplicates:
-                joined = ", ".join(sorted(duplicates))
-                raise TimeSeriesValidationError(
-                    f"Value columns must be unique, duplicates found for: {joined}"
-                )
-            if self.timestamp_column in names:
-                raise TimeSeriesValidationError(
-                    "Timestamp column cannot also be declared as a value column"
-                )
-            return self
-
-    else:  # pragma: no cover - compatibility layer for pydantic v1
-
-        @validator("timestamp_column")
-        def _strip_timestamp_column(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Timestamp column name must not be blank")
-            return stripped
-
-        @validator("frequency", pre=True)
-        def _coerce_frequency(cls, value: Optional[object]) -> Optional[pd.Timedelta]:
-            return _coerce_timedelta(value)
-
-        @validator("require_timezone")
-        def _ensure_timezone(cls, value: str) -> str:
-            stripped = value.strip()
-            if not stripped:
-                raise TimeSeriesValidationError("Timezone requirement must not be blank")
-            _resolve_timezone(stripped)
-            return stripped
-
-        @root_validator
-        def _ensure_unique_columns(cls, values: dict[str, object]) -> dict[str, object]:
-            names = [col.name for col in values.get("value_columns", [])]
-            duplicates = _find_duplicates(names)
-            if duplicates:
-                joined = ", ".join(sorted(duplicates))
-                raise TimeSeriesValidationError(
-                    f"Value columns must be unique, duplicates found for: {joined}"
-                )
-            timestamp_column = values.get("timestamp_column")
-            if timestamp_column in names:
-                raise TimeSeriesValidationError(
-                    "Timestamp column cannot also be declared as a value column"
-                )
-            return values
+    @model_validator(mode="after")
+    def _ensure_unique_columns(self) -> "TimeSeriesValidationConfig":
+        names = [col.name for col in self.value_columns]
+        duplicates = _find_duplicates(names)
+        if duplicates:
+            joined = ", ".join(sorted(duplicates))
+            raise TimeSeriesValidationError(
+                f"Value columns must be unique, duplicates found for: {joined}"
+            )
+        if self.timestamp_column in names:
+            raise TimeSeriesValidationError(
+                "Timestamp column cannot also be declared as a value column"
+            )
+        return self
 
 
 def _coerce_timedelta(value: Optional[object]) -> Optional[pd.Timedelta]:

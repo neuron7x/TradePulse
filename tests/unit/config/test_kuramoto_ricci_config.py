@@ -1,9 +1,7 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-import importlib
 import tempfile
-import warnings
 from pathlib import Path
 
 import pytest
@@ -204,49 +202,3 @@ def test_yaml_settings_source_surfaces_yaml_parse_errors(tmp_path: Path) -> None
 
     with pytest.raises(SettingsError, match="failed to parse YAML"):
         source()
-
-
-def test_legacy_settings_fallback_behaviour(monkeypatch, tmp_path: Path) -> None:
-    import core.config.kuramoto_ricci as module
-    from pydantic.warnings import PydanticDeprecatedSince20
-
-    monkeypatch.setenv("TRADEPULSE_FORCE_LEGACY_SETTINGS", "1")
-    monkeypatch.setenv("TRADEPULSE_FORCE_PYDANTIC_V1", "1")
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore", PydanticDeprecatedSince20)
-        reloaded = importlib.reload(module)
-    monkeypatch.delenv("TRADEPULSE_FORCE_LEGACY_SETTINGS", raising=False)
-    monkeypatch.delenv("TRADEPULSE_FORCE_PYDANTIC_V1", raising=False)
-
-    try:
-        pairs = [
-            ("TRADEPULSE_KURAMOTO__BASE_WINDOW", "128"),
-            ("TRADEPULSE_RICCI__TEMPORAL__WINDOW_SIZE", "42"),
-        ]
-        expanded = reloaded._expand_env_pairs(pairs)
-        assert expanded["kuramoto"]["base_window"] == 128
-        assert expanded["ricci"]["temporal"]["window_size"] == 42
-
-        dotenv_path = tmp_path / ".env"
-        dotenv_path.write_text("TRADEPULSE_KURAMOTO__BASE_WINDOW=256\n", encoding="utf8")
-
-        config_path = tmp_path / "config.yaml"
-        config_path.write_text(yaml.safe_dump({"kuramoto": {"base_window": 64}}), encoding="utf8")
-
-        source = reloaded.DotEnvSettingsSource(reloaded.TradePulseSettings, dotenv_path)
-        dotenv_payload = source()
-        assert dotenv_payload["kuramoto"]["base_window"] == 256
-
-        monkeypatch.chdir(tmp_path)
-        monkeypatch.setenv("TRADEPULSE_RICCI__TEMPORAL__WINDOW_SIZE", "90")
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", PydanticDeprecatedSince20)
-            config = reloaded.load_kuramoto_ricci_config(
-                config_path,
-                cli_overrides={"kuramoto": {"base_window": 512}},
-            )
-        assert config.kuramoto.base_window == 512
-        assert config.ricci.temporal.window_size == 90
-    finally:
-        monkeypatch.delenv("TRADEPULSE_RICCI__TEMPORAL__WINDOW_SIZE", raising=False)
-        importlib.reload(module)
