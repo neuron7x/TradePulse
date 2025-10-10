@@ -6,34 +6,26 @@ This document describes the testing strategy, coverage requirements, and instruc
 
 TradePulse employs a comprehensive testing strategy that includes:
 
-- **Unit Tests**: Test individual functions and classes in isolation
-- **Integration Tests**: Test complete workflows and pipeline chains
-- **Property-Based Tests**: Test invariants and properties using Hypothesis
-- **Fuzz Tests**: Test robustness with malformed and edge-case data
-- **Performance Tests**: Test behavior with large datasets (planned)
+- **Unit Tests**: Validate individual functions and classes in isolation.
+- **Integration Tests**: Exercise complete workflows and pipeline chains across modules.
+- **Property-Based Tests**: Check invariants and properties using Hypothesis-generated data.
+- **Fuzz Tests**: Stress the system with malformed and adversarial payloads.
+- **End-to-End (E2E) Tests**: Reproduce realistic user journeys and CLI pipelines.
+- **Performance Tests**: Test behavior with large datasets (planned).
 
 ## Test Structure
 
 ```
 tests/
-├── unit/                    # Unit tests for individual modules
-│   ├── test_agents.py
-│   ├── test_data_ingestion.py
-│   ├── test_execution.py
-│   └── ...
-├── integration/             # Integration tests for complete workflows
-│   ├── test_pipeline.py
-│   ├── test_backtest.py
-│   └── test_extended_pipeline.py
-├── property/                # Property-based tests
-│   ├── test_backtest_properties.py
-│   ├── test_execution_properties.py
-│   ├── test_strategy_properties.py
-│   └── test_invariants.py
-├── fuzz/                    # Fuzz tests for robustness
-│   └── test_ingestion_fuzz.py
-└── fixtures/                # Shared test fixtures and data
-    └── conftest.py
+├── unit/                    # Module-level tests (core.*, backtest.*, execution.*, ...)
+├── integration/             # Workflow-level tests (pipelines, backtests, protocol adapters)
+├── property/                # Property-based suites powered by Hypothesis
+├── fuzz/                    # Fuzz harnesses targeting ingestion and message handling
+├── e2e/                     # Pytest smoke scenarios that mimic end-user flows
+└── fixtures/                # Shared fixtures, builders, and reusable data
+
+scripts/
+└── smoke_e2e.py             # CLI entrypoint used by the E2E workflow
 ```
 
 ## Coverage Requirements
@@ -100,6 +92,11 @@ pytest tests/property/
 pytest tests/fuzz/
 ```
 
+**E2E smoke tests (pytest harness):**
+```bash
+pytest tests/e2e/
+```
+
 ### Running Specific Test Files or Functions
 
 Run a specific test file:
@@ -116,6 +113,16 @@ Run tests matching a pattern:
 ```bash
 pytest tests/ -k "backtest"
 ```
+
+### Running the E2E Pipeline Script
+
+The CLI entrypoint mirrors the CI smoke workflow and is suitable for local regression checks:
+
+```bash
+python scripts/smoke_e2e.py --csv data/sample.csv --seed 1337 --output-dir reports/smoke-e2e
+```
+
+Generated artifacts (plots, metrics) are written to the specified `--output-dir`.
 
 ### Hypothesis Configuration
 
@@ -143,12 +150,18 @@ Tests run automatically on every push and pull request via GitHub Actions.
 
 ### CI Workflow
 
-See `.github/workflows/tests.yml`:
+The testing automation is split across two workflows:
 
-1. **Unit & Integration Tests**: Run with coverage
-2. **Property-Based Tests**: Run with Hypothesis statistics
-3. **Coverage Report**: Generate and upload to CI artifacts
-4. **Coverage Threshold**: Fail if coverage < 80%
+- `.github/workflows/tests.yml` (per push / PR)
+  1. **Unit & Integration Tests**: Executed with coverage gates.
+  2. **Property-Based Tests**: Run with Hypothesis statistics enabled.
+  3. **Fuzz Tests**: Replay deterministic fuzz corpora.
+  4. **Coverage Report**: Generated and uploaded to CI artifacts.
+  5. **Coverage Threshold**: Build fails if coverage `< 80%`.
+
+- `.github/workflows/smoke-e2e.yml` (nightly + manual)
+  1. **E2E Pipeline**: Executes `python scripts/smoke_e2e.py` against `data/sample.csv`.
+  2. **Artifact Upload**: Persists generated signals and reports for inspection.
 
 ### Coverage Enforcement
 
