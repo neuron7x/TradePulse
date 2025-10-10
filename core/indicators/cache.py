@@ -18,13 +18,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import builtins
 import functools
 import hashlib
 import json
 import os
-import pickle
+# Pickle import required for cache serialization hardened with restricted unpickler.
+import pickle  # nosec B403
 from pathlib import Path
 import shutil
+import importlib
+import hmac
 from typing import Any, Callable, Mapping, MutableMapping, Sequence, TYPE_CHECKING
 
 import numpy as np
@@ -175,7 +179,15 @@ class FileSystemIndicatorCache:
         return timeframe_dir / fingerprint
 
     # ---------------------------------------------------------------- serialization
-    def _serialize(self, directory: Path, value: Any) -> tuple[str, str]:
+    @staticmethod
+    def _file_digest(path: Path) -> str:
+        hasher = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(8192), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def _serialize(self, directory: Path, value: Any) -> tuple[str, str, str]:
         data_path = directory / "payload"
 
         # pandas structures
@@ -183,39 +195,94 @@ class FileSystemIndicatorCache:
             try:
                 file_path = data_path.with_suffix(".parquet")
                 value.to_parquet(file_path)
-                return file_path.name, "parquet"
+                return file_path.name, "parquet", self._file_digest(file_path)
             except Exception:  # pragma: no cover - optional dependency
                 file_path = data_path.with_suffix(".pkl")
                 value.to_pickle(file_path)
-                return file_path.name, "pickle"
+                return file_path.name, "pickle", self._file_digest(file_path)
         if isinstance(value, pd.Series):
             try:
                 file_path = data_path.with_suffix(".parquet")
                 value.to_frame(name=value.name).to_parquet(file_path)
-                return file_path.name, "parquet"
+                return file_path.name, "parquet", self._file_digest(file_path)
             except Exception:  # pragma: no cover
                 file_path = data_path.with_suffix(".pkl")
                 value.to_pickle(file_path)
-                return file_path.name, "pickle"
+                return file_path.name, "pickle", self._file_digest(file_path)
         if isinstance(value, np.ndarray):
             file_path = data_path.with_suffix(".npy")
             np.save(file_path, value)
-            return file_path.name, "numpy"
+            return file_path.name, "numpy", self._file_digest(file_path)
 
         file_path = data_path.with_suffix(".pkl")
         with file_path.open("wb") as handle:
             pickle.dump(value, handle, protocol=pickle.HIGHEST_PROTOCOL)
-        return file_path.name, "pickle"
+        return file_path.name, "pickle", self._file_digest(file_path)
 
     @staticmethod
-    def _deserialize(path: Path, fmt: str) -> Any:
+    def _restricted_unpickle(handle: Any) -> Any:
+        class _SafeUnpickler(pickle.Unpickler):
+            _SAFE_BUILTINS = {
+                "complex",
+                "dict",
+                "frozenset",
+                "list",
+                "set",
+                "tuple",
+                "int",
+                "float",
+                "bool",
+                "str",
+                "bytes",
+                "bytearray",
+                "memoryview",
+                "range",
+                "slice",
+                "NoneType",
+            }
+
+            _SAFE_MODULE_PREFIXES = (
+                "collections",
+                "datetime",
+                "decimal",
+                "fractions",
+                "numpy",
+                "pandas",
+                "core.indicators",
+            )
+
+            _SAFE_MODULES = {
+                "uuid",
+                "math",
+                "statistics",
+                "pathlib",
+                "types",
+            }
+
+            def find_class(self, module: str, name: str) -> Any:  # type: ignore[override]
+                if module == "builtins" and name in self._SAFE_BUILTINS:
+                    return getattr(builtins, name)
+                if module in self._SAFE_MODULES:
+                    mod = importlib.import_module(module)
+                    return getattr(mod, name)
+                for prefix in self._SAFE_MODULE_PREFIXES:
+                    if module == prefix or module.startswith(f"{prefix}."):
+                        mod = importlib.import_module(module)
+                        return getattr(mod, name)
+                raise pickle.UnpicklingError(
+                    f"Attempted to load unsafe module '{module}.{name}' from cache"
+                )
+
+        return _SafeUnpickler(handle).load()
+
+    def _deserialize(self, path: Path, fmt: str) -> Any:
         if fmt == "parquet":
             return pd.read_parquet(path)
         if fmt == "numpy":
             return np.load(path, allow_pickle=False)
         if fmt == "pickle":
             with path.open("rb") as handle:
-                return pickle.load(handle)
+                return self._restricted_unpickle(handle)
         raise ValueError(f"Unsupported cache format '{fmt}'")
 
     # ---------------------------------------------------------------- fingerprint
@@ -261,7 +328,7 @@ class FileSystemIndicatorCache:
             shutil.rmtree(directory)
         directory.mkdir(parents=True, exist_ok=True)
 
-        data_file, data_format = self._serialize(directory, value)
+        data_file, data_format, data_integrity = self._serialize(directory, value)
 
         payload: MutableMapping[str, Any] = {
             "fingerprint": fingerprint,
@@ -272,6 +339,7 @@ class FileSystemIndicatorCache:
             "timeframe": self._timeframe_key(timeframe),
             "data_file": data_file,
             "data_format": data_format,
+            "data_integrity": data_integrity,
             "stored_at": datetime.now(UTC).isoformat(),
             "coverage_start": (
                 coverage_start.isoformat() if isinstance(coverage_start, datetime) else coverage_start
@@ -322,6 +390,17 @@ class FileSystemIndicatorCache:
 
         data_path = directory / meta["data_file"]
         if not data_path.exists():
+            return None
+
+        expected_integrity = meta.get("data_integrity")
+        actual_integrity = self._file_digest(data_path)
+        if expected_integrity and not hmac.compare_digest(expected_integrity, actual_integrity):
+            _logger.warning(
+                "indicator_cache_integrity_mismatch",
+                path=str(data_path),
+                expected=expected_integrity,
+                actual=actual_integrity,
+            )
             return None
 
         value = self._deserialize(data_path, meta["data_format"])

@@ -53,6 +53,29 @@ def test_filesystem_cache_roundtrip(tmp_path: Path) -> None:
     assert record.metadata == {"unit": "test"}
 
 
+def test_cache_detects_tampering(tmp_path: Path) -> None:
+    cache = FileSystemIndicatorCache(tmp_path)
+    params = {"alpha": 0.1}
+    data = [1, 2, 3]
+    data_hash = hash_input_data(data)
+
+    fingerprint = cache.store(
+        indicator_name="malicious", params=params, data_hash=data_hash, value=data
+    )
+
+    entry_dir = tmp_path / "_global" / fingerprint
+    payload_path = next(entry_dir.glob("payload.*"))
+    payload_path.write_bytes(b"tampered")
+
+    record = cache.load(
+        indicator_name="malicious",
+        params=params,
+        data_hash=data_hash,
+    )
+
+    assert record is None
+
+
 def test_backfill_state_roundtrip(tmp_path: Path) -> None:
     cache = FileSystemIndicatorCache(tmp_path)
     cache.update_backfill_state(
