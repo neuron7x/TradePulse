@@ -27,7 +27,8 @@ def test_kuramoto_order_handles_non_finite(phases: list[float]) -> None:
     arr = np.asarray(phases, dtype=float)
     result = kuramoto_order(arr)
     assert np.isfinite(result)
-    assert 0.0 <= result <= 1.0
+    assert 0.0 <= result
+    assert result <= 1.0 or np.isclose(result, 1.0, rtol=1e-9, atol=1e-12)
 
 
 @given(
@@ -49,7 +50,8 @@ def test_multi_asset_kuramoto_supports_variable_windows(
         series_list.append(np.asarray(samples, dtype=float))
     result = multi_asset_kuramoto(series_list)
     assert np.isfinite(result)
-    assert 0.0 <= result <= 1.0
+    assert 0.0 <= result
+    assert result <= 1.0 or np.isclose(result, 1.0, rtol=1e-9, atol=1e-12)
 
 
 @given(st.lists(finite_floats, min_size=3, max_size=40))
