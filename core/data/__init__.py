@@ -11,6 +11,13 @@ from .models import (
     PriceTick,
     Ticker,
 )
+from .validation import (
+    TimeSeriesValidationConfig,
+    TimeSeriesValidationError,
+    ValueColumnConfig,
+    build_timeseries_schema,
+    validate_timeseries_frame,
+)
 from .timeutils import (
     MarketCalendar,
     MarketCalendarRegistry,
@@ -32,6 +39,11 @@ __all__ = [
     "OHLCVBar",
     "PriceTick",
     "Ticker",
+    "TimeSeriesValidationConfig",
+    "TimeSeriesValidationError",
+    "ValueColumnConfig",
+    "build_timeseries_schema",
+    "validate_timeseries_frame",
     "convert_timestamp",
     "get_market_calendar",
     "is_market_open",
