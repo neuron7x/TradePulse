@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import csv
 import logging
-from dataclasses import dataclass
+from decimal import InvalidOperation
 from typing import Callable, Iterable, Optional
 
 try:
@@ -13,12 +13,10 @@ except Exception:  # pragma: no cover - optional dependency
 
 logger = logging.getLogger(__name__)
 
+from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.timeutils import normalize_timestamp
 
-@dataclass
-class Ticker:
-    ts: float
-    price: float
-    volume: float = 0.0
+__all__ = ["Ticker", "DataIngestor", "BinanceStreamHandle"]
 
 
 class BinanceStreamHandle:
@@ -48,7 +46,17 @@ class DataIngestor:
         self.api_key = api_key
         self.api_secret = api_secret
 
-    def historical_csv(self, path: str, on_tick: Callable[[Ticker], None], *, required_fields: Iterable[str] = ("ts", "price")) -> None:
+    def historical_csv(
+        self,
+        path: str,
+        on_tick: Callable[[Ticker], None],
+        *,
+        required_fields: Iterable[str] = ("ts", "price"),
+        symbol: str = "UNKNOWN",
+        venue: str = "CSV",
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+        market: Optional[str] = None,
+    ) -> None:
         missing: list[str] = []
         with open(path, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -59,13 +67,22 @@ class DataIngestor:
                 raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
             for row_number, row in enumerate(reader, start=2):
                 try:
-                    ts = float(row["ts"])
-                    price = float(row["price"])
-                    volume = float(row.get("volume", 0.0) or 0.0)
-                except (TypeError, ValueError) as exc:
+                    ts_raw = float(row["ts"])
+                    price = row["price"]
+                    volume = row.get("volume", 0.0) or 0.0
+                    timestamp = normalize_timestamp(ts_raw, market=market)
+                    tick = Ticker.create(
+                        symbol=symbol,
+                        venue=venue,
+                        price=price,
+                        timestamp=timestamp,
+                        volume=volume,
+                        instrument_type=instrument_type,
+                    )
+                except (TypeError, ValueError, InvalidOperation) as exc:
                     logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
                     continue
-                on_tick(Ticker(ts=ts, price=price, volume=volume))
+                on_tick(tick)
 
     def binance_ws(self, symbol: str, on_tick: Callable[[Ticker], None], *, interval: str = "1m") -> object:
         if BinanceWS is None:
@@ -79,8 +96,16 @@ class DataIngestor:
             if not kline:
                 return
             try:
-                tick = Ticker(ts=float(kline["T"]) / 1000.0, price=float(kline["c"]), volume=float(kline.get("v", 0.0)))
-            except (TypeError, ValueError) as exc:
+                ts = normalize_timestamp(float(kline["T"]) / 1000.0, market="BINANCE")
+                tick = Ticker.create(
+                    symbol=symbol,
+                    venue="BINANCE",
+                    price=kline["c"],
+                    timestamp=ts,
+                    volume=kline.get("v", 0.0),
+                    instrument_type=InstrumentType.SPOT,
+                )
+            except (TypeError, ValueError, InvalidOperation) as exc:
                 logger.warning("Failed to parse websocket payload: %s", exc)
                 return
             on_tick(tick)

@@ -8,23 +8,20 @@ from __future__ import annotations
 
 import asyncio
 import csv
-from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import InvalidOperation
 from typing import AsyncIterator, Callable, Optional, List
 
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 
+from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.timeutils import normalize_timestamp
+
+__all__ = ["AsyncDataIngestor", "AsyncWebSocketStream", "Ticker", "merge_streams"]
+
 logger = get_logger(__name__)
 metrics = get_metrics_collector()
-
-
-@dataclass
-class Ticker:
-    """Market data tick."""
-    ts: float
-    price: float
-    volume: float = 0.0
-    symbol: str = ""
 
 
 class AsyncDataIngestor:
@@ -45,6 +42,9 @@ class AsyncDataIngestor:
         path: str,
         *,
         symbol: str = "UNKNOWN",
+        venue: str = "CSV",
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+        market: Optional[str] = None,
         chunk_size: int = 1000,
         delay_ms: int = 0,
     ) -> AsyncIterator[Ticker]:
@@ -53,6 +53,9 @@ class AsyncDataIngestor:
         Args:
             path: Path to CSV file
             symbol: Trading symbol for the data
+            venue: Name of the data venue (used for metadata)
+            instrument_type: Instrument classification (spot or futures)
+            market: Optional market calendar identifier for timezone normalization
             chunk_size: Number of rows to read at a time
             delay_ms: Optional delay between chunks (for simulation)
             
@@ -78,11 +81,18 @@ class AsyncDataIngestor:
                     chunk: List[Ticker] = []
                     for row_number, row in enumerate(reader, start=2):
                         try:
-                            ts = float(row["ts"])
-                            price = float(row["price"])
-                            volume = float(row.get("volume", 0.0) or 0.0)
-                            
-                            tick = Ticker(ts=ts, price=price, volume=volume, symbol=symbol)
+                            ts_raw = float(row["ts"])
+                            price = row["price"]
+                            volume = row.get("volume", 0.0) or 0.0
+
+                            tick = Ticker.create(
+                                symbol=symbol,
+                                venue=venue,
+                                price=price,
+                                timestamp=normalize_timestamp(ts_raw, market=market),
+                                volume=volume,
+                                instrument_type=instrument_type,
+                            )
                             chunk.append(tick)
                             
                             if len(chunk) >= chunk_size:
@@ -94,7 +104,7 @@ class AsyncDataIngestor:
                                 if delay_ms > 0:
                                     await asyncio.sleep(delay_ms / 1000.0)
                                     
-                        except (TypeError, ValueError) as exc:
+                        except (TypeError, ValueError, InvalidOperation) as exc:
                             logger.warning(
                                 f"Skipping malformed row {row_number}",
                                 path=path,
@@ -116,6 +126,7 @@ class AsyncDataIngestor:
         source: str,
         symbol: str,
         *,
+        instrument_type: InstrumentType = InstrumentType.SPOT,
         interval_ms: int = 1000,
         max_ticks: Optional[int] = None,
     ) -> AsyncIterator[Ticker]:
@@ -124,6 +135,7 @@ class AsyncDataIngestor:
         Args:
             source: Data source name
             symbol: Trading symbol
+            instrument_type: Instrument classification (spot or futures)
             interval_ms: Polling interval in milliseconds
             max_ticks: Optional maximum number of ticks to yield
             
@@ -139,11 +151,13 @@ class AsyncDataIngestor:
                 await asyncio.sleep(interval_ms / 1000.0)
                 
                 # Placeholder tick generation
-                tick = Ticker(
-                    ts=asyncio.get_event_loop().time(),
+                tick = Ticker.create(
+                    symbol=symbol,
+                    venue=source.upper(),
                     price=100.0 + (count % 10),
+                    timestamp=normalize_timestamp(datetime.now(timezone.utc)),
                     volume=1000.0,
-                    symbol=symbol
+                    instrument_type=instrument_type,
                 )
                 
                 yield tick

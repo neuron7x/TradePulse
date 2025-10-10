@@ -124,7 +124,7 @@ def cmd_live(args):
     prices = []
     while not q.empty():
         t = q.get()
-        prices.append(t.price)
+        prices.append(float(t.price))
         if len(prices) >= window:
             p = np.array(prices[-window:])
             phases = compute_phase(p)
@@ -132,7 +132,17 @@ def cmd_live(args):
             H = entropy(p)
             dH = delta_entropy(np.array(prices), window=window)
             kappa = mean_ricci(build_price_graph(p, delta=0.005))
-            print(json.dumps({"ts": t.ts, "R": float(R), "H": float(H), "delta_H": float(dH), "kappa_mean": float(kappa)}))
+            print(
+                json.dumps(
+                    {
+                        "ts": t.timestamp.isoformat(),
+                        "R": float(R),
+                        "H": float(H),
+                        "delta_H": float(dH),
+                        "kappa_mean": float(kappa),
+                    }
+                )
+            )
 
 def main():
     p = argparse.ArgumentParser(prog="tradepulse")

@@ -12,6 +12,13 @@
     },
     "trades": {
       "type": "integer"
+    },
+    "equity_curve": {},
+    "latency_steps": {
+      "type": "integer"
+    },
+    "slippage_cost": {
+      "type": "number"
     }
   },
   "required": [

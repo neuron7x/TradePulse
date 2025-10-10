@@ -13,6 +13,8 @@ try:
 except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
+from decimal import Decimal
+
 from core.data.ingestion import DataIngestor, Ticker
 
 
@@ -63,11 +65,11 @@ class TestCSVFuzzTests:
         # All successfully parsed records should have valid numeric values
         for record in records:
             assert isinstance(record.ts, float)
-            assert isinstance(record.price, float)
-            assert isinstance(record.volume, float)
+            assert isinstance(record.price, Decimal)
+            assert isinstance(record.volume, Decimal)
             assert math.isfinite(record.ts)
-            assert math.isfinite(record.price)
-            assert math.isfinite(record.volume)
+            assert math.isfinite(float(record.price))
+            assert math.isfinite(float(record.volume))
 
     def test_csv_rejects_missing_header(self, tmp_path: Path) -> None:
         """CSV without proper header should raise ValueError."""
@@ -128,8 +130,8 @@ class TestCSVFuzzTests:
         
         assert len(records) == 1
         assert records[0].ts == pytest.approx(ts, rel=1e-6)
-        assert records[0].price == pytest.approx(price, rel=1e-6)
-        assert records[0].volume == pytest.approx(volume, rel=1e-6)
+        assert float(records[0].price) == pytest.approx(price, rel=1e-6)
+        assert float(records[0].volume) == pytest.approx(volume, rel=1e-6)
 
     def test_csv_handles_missing_volume_as_zero(self, tmp_path: Path) -> None:
         """CSV with missing volume field should default to 0."""
@@ -144,7 +146,7 @@ class TestCSVFuzzTests:
         ingestor.historical_csv(str(csv_path), records.append)
         
         assert len(records) == 1
-        assert records[0].volume == 0.0
+        assert records[0].volume == Decimal("0")
 
     def test_csv_handles_empty_volume_as_zero(self, tmp_path: Path) -> None:
         """CSV with empty volume field should default to 0."""
@@ -159,7 +161,7 @@ class TestCSVFuzzTests:
         ingestor.historical_csv(str(csv_path), records.append)
         
         assert len(records) == 1
-        assert records[0].volume == 0.0
+        assert records[0].volume == Decimal("0")
 
     @settings(max_examples=50, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture])
     @given(
@@ -205,7 +207,7 @@ class TestCSVFuzzTests:
         
         assert len(records) == 1
         assert records[0].ts == 1.0
-        assert records[0].price == 100.0
+        assert float(records[0].price) == pytest.approx(100.0)
 
     def test_csv_with_unicode_in_data(self, tmp_path: Path) -> None:
         """CSV with unicode characters should be handled."""
@@ -223,7 +225,7 @@ class TestCSVFuzzTests:
 
 
 class TestTickerProperties:
-    """Property-based tests for Ticker dataclass."""
+    """Property-based tests for the Ticker model."""
 
     @settings(max_examples=100, deadline=None)
     @given(
@@ -233,12 +235,18 @@ class TestTickerProperties:
     )
     def test_ticker_creation(self, ts: float, price: float, volume: float) -> None:
         """Ticker should be created with provided values."""
-        ticker = Ticker(ts=ts, price=price, volume=volume)
-        assert ticker.ts == ts
-        assert ticker.price == price
-        assert ticker.volume == volume
+        ticker = Ticker.create(symbol="FUZZ", venue="TEST", price=price, timestamp=ts, volume=volume)
+        # ``Ticker`` normalises the provided timestamp to a timezone-aware
+        # ``datetime`` under the hood.  Python datetimes carry microsecond
+        # precision, so converting back to epoch seconds can incur a small
+        # absolute rounding error for very small floats.  An explicit absolute
+        # tolerance keeps the property-based test robust without masking
+        # genuine large deviations.
+        assert ticker.ts == pytest.approx(ts, abs=1e-6)
+        assert float(ticker.price) == pytest.approx(price)
+        assert float(ticker.volume) == pytest.approx(volume)
 
     def test_ticker_volume_defaults_to_zero(self) -> None:
         """Ticker volume should default to 0.0 if not provided."""
-        ticker = Ticker(ts=1234.5, price=100.0)
-        assert ticker.volume == 0.0
+        ticker = Ticker.create(symbol="FUZZ", venue="TEST", price=100.0, timestamp=1234.5)
+        assert ticker.volume == Decimal("0")

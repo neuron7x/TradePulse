@@ -3,6 +3,7 @@
 
 import asyncio
 import csv
+from datetime import datetime, timezone
 import tempfile
 from pathlib import Path
 
@@ -23,9 +24,9 @@ class TestAsyncDataIngestor:
         ingestor = AsyncDataIngestor()
         ticks = []
         
-        async for tick in ingestor.read_csv(str(csv_file), symbol="TEST"):
+        async for tick in ingestor.read_csv(str(csv_file), symbol="TEST", venue="TEST"):
             ticks.append(tick)
-            
+
         assert len(ticks) == 2
         assert ticks[0].price == 100.0
         assert ticks[1].price == 101.0
@@ -77,7 +78,7 @@ class TestAsyncDataIngestor:
             max_ticks=5
         ):
             ticks.append(tick)
-            
+
         assert len(ticks) == 5
         assert all(tick.symbol == "BTC" for tick in ticks)
         
@@ -114,7 +115,13 @@ class TestMergeStreams:
         """Helper to generate ticks."""
         for i in range(count):
             await asyncio.sleep(delay_ms / 1000.0)
-            yield Ticker(ts=float(i), price=100.0 + i, volume=1000, symbol=symbol)
+            yield Ticker.create(
+                symbol=symbol,
+                venue="TEST",
+                price=100.0 + i,
+                timestamp=datetime.fromtimestamp(float(i), tz=timezone.utc),
+                volume=1000,
+            )
             
     @pytest.mark.asyncio
     async def test_merge_two_streams(self) -> None:
