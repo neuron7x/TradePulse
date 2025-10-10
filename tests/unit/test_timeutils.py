@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 
 import pandas as pd
 import pytest
@@ -11,8 +11,10 @@ from core.data.timeutils import (
     get_timezone,
     is_market_open,
     normalize_timestamp,
+    to_utc,
     validate_bar_alignment,
 )
+from exchange_calendars import always_open, errors
 
 
 def test_normalize_timestamp_from_float() -> None:
@@ -24,6 +26,17 @@ def test_normalize_timestamp_from_float() -> None:
 def test_normalize_timestamp_with_market() -> None:
     ts = normalize_timestamp(1_700_000_000.0, market="BINANCE")
     assert ts.tzinfo == timezone.utc
+
+
+def test_normalize_timestamp_from_datetime() -> None:
+    source = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    result = normalize_timestamp(source)
+    assert result == source
+
+
+def test_normalize_timestamp_rejects_invalid_type() -> None:
+    with pytest.raises(TypeError):
+        normalize_timestamp("2024-01-01")
 
 
 def test_convert_timestamp_changes_timezone() -> None:
@@ -42,6 +55,19 @@ def test_convert_timestamp_handles_dst_shift() -> None:
 
     assert before_local.hour == 14  # UTC-5
     assert after_local.hour == 15  # UTC-4 after DST transition
+
+
+def test_convert_timestamp_handles_naive_datetime() -> None:
+    naive = datetime(2024, 1, 1, 12, 0)
+    localized = convert_timestamp(naive, "BINANCE")
+    assert localized.tzinfo is not None
+    assert localized.utcoffset().total_seconds() == pytest.approx(0)
+
+
+def test_to_utc_assigns_timezone_when_missing() -> None:
+    naive = datetime(2024, 1, 1, 12, 0)
+    localized = to_utc(naive)
+    assert localized.tzinfo == timezone.utc
 
 
 def test_is_market_open_handles_weekends() -> None:
@@ -66,10 +92,107 @@ def test_default_registry_includes_nasdaq() -> None:
     assert calendar.timezone == "America/New_York"
 
 
+def test_registry_raises_for_unknown_market() -> None:
+    with pytest.raises(KeyError):
+        get_market_calendar("UNKNOWN")
+
+
+def test_market_calendar_requires_market_name() -> None:
+    with pytest.raises(ValueError):
+        MarketCalendar(market="", timezone="UTC")
+
+
+def test_market_calendar_requires_timezone_without_calendar_name() -> None:
+    with pytest.raises(ValueError):
+        MarketCalendar(market="TEST")
+
+
+def test_market_calendar_ensures_weekend_defaults() -> None:
+    cal = MarketCalendar(market="TEST", timezone="UTC", weekend_closure=None)
+    assert cal.weekend_closure == frozenset({5, 6})
+
+
+def test_market_calendar_uses_exchange_calendar_metadata() -> None:
+    cal = MarketCalendar(market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None)
+    assert cal.timezone == "UTC"
+    assert cal.weekend_closure == frozenset()
+
+
+def test_market_calendar_tzinfo_requires_timezone() -> None:
+    cal = MarketCalendar(market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None)
+    object.__setattr__(cal, "timezone", None)
+
+    with pytest.raises(ValueError):
+        cal.tzinfo()
+
+
 def test_exchange_aliases_are_supported() -> None:
     nyse = get_market_calendar("NYSE")
     assert nyse is get_market_calendar("XNYS")
     assert get_market_calendar("24/7").market == "BINANCE"
+
+
+def test_load_exchange_calendar_falls_back_to_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    from core.data import timeutils as tu
+
+    def fake_resolve(name: str) -> str:
+        raise errors.InvalidCalendarName()
+
+    monkeypatch.setattr(tu, "resolve_alias", fake_resolve)
+    monkeypatch.setattr(tu, "get_calendar", lambda name: always_open.AlwaysOpenCalendar())
+
+    calendar = tu._load_exchange_calendar("custom")
+    assert isinstance(calendar, always_open.AlwaysOpenCalendar)
+
+
+def test_market_calendar_is_open_handles_naive_timestamp() -> None:
+    nyse = get_market_calendar("NYSE")
+    assert nyse.is_open(datetime(2024, 3, 4, 15, 30))
+
+
+def test_market_calendar_is_open_with_overnight_session() -> None:
+    overnight = MarketCalendar(
+        market="FUTURES",
+        timezone="UTC",
+        open_time=time(22, 0),
+        close_time=time(6, 0),
+        weekend_closure=(),
+    )
+
+    from core.data import timeutils as tu
+
+    tu._registry.register(overnight)
+
+    late = datetime(2024, 3, 4, 23, 0, tzinfo=timezone.utc)
+    early = datetime(2024, 3, 5, 4, 0, tzinfo=timezone.utc)
+    midday = datetime(2024, 3, 5, 12, 0, tzinfo=timezone.utc)
+
+    assert overnight.is_open(late)
+    assert overnight.is_open(early)
+    assert not overnight.is_open(midday)
+
+
+def test_market_calendar_manual_session_holidays_and_weekends() -> None:
+    manual = MarketCalendar(
+        market="MANUAL",
+        timezone="UTC",
+        open_time=time(9, 0),
+        close_time=time(17, 0),
+        weekend_closure={5, 6},
+        holidays=[date(2024, 1, 1)],
+    )
+
+    from core.data import timeutils as tu
+
+    tu._registry.register(manual)
+
+    holiday = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    weekend = datetime(2024, 1, 6, 12, 0, tzinfo=timezone.utc)
+    trading = datetime(2024, 1, 2, 12, 0, tzinfo=timezone.utc)
+
+    assert not manual.is_open(holiday)
+    assert not manual.is_open(weekend)
+    assert manual.is_open(trading)
 
 
 def test_validate_bar_alignment_accepts_dst_boundary_minutes() -> None:
@@ -101,6 +224,10 @@ def test_validate_bar_alignment_detects_gaps() -> None:
         validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
 
 
+def test_validate_bar_alignment_handles_empty_sequence() -> None:
+    validate_bar_alignment([], market="NYSE", frequency="1min")
+
+
 def test_validate_bar_alignment_handles_always_open_market() -> None:
     timestamps = pd.date_range(
         "2024-01-01 00:00:00+00:00",
@@ -118,3 +245,105 @@ def test_get_timezone_round_trip() -> None:
 
     with pytest.raises(ValueError):
         get_timezone("Mars/Phobos")
+
+
+def test_validate_bar_alignment_rejects_unsorted() -> None:
+    timestamps = [
+        datetime(2024, 3, 11, 13, 31, tzinfo=timezone.utc),
+        datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc),
+    ]
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
+
+
+def test_validate_bar_alignment_rejects_duplicates() -> None:
+    timestamps = [
+        datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc),
+        datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc),
+    ]
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
+
+
+def test_validate_bar_alignment_requires_positive_minute_frequency() -> None:
+    timestamps = [datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc)]
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="0min")
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="30s")
+
+
+def test_validate_bar_alignment_invalid_trading_minute() -> None:
+    timestamps = [
+        datetime(2024, 3, 9, 15, 30, tzinfo=timezone.utc),  # Saturday
+        datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc),
+    ]
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
+
+
+def test_validate_bar_alignment_invalid_end_minute() -> None:
+    timestamps = [
+        datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc),
+        datetime(2024, 3, 11, 21, 0, tzinfo=timezone.utc),  # After close
+    ]
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
+
+
+def test_validate_bar_alignment_reports_missing_and_extra() -> None:
+    timestamps = pd.DatetimeIndex(
+        [
+            "2024-03-11 13:30:00+00:00",
+            "2024-03-11 13:32:00+00:00",
+            "2024-03-11 13:33:00+00:00",
+        ]
+    )
+
+    with pytest.raises(ValueError) as err:
+        validate_bar_alignment(timestamps, market="NYSE", frequency="1min")
+
+    message = str(err.value)
+    assert "missing" in message and "extra" in message
+
+
+def test_validate_bar_alignment_with_manual_calendar() -> None:
+    custom = MarketCalendar(market="CUSTOM", timezone="UTC")
+    _ = get_market_calendar("BINANCE")  # ensure registry initialised
+    # Registering custom calendar on module-level registry
+    from core.data import timeutils as tu
+
+    tu._registry.register(custom)
+
+    timestamps = pd.date_range(
+        "2024-01-01 00:00:00+00:00", periods=4, freq="15min", tz="UTC"
+    )
+
+    validate_bar_alignment(timestamps, market="CUSTOM", frequency="15min")
+
+
+def test_validate_bar_alignment_with_manual_calendar_mismatch() -> None:
+    custom = MarketCalendar(market="CUSTOM_MISMATCH", timezone="UTC")
+    from core.data import timeutils as tu
+
+    tu._registry.register(custom)
+
+    timestamps = pd.date_range(
+        "2024-01-01 00:00:00+00:00", periods=4, freq="15min", tz="UTC"
+    ).delete(1)
+
+    with pytest.raises(ValueError):
+        validate_bar_alignment(timestamps, market="CUSTOM_MISMATCH", frequency="15min")
+
+
+def test_as_utc_index_handles_naive_values() -> None:
+    from core.data import timeutils as tu
+
+    index = tu._as_utc_index([datetime(2024, 1, 1, 0, 0), datetime(2024, 1, 1, 0, 1)])
+    assert str(index.tz) == "UTC"
