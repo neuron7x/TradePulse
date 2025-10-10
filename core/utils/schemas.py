@@ -124,7 +124,7 @@ def _type_to_schema(typ: Any) -> Dict[str, Any]:
 
     # Handle Pydantic models
     if BaseModel is not None and isinstance(typ, type) and issubclass(typ, BaseModel):
-        schema = typ.schema()
+        schema = typ.model_json_schema()
         schema.setdefault("title", typ.__name__)
         if typ.__doc__:
             schema.setdefault("description", typ.__doc__.strip())
@@ -284,7 +284,7 @@ def model_to_json_schema(cls: Type[Any], title: str | None = None) -> Dict[str, 
     """Return a JSON schema for either a dataclass or a Pydantic model."""
 
     if BaseModel is not None and isinstance(cls, type) and issubclass(cls, BaseModel):
-        schema = cls.schema()
+        schema = cls.model_json_schema()
         if title:
             schema["title"] = title
         if cls.__doc__:

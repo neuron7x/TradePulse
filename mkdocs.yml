@@ -54,6 +54,7 @@ nav:
   - Developer Guides:
       - Extending TradePulse: extending.md
       - Integration API: integration-api.md
+      - Configuration: configuration.md
       - Developer Scenarios: scenarios.md
       - Technical Debt Playbook: technical-debt.md
       - Testing Guide: ../TESTING.md
