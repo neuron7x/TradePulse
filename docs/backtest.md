@@ -70,3 +70,15 @@ fills), wrap the existing engine so legacy tests remain deterministic.
   module already uses this walk-forward logic to ensure consistent scoring.
 - For multi-asset or order-book simulations, fork the engine and maintain the
   same `Result` signature so downstream tooling keeps working.
+
+---
+
+## Execution Simulation
+
+When strategies require microstructure-aware analysis (latency, partial fills,
+order queueing, halts, and time-in-force semantics), layer the
+[`backtest.execution_simulation`](../backtest/execution_simulation.py) module on
+top of the walk-forward loop. The protocol described in
+[`docs/backtest_execution_simulation.md`](backtest_execution_simulation.md)
+covers latency modelling, halt policies, order types, and integration steps for
+deterministic research environments.
