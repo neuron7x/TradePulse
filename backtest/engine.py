@@ -2,12 +2,19 @@
 from __future__ import annotations
 import numpy as np
 from dataclasses import dataclass
-from typing import Callable, Sequence
+from pathlib import Path
+from typing import Any, Callable, Mapping, Sequence
 
 from numpy.typing import NDArray
 
 from core.utils.metrics import get_metrics_collector
 from interfaces.backtest import BacktestEngine
+
+from backtest.transaction_costs import (
+    PerUnitCommission,
+    TransactionCostModel,
+    load_market_costs,
+)
 
 
 @dataclass(slots=True)
@@ -48,6 +55,8 @@ class Result:
     equity_curve: NDArray[np.float64] | None = None
     latency_steps: int = 0
     slippage_cost: float = 0.0
+    commission_cost: float = 0.0
+    spread_cost: float = 0.0
 
 
 class _SimpleOrderBook:
@@ -142,6 +151,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
         latency: LatencyConfig | None = None,
         order_book: OrderBookConfig | None = None,
         slippage: SlippageConfig | None = None,
+        market: str | None = None,
+        cost_model: TransactionCostModel | None = None,
+        cost_config: str | Path | Mapping[str, Any] | None = None,
     ) -> Result:
         """Vectorised walk-forward backtest with configurable execution realism."""
 
@@ -155,6 +167,19 @@ class WalkForwardEngine(BacktestEngine[Result]):
             latency_cfg = latency or LatencyConfig()
             order_book_cfg = order_book or OrderBookConfig()
             slippage_cfg = slippage or SlippageConfig()
+
+            transaction_cost_model = cost_model
+            if transaction_cost_model is None and market:
+                config_source = cost_config
+                if config_source is None:
+                    default_config = Path("configs/markets.yaml")
+                    if default_config.exists():
+                        config_source = default_config
+                if config_source is not None:
+                    transaction_cost_model = load_market_costs(config_source, market)
+
+            if transaction_cost_model is None:
+                transaction_cost_model = PerUnitCommission(fee)
 
             with metrics.measure_signal_generation(strategy_name) as signal_ctx:
                 raw_signals = np.asarray(signal_fn(price_array), dtype=float)
@@ -172,6 +197,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
             position_changes = positions - prev_positions
 
             book = _SimpleOrderBook(price_array, order_book_cfg)
+            commission_costs = np.zeros_like(position_changes)
+            spread_costs = np.zeros_like(position_changes)
             slippage_costs = np.zeros_like(position_changes)
 
             for idx, change in enumerate(position_changes):
@@ -180,15 +207,40 @@ class WalkForwardEngine(BacktestEngine[Result]):
                     continue
                 side = "buy" if change > 0 else "sell"
                 price_index = min(idx + 1, price_array.size - 1)
-                fill_price = book.fill_price(side, qty, price_index, slippage_cfg)
                 mid_price = float(price_array[price_index])
-                if side == "buy":
-                    slippage_costs[idx] = max(0.0, (fill_price - mid_price) * qty)
-                else:
-                    slippage_costs[idx] = max(0.0, (mid_price - fill_price) * qty)
+                fill_price = float(mid_price)
 
-            trade_costs = np.abs(position_changes) * fee
-            pnl = positions * price_moves - trade_costs - slippage_costs
+                book_fill_price = book.fill_price(side, qty, price_index, slippage_cfg)
+                if side == "buy":
+                    slippage_costs[idx] += max(0.0, (book_fill_price - mid_price) * qty)
+                else:
+                    slippage_costs[idx] += max(0.0, (mid_price - book_fill_price) * qty)
+                fill_price = float(book_fill_price)
+
+                spread_adj = float(max(transaction_cost_model.get_spread(mid_price, side), 0.0))
+                if spread_adj > 0.0:
+                    spread_costs[idx] = spread_adj * qty
+                    if side == "buy":
+                        fill_price += spread_adj
+                    else:
+                        fill_price -= spread_adj
+
+                slippage_adj = float(max(transaction_cost_model.get_slippage(qty, mid_price, side), 0.0))
+                if slippage_adj > 0.0:
+                    slippage_costs[idx] += slippage_adj * qty
+                    if side == "buy":
+                        fill_price += slippage_adj
+                    else:
+                        fill_price -= slippage_adj
+
+                commission_costs[idx] = max(0.0, float(transaction_cost_model.get_commission(qty, fill_price)))
+
+            pnl = (
+                positions * price_moves
+                - commission_costs
+                - spread_costs
+                - slippage_costs
+            )
 
             equity_curve = np.cumsum(pnl) + initial_capital
             peaks = np.maximum.accumulate(equity_curve)
@@ -196,6 +248,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
             pnl_total = float(pnl.sum())
             max_dd = float(drawdowns.min()) if drawdowns.size else 0.0
             trades = int(np.count_nonzero(position_changes))
+            total_commission = float(commission_costs.sum())
+            total_spread = float(spread_costs.sum())
             total_slippage = float(slippage_costs.sum())
 
             if metrics.enabled:
@@ -206,6 +260,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
         ctx["max_dd"] = max_dd
         ctx["trades"] = trades
         ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
+        ctx["commission_cost"] = total_commission
+        ctx["spread_cost"] = total_spread
+        ctx["slippage_cost"] = total_slippage
 
         return Result(
             pnl=pnl_total,
@@ -214,6 +271,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
             equity_curve=equity_curve,
             latency_steps=int(latency_cfg.total_delay),
             slippage_cost=total_slippage,
+            commission_cost=total_commission,
+            spread_cost=total_spread,
         )
 
 
@@ -227,6 +286,9 @@ def walk_forward(
     latency: LatencyConfig | None = None,
     order_book: OrderBookConfig | None = None,
     slippage: SlippageConfig | None = None,
+    market: str | None = None,
+    cost_model: TransactionCostModel | None = None,
+    cost_config: str | Path | Mapping[str, Any] | None = None,
 ) -> Result:
     """Compatibility wrapper that delegates to :class:`WalkForwardEngine`."""
 
@@ -240,5 +302,8 @@ def walk_forward(
         latency=latency,
         order_book=order_book,
         slippage=slippage,
+        market=market,
+        cost_model=cost_model,
+        cost_config=cost_config,
     )
 

@@ -8,14 +8,14 @@ contract, scoring outputs, and extension hooks for more advanced simulations.
 
 ## Walk-Forward Engine
 
-`backtest.engine.walk_forward(prices, signal_fn, fee=0.0005, initial_capital=0.0)`
+`backtest.engine.walk_forward(prices, signal_fn, fee=0.0005, initial_capital=0.0, market=None, cost_model=None)`
 performs a rolling evaluation of a strategy by:
 
 1. Validating that `prices` is a 1-D array with at least two observations.
 2. Requesting a synchronised signal array from `signal_fn(prices)` and clipping
    it to the `[-1, 1]` range to enforce long/short bounds.
 3. Calculating P&L from position changes and price moves while deducting
-   proportional transaction costs.
+   configurable commissions, spreads, and slippage.
 4. Returning a `Result` dataclass with total P&L, maximum drawdown, and the
    number of trades executed. 【F:backtest/engine.py†L1-L32】
 
@@ -29,7 +29,13 @@ def momentum_signal(prices: np.ndarray) -> np.ndarray:
     return signal
 
 prices = np.linspace(100, 110, 500) + np.random.randn(500)
-result = walk_forward(prices, momentum_signal, fee=0.0002, initial_capital=10_000)
+result = walk_forward(
+    prices,
+    momentum_signal,
+    fee=0.0002,
+    initial_capital=10_000,
+    market="BTC-USD",
+)
 print(result.pnl, result.max_dd, result.trades)
 ```
 
@@ -40,8 +46,10 @@ print(result.pnl, result.max_dd, result.trades)
 - **Alignment** – `signal_fn` must return an array with the same length as the
   price series; otherwise a `ValueError` is raised. 【F:backtest/engine.py†L15-L22】
 - **Leverage & bounds** – signals outside `[-1, 1]` are clamped automatically.
-- **Fees** – the `fee` parameter models proportional costs per unit of position
-  change; set it to zero for idealised runs or scale it by expected slippage.
+- **Execution costs** – specify `market` to pull per-instrument settings from
+  `configs/markets.yaml`, or pass a custom `cost_model` implementing
+  `TransactionCostModel` for bespoke handling. Falling back to the scalar `fee`
+  reproduces the legacy proportional cost behaviour.
 
 When you need richer book-keeping (cash balances, borrowing costs, event-driven
 fills), wrap the existing engine so legacy tests remain deterministic.
@@ -49,6 +57,12 @@ fills), wrap the existing engine so legacy tests remain deterministic.
 ---
 
 ## Diagnostics & Extensions
+
+- Use `Result.commission_cost`, `Result.spread_cost`, and
+  `Result.slippage_cost` to reconcile the breakdown of execution frictions.
+- Construct reusable commission/spread/slippage policies via
+  `backtest.transaction_costs.CompositeTransactionCostModel` and point the
+  engine at bespoke YAML configuration files with `cost_config="my_markets.yaml"`.
 
 - Record intermediate arrays (`positions`, `equity_curve`, `drawdowns`) to
   inspect trade-by-trade performance.
