@@ -23,6 +23,9 @@ jobs:
       - name: Run mypy strict
         run: |
           mypy --config-file mypy.ini .
+      - name: Enforce mypy override annotations
+        run: |
+          python tools/check_mypy_overrides.py mypy.ini
       - name: Prepare test report directories
         run: |
           mkdir -p reports
