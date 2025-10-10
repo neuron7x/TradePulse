@@ -153,6 +153,11 @@ safety check
 - Download SBOM artifacts from the `CycloneDX SBOM` workflow run or from the published release assets.
 - Use these SBOMs to audit dependency inventories and share with stakeholders.
 
+**Container signing & provenance:**
+- Release container images are pushed to GHCR with keyless [Sigstore Cosign](https://github.com/sigstore/cosign) signatures attached to the digest.
+- Every release produces a SLSA v3 provenance statement for the container image via the official [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator).
+- Consumers can verify signatures with `cosign verify ghcr.io/<owner>/<repo>@<digest>` and download provenance attestations directly from GHCR.
+
 #### 4. Code Review
 
 **Security checklist for PRs:**
