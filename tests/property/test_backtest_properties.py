@@ -154,3 +154,5 @@ class TestBacktestResultProperties:
         assert result.pnl == pnl
         assert result.max_dd == max_dd
         assert result.trades == trades
+        assert result.performance is None
+        assert result.report_path is None

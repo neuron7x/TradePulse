@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 from core.utils.metrics import get_metrics_collector
 
 from .engine import LatencyConfig, OrderBookConfig, Result, SlippageConfig
+from .performance import compute_performance_metrics, export_performance_report
 from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
 from interfaces.backtest import BacktestEngine
 
@@ -159,6 +160,7 @@ class Portfolio:
     cash: float = 0.0
     position: float = 0.0
     equity_curve: List[float] | None = None
+    position_history: List[float] | None = None
     trades: int = 0
     _last_price: float | None = field(init=False, default=None, repr=False)
     _pending_target: float = field(init=False, default=0.0, repr=False)
@@ -166,6 +168,7 @@ class Portfolio:
     def __post_init__(self) -> None:
         self.cash = float(self.initial_capital)
         self.equity_curve = []
+        self.position_history = []
         self._pending_target = self.position
 
     def on_market_event(self, event: MarketEvent) -> None:
@@ -174,6 +177,8 @@ class Portfolio:
             self.cash += self.position * delta
         self._last_price = event.price
         self.equity_curve.append(self.cash)
+        if self.position_history is not None:
+            self.position_history.append(self.position)
         LOGGER.debug("portfolio equity updated to %.4f", self.cash)
 
     def create_order(self, signal: SignalEvent) -> Optional[OrderEvent]:
@@ -430,6 +435,11 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                     release_ready()
 
             equity_curve = np.asarray(portfolio.equity_curve, dtype=float)
+            positions = (
+                np.asarray(portfolio.position_history, dtype=float)
+                if portfolio.position_history is not None
+                else np.array([], dtype=float)
+            )
             pnl_total = float(equity_curve[-1] - initial_capital) if equity_curve.size else 0.0
             peaks = np.maximum.accumulate(equity_curve) if equity_curve.size else np.array([], dtype=float)
             drawdowns = equity_curve - peaks if peaks.size else np.array([], dtype=float)
@@ -447,6 +457,24 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                 for step, value in enumerate(equity_curve):
                     metrics.record_equity_point(strategy_name, step, float(value))
 
+            pnl_series = (
+                equity_curve
+                - np.concatenate(([float(initial_capital)], equity_curve[:-1]))
+                if equity_curve.size
+                else np.array([], dtype=float)
+            )
+            position_changes = np.diff(positions) if positions.size else np.array([], dtype=float)
+            performance = compute_performance_metrics(
+                equity_curve=equity_curve,
+                pnl=pnl_series,
+                position_changes=position_changes,
+                initial_capital=initial_capital,
+                max_drawdown=max_dd,
+            )
+            report_path = export_performance_report(strategy_name, performance)
+            ctx["performance"] = performance.as_dict()
+            ctx["report_path"] = str(report_path)
+
             return Result(
                 pnl=pnl_total,
                 max_dd=max_dd,
@@ -454,6 +482,8 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                 equity_curve=equity_curve,
                 latency_steps=int(latency_cfg.total_delay),
                 slippage_cost=float(total_slippage),
+                performance=performance,
+                report_path=report_path,
             )
 
 

@@ -67,10 +67,14 @@ class TestEndToEndPipeline:
         
         # Run backtest
         result = walk_forward(prices, signal_from_strategy, fee=0.001)
-        
+
         assert isinstance(result, Result)
         assert result.pnl != 0.0 or result.trades == 0
         assert result.max_dd <= 0.0
+        assert result.performance is not None
+        assert result.performance.max_drawdown == pytest.approx(result.max_dd)
+        assert result.report_path is not None
+        assert result.report_path.exists()
 
     def test_agent_adapt_and_backtest_loop(self) -> None:
         """Test agent adaptation with backtest feedback loop."""
@@ -104,6 +108,8 @@ class TestEndToEndPipeline:
         result = walk_forward(prices, zero_signal, fee=0.0)
         assert result.pnl == 0.0
         assert result.trades == 0
+        assert result.performance is not None
+        assert result.report_path is not None
 
     def test_high_volatility_data(self) -> None:
         """Test pipeline with high volatility data."""
@@ -193,10 +199,11 @@ class TestErrorRecovery:
             return np.ones_like(p) * 0.5
         
         result = walk_forward(prices, simple_signal, fee=0.001)
-        
+
         # No price movement = no PnL except fees
         assert result.pnl <= 0.0  # Only fees
         assert result.max_dd <= 0.0
+        assert result.performance is not None
 
     def test_csv_with_large_gaps_in_timestamps(self, tmp_path) -> None:
         """CSV ingestion should handle large gaps in timestamps."""
