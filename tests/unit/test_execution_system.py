@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -13,6 +13,13 @@ from execution.connectors import BinanceConnector, OrderError
 from execution.normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from execution.oms import OMSConfig, OrderManagementSystem
 from execution.risk import RiskLimits, RiskManager
+from core.utils.metrics import MetricsCollector
+
+
+def _sample_value(registry, name: str, labels: dict[str, str]) -> float | None:
+    """Fetch a metric sample from a Prometheus registry."""
+
+    return registry.get_sample_value(name, labels)
 
 
 @pytest.fixture()
@@ -220,4 +227,71 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
 
     oms.reload()
     assert any(o.order_id == placed.order_id for o in oms.outstanding())
+
+
+def test_oms_emits_ack_and_signal_to_fill_latency_metrics(
+    tmp_path, monkeypatch, risk_manager: RiskManager
+) -> None:
+    prometheus_client = pytest.importorskip("prometheus_client")
+    registry = prometheus_client.CollectorRegistry()
+    metrics = MetricsCollector(registry)
+
+    state_path = tmp_path / "latency_metrics_state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config, metrics=metrics)
+
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=21_500.0,
+        order_type=OrderType.LIMIT,
+    )
+    # Pretend the originating signal fired a few seconds ago so signal→fill latency is non-zero
+    origin = datetime.now(timezone.utc) - timedelta(seconds=9)
+    order.created_at = origin
+    order.updated_at = origin
+
+    counter_values = iter([100.0, 100.42])
+
+    def _fake_perf_counter() -> float:
+        try:
+            return next(counter_values)
+        except StopIteration:
+            return 100.42
+
+    monkeypatch.setattr("execution.oms.time.perf_counter", _fake_perf_counter)
+
+    oms.submit(order, correlation_id="lat-ack-1")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    # Backdate the acknowledgement timestamp to simulate latency between ack and fill events
+    ack_backdated = datetime.now(timezone.utc) - timedelta(seconds=3)
+    oms._ack_timestamps[placed.order_id] = ack_backdated  # noqa: SLF001 - introspection for observability
+
+    oms.register_fill(placed.order_id, placed.quantity, placed.price or 1.0)
+
+    exchange_label = connector.__class__.__name__.lower()
+    ack_labels = {"exchange": exchange_label, "symbol": placed.symbol, "quantile": "0.50"}
+    signal_fill_labels = {
+        "strategy": "unspecified",
+        "exchange": exchange_label,
+        "symbol": placed.symbol,
+        "quantile": "0.50",
+    }
+
+    ack_value = _sample_value(registry, "tradepulse_order_ack_latency_quantiles_seconds", ack_labels)
+    signal_to_fill_value = _sample_value(
+        registry, "tradepulse_signal_to_fill_latency_quantiles_seconds", signal_fill_labels
+    )
+
+    assert ack_value is not None
+    assert signal_to_fill_value is not None
+    assert ack_value == pytest.approx(0.42, rel=1e-6)
+
+    expected_signal_latency = (datetime.now(timezone.utc) - origin).total_seconds()
+    assert signal_to_fill_value == pytest.approx(expected_signal_latency, rel=1e-3)
+    assert placed.order_id not in oms._ack_timestamps  # noqa: SLF001 - ensure cleanup after fill
 

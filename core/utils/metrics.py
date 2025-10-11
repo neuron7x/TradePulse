@@ -426,11 +426,11 @@ class MetricsCollector:
         else:
             quantile_values = _fallback_quantiles(values, quantiles)
 
-        for quantile, name in zip(quantiles, ("p50", "p95", "p99")):
+        for quantile in quantiles:
             value = quantile_values.get(quantile)
             if value is None:
                 continue
-            gauge.labels(**labels, quantile=name).set(value)
+            gauge.labels(**labels, quantile=f"{quantile:.2f}").set(value)
 
     @contextmanager
     def measure_signal_generation(self, strategy: str) -> Iterator[Dict[str, Any]]:

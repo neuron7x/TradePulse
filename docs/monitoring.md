@@ -177,7 +177,8 @@ tradepulse_order_fill_latency_quantiles_seconds{quantile="0.95"}
 tradepulse_signal_to_fill_latency_quantiles_seconds{quantile="0.95"}
 ```
 
-The `quantile` label exposes p50/p95/p99 so alerts can target specific tiers.
+The `quantile` label exposes the key percentiles as decimal strings (`0.50`, `0.95`, `0.99`)
+so alerts can target specific tiers.
 Prometheus recording rules aggregate by `strategy` and `exchange` to surface
 outliers, and Grafana overlays SLA bands (p95 ≤ 0.4 s, p99 ≤ 0.65 s) for fast
 visual validation.

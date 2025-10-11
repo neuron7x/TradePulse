@@ -9,12 +9,12 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Deque, Dict, Iterable, MutableMapping
+from typing import Deque, Dict, Iterable, MutableMapping, Optional
 
-from domain import Order
+from domain import Order, OrderStatus
 from interfaces.execution import RiskController
 
-from core.utils.metrics import get_metrics_collector
+from core.utils.metrics import MetricsCollector, get_metrics_collector
 from .connectors import ExecutionConnector, OrderError
 
 
@@ -46,6 +46,7 @@ class OrderManagementSystem:
         connector: ExecutionConnector,
         risk_controller: RiskController,
         config: OMSConfig,
+        metrics: Optional[MetricsCollector] = None,
     ) -> None:
         self.connector = connector
         self.risk = risk_controller
@@ -53,7 +54,7 @@ class OrderManagementSystem:
         self._queue: Deque[QueuedOrder] = deque()
         self._orders: MutableMapping[str, Order] = {}
         self._processed: Dict[str, str] = {}
-        self._metrics = get_metrics_collector()
+        self._metrics = metrics or get_metrics_collector()
         self._ack_timestamps: Dict[str, datetime] = {}
         self._load_state()
 
@@ -190,7 +191,7 @@ class OrderManagementSystem:
         order = self._orders[order_id]
         order.record_fill(quantity, price)
         self.risk.register_fill(order.symbol, order.side.value, quantity, price)
-        if self._metrics.enabled:
+        if self._metrics.enabled and order.status is OrderStatus.FILLED:
             exchange = getattr(self.connector, "name", self.connector.__class__.__name__.lower())
             now = datetime.now(timezone.utc)
             ack_ts = self._ack_timestamps.get(order_id)

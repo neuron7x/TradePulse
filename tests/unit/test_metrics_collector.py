@@ -102,7 +102,7 @@ def test_measure_data_ingestion_records_duration_and_status() -> None:
     latency_quantile = _sample_value(
         registry,
         "tradepulse_data_ingestion_latency_quantiles_seconds",
-        {"source": "csv", "symbol": "BTC-USDT", "quantile": "p50"},
+        {"source": "csv", "symbol": "BTC-USDT", "quantile": "0.50"},
     )
 
     assert count == 1.0
@@ -159,7 +159,7 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     submission_quantile = _sample_value(
         registry,
         "tradepulse_order_submission_latency_quantiles_seconds",
-        {"exchange": "binance", "symbol": "ETH-USDT", "quantile": "p50"},
+        {"exchange": "binance", "symbol": "ETH-USDT", "quantile": "0.50"},
     )
     assert submission_quantile is not None
     assert rejected_total == 1.0
@@ -276,7 +276,7 @@ def test_latency_quantiles_without_numpy(monkeypatch: pytest.MonkeyPatch) -> Non
     quantile = _sample_value(
         registry,
         "tradepulse_data_ingestion_latency_quantiles_seconds",
-        {"source": "csv", "symbol": "BTC-USDT", "quantile": "p95"},
+        {"source": "csv", "symbol": "BTC-USDT", "quantile": "0.95"},
     )
 
     # With deterministic timing and the fallback path, the quantile should match the
@@ -304,22 +304,22 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
     signal_quantile = _sample_value(
         registry,
         "tradepulse_signal_generation_latency_quantiles_seconds",
-        {"strategy": "trend", "quantile": "p50"},
+        {"strategy": "trend", "quantile": "0.50"},
     )
     fill_quantile = _sample_value(
         registry,
         "tradepulse_order_fill_latency_quantiles_seconds",
-        {"exchange": "demo", "symbol": "trend", "quantile": "p50"},
+        {"exchange": "demo", "symbol": "trend", "quantile": "0.50"},
     )
     ack_quantile = _sample_value(
         registry,
         "tradepulse_order_ack_latency_quantiles_seconds",
-        {"exchange": "demo", "symbol": "trend", "quantile": "p50"},
+        {"exchange": "demo", "symbol": "trend", "quantile": "0.50"},
     )
     signal_fill_quantile = _sample_value(
         registry,
         "tradepulse_signal_to_fill_latency_quantiles_seconds",
-        {"strategy": "trend", "exchange": "demo", "symbol": "trend", "quantile": "p50"},
+        {"strategy": "trend", "exchange": "demo", "symbol": "trend", "quantile": "0.50"},
     )
     equity_gauge = _sample_value(
         registry,
@@ -359,7 +359,7 @@ def test_deterministic_quantiles_match_numpy_and_benchmark(gauge_name: str, labe
     gauge = getattr(collector, gauge_name)
     collector._update_latency_quantiles(gauge, labels, samples)
 
-    for quantile, suffix in zip((0.5, 0.95, 0.99), ("p50", "p95", "p99")):
+    for quantile, suffix in zip((0.5, 0.95, 0.99), ("0.50", "0.95", "0.99")):
         observed = _sample_value(
             registry,
             gauge._name,  # type: ignore[attr-defined]
