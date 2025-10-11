@@ -120,6 +120,45 @@ with logger.operation("custom_computation", data_size=len(prices)) as op:
     op["iterations"] = 100
 ```
 
+### Sampling Profilers
+
+TradePulse includes `scalene` and `py-spy` in the development dependencies so
+you can capture CPU and memory profiles without modifying source code.
+
+*Scalene*
+
+```bash
+scalene --cpu-only --outfile reports/scalene.html src/your_entrypoint.py --arg=value
+```
+
+This produces an interactive HTML report under `reports/scalene.html` that
+pinpoints hotspots at the function and line level.
+
+*py-spy*
+
+```bash
+py-spy record -o reports/py-spy.svg -- python src/your_entrypoint.py --arg=value
+```
+
+`py-spy` generates a flamegraph that visualises stack traces aggregated over
+time, which is ideal for spotting intermittent slow paths.
+
+### Microbenchmarks
+
+Critical pipeline stages have dedicated microbenchmarks in `bench/` to track
+regressions:
+
+```bash
+python bench/bench_pipeline.py
+# normalize_df                   best=  7.42 ms  avg=  7.95 ms
+# ricci_feature                  best= 11.31 ms  avg= 11.88 ms
+# strategy_simulation            best= 18.04 ms  avg= 18.65 ms
+# matching_engine_submit         best=  1.92 ms  avg=  2.10 ms
+```
+
+Run the script before and after optimisations to measure impact or to populate
+baseline data in CI.
+
 ## Chunked Processing
 
 ### Entropy with Chunking

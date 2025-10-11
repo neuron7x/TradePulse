@@ -13,6 +13,8 @@ import heapq
 import itertools
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
+from observability.tracing import pipeline_span
+
 
 EPSILON = 1e-12
 
@@ -137,24 +139,38 @@ class MatchingEngine:
     # ------------------------------------------------------------------
     def submit_order(self, order: Order) -> Order:
         """Register a new order with latency and halt handling."""
-
-        halt = self._halt_state(order.symbol, order.timestamp)
-        if halt and halt.mode == HaltMode.REJECT_NEW:
-            order.status = OrderStatus.REJECTED
-            return order
-
-        ready_at = order.timestamp + max(0, int(self.latency_model(order)))
-
-        if halt and halt.mode in (HaltMode.DELAY, HaltMode.FULL):
-            if halt.resume_time is None:
-                order.status = OrderStatus.CANCELLED
+        with pipeline_span(
+            "orders.submit",
+            symbol=order.symbol,
+            side=getattr(order.side, "value", order.side),
+            order_type=getattr(order.order_type, "value", order.order_type),
+        ) as span:
+            halt = self._halt_state(order.symbol, order.timestamp)
+            if halt and halt.mode == HaltMode.REJECT_NEW:
+                order.status = OrderStatus.REJECTED
+                if span is not None:
+                    span.set_attributes({"order.status": order.status.value})
                 return order
-            ready_at = max(ready_at, halt.resume_time)
 
-        order.ready_at = ready_at
-        order.status = OrderStatus.QUEUED
-        heapq.heappush(self._pending, (ready_at, next(self._counter), order))
-        return order
+            ready_at = order.timestamp + max(0, int(self.latency_model(order)))
+
+            if halt and halt.mode in (HaltMode.DELAY, HaltMode.FULL):
+                if halt.resume_time is None:
+                    order.status = OrderStatus.CANCELLED
+                    if span is not None:
+                        span.set_attributes({"order.status": order.status.value})
+                    return order
+                ready_at = max(ready_at, halt.resume_time)
+
+            order.ready_at = ready_at
+            order.status = OrderStatus.QUEUED
+            heapq.heappush(self._pending, (ready_at, next(self._counter), order))
+            if span is not None:
+                span.set_attributes({
+                    "order.status": order.status.value,
+                    "order.ready_at": int(ready_at),
+                })
+            return order
 
     def process_until(self, timestamp: int) -> List[Order]:
         """Process all queued orders whose latency has elapsed."""

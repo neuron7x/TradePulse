@@ -98,7 +98,8 @@
     }
   ],
   "dashboards": [
-    "tradepulse-overview"
+    "tradepulse-overview",
+    "tp-pipeline"
   ],
   "metrics": [
     {
@@ -199,6 +200,17 @@
       "type": "counter"
     },
     {
+      "description": "P50/P95/P99 latency of ingestion callbacks.",
+      "labels": [
+        "source",
+        "symbol",
+        "quantile"
+      ],
+      "name": "tradepulse_data_ingestion_latency_quantiles_seconds",
+      "subsystem": "data",
+      "type": "gauge"
+    },
+    {
       "description": "Ticks processed for each data source and symbol.",
       "labels": [
         "source",
@@ -231,6 +243,28 @@
       "type": "counter"
     },
     {
+      "description": "Latency quantiles for simulated order submissions.",
+      "labels": [
+        "exchange",
+        "symbol",
+        "quantile"
+      ],
+      "name": "tradepulse_order_submission_latency_quantiles_seconds",
+      "subsystem": "execution",
+      "type": "gauge"
+    },
+    {
+      "description": "Latency quantiles between order ready time and fill.",
+      "labels": [
+        "exchange",
+        "symbol",
+        "quantile"
+      ],
+      "name": "tradepulse_order_fill_latency_quantiles_seconds",
+      "subsystem": "execution",
+      "type": "gauge"
+    },
+    {
       "description": "Currently open positions tracked per exchange and symbol.",
       "labels": [
         "exchange",
@@ -239,6 +273,26 @@
       "name": "tradepulse_open_positions",
       "subsystem": "execution",
       "type": "gauge"
+    },
+    {
+      "description": "Latency quantiles for signal generation routines.",
+      "labels": [
+        "strategy",
+        "quantile"
+      ],
+      "name": "tradepulse_signal_generation_latency_quantiles_seconds",
+      "subsystem": "signals",
+      "type": "gauge"
+    },
+    {
+      "description": "Total number of signal generation invocations.",
+      "labels": [
+        "strategy",
+        "status"
+      ],
+      "name": "tradepulse_signal_generation_total",
+      "subsystem": "signals",
+      "type": "counter"
     },
     {
       "description": "Composite score for a strategy's live performance.",

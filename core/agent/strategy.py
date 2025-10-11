@@ -8,6 +8,8 @@ from typing import Any, Dict
 import numpy as np
 import pandas as pd
 
+from observability.tracing import pipeline_span
+
 @dataclass
 class Strategy:
     name: str
@@ -57,61 +59,84 @@ class Strategy:
             self.params["max_drawdown"] = float(drawdown.min()) if drawdown.size else 0.0
             self.params["trades"] = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
 
-        if data is None:
-            series = pd.Series(np.linspace(100.0, 101.0, 256), dtype=float)
-        else:
-            series = _to_price_series(data)
+        with pipeline_span("signals.simulate_performance", strategy=self.name) as span:
+            if data is None:
+                series = pd.Series(np.linspace(100.0, 101.0, 256), dtype=float)
+            else:
+                series = _to_price_series(data)
 
-        series = series.astype(float)
-        if isinstance(series.index, pd.DatetimeIndex):
-            series = series[~series.index.duplicated(keep="last")].sort_index()
-        series = series.replace([np.inf, -np.inf], np.nan)
-        if series.isna().all():
-            self.score = 0.0
-            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+            if span is not None:
+                span.set_attributes({
+                    "series.length": int(series.size),
+                    "series.has_index": isinstance(series.index, pd.DatetimeIndex),
+                })
+
+            series = series.astype(float)
+            if isinstance(series.index, pd.DatetimeIndex):
+                series = series[~series.index.duplicated(keep="last")].sort_index()
+            series = series.replace([np.inf, -np.inf], np.nan)
+            if series.isna().all():
+                self.score = 0.0
+                _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+                return self.score
+            series = series.ffill().bfill()
+
+            returns = series.pct_change(fill_method=None)
+            returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+            if returns.empty:
+                self.score = 0.0
+                _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+                return self.score
+
+            lookback = int(self.params.get("lookback", 20))
+            threshold = float(self.params.get("threshold", 0.5))
+            risk_budget = float(self.params.get("risk_budget", 1.0))
+            if span is not None:
+                span.set_attributes(
+                    {
+                        "params.lookback": float(lookback),
+                        "params.threshold": float(threshold),
+                        "params.risk_budget": float(risk_budget),
+                        "returns.length": int(len(returns)),
+                    }
+                )
+            effective_lookback = max(1, min(lookback, len(returns)))
+
+            rolling_mean = returns.rolling(window=effective_lookback, min_periods=effective_lookback).mean().fillna(0.0)
+            rolling_vol = (
+                returns.rolling(window=effective_lookback, min_periods=1)
+                .std(ddof=0)
+                .replace(0.0, np.nan)
+                .ffill()
+                .bfill()
+                .fillna(1e-6)
+            )
+            zscore = (rolling_mean / rolling_vol).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+            signal = np.where(zscore > threshold, -1.0, np.where(zscore < -threshold, 1.0, 0.0))
+            if signal.size:
+                position = np.concatenate(([0.0], signal[:-1])) * risk_budget
+            else:
+                position = np.array([], dtype=float)
+
+            pnl = position * returns.to_numpy()
+            equity = np.cumsum(pnl)
+            _update_diagnostics(equity, position)
+            if equity.size == 0:
+                self.score = 0.0
+                return self.score
+
+            sharpe = np.mean(pnl) / (np.std(pnl) + 1e-9)
+            terminal = equity[-1]
+            raw_score = terminal + 0.5 * sharpe
+            self.score = float(np.clip(raw_score, -1.0, 2.0))
+            if span is not None:
+                span.set_attributes(
+                    {
+                        "score": float(self.score),
+                        "trades": int(self.params.get("trades", 0)),
+                    }
+                )
             return self.score
-        series = series.ffill().bfill()
-
-        returns = series.pct_change(fill_method=None)
-        returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
-        if returns.empty:
-            self.score = 0.0
-            _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
-            return self.score
-
-        lookback = int(self.params.get("lookback", 20))
-        threshold = float(self.params.get("threshold", 0.5))
-        risk_budget = float(self.params.get("risk_budget", 1.0))
-        effective_lookback = max(1, min(lookback, len(returns)))
-
-        rolling_mean = returns.rolling(window=effective_lookback, min_periods=effective_lookback).mean().fillna(0.0)
-        rolling_vol = (
-            returns.rolling(window=effective_lookback, min_periods=1)
-            .std(ddof=0)
-            .replace(0.0, np.nan)
-            .ffill()
-            .bfill()
-            .fillna(1e-6)
-        )
-        zscore = (rolling_mean / rolling_vol).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-        signal = np.where(zscore > threshold, -1.0, np.where(zscore < -threshold, 1.0, 0.0))
-        if signal.size:
-            position = np.concatenate(([0.0], signal[:-1])) * risk_budget
-        else:
-            position = np.array([], dtype=float)
-
-        pnl = position * returns.to_numpy()
-        equity = np.cumsum(pnl)
-        _update_diagnostics(equity, position)
-        if equity.size == 0:
-            self.score = 0.0
-            return self.score
-
-        sharpe = np.mean(pnl) / (np.std(pnl) + 1e-9)
-        terminal = equity[-1]
-        raw_score = terminal + 0.5 * sharpe
-        self.score = float(np.clip(raw_score, -1.0, 2.0))
-        return self.score
 
 @dataclass
 class PiAgent:

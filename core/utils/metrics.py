@@ -7,6 +7,7 @@ performance-sensitive operations.
 from __future__ import annotations
 
 import math
+import multiprocessing
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
@@ -638,7 +639,7 @@ def get_metrics_collector(registry: Optional[Any] = None) -> MetricsCollector:
 
 def start_metrics_server(port: int = 8000, addr: str = "") -> None:
     """Start the Prometheus metrics HTTP server.
-    
+
     Args:
         port: Port to listen on
         addr: Address to bind to (empty string for all interfaces)
@@ -648,8 +649,34 @@ def start_metrics_server(port: int = 8000, addr: str = "") -> None:
     start_http_server(port, addr)
 
 
+def start_metrics_exporter_process(port: int = 8000, addr: str = "") -> multiprocessing.Process:
+    """Spawn a Prometheus exporter in a dedicated process."""
+
+    if not PROMETHEUS_AVAILABLE:
+        raise RuntimeError("prometheus_client is not installed")
+
+    from observability.exporters import start_prometheus_exporter_process
+
+    return start_prometheus_exporter_process(port=port, addr=addr)
+
+
+def stop_metrics_exporter_process(
+    process: Optional[multiprocessing.Process], *, timeout: float = 5.0
+) -> None:
+    """Terminate a previously spawned Prometheus exporter process."""
+
+    if process is None:
+        return
+
+    from observability.exporters import stop_exporter_process
+
+    stop_exporter_process(process, timeout=timeout)
+
+
 __all__ = [
     "MetricsCollector",
     "get_metrics_collector",
     "start_metrics_server",
+    "start_metrics_exporter_process",
+    "stop_metrics_exporter_process",
 ]
