@@ -64,6 +64,9 @@ focused document so contributors can quickly find the details they need.
 
 - Adhere to the testing instructions in [`TESTING.md`](../TESTING.md) and the
   quality checklist documented in [`reports/release_readiness.md`](../reports/release_readiness.md).
+- For production cutovers, complete the
+  [`Production Cutover Readiness Checklist`](../reports/prod_cutover_readiness_checklist.md)
+  alongside the go/no-go review.
 - Keep documentation in sync with the public APIs exposed by modules such as
   [`core/agent/strategy.py`](../core/agent/strategy.py) and
   [`execution/order.py`](../execution/order.py).
@@ -76,4 +79,4 @@ focused document so contributors can quickly find the details they need.
 
 ---
 
-**Last updated:** 2025-10-09
+**Last updated:** 2025-02-14
