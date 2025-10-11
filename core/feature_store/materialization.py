@@ -68,7 +68,13 @@ class FeatureMaterializer:
         offline_path = self._offline_store.write(feature_set, mode=mode)
         rows_online = 0
         if self._online_store is not None:
+            # Validate freshness before mutating the online store so we never delete
+            # the authoritative snapshot when attempting to load stale data.
             self._ensure_not_regressing(feature_set)
+            if mode == "overwrite":
+                # Align the online store with the offline overwrite by clearing out
+                # rows that are no longer present in the incoming dataset.
+                self._online_store.purge(feature_set_name)
             self._online_store.write(feature_set)
             rows_online = len(feature_set.dataframe)
         latest = self._offline_store.latest_timestamp(

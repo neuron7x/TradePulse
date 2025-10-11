@@ -58,6 +58,38 @@ def test_materialize_parquet_sqlite(sample_config):
     assert materializer.validate_consistency("account_features")
 
 
+def test_materialize_overwrite_purges_stale_rows(sample_config):
+    offline_store = OfflineStoreFactory(sample_config.offline).create()
+    sqlite_store = SQLiteOnlineStore(sample_config.online)
+    materializer = FeatureMaterializer(sample_config, offline_store=offline_store, online_store=sqlite_store)
+
+    initial_frame = pd.DataFrame(
+        {
+            "account_id": ["abc", "xyz"],
+            "balance": [100.0, 200.5],
+            "event_timestamp": ["2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z"],
+        }
+    )
+    materializer.materialize(initial_frame, "account_features", mode="overwrite")
+
+    updated_frame = pd.DataFrame(
+        {
+            "account_id": ["xyz"],
+            "balance": [250.75],
+            "event_timestamp": ["2024-01-03T00:00:00Z"],
+        }
+    )
+
+    result = materializer.materialize(updated_frame, "account_features", mode="overwrite")
+
+    assert result.rows_written_online == 1
+    offline_loaded = offline_store.read("account_features")
+    assert len(offline_loaded) == 1
+    online_loaded = sqlite_store.read("account_features")
+    assert set(online_loaded["account_id"]) == {"xyz"}
+    assert materializer.validate_consistency("account_features")
+
+
 def test_materialize_rejects_regressions(sample_config):
     offline_store = OfflineStoreFactory(sample_config.offline).create()
     sqlite_store = SQLiteOnlineStore(sample_config.online)
