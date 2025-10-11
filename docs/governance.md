@@ -20,10 +20,26 @@ This guide defines the governance guardrails for TradePulse across access manage
 
 ### Access Logging and Configuration Integrity
 
-1. **Action audit trail** – Every invocation of `create`, `run`, `kill`, or `export` emits a structured log (JSON) to the governance topic with identity, strategy ID, parameter diff, and approval reference. Logs replicate to long-term storage with 400-day retention.
-2. **Configuration signing** – Strategy manifests, risk limits, and pipeline configs are stored in Git. A sigstore-based signing step runs in CI, attaching provenance metadata (commit SHA, signer identity) before release bundles are published.
-3. **Version rollback** – The deployment controller verifies signatures before promoting configs. If validation fails or a regression is detected, operators can request an automated rollback to the previous signed version, tracked through change tickets.
-4. **Immutable audit snapshots** – Each approved change generates an append-only record in the compliance ledger (PostgreSQL + pgcrypto) linking Git commit, signer, and deployment environment for evidentiary purposes.
+1. **Action audit trail** – Every invocation of `create`, `run`, `kill`, or `export` emits a structured log (JSON) to the governance topic with identity, strategy ID, parameter diff, approval reference, and cryptographic digest of the before/after configuration. Logs replicate to long-term storage with 400-day retention and are cross-checked nightly against the compliance ledger.
+2. **Configuration signing** – Strategy manifests, risk limits, and pipeline configs are stored in Git. A sigstore-based signing step runs in CI, attaching provenance metadata (commit SHA, signer identity) before release bundles are published. Parameter changes require dual signatures (requester + approver) which are validated before promotion.
+3. **Version rollback** – The deployment controller verifies signatures before promoting configs. If validation fails or a regression is detected, operators can request an automated rollback to the previous signed version, tracked through change tickets. Rollbacks emit an `audit.rollback` event referencing the triggering incident ID.
+4. **Immutable audit snapshots** – Each approved change generates an append-only record in the compliance ledger (PostgreSQL + pgcrypto) linking Git commit, signer, and deployment environment for evidentiary purposes. Snapshots are sealed with a Merkle root so tampering invalidates the entire chain.
+5. **Critical action 2FA** – Strategy activation, kill-switch, and risk limit overrides enforce second-factor confirmation (FIDO2 or TOTP). The audit event stores the authenticator type and challenge nonce, blocking execution if the proof is absent.
+
+### Temporary Debug Access Tokens
+
+- **Scoped issuance** – Engineers can mint temporary debug tokens with `tradepulse-cli auth mint --scope debug --ttl 2h`. Tokens are namespaced per environment and include explicit expiry metadata.
+- **Automatic expiration** – Tokens are backed by the identity provider with short-lived credentials (≤4 hours). Revocation occurs automatically at expiry or on manual kill via `tradepulse-cli auth revoke --token <id>`.
+- **Usage journal** – Every token use emits `auth.token_usage` events recording subject, IP, scope, and command executed. The journal feeds into weekly access review dashboards.
+- **Approval workflow** – Minting tokens requires peer approval captured through the governance service. The approval ID is embedded in the token claims and validated by gateways before honoring the request.
+
+### Strategy Change Sign-Off Workflow
+
+1. Engineer submits parameter update through the governance UI, attaching justification and expected impact.
+2. Change is serialized as a signed bundle (YAML + diff digest) and routed for dual approval (strategy owner + risk officer).
+3. Upon approval, CI stamps the bundle with sigstore metadata and publishes to the artifact registry.
+4. Deployment controllers validate signatures, enforce 2FA confirmation, and emit `strategy.change.applied` events with the diff hash and signers.
+5. Audit dashboards reconcile applied changes against approval manifests nightly; mismatches trigger incident escalation.
 
 ### Service-Level Access Policies
 

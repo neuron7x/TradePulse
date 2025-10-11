@@ -14,6 +14,14 @@ criteria across testing, performance, and reliability domains.
 3. **Latency SLOs** – Synthetic smoke tests replay key execution flows. If the
    SLI dashboards predict burn-rate exhaustion under 72 hours, the PR merge is
    blocked until mitigations land.
+4. **Heavy-math validation** – Dedicated jobs defined in
+   `configs/quality/heavy_math_jobs.yaml` execute Kuramoto, Ricci, and Hurst
+   stress workloads with enforced CPU/memory quotas. The jobs run under the
+   `heavy_math` pytest marker and must pass before a PR can merge.
+5. **Cross-architecture parity** – Indicator portability tests labelled with the
+   `arm` marker compare CPU, GPU, and float32 (ARM-simulated) execution paths.
+   CI requires parity within ±0.005 absolute tolerance; deviations block the
+   pipeline and page the platform quality channel.
 
 ## Nightly Benchmarks and Auto-Triage
 
