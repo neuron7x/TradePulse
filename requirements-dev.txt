@@ -19,8 +19,8 @@ click>=8.1.7
 fakeredis==2.26.2
 
 # Profiling tools
-scalene>=1.5.55
-py-spy>=0.4.1
+scalene>=1.5.55; python_version < "3.13"
+py-spy>=0.4.1; python_version < "3.13"
 
 # Security scanning
 bandit==1.8.0
