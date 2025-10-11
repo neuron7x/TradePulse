@@ -16,6 +16,9 @@ focused document so contributors can quickly find the details they need.
   catalogues, orchestration contracts, and reproducible benchmarks.
 - **Monitoring & operations** – instrumentation, alerting, and dashboard
   recipes live in [`docs/monitoring.md`](monitoring.md).
+- **Risk, signals, and observability controls** – consolidated guardrails for
+  portfolio risk, model governance, and Prometheus coverage are in
+  [`docs/risk_ml_observability.md`](risk_ml_observability.md).
 - **Reliability & SRE** – SLA commitments, SLOs, error budgets, and escalation
   policy are outlined in [`docs/reliability.md`](reliability.md).
 
@@ -52,6 +55,8 @@ focused document so contributors can quickly find the details they need.
   quarterly priorities.
 - Cross-reference the [Improvement Plan](improvement_plan.md) for detailed
   success criteria and implementation guidance.
+- Align on safeguards using the [Risk, Signals, and Observability Control
+  Blueprint](risk_ml_observability.md) when planning high-impact releases.
 
 ---
 
@@ -71,4 +76,4 @@ focused document so contributors can quickly find the details they need.
 
 ---
 
-**Last updated:** 2025-10-08
+**Last updated:** 2025-10-09
