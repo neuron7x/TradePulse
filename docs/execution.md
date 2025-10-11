@@ -84,3 +84,70 @@ liquidations when exposure exceeds policy thresholds.
   that `PiAgent` actions map cleanly to order intents.
 - Extend this guide whenever new adapters (FIX, REST, websockets) or risk checks
   (e.g., pre-trade credit, margin requirements) are added.
+
+---
+
+## Execution Quality Analytics
+
+The `analytics.execution_quality` module captures post-trade diagnostics such as
+implementation shortfall, VWAP slippage, and fill efficiency. Use these helpers
+to quantify execution drift versus a benchmark or arrival price:
+
+```python
+from analytics.execution_quality import (
+    FillSample,
+    implementation_shortfall,
+    vwap_slippage,
+    fill_rate,
+)
+
+fills = [
+    FillSample(quantity=1.0, price=100.5),
+    FillSample(quantity=0.5, price=100.8, fees=0.15),
+]
+
+shortfall = implementation_shortfall("buy", arrival_price=100.0, fills=fills)
+slippage = vwap_slippage("buy", benchmark_price=99.8, fills=fills)
+fill = fill_rate(target_quantity=2.0, fills=fills)
+```
+
+- `implementation_shortfall` normalises by side so that positive numbers always
+  represent underperformance relative to the arrival price and includes fees in
+  the realised outcome. 【F:analytics/execution_quality.py†L36-L73】
+- `vwap_slippage` compares the realised VWAP to a benchmark, again adjusting for
+  side. 【F:analytics/execution_quality.py†L76-L97】
+- `fill_rate` reports the executed fraction of the order target. 【F:analytics/execution_quality.py†L100-L109】
+- `cancel_replace_latency` summarises cancel/replace turnaround times to spot
+  venue microstructure issues. 【F:analytics/execution_quality.py†L112-L133】
+
+These metrics can be exported to observability pipelines or regression tests to
+ensure routing changes do not degrade quality.
+
+---
+
+## Venue Compliance Monitoring
+
+`execution.compliance.ComplianceMonitor` wraps `SymbolNormalizer` to enforce lot
+size, tick size, and minimum notional requirements prior to submission:
+
+```python
+from execution.compliance import ComplianceMonitor
+from execution.normalization import SymbolNormalizer, SymbolSpecification
+
+normalizer = SymbolNormalizer(specifications={
+    "BTCUSDT": SymbolSpecification(symbol="BTCUSDT", min_qty=0.001, step_size=0.001, min_notional=5.0)
+})
+
+monitor = ComplianceMonitor(normalizer, strict=True, auto_round=True)
+report = monitor.check("BTCUSDT", quantity=0.00125, price=26850.0)
+```
+
+- When `auto_round=True`, quantities and prices are rounded to the nearest
+  exchange increment prior to validation. 【F:execution/compliance.py†L35-L47】
+- Violations raise `ComplianceViolation` when `strict=True`, guaranteeing that
+  orders breaching minimums are blocked before hitting the wire. 【F:execution/compliance.py†L23-L67】
+- The returned `ComplianceReport` retains both the requested and normalised
+  values so execution services can log discrepancies for QA. 【F:execution/compliance.py†L26-L67】
+
+Leverage this monitor alongside throttles in `RiskManager` to keep order flow
+inside venue guardrails.
