@@ -55,6 +55,9 @@ focused document so contributors can quickly find the details they need.
   quarterly priorities.
 - Cross-reference the [Improvement Plan](improvement_plan.md) for detailed
   success criteria and implementation guidance.
+- Align governance and compliance using the
+  [Governance and Data Controls](governance.md) playbook covering RBAC, data
+  contracts, privacy, and catalog management.
 - Align on safeguards using the [Risk, Signals, and Observability Control
   Blueprint](risk_ml_observability.md) when planning high-impact releases.
 
