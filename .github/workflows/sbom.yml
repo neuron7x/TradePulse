@@ -9,16 +9,14 @@ on:
     branches:
       - main
       - develop
-  release:
-    types: [published]
 
 jobs:
   generate:
     name: Generate CycloneDX SBOM
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      actions: read
+      contents: read
+      actions: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v5
@@ -112,13 +110,3 @@ jobs:
           path: |
             sbom/cyclonedx-sbom.json
             sbom/cyclonedx-sbom.xml
-
-      - name: Attach SBOM to release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            sbom/cyclonedx-sbom.json
-            sbom/cyclonedx-sbom.xml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
