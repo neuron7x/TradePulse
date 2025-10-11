@@ -16,6 +16,9 @@ focused document so contributors can quickly find the details they need.
   catalogues, orchestration contracts, and reproducible benchmarks.
 - **Monitoring & operations** – instrumentation, alerting, and dashboard
   recipes live in [`docs/monitoring.md`](monitoring.md).
+- **Chaos & cost governance** – container stress campaigns, FinOps controls,
+  and research workload guardrails are captured in
+  [`docs/chaos_cost_controls.md`](chaos_cost_controls.md).
 - **Risk, signals, and observability controls** – consolidated guardrails for
   portfolio risk, model governance, and Prometheus coverage are in
   [`docs/risk_ml_observability.md`](risk_ml_observability.md).
@@ -34,6 +37,7 @@ focused document so contributors can quickly find the details they need.
 | Execution & Risk | Order sizing utilities, portfolio heat checks, and integration touchpoints. | [`docs/execution.md`](execution.md), [`execution`](../execution) |
 | Execution Simulation | Latency, queueing, halts, and time-in-force handling for research-grade fills. | [`docs/backtest_execution_simulation.md`](backtest_execution_simulation.md), [`backtest/execution_simulation.py`](../backtest/execution_simulation.py) |
 | Stress & Portfolio Resilience | Historic scenario replays, chaos exercises, and capital allocation guardrails. | [`docs/stress_playbooks.md`](stress_playbooks.md) |
+| Chaos & Cost Governance | Container stress testing, budget tagging, and cost-aware research workflows. | [`docs/chaos_cost_controls.md`](chaos_cost_controls.md) |
 | CLI & Interfaces | Automations for analysis/backtest/live commands and scripting entrypoints. | [`interfaces/cli.py`](../interfaces/cli.py) |
 
 ---
