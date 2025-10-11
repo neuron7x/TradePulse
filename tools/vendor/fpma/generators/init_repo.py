@@ -47,15 +47,18 @@ SPEC_TEXT = r"""# FPM-A: Formal methodology for a fractal algorithmic system
 
 ## 1. Terms
 
-Fractal Unit (FU) - minimal autonomous unit with the same internal structure: src/, tests/, api/, docs/, config/, ci/, benchmarks/.
+Fractal Unit (FU) - minimal autonomous unit with the same internal structure:
+src/, tests/, api/, docs/, config/, ci/, benchmarks/.
 Bounded Context (BC) - domain boundary containing one or more FUs.
 Core / Ports / Adapters - domain core; abstract ports; technical adapters (DB/HTTP/CLI/UI).
 Contract - formal interface (OpenAPI 3.1 or gRPC) validated by contract tests.
 
 ## 2. Architecture invariants
 
-I1. Self-similarity: each FU contains mandatory subdirectories: {src,tests,api,docs,config,ci,benchmarks}.
-I2. Import boundary: adapters must not import core across BC; forbids access to private paths of other FU except via ports/api.
+I1. Self-similarity: each FU contains mandatory subdirectories:
+{src,tests,api,docs,config,ci,benchmarks}.
+I2. Import boundary: adapters must not import core across BC; forbids access to
+private paths of other FU except via ports/api.
 I3. Acyclic graph: dependency graph between FUs is a DAG.
 I4. Contracts: changes follow SemVer; backward compatibility is verified via contract tests.
 I5. Configs: managed by environment variables; .env.example provided per FU.
@@ -80,7 +83,8 @@ OpenAPI 3.1 (api/openapi.yaml) schema validation. CDC if applicable.
 
 ## 4. Change protocol
 
-Conventional Commits -> SemVer. Pipeline: check (invariants+complexity+graph) -> test -> bench -> release.
+Conventional Commits -> SemVer. Pipeline: check
+(invariants+complexity+graph) -> test -> bench -> release.
 
 ## 5. Operational model
 
@@ -250,15 +254,24 @@ def init_repo(name:str, license_id="MIT", include_ci=True, include_bazel=True):
     (root / "docs" / "spec.md").write_text(SPEC_TEXT, encoding="utf-8")
 
     if include_ci:
-        (root / ".github" / "workflows" / "ci-reusable.yml").write_text(CI_REUSABLE, encoding="utf-8")
-        (root / ".github" / "workflows" / "depgraph-gate.yml").write_text(DEPGRAPH_GATE, encoding="utf-8")
-        (root / ".github" / "workflows" / "complexity-gate.yml").write_text(COMPLEXITY_GATE, encoding="utf-8")
-        (root / ".github" / "workflows" / "perf-gate.yml").write_text(PERF_GATE, encoding="utf-8")
+        (root / ".github" / "workflows" / "ci-reusable.yml").write_text(
+            CI_REUSABLE, encoding="utf-8"
+        )
+        (root / ".github" / "workflows" / "depgraph-gate.yml").write_text(
+            DEPGRAPH_GATE, encoding="utf-8"
+        )
+        (root / ".github" / "workflows" / "complexity-gate.yml").write_text(
+            COMPLEXITY_GATE, encoding="utf-8"
+        )
+        (root / ".github" / "workflows" / "perf-gate.yml").write_text(
+            PERF_GATE, encoding="utf-8"
+        )
 
     if include_bazel:
-        (root / "WORKSPACE").write_text(BAZEL_WORKSPACE.format(name=name.replace('-','_')), encoding="utf-8")
-        (root / "BUILD.bazel").write_text("# root build
-", encoding="utf-8")
+        (root / "WORKSPACE").write_text(
+            BAZEL_WORKSPACE.format(name=name.replace("-", "_")), encoding="utf-8"
+        )
+        (root / "BUILD.bazel").write_text("# root build\n", encoding="utf-8")
 
     (root / "tools" / "dep_audit.py").write_text(DEP_AUDIT, encoding="utf-8")
     (root / "tools" / "graphviz_export.sh").write_text(GRAPHVIZ_SH, encoding="utf-8")
