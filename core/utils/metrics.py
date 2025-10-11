@@ -192,10 +192,24 @@ class MetricsCollector:
             registry=registry,
         )
 
+        self.order_ack_latency_quantiles = Gauge(
+            "tradepulse_order_ack_latency_quantiles_seconds",
+            "Latency between order submission and broker acknowledgement",
+            ["exchange", "symbol", "quantile"],
+            registry=registry,
+        )
+
         self.order_fill_latency_quantiles = Gauge(
             "tradepulse_order_fill_latency_quantiles_seconds",
             "Order fill latency quantiles",
             ["exchange", "symbol", "quantile"],
+            registry=registry,
+        )
+
+        self.signal_to_fill_latency_quantiles = Gauge(
+            "tradepulse_signal_to_fill_latency_quantiles_seconds",
+            "Aggregate latency from signal emission to final fill",
+            ["strategy", "exchange", "symbol", "quantile"],
             registry=registry,
         )
 
@@ -251,7 +265,9 @@ class MetricsCollector:
         self._ingestion_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
         self._signal_latency_samples: Dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=256))
         self._order_submission_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
+        self._order_ack_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
         self._order_fill_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
+        self._signal_to_fill_latency_samples: Dict[tuple[str, str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
         
         # Agent/optimization metrics
         self.optimization_duration = Histogram(
@@ -591,6 +607,40 @@ class MetricsCollector:
         self._update_latency_quantiles(
             self.order_fill_latency_quantiles,
             {"exchange": exchange, "symbol": symbol},
+            samples,
+        )
+
+    def record_order_ack_latency(self, exchange: str, symbol: str, duration: float) -> None:
+        """Observe latency between order submission and venue acknowledgement."""
+
+        if not self._enabled:
+            return
+        samples = self._order_ack_latency_samples[(exchange, symbol)]
+        samples.append(duration)
+        self._update_latency_quantiles(
+            self.order_ack_latency_quantiles,
+            {"exchange": exchange, "symbol": symbol},
+            samples,
+        )
+
+    def record_signal_to_fill_latency(
+        self,
+        strategy: str,
+        exchange: str,
+        symbol: str,
+        duration: float,
+    ) -> None:
+        """Observe latency from signal emission until the final fill completes."""
+
+        if not self._enabled:
+            return
+
+        label_key = (strategy, exchange, symbol)
+        samples = self._signal_to_fill_latency_samples[label_key]
+        samples.append(duration)
+        self._update_latency_quantiles(
+            self.signal_to_fill_latency_quantiles,
+            {"strategy": strategy, "exchange": exchange, "symbol": symbol},
             samples,
         )
 

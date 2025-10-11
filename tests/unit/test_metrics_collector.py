@@ -293,6 +293,8 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
 
     collector.record_equity_point("trend", 0, 100.0)
     collector.record_order_fill_latency("demo", "trend", 0.123)
+    collector.record_order_ack_latency("demo", "trend", 0.045)
+    collector.record_signal_to_fill_latency("trend", "demo", "trend", 0.25)
 
     signal_total = _sample_value(
         registry,
@@ -309,6 +311,16 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
         "tradepulse_order_fill_latency_quantiles_seconds",
         {"exchange": "demo", "symbol": "trend", "quantile": "p50"},
     )
+    ack_quantile = _sample_value(
+        registry,
+        "tradepulse_order_ack_latency_quantiles_seconds",
+        {"exchange": "demo", "symbol": "trend", "quantile": "p50"},
+    )
+    signal_fill_quantile = _sample_value(
+        registry,
+        "tradepulse_signal_to_fill_latency_quantiles_seconds",
+        {"strategy": "trend", "exchange": "demo", "symbol": "trend", "quantile": "p50"},
+    )
     equity_gauge = _sample_value(
         registry,
         "tradepulse_backtest_equity_curve",
@@ -318,6 +330,8 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
     assert signal_total == 1.0
     assert signal_quantile is not None
     assert fill_quantile is not None
+    assert ack_quantile is not None
+    assert signal_fill_quantile is not None
     assert equity_gauge == 100.0
 
 
@@ -328,6 +342,11 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
         ("signal_generation_latency_quantiles", {"strategy": "trend"}),
         ("order_submission_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
         ("order_fill_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
+        ("order_ack_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
+        (
+            "signal_to_fill_latency_quantiles",
+            {"strategy": "trend", "exchange": "demo", "symbol": "ETH-USDT"},
+        ),
     ],
 )
 def test_deterministic_quantiles_match_numpy_and_benchmark(gauge_name: str, labels: dict[str, str]) -> None:

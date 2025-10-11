@@ -48,6 +48,8 @@ tracked weekly and trended quarterly.
 | Order execution | Orders confirmed within broker SLA / total orders | 99.9% | Rolling 30 days |
 | Market data freshness | Percentage of ticks arriving < 1.5 s from event time | 99.8% | Rolling 24 hours |
 | Data pipeline accuracy | Jobs with parity checks passing / total jobs | 99.95% | Rolling 30 days |
+| Trade pipeline latency | p95 signal → order → ack duration | ≤ 400 ms | 5-minute sliding windows |
+| Trade pipeline reliability | p99 signal → order → fill duration | ≤ 650 ms | 5-minute sliding windows |
 
 Targets assume at least 1,000 valid events per window; otherwise the period is
 flagged for manual review.
@@ -105,3 +107,21 @@ hours for Red services or 7 days for Yellow services.
 
 Change proposals to SLO targets or escalation rules must be tracked via RFC with
 sign-off from SRE lead, affected domain owner, and product counterpart.
+
+## Unified Timekeeping Requirements
+
+- **Clock synchronisation** – All production hosts run `chronyd` pointed at the
+  TradePulse Stratum-1 pool (`time.tradepulse.net`) with fallback to regional NTP
+  peers. Co-located execution racks enable PTP (IEEE 1588) and expose hardware
+  timestamps to NICs so trade plant remains aligned within ±5 μs.
+- **Configuration management** – The `infra.time-sync` automation role enforces
+  max-offset (50 ms), polling cadence, and fallback peers. CI images fail
+  promotion when `chronyc tracking` reports drift beyond the threshold.
+- **Monotonic clocks** – Runtime services measure durations via monotonic clock
+  APIs (`time.monotonic_ns()` in Python, `CLOCK_MONOTONIC_RAW` in Go) to avoid
+  retrograde time jumps when NTP/PTP corrections occur. Wall-clock timestamps are
+  attached only at ingestion/egress boundaries for audit trails.
+
+Any host exceeding the drift limits is automatically quarantined by the
+deployment orchestrator, and SRE receives a SEV-2 alert to remediate or rotate
+the instance.
