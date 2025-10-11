@@ -42,6 +42,12 @@ class TransactionCostModel:
         del volume, price, side
         return 0.0
 
+    def get_financing(self, position: float, price: float) -> float:
+        """Return the carry cost associated with holding ``position`` at ``price``."""
+
+        del position, price
+        return 0.0
+
 
 class ZeroTransactionCost(TransactionCostModel):
     """A convenience model that yields zero costs for all components."""
@@ -171,6 +177,37 @@ class SquareRootSlippage(TransactionCostModel):
         return price * (self.a + self.b * math.sqrt(volume))
 
 
+class BorrowFinancing(TransactionCostModel):
+    """Borrow/funding cost model with optional non-linear scaling."""
+
+    __slots__ = ("long_rate", "short_rate", "periods_per_year", "exponent")
+
+    def __init__(
+        self,
+        long_rate_bps: float = 0.0,
+        short_rate_bps: float = 0.0,
+        *,
+        periods_per_year: int = 252,
+        exponent: float = 1.0,
+    ) -> None:
+        self.long_rate = float(long_rate_bps) * 1e-4
+        self.short_rate = float(short_rate_bps) * 1e-4
+        self.periods_per_year = max(int(periods_per_year), 1)
+        self.exponent = float(exponent) if exponent > 0 else 1.0
+
+    def get_financing(self, position: float, price: float) -> float:  # noqa: D401
+        position = float(position)
+        price = float(max(price, 0.0))
+        volume = abs(position)
+        if not math.isfinite(price) or not math.isfinite(volume) or volume <= 0.0:
+            return 0.0
+        notional = volume * price
+        scale = volume ** (self.exponent - 1.0) if self.exponent != 1.0 else 1.0
+        rate = self.long_rate if position >= 0 else self.short_rate
+        annual_cost = rate * notional * scale
+        return annual_cost / self.periods_per_year
+
+
 @dataclass(slots=True)
 class CompositeTransactionCostModel(TransactionCostModel):
     """Aggregate model composed of optional commission, spread and slippage."""
@@ -178,6 +215,7 @@ class CompositeTransactionCostModel(TransactionCostModel):
     commission_model: TransactionCostModel | None = None
     spread_model: TransactionCostModel | None = None
     slippage_model: TransactionCostModel | None = None
+    financing_model: TransactionCostModel | None = None
 
     def get_commission(self, volume: float, price: float) -> float:  # noqa: D401
         model = self.commission_model
@@ -190,6 +228,10 @@ class CompositeTransactionCostModel(TransactionCostModel):
     def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:  # noqa: D401
         model = self.slippage_model
         return model.get_slippage(volume, price, side) if model else 0.0
+
+    def get_financing(self, position: float, price: float) -> float:  # noqa: D401
+        model = self.financing_model
+        return model.get_financing(position, price) if model else 0.0
 
 
 def _import_from_string(path: str) -> Callable[..., Any]:
@@ -324,6 +366,54 @@ def _build_slippage(entry: Mapping[str, Any]) -> TransactionCostModel | None:
     return None
 
 
+def _build_financing(entry: Mapping[str, Any]) -> TransactionCostModel | None:
+    if "financing_model" in entry:
+        model_spec = entry["financing_model"]
+        params = entry.get("financing_params", {})
+        if isinstance(model_spec, str):
+            alias = model_spec.lower()
+            if alias in {"borrow", "borrowing", "funding"}:
+                long_rate = params.get("long_rate_bps", params.get("long_bps", params.get("bps", 0.0)))
+                short_rate = params.get(
+                    "short_rate_bps",
+                    params.get("short_bps", params.get("borrow_bps", long_rate)),
+                )
+                exponent = params.get("exponent")
+                periods = params.get("periods_per_year")
+                kwargs: dict[str, Any] = {
+                    "long_rate_bps": long_rate or 0.0,
+                    "short_rate_bps": short_rate if short_rate is not None else long_rate or 0.0,
+                }
+                if exponent is not None:
+                    kwargs["exponent"] = exponent
+                if periods is not None:
+                    kwargs["periods_per_year"] = periods
+                return BorrowFinancing(**kwargs)
+        return _instantiate(model_spec, params)
+
+    if "borrow_bps" in entry:
+        value = entry["borrow_bps"]
+        short_value = entry.get("borrow_bps_short", value)
+        return BorrowFinancing(long_rate_bps=value, short_rate_bps=short_value)
+
+    if "funding_long_bps" in entry or "funding_short_bps" in entry:
+        long_rate = entry.get("funding_long_bps", 0.0)
+        short_rate = entry.get("funding_short_bps", long_rate)
+        exponent = entry.get("funding_exponent")
+        kwargs: dict[str, Any] = {
+            "long_rate_bps": long_rate,
+            "short_rate_bps": short_rate,
+        }
+        if exponent is not None:
+            kwargs["exponent"] = exponent
+        periods = entry.get("funding_periods_per_year")
+        if periods is not None:
+            kwargs["periods_per_year"] = periods
+        return BorrowFinancing(**kwargs)
+
+    return None
+
+
 def load_market_costs(
     source: str | Path | Mapping[str, Any],
     market: str,
@@ -358,11 +448,13 @@ def load_market_costs(
     commission = _build_commission(entry)
     spread = _build_spread(entry)
     slippage = _build_slippage(entry)
+    financing = _build_financing(entry)
 
     return CompositeTransactionCostModel(
         commission_model=commission,
         spread_model=spread,
         slippage_model=slippage,
+        financing_model=financing,
     )
 
 
@@ -377,6 +469,7 @@ __all__ = [
     "FixedSlippage",
     "VolumeProportionalSlippage",
     "SquareRootSlippage",
+    "BorrowFinancing",
     "CompositeTransactionCostModel",
     "load_market_costs",
 ]

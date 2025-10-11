@@ -53,6 +53,16 @@ class SlippageConfig:
 
 
 @dataclass(slots=True)
+class PortfolioConstraints:
+    """Risk controls applied to target positions before execution."""
+
+    max_gross_exposure: float | None = None
+    max_net_exposure: float | None = None
+    target_volatility: float | None = None
+    volatility_lookback: int = 20
+
+
+@dataclass(slots=True)
 class Result:
     pnl: float
     max_dd: float
@@ -62,6 +72,7 @@ class Result:
     slippage_cost: float = 0.0
     commission_cost: float = 0.0
     spread_cost: float = 0.0
+    financing_cost: float = 0.0
     performance: PerformanceReport | None = None
     report_path: Path | None = None
 
@@ -144,6 +155,43 @@ def _compute_positions(signals: NDArray[np.float64], latency: LatencyConfig) -> 
     return executed
 
 
+def _apply_portfolio_constraints(
+    signals: NDArray[np.float64],
+    prices: NDArray[np.float64],
+    constraints: PortfolioConstraints,
+) -> NDArray[np.float64]:
+    adjusted = np.asarray(signals, dtype=float).copy()
+    max_gross = constraints.max_gross_exposure
+    if max_gross is not None:
+        limit = float(abs(max_gross))
+        if limit > 0.0:
+            adjusted = np.clip(adjusted, -limit, limit)
+
+    max_net = constraints.max_net_exposure
+    if max_net is not None:
+        limit = float(abs(max_net))
+        if limit > 0.0:
+            adjusted = np.clip(adjusted, -limit, limit)
+
+    target_vol = constraints.target_volatility
+    if target_vol is not None and target_vol > 0.0:
+        returns = np.diff(prices) / prices[:-1]
+        if returns.size:
+            lookback = min(len(returns), max(int(constraints.volatility_lookback), 1))
+            window = returns[-lookback:] if lookback else returns
+            with np.errstate(invalid="ignore", divide="ignore"):
+                realized_vol = float(np.std(window, ddof=1)) if window.size > 1 else float(np.std(window))
+            if realized_vol > 1e-12:
+                scale = float(target_vol) / realized_vol
+                adjusted = adjusted * scale
+                if max_gross is not None or max_net is not None:
+                    limit = min(
+                        [float(abs(value)) for value in (max_gross, max_net) if value is not None] or [1.0]
+                    )
+                    adjusted = np.clip(adjusted, -limit, limit)
+    return np.clip(adjusted, -1.0, 1.0)
+
+
 class WalkForwardEngine(BacktestEngine[Result]):
     """Concrete implementation of :class:`interfaces.backtest.BacktestEngine`."""
 
@@ -161,6 +209,7 @@ class WalkForwardEngine(BacktestEngine[Result]):
         market: str | None = None,
         cost_model: TransactionCostModel | None = None,
         cost_config: str | Path | Mapping[str, Any] | None = None,
+        constraints: PortfolioConstraints | None = None,
     ) -> Result:
         """Vectorised walk-forward backtest with configurable execution realism."""
 
@@ -196,6 +245,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 raise ValueError("signal_fn must return an array with the same length as prices")
 
             signals = np.clip(raw_signals, -1.0, 1.0)
+            if constraints is not None:
+                signals = _apply_portfolio_constraints(signals, price_array, constraints)
             executed_positions = _compute_positions(signals, latency_cfg)
             price_moves = np.diff(price_array)
 
@@ -207,17 +258,23 @@ class WalkForwardEngine(BacktestEngine[Result]):
             commission_costs = np.zeros_like(position_changes)
             spread_costs = np.zeros_like(position_changes)
             slippage_costs = np.zeros_like(position_changes)
+            financing_costs = np.zeros_like(position_changes)
 
             for idx, change in enumerate(position_changes):
+                prev_position = float(prev_positions[idx])
+                price_index = min(idx, price_array.size - 1)
+                ref_price = float(price_array[price_index])
+                financing_costs[idx] = float(transaction_cost_model.get_financing(prev_position, ref_price))
+
                 qty = float(abs(change))
                 if qty == 0.0:
                     continue
                 side = "buy" if change > 0 else "sell"
-                price_index = min(idx + 1, price_array.size - 1)
-                mid_price = float(price_array[price_index])
+                trade_price_index = min(idx + 1, price_array.size - 1)
+                mid_price = float(price_array[trade_price_index])
                 fill_price = float(mid_price)
 
-                book_fill_price = book.fill_price(side, qty, price_index, slippage_cfg)
+                book_fill_price = book.fill_price(side, qty, trade_price_index, slippage_cfg)
                 if side == "buy":
                     slippage_costs[idx] += max(0.0, (book_fill_price - mid_price) * qty)
                 else:
@@ -247,6 +304,7 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 - commission_costs
                 - spread_costs
                 - slippage_costs
+                - financing_costs
             )
 
             equity_curve = np.cumsum(pnl) + initial_capital
@@ -258,6 +316,7 @@ class WalkForwardEngine(BacktestEngine[Result]):
             total_commission = float(commission_costs.sum())
             total_spread = float(spread_costs.sum())
             total_slippage = float(slippage_costs.sum())
+            total_financing = float(financing_costs.sum())
 
             performance = compute_performance_metrics(
                 equity_curve=equity_curve,
@@ -275,12 +334,13 @@ class WalkForwardEngine(BacktestEngine[Result]):
             ctx["pnl"] = pnl_total
             ctx["performance"] = performance.as_dict()
             ctx["report_path"] = str(report_path)
-        ctx["max_dd"] = max_dd
-        ctx["trades"] = trades
-        ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
-        ctx["commission_cost"] = total_commission
-        ctx["spread_cost"] = total_spread
-        ctx["slippage_cost"] = total_slippage
+            ctx["max_dd"] = max_dd
+            ctx["trades"] = trades
+            ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
+            ctx["commission_cost"] = total_commission
+            ctx["spread_cost"] = total_spread
+            ctx["slippage_cost"] = total_slippage
+            ctx["financing_cost"] = total_financing
 
         return Result(
             pnl=pnl_total,
@@ -291,6 +351,7 @@ class WalkForwardEngine(BacktestEngine[Result]):
             slippage_cost=total_slippage,
             commission_cost=total_commission,
             spread_cost=total_spread,
+            financing_cost=total_financing,
             performance=performance,
             report_path=report_path,
         )
@@ -309,6 +370,7 @@ def walk_forward(
     market: str | None = None,
     cost_model: TransactionCostModel | None = None,
     cost_config: str | Path | Mapping[str, Any] | None = None,
+    constraints: PortfolioConstraints | None = None,
 ) -> Result:
     """Compatibility wrapper that delegates to :class:`WalkForwardEngine`."""
 
@@ -325,5 +387,6 @@ def walk_forward(
         market=market,
         cost_model=cost_model,
         cost_config=cost_config,
+        constraints=constraints,
     )
 

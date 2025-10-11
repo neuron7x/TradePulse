@@ -60,6 +60,21 @@ def test_purged_walk_forward_removes_overlaps():
         assert frame.loc[train_idx, "timestamp"].max() < test_end
 
 
+def test_walk_forward_expanding_window():
+    frame = _sample_frame()
+    splitter = WalkForwardSplitter(
+        train_window=None,
+        test_window="60D",
+        step="30D",
+        time_col="timestamp",
+    )
+    train_lengths = []
+    for train_idx, _ in splitter.split(frame):
+        train_lengths.append(len(train_idx))
+    assert train_lengths == sorted(train_lengths)
+    assert train_lengths[0] < train_lengths[-1]
+
+
 def test_purged_kfold_applies_embargo():
     frame = _sample_frame()
     splitter = PurgedKFoldTimeSeriesSplit(

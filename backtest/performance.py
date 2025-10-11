@@ -35,6 +35,10 @@ class PerformanceReport:
     expected_shortfall: float | None = None
     turnover: float | None = None
     hit_ratio: float | None = None
+    alpha: float | None = None
+    beta: float | None = None
+    information_ratio: float | None = None
+    tracking_error: float | None = None
 
     @staticmethod
     def _clean(value: float | None) -> float | None:
@@ -55,6 +59,10 @@ class PerformanceReport:
             "expected_shortfall": self._clean(self.expected_shortfall),
             "turnover": self._clean(self.turnover),
             "hit_ratio": self._clean(self.hit_ratio),
+            "alpha": self._clean(self.alpha),
+            "beta": self._clean(self.beta),
+            "information_ratio": self._clean(self.information_ratio),
+            "tracking_error": self._clean(self.tracking_error),
         }
 
 
@@ -68,6 +76,7 @@ def compute_performance_metrics(
     periods_per_year: int = _PERIODS_PER_YEAR,
     risk_free_rate: float = 0.0,
     alpha: float = _DEFAULT_ALPHA,
+    benchmark_returns: Iterable[float] | NDArray[np.float64] | None = None,
 ) -> PerformanceReport:
     """Compute a :class:`PerformanceReport` from backtest series."""
 
@@ -139,6 +148,38 @@ def compute_performance_metrics(
         if activity > 0:
             hit_ratio = wins / activity
 
+    alpha_value: float | None = None
+    beta_value: float | None = None
+    information_ratio: float | None = None
+    tracking_error: float | None = None
+    benchmark_array = _to_numpy(benchmark_returns)
+    if returns.size and benchmark_array.size:
+        m = min(returns.size, benchmark_array.size)
+        port_ret = returns[-m:]
+        bench_ret = benchmark_array[-m:]
+        mask = np.isfinite(port_ret) & np.isfinite(bench_ret)
+        port_ret = port_ret[mask]
+        bench_ret = bench_ret[mask]
+        if port_ret.size and bench_ret.size:
+            bench_excess = bench_ret - excess_rate
+            port_excess = port_ret - excess_rate
+            bench_var = float(np.var(bench_excess, ddof=1)) if bench_excess.size > 1 else float(np.var(bench_excess))
+            if bench_var > 1e-12:
+                cov = float(np.cov(port_excess, bench_excess, ddof=1)[0, 1]) if port_excess.size > 1 else 0.0
+                beta_value = cov / bench_var if bench_excess.size > 1 else 0.0
+            if beta_value is not None:
+                alpha_periodic = float(np.mean(port_excess) - (beta_value or 0.0) * np.mean(bench_excess))
+                alpha_value = alpha_periodic * periods_per_year
+            active_returns = port_excess - bench_excess
+            if active_returns.size:
+                tracking_error = (
+                    float(np.std(active_returns, ddof=1))
+                    if active_returns.size > 1
+                    else float(np.std(active_returns))
+                )
+                if tracking_error > 1e-12:
+                    information_ratio = float(np.mean(active_returns)) / tracking_error * annualisation
+
     return PerformanceReport(
         sharpe_ratio=sharpe_ratio,
         sortino_ratio=sortino_ratio,
@@ -147,6 +188,10 @@ def compute_performance_metrics(
         expected_shortfall=expected_shortfall,
         turnover=turnover,
         hit_ratio=hit_ratio,
+        alpha=alpha_value,
+        beta=beta_value,
+        information_ratio=information_ratio,
+        tracking_error=tracking_error,
     )
 
 
