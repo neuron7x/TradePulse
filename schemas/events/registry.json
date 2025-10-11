@@ -1,0 +1,54 @@
+{
+  "events": {
+    "ticks": {
+      "latest": 1,
+      "versions": [
+        {
+          "version": 1,
+          "avro": "avro/v1/tick.avsc",
+          "protobuf": "../../libs/proto/events.proto"
+        }
+      ]
+    },
+    "bars": {
+      "latest": 1,
+      "versions": [
+        {
+          "version": 1,
+          "avro": "avro/v1/bar.avsc",
+          "protobuf": "../../libs/proto/events.proto"
+        }
+      ]
+    },
+    "signals": {
+      "latest": 1,
+      "versions": [
+        {
+          "version": 1,
+          "avro": "avro/v1/signal.avsc",
+          "protobuf": "../../libs/proto/events.proto"
+        }
+      ]
+    },
+    "orders": {
+      "latest": 1,
+      "versions": [
+        {
+          "version": 1,
+          "avro": "avro/v1/order.avsc",
+          "protobuf": "../../libs/proto/events.proto"
+        }
+      ]
+    },
+    "fills": {
+      "latest": 1,
+      "versions": [
+        {
+          "version": 1,
+          "avro": "avro/v1/fill.avsc",
+          "protobuf": "../../libs/proto/events.proto"
+        }
+      ]
+    }
+  }
+}

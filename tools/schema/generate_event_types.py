@@ -1,0 +1,271 @@
+"""Generate strongly-typed Python and TypeScript models from Avro schemas."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, List
+
+from core.messaging.schema_registry import EventSchemaRegistry, SchemaFormat
+
+
+@dataclass
+class FieldDefinition:
+    name: str
+    type_hint: str
+    ts_type: str
+    optional: bool = False
+    default: str | None = None
+    default_factory: str | None = None
+    doc: str | None = None
+
+
+@dataclass
+class RecordDefinition:
+    name: str
+    doc: str | None
+    fields: List[FieldDefinition]
+
+
+@dataclass
+class EnumDefinition:
+    name: str
+    doc: str | None
+    symbols: List[str]
+
+
+class AvroSchemaCollector:
+    def __init__(self) -> None:
+        self.records: Dict[str, RecordDefinition] = {}
+        self.enums: Dict[str, EnumDefinition] = {}
+        self.python_imports: set[str] = set()
+        self.python_requires_field = False
+
+    def collect(self, schema: Dict) -> None:
+        self._parse_record(schema)
+
+    def _parse_record(self, schema: Dict) -> str:
+        name = schema["name"]
+        if name in self.records:
+            return name
+        fields: List[FieldDefinition] = []
+        for field in schema.get("fields", []):
+            field_def = self._parse_field(field)
+            fields.append(field_def)
+        record = RecordDefinition(name=name, doc=schema.get("doc"), fields=fields)
+        self.records[name] = record
+        return name
+
+    def _parse_field(self, field: Dict) -> FieldDefinition:
+        field_type = field["type"]
+        doc = field.get("doc")
+        default = field.get("default")
+        type_hint, ts_type, optional, default_expr, default_factory = self._parse_type(field_type, default)
+        return FieldDefinition(
+            name=field["name"],
+            type_hint=type_hint,
+            ts_type=ts_type,
+            optional=optional,
+            default=default_expr,
+            default_factory=default_factory,
+            doc=doc,
+        )
+
+    def _parse_type(self, avro_type, default):
+        optional = False
+        default_expr = None
+        default_factory = None
+        if isinstance(avro_type, list):
+            non_null = [t for t in avro_type if not _is_null_type(t)]
+            if len(non_null) != 1:
+                raise ValueError(f"Unsupported union type: {avro_type}")
+            optional = True
+            avro_type = non_null[0]
+            if default is None:
+                default_expr = "None"
+
+        if isinstance(avro_type, str):
+            type_hint = _PYTHON_PRIMITIVES[avro_type]
+            ts_type = _TS_PRIMITIVES[avro_type]
+        elif isinstance(avro_type, dict):
+            avro_kind = avro_type["type"]
+            if avro_kind in _PYTHON_PRIMITIVES:
+                type_hint = _PYTHON_PRIMITIVES[avro_kind]
+                ts_type = _TS_PRIMITIVES[avro_kind]
+            elif avro_kind == "record":
+                nested_name = self._parse_record(avro_type)
+                type_hint = nested_name
+                ts_type = nested_name
+            elif avro_kind == "enum":
+                nested_name = avro_type["name"]
+                if nested_name not in self.enums:
+                    self.enums[nested_name] = EnumDefinition(
+                        name=nested_name,
+                        doc=avro_type.get("doc"),
+                        symbols=list(avro_type.get("symbols", [])),
+                    )
+                type_hint = nested_name
+                ts_type = nested_name
+            elif avro_kind == "array":
+                item_type, item_ts, _, _, _ = self._parse_type(avro_type["items"], None)
+                self.python_imports.add("List")
+                type_hint = f"List[{item_type}]"
+                ts_type = f"{item_ts}[]"
+            elif avro_kind == "map":
+                value_type, value_ts, _, _, _ = self._parse_type(avro_type["values"], None)
+                self.python_imports.add("Dict")
+                type_hint = f"Dict[str, {value_type}]"
+                ts_type = f"Record<string, {value_ts}>"
+            else:
+                raise ValueError(f"Unsupported complex type: {avro_kind}")
+        else:
+            raise ValueError(f"Unsupported type declaration: {avro_type}")
+
+        if optional:
+            self.python_imports.add("Optional")
+            type_hint = f"Optional[{type_hint}]"
+            ts_type = f"{ts_type} | null"
+
+        if isinstance(default, dict) and default == {}:
+            default_factory = "dict"
+            self.python_requires_field = True
+        elif isinstance(default, list) and default == []:
+            default_factory = "list"
+            self.python_requires_field = True
+        elif default is not None and default_expr is None:
+            default_expr = repr(default)
+
+        return type_hint, ts_type, optional, default_expr, default_factory
+
+    def render_python(self) -> str:
+        header = [
+            "# Auto-generated by tools/schema/generate_event_types.py. DO NOT EDIT.",
+            "from __future__ import annotations",
+            "",
+        ]
+        imports = ["from dataclasses import dataclass"]
+        if self.python_requires_field:
+            imports[0] = "from dataclasses import dataclass, field"
+        typing_imports: List[str] = []
+        for item in sorted(self.python_imports):
+            typing_imports.append(item)
+        if typing_imports:
+            imports.append(f"from typing import {', '.join(typing_imports)}")
+        if self.enums:
+            imports.append("from enum import Enum")
+        body: List[str] = []
+        for enum in (self.enums[name] for name in sorted(self.enums)):
+            body.append(_render_python_enum(enum))
+        for record in (self.records[name] for name in sorted(self.records)):
+            body.append(_render_python_record(record))
+        return "\n".join(header + imports + ["", "\n".join(body)])
+
+    def render_typescript(self) -> str:
+        header = [
+            "// Auto-generated by tools/schema/generate_event_types.py. DO NOT EDIT.",
+            "/* eslint-disable */",
+        ]
+        body: List[str] = []
+        for enum in (self.enums[name] for name in sorted(self.enums)):
+            body.append(_render_ts_enum(enum))
+        for record in (self.records[name] for name in sorted(self.records)):
+            body.append(_render_ts_interface(record))
+        return "\n\n".join(header + body) + "\n"
+
+
+_PYTHON_PRIMITIVES = {
+    "string": "str",
+    "int": "int",
+    "long": "int",
+    "double": "float",
+    "float": "float",
+    "boolean": "bool",
+    "bytes": "bytes",
+}
+
+_TS_PRIMITIVES = {
+    "string": "string",
+    "int": "number",
+    "long": "number",
+    "double": "number",
+    "float": "number",
+    "boolean": "boolean",
+    "bytes": "Uint8Array",
+}
+
+
+def _render_python_enum(enum: EnumDefinition) -> str:
+    lines = ["", f"class {enum.name}(Enum):"]
+    if enum.doc:
+        lines.append(f"    \"\"\"{enum.doc}\"\"\"")
+    for symbol in enum.symbols:
+        lines.append(f"    {symbol} = \"{symbol}\"")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_python_record(record: RecordDefinition) -> str:
+    lines = [""]
+    lines.append("@dataclass")
+    lines.append(f"class {record.name}:")
+    if record.doc:
+        lines.append(f"    \"\"\"{record.doc}\"\"\"")
+    if not record.fields:
+        lines.append("    pass")
+    for field in record.fields:
+        annotation = field.type_hint
+        default = ""
+        if field.default_factory:
+            default = f" = field(default_factory={field.default_factory})"
+        elif field.default is not None:
+            default = f" = {field.default}"
+        elif field.optional:
+            default = " = None"
+        lines.append(f"    {field.name}: {annotation}{default}")
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _render_ts_enum(enum: EnumDefinition) -> str:
+    lines = [f"export enum {enum.name} {{"]
+    for symbol in enum.symbols:
+        lines.append(f"  {symbol} = \"{symbol}\",")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _render_ts_interface(record: RecordDefinition) -> str:
+    lines = [f"export interface {record.name} {{"]
+    for field in record.fields:
+        ts_type = field.ts_type
+        optional_flag = "?" if field.optional else ""
+        lines.append(f"  {field.name}{optional_flag}: {ts_type};")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def _is_null_type(value) -> bool:
+    return value == "null" or (isinstance(value, dict) and value.get("type") == "null")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate event types from Avro schemas")
+    parser.add_argument("--registry", default="schemas/events", help="Path to schema registry directory")
+    parser.add_argument("--python-output", default="core/events/models.py")
+    parser.add_argument("--ts-output", default="ui/dashboard/src/types/events.ts")
+    args = parser.parse_args()
+
+    registry = EventSchemaRegistry.from_directory(args.registry)
+    collector = AvroSchemaCollector()
+    for event in sorted(registry.available_events()):
+        schema_info = registry.latest(event, SchemaFormat.AVRO)
+        collector.collect(schema_info.load())
+    python_code = collector.render_python()
+    Path(args.python_output).write_text(python_code + "\n", encoding="utf-8")
+    ts_code = collector.render_typescript()
+    Path(args.ts_output).write_text(ts_code, encoding="utf-8")
+
+
+if __name__ == "__main__":
+    main()

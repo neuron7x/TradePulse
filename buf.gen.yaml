@@ -12,3 +12,6 @@ plugins:
       - useExactTypes=false
       - outputServices=generic-definitions
       - esModuleInterop=true
+  - plugin: buf.build/protocolbuffers/python
+    out: core/events/proto
+    opt: [paths=source_relative]

@@ -126,6 +126,11 @@ See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instr
 - **Security Scanning**: Automated secret detection and dependency vulnerability checks.
 - **Type Safety**: Strict mypy validation across Python modules.
 
+### Streaming & Messaging
+- **Schema Registry**: Versioned Avro/Protobuf contracts for ticks, bars, signals, orders, and fills with automated backward/forward compatibility checks.
+- **Type Generation**: Build-time generation of Python (`core/events/models.py`) and TypeScript (`ui/dashboard/src/types/events.ts`) types from canonical schemas.
+- **Event Bus**: Kafka/NATS abstractions with per-symbol partitioning, at-least-once delivery, idempotent processing, retry queues, and dead-letter routing.
+
 ### Performance Optimization
 - **Float32 Precision**: 50% memory reduction with minimal accuracy loss.
 - **Chunked Processing**: Efficiently handle unlimited dataset sizes.

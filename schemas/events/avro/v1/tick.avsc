@@ -1,0 +1,21 @@
+{
+  "type": "record",
+  "name": "TickEvent",
+  "namespace": "tradepulse.events.marketdata",
+  "doc": "Real-time market tick update for a single symbol.",
+  "fields": [
+    {"name": "event_id", "type": "string", "doc": "Globally unique identifier for idempotency."},
+    {"name": "schema_version", "type": "int", "doc": "Schema major version for compatibility tracking."},
+    {"name": "symbol", "type": "string", "doc": "Trading symbol (e.g. EURUSD, AAPL)."},
+    {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-micros"}, "doc": "Event timestamp in microseconds since epoch."},
+    {"name": "bid_price", "type": "double", "doc": "Best bid price."},
+    {"name": "ask_price", "type": "double", "doc": "Best ask price."},
+    {"name": "last_price", "type": ["null", "double"], "default": null, "doc": "Last traded price if available."},
+    {"name": "volume", "type": ["null", "long"], "default": null, "doc": "Trade volume associated with the tick."},
+    {"name": "microstructure", "type": ["null", {"type": "record", "name": "TickMicrostructure", "fields": [
+      {"name": "bid_size", "type": ["null", "long"], "default": null},
+      {"name": "ask_size", "type": ["null", "long"], "default": null},
+      {"name": "trade_condition", "type": ["null", "string"], "default": null}
+    ]}], "default": null, "doc": "Optional microstructure metadata."}
+  ]
+}
