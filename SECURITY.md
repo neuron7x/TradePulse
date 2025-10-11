@@ -170,7 +170,14 @@ safety check
 - Every release produces a SLSA v3 provenance statement for the container image via the official [slsa-github-generator](https://github.com/slsa-framework/slsa-github-generator).
 - Consumers can verify signatures with `cosign verify ghcr.io/<owner>/<repo>@<digest>` and download provenance attestations directly from GHCR.
 
-#### 4. Code Review
+#### 4. Web Interface Hardening
+
+- Enforce strict Content Security Policy headers via `apps/web/next.config.js`. Frame embedding is blocked and only same-origin resources are allowed by default.
+- Run `npm run security:audit-scripts` inside `apps/web` before shipping UI changes. The audit fails if unchecked third-party script URLs are introduced.
+- Avoid inline scripts; prefer vetted modules bundled at build time. When inline styles are required, keep them minimal and scoped.
+- Document any intentional CSP relaxations directly in the pull request and in `SECURITY.md`.
+
+#### 5. Code Review
 
 **Security checklist for PRs:**
 - [ ] No hardcoded secrets

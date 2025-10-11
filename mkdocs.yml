@@ -57,7 +57,9 @@ nav:
       - Extending TradePulse: extending.md
       - Integration API: integration-api.md
       - Configuration: configuration.md
-      - Developer Scenarios: scenarios.md
+      - Developer Scenarios:
+          - Overview: scenarios.md
+          - Scenario Template: scenario_template.md
       - Technical Debt Playbook: technical-debt.md
       - Testing Guide: ../TESTING.md
       - Contributing: ../CONTRIBUTING.md

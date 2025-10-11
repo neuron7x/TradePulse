@@ -6,6 +6,7 @@ Common development tasks and workflows for TradePulse contributors.
 
 ## Table of Contents
 
+- [Scenario Templates](#scenario-templates)
 - [Setting Up Development Environment](#setting-up-development-environment)
 - [Adding a New Indicator](#adding-a-new-indicator)
 - [Creating a Trading Strategy](#creating-a-trading-strategy)
@@ -16,6 +17,18 @@ Common development tasks and workflows for TradePulse contributors.
 - [Performance Optimization](#performance-optimization)
 - [Documentation](#documentation)
 - [Release Process](#release-process)
+
+---
+
+## Scenario Templates
+
+Use the [Scenario Template](scenario_template.md) alongside the web-based **Scenario Studio** (`apps/web`) when drafting new workflows. The UI now offers:
+
+- **Input sanity checkers** – invalid balances, risk allocations, or timeframe formats are flagged before you export JSON.
+- **Auto-generated JSON snippets** – copy the preview directly into documentation or configuration files once all warnings clear.
+- **Template presets** – choose from breakout, mean-reversion, or volatility archetypes as a starting point.
+
+> 🛡️ Pair these guardrails with the CLI sanity checks (`cli/amm_cli.py`) so malformed CSV feeds or unsafe metrics never reach production pipelines.
 
 ---
 
