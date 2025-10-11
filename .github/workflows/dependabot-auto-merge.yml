@@ -1,42 +1,48 @@
 name: Dependabot Auto Merge
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, reopened, synchronize, ready_for_review]
 
 permissions:
-  contents: write
-  pull-requests: write
-  issues: write
   checks: read
+  contents: write
+  id-token: write
+  issues: write
+  pull-requests: write
 
 jobs:
   enable-auto-merge:
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
+      - name: Rebase Dependabot PR onto base branch
+        uses: peter-evans/rebase@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          head: ${{ github.event.pull_request.head.ref }}
       - name: Fetch Dependabot metadata
         id: metadata
         uses: dependabot/fetch-metadata@v2
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Wait for required checks to succeed
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           gh pr checks "$PR_URL" --watch --interval 30 --required
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
       - name: Enable auto-merge for safe updates
         if: contains(['version-update:semver-patch', 'version-update:semver-minor'], steps.metadata.outputs.update-type)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           gh pr merge "$PR_URL" --auto --squash --delete-branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
       - name: Comment when manual review is required
         if: ${{ !contains(['version-update:semver-patch', 'version-update:semver-minor'], steps.metadata.outputs.update-type) }}
-        run: |
-          gh pr comment "$PR_URL" --body "⚠️ Automated merge is disabled for this Dependabot PR because it is a major update. Please review and merge manually after ensuring all required checks pass."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr comment "$PR_URL" --body "⚠️ Automated merge is disabled for this Dependabot PR because it is a major update. Please review and merge manually after ensuring all required checks pass."
