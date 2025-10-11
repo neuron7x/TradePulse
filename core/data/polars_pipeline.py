@@ -80,18 +80,21 @@ def lazy_column_zero_copy(
     lazy_frame: "LazyFrame",
     column: str,
     *,
-    streaming: bool = True,
+    streaming: bool = False,
 ) -> np.ndarray:
     """Extract a column as a zero-copy NumPy array."""
     module = _require_polars()
     if pa is None:  # pragma: no cover - optional dependency guard
         raise RuntimeError("pyarrow is required for zero-copy column extraction")
     _logger.debug("Extracting zero-copy column", column=column, streaming=streaming)
-    arrow_table = (
-        lazy_frame.select(module.col(column)).collect(streaming=streaming).to_arrow()
-    )
+    frame = lazy_frame.select(module.col(column)).collect(streaming=streaming)
+    if streaming:
+        frame = frame.rechunk()
+    arrow_table = frame.to_arrow()
     if arrow_table.num_columns != 1:
         raise ValueError("Expected a single-column selection for zero-copy extraction")
+    if arrow_table.column(0).num_chunks > 1:
+        arrow_table = arrow_table.combine_chunks()
     return arrow_table.column(0).to_numpy(zero_copy_only=True)
 
 
