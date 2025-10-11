@@ -69,12 +69,15 @@ nav:
   - Product Experience:
       - UI Performance Playbook: performance.md
       - Accessibility Playbook: accessibility.md
+      - What-If Exploration Mode: ui_what_if.md
   - Operations:
       - Monitoring: monitoring.md
       - Scaling: scaling.md
       - Chaos Testing (GameDay): resilience.md
       - Reliability Targets: reliability.md
       - Incident Playbooks: incident_playbooks.md
+      - Live Trading Runbook: runbook_live_trading.md
+      - Data Incident Runbook: runbook_data_incident.md
       - Security: ../SECURITY.md
       - Governance and Data Controls: governance.md
       - Deployment: deployment.md

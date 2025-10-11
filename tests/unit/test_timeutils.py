@@ -1,4 +1,6 @@
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timezone, timedelta
+
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
@@ -78,6 +80,62 @@ def test_is_market_open_handles_weekends() -> None:
 def test_is_market_open_respects_holidays() -> None:
     independence_day = datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc)
     assert not is_market_open(independence_day, "NYSE")
+
+
+@pytest.mark.parametrize(
+    ("market", "timestamp", "expected", "reason"),
+    (
+        ("NYSE", datetime(2024, 3, 8, 14, 35, tzinfo=timezone.utc), True, "Open before US DST change"),
+        ("NYSE", datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc), True, "Open after US DST change"),
+        ("NYSE", datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc), False, "Closed for Independence Day"),
+        ("NASDAQ", datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc), True, "NASDAQ mirrors NYSE DST"),
+        ("NASDAQ", datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc), False, "NASDAQ holiday closure"),
+        ("CME", datetime(2024, 3, 11, 21, 55, tzinfo=timezone.utc), False, "Minutes before CME evening reopen"),
+        ("CME", datetime(2024, 3, 11, 22, 5, tzinfo=timezone.utc), True, "CME open after DST shift"),
+        ("BINANCE", datetime(2024, 3, 11, 0, 0, tzinfo=timezone.utc), True, "24/7 venue unaffected"),
+    ),
+)
+def test_is_market_open_covers_dst_and_holiday_edges(
+    market: str, timestamp: datetime, expected: bool, reason: str
+) -> None:
+    """Validate open/closed detection across DST transitions and holidays."""
+
+    assert is_market_open(timestamp, market) is expected, reason
+
+
+@pytest.mark.parametrize(
+    ("market", "tz", "open_time", "close_time"),
+    (
+        ("NYSE", "America/New_York", time(9, 30), time(16, 0)),
+        ("NASDAQ", "America/New_York", time(9, 30), time(16, 0)),
+        ("CME", "America/Chicago", time(17, 0), time(16, 0)),
+    ),
+)
+def test_is_market_open_session_boundaries(
+    market: str, tz: str, open_time: time, close_time: time
+) -> None:
+    """Ensure open/close edges honour session boundaries for each market."""
+
+    zone = ZoneInfo(tz)
+
+    def to_utc(local_dt: datetime) -> datetime:
+        return local_dt.replace(tzinfo=zone).astimezone(timezone.utc)
+
+    trading_day = datetime(2024, 3, 11, 0, 0)
+    before_open_local = trading_day.replace(hour=open_time.hour, minute=open_time.minute) - timedelta(minutes=1)
+    open_local = trading_day.replace(hour=open_time.hour, minute=open_time.minute)
+    just_before_close_local = trading_day.replace(hour=close_time.hour, minute=close_time.minute) - timedelta(minutes=1)
+    after_close_local = trading_day.replace(hour=close_time.hour, minute=close_time.minute)
+
+    before_open = to_utc(before_open_local)
+    at_open = to_utc(open_local)
+    before_close = to_utc(just_before_close_local)
+    after_close = to_utc(after_close_local)
+
+    assert not is_market_open(before_open, market)
+    assert is_market_open(at_open, market)
+    assert is_market_open(before_close, market)
+    assert not is_market_open(after_close, market)
 
 
 def test_registry_allows_custom_calendar() -> None:
