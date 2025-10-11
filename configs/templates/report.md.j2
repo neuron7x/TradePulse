@@ -1,0 +1,23 @@
+# TradePulse Analysis Report
+
+Generated: {{ generated_at }}
+
+## Overview
+
+- Report Name: {{ config.name }}
+- Description: {{ config.description or 'N/A' }}
+- Tags: {{ ', '.join(config.tags) if config.tags else 'none' }}
+
+## Inputs
+{% for artifact in artifacts %}
+### {{ artifact.name }}
+- Path: {{ artifact.path }}
+- Checksum: {{ artifact.checksum or 'n/a' }}
+- Config Hash: {{ artifact.config_hash }}
+- Timestamp: {{ artifact.timestamp }}
+- Metadata: {{ artifact.metadata | tojson }}
+
+{% endfor %}
+## Notes
+
+Provide additional commentary here.

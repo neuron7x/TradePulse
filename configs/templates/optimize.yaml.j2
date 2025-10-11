@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+name: sample_optimization
+description: Grid search optimisation of mean-reversion parameters.
+tags:
+  - optimize
+  - research
+objective: core.strategies.objectives:mean_reversion_objective
+direction: maximize
+search_space:
+  lookback:
+    - 10
+    - 20
+    - 40
+  threshold:
+    - 0.5
+    - 1.0
+    - 1.5
+  risk_budget:
+    - 0.5
+    - 1.0
+max_trials: 9
+context:
+  data_path: data/sample.csv
+  price_column: close
+results_path: reports/optimization/sample_optimization.json
+metadata:
+  owner: research

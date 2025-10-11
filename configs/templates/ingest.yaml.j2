@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+name: sample_ingest_job
+description: Example ingestion configuration for TradePulse CLI.
+tags:
+  - ingest
+  - example
+source:
+  kind: csv
+  path: data/sample.csv
+  parameters:
+    required_fields:
+      - ts
+      - price
+      - volume
+destination: data/processed/sample_ingested.parquet
+versioning:
+  backend: none
+  repo_path:
+  remote:
+  branch:
+  commit_message: Ingested sample dataset
+catalog:
+  path: data/feature_catalog.json
+features:
+  resample: 1m
+  normalise: true
+lineage:
+  - data/sample.csv
+metadata:
+  owner: research

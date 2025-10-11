@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+name: sample_backtest_run
+description: Event-driven backtest using a mean-reversion signal.
+tags:
+  - backtest
+  - research
+data:
+  kind: csv
+  path: data/sample.csv
+  parameters:
+    price_column: close
+    parse_dates: false
+    symbol: BTCUSDT
+strategy:
+  entrypoint: core.strategies.signals:mean_reversion_signal
+  parameters:
+    lookback: 20
+    zscore: 1.25
+    risk: 0.5
+execution:
+  initial_capital: 100000
+  fee_bps: 5
+  chunk_size: 5000
+  latency:
+    signal_to_order: 1
+    order_to_execution: 1
+    execution_to_fill: 1
+results_path: reports/backtests/sample_backtest.json
+versioning:
+  backend: none
+  repo_path:
+  remote:
+  branch:
+  commit_message: Backtest sample output
+metadata:
+  owner: research
