@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security reports
+    url: mailto:security@tradepulse.local
+    about: Please disclose vulnerabilities privately so we can coordinate a fix.
