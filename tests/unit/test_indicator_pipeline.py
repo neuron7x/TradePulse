@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import asyncio
+
 import numpy as np
 import pytest
 
@@ -32,10 +34,71 @@ def test_indicator_pipeline_reuses_float32_pool() -> None:
     second.release()
 
 
+def test_indicator_pipeline_requires_features() -> None:
+    with pytest.raises(ValueError):
+        IndicatorPipeline([])
+
+
+def test_indicator_pipeline_exposes_features_property() -> None:
+    feature = _SumFeature(name="sum")
+    pipeline = IndicatorPipeline([feature])
+    assert pipeline.features == (feature,)
+
+
 def test_parallel_feature_block_thread_executes_all_features() -> None:
     block = ParallelFeatureBlock([_SumFeature(name="sum")], mode="thread")
     outputs = block.run(np.ones(8, dtype=np.float32))
     assert outputs["sum"] == pytest.approx(8.0)
+
+
+def test_parallel_feature_block_process_uses_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[FeatureResult] = []
+
+    class ImmediateFuture:
+        def __init__(self, value: FeatureResult) -> None:
+            self._value = value
+
+        def result(self) -> FeatureResult:
+            return self._value
+
+    class DummyExecutor:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - signature matches executor
+            self.args = args
+            self.kwargs = kwargs
+
+        def __enter__(self) -> "DummyExecutor":
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def submit(self, fn, feature, data, kwargs):  # noqa: ANN001 - interface compatibility
+            result = fn(feature, data, kwargs)
+            captured.append(result)
+            return ImmediateFuture(result)
+
+    monkeypatch.setattr("core.indicators.base.ProcessPoolExecutor", DummyExecutor)
+
+    block = ParallelFeatureBlock([_SumFeature(name="sum")], mode="process")
+    outputs = block.run(np.arange(4, dtype=np.float32))
+
+    assert outputs["sum"] == pytest.approx(6.0)
+    assert captured and all(isinstance(item, FeatureResult) for item in captured)
+
+
+def test_parallel_feature_block_handles_running_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.indicators.base as base_module
+
+    def fake_asyncio_run(coro):
+        coro.close()
+        raise RuntimeError("event loop is running")
+
+    monkeypatch.setattr(base_module.asyncio, "run", fake_asyncio_run)
+
+    block = ParallelFeatureBlock([_SumFeature(name="sum")], mode="thread")
+    outputs = block.run(np.ones(5, dtype=np.float32))
+
+    assert outputs["sum"] == pytest.approx(5.0)
 
 
 def test_entropy_parallel_modes_match_cpu() -> None:

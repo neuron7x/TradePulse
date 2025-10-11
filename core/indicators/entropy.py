@@ -225,7 +225,7 @@ def _resolve_backend(requested: str) -> str:
     return "cpu"
 
 
-def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:
+def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no cover - requires GPU backends
     if backend == "cupy":
         if cp is None:
             raise RuntimeError("CuPy not available")

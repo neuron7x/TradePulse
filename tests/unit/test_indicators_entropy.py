@@ -199,7 +199,69 @@ def test_entropy_feature_chunk_size_behavior() -> None:
     
     # Results should be reasonably close (chunking uses weighted averaging)
     assert abs(result_unchunked.value - result_chunked.value) < 1.0
-    
+
     # Metadata should reflect the difference
     assert "chunk_size" not in result_unchunked.metadata
     assert result_chunked.metadata["chunk_size"] == 1000
+
+
+def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.indicators.entropy as entropy_module
+
+    class DummyLogger:
+        def __init__(self) -> None:
+            self.warnings: list[tuple[str, tuple]] = []
+
+        def operation(self, *_args, **_kwargs):  # noqa: D401 - contextmanager interface
+            class _Context:
+                def __enter__(self_inner):
+                    return {}
+
+                def __exit__(self_inner, exc_type, exc, tb):
+                    return False
+
+            return _Context()
+
+        def warning(self, msg: str, *args: object) -> None:
+            self.warnings.append((msg, args))
+
+    dummy_logger = DummyLogger()
+    monkeypatch.setattr(entropy_module, "_logger", dummy_logger)
+    monkeypatch.setattr(entropy_module, "_resolve_backend", lambda backend: "cupy")
+
+    def _failing_gpu_backend(x: np.ndarray, bins: int, backend: str) -> float:
+        raise RuntimeError("backend exploded")
+
+    monkeypatch.setattr(entropy_module, "_entropy_gpu", _failing_gpu_backend)
+
+    data = np.linspace(-1.0, 1.0, 64)
+    result = entropy_module.entropy(data, bins=16)
+
+    assert np.isfinite(result)
+    assert dummy_logger.warnings, "Expected GPU fallback warning to be emitted"
+
+
+def test_entropy_process_executor_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.indicators.entropy as entropy_module
+
+    class DummyExecutor:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - signature compatibility
+            self.args = args
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        def map(self, fn, tasks):
+            return [fn(task) for task in tasks]
+
+    monkeypatch.setattr(entropy_module, "ProcessPoolExecutor", DummyExecutor)
+
+    rng = np.random.default_rng(0)
+    series = rng.normal(size=512)
+    value = entropy_module.entropy(series, bins=32, chunk_size=64, parallel="process")
+
+    assert np.isfinite(value)

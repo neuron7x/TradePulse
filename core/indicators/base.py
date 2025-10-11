@@ -167,7 +167,8 @@ def _run_block_thread(
     try:
         return asyncio.run(_runner())
     except RuntimeError as exc:
-        if "event loop is running" not in str(exc):
+        message = str(exc)
+        if "event loop is running" not in message and "cannot be called from a running event loop" not in message:
             raise
         new_loop = asyncio.new_event_loop()
         try:
