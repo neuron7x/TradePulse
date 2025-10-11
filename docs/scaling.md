@@ -59,6 +59,33 @@ Adopt a queue-based architecture so that scale-out is limited only by available 
 - **Schema contracts**: define schemas in `docs/schemas/` (or protobuf for gRPC) and version them to avoid breaking consumers.
 - **Caching layer**: colocate Redis near computation clusters for low-latency access to recent candles and computed signals.
 
+### Time-Series Warehouses
+
+- **ClickHouse or TimescaleDB** provide the OLAP layer for tick and bar level series that require millisecond aggregations for
+  research dashboards and signal validation.
+  - Partition raw ticks by trading day and symbol using `MergeTree` engines (ClickHouse) or hypertables (TimescaleDB) keyed on
+    `ts` to preserve ingestion order.
+  - Maintain rolling TTL windows (e.g., 30 days of raw ticks, 180 days of minute bars) with automatic eviction policies (`ALTER
+    TABLE ... MODIFY TTL` in ClickHouse or `SELECT add_retention_policy(...)` in TimescaleDB).
+  - Enable built-in compression (ClickHouse codecs or Timescale columnar compression) once data ages beyond the hot tier to
+    minimise storage without sacrificing aggregation speed.
+  - Schedule nightly `OPTIMIZE TABLE`/`REORDER` jobs to keep partitions compact and prune unused indices.
+
+### Dataset Manifests for Backtesting
+
+- Publish immutable manifests alongside every curated dataset under `data/manifests/<dataset>.yaml` capturing:
+  - semantic version, snapshot timestamp, checksum (SHA256), and upstream source URI;
+  - schema hash or contract version to detect incompatible field changes;
+  - dependency notes (e.g., signal feature version) that downstream jobs must honour.
+- Extend ingestion pipelines to emit the manifest and register it in a catalogue table so backtests can query the latest
+  compatible snapshot.
+- Before each backtest run, the driver should:
+  1. resolve requested dataset versions to manifest records;
+  2. verify all manifests share the same trading calendar and clock skew tolerances;
+  3. recompute checksums on local artefacts and halt if mismatches are detected.
+- Surface manifest mismatches as explicit errors in CLI/CI jobs and provide remediation guidance (refresh dataset, downgrade to
+  compatible snapshot, or regenerate features).
+
 ## 6. API Gateway and Service Communication
 
 - Standardise service-to-service communication on gRPC or REST with OpenAPI/Protocol Buffers definitions stored in `docs/schemas/`.
