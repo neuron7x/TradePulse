@@ -68,7 +68,10 @@ nav:
       - Scaling: scaling.md
       - Chaos Testing (GameDay): resilience.md
       - Security: ../SECURITY.md
+      - Governance and Data Controls: governance.md
       - Deployment: deployment.md
+  - Governance Records:
+      - Architecture Decision Records: adr/index.md
   - Reference:
       - API Reference: integration-api.md
       - Indicators Reference: indicators.md
