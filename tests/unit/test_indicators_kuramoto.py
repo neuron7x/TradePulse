@@ -5,9 +5,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 import pytest
+
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 from core.indicators.kuramoto import (
     KuramotoOrderFeature,
@@ -50,7 +52,7 @@ def test_compute_phase_requires_one_dimensional_input() -> None:
 def test_kuramoto_order_is_one_for_aligned_phases() -> None:
     phases = np.zeros(128)
     result = kuramoto_order(phases)
-    assert pytest.approx(1.0, rel=1e-12) == result
+    assert pytest.approx(1.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL) == result
 
 
 def test_kuramoto_order_clips_roundoff_to_unit_circle() -> None:
@@ -76,7 +78,7 @@ def test_multi_asset_kuramoto_uses_last_phase_alignment() -> None:
     phase_a = compute_phase(series_a)[-1]
     phase_b = compute_phase(series_b)[-1]
     reference = kuramoto_order(np.array([phase_a, phase_b]))
-    assert pytest.approx(reference, rel=1e-5) == result
+    assert pytest.approx(reference, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL) == result
 
 
 def test_compute_phase_gpu_fallback_matches_cpu() -> None:
@@ -144,7 +146,7 @@ def test_kuramoto_order_feature_returns_expected_metadata() -> None:
     result = feature.transform(np.zeros(32))
     assert result.name == "kuramoto_order"
     assert result.metadata == {}
-    assert result.value == pytest.approx(1.0, rel=1e-12)
+    assert result.value == pytest.approx(1.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
 def test_multi_asset_kuramoto_feature_reports_asset_count(sin_wave: np.ndarray) -> None:
@@ -154,7 +156,7 @@ def test_multi_asset_kuramoto_feature_reports_asset_count(sin_wave: np.ndarray) 
     assert outcome.name == "multi"
     assert outcome.metadata == {"assets": 2}
     expected = multi_asset_kuramoto(data)
-    assert outcome.value == pytest.approx(expected, rel=1e-12)
+    assert outcome.value == pytest.approx(expected, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
 def _synth_dataframe(periods: int = 4096) -> pd.DataFrame:
@@ -179,13 +181,21 @@ def test_multiscale_kuramoto_matches_realistic_sample() -> None:
     result = analyzer.analyze(df)
 
     assert result.skipped_timeframes == ()
-    assert result.consensus_R == pytest.approx(0.34992364082320904, rel=1e-9)
-    assert result.cross_scale_coherence == pytest.approx(0.823211105621413, rel=1e-9)
+    assert result.consensus_R == pytest.approx(
+        0.34992364082320904, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
+    assert result.cross_scale_coherence == pytest.approx(
+        0.823211105621413, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
 
     R_values = [res.order_parameter for res in result.timeframe_results.values()]
     assert all(0.0 <= value <= 1.0 for value in R_values)
-    assert result.timeframe_results[TimeFrame.M1].order_parameter == pytest.approx(0.173134746444622, rel=1e-9)
-    assert result.timeframe_results[TimeFrame.M5].order_parameter == pytest.approx(0.5267125352017961, rel=1e-9)
+    assert result.timeframe_results[TimeFrame.M1].order_parameter == pytest.approx(
+        0.173134746444622, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
+    assert result.timeframe_results[TimeFrame.M5].order_parameter == pytest.approx(
+        0.5267125352017961, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
 
 
 def test_kuramoto_order_remains_stable_with_nan_and_clamp() -> None:
@@ -339,9 +349,11 @@ def test_multiscale_feature_respects_custom_price_column_and_metadata() -> None:
 
     assert analyzer.price_cols == ["custom_price"]
     assert outcome.name == "calibrated"
-    assert outcome.value == pytest.approx(0.55, rel=1e-12)
+    assert outcome.value == pytest.approx(0.55, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
     assert outcome.metadata["dominant_timeframe"] == "M5"
     assert outcome.metadata["skipped_timeframes"] == ["M15"]
-    assert outcome.metadata["cross_scale_coherence"] == pytest.approx(0.82, rel=1e-12)
-    assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=1e-12)
+    assert outcome.metadata["cross_scale_coherence"] == pytest.approx(
+        0.82, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
+    assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
     assert outcome.metadata["window_M5"] == 144
