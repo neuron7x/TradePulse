@@ -23,6 +23,26 @@ groups:
         annotations:
           summary: Order placement latency above 2 seconds
           description: P95 order placement latency exceeded the target for 10 minutes
+      -
+        alert: TradePulseOrderAckLatency
+        expr: tradepulse_order_ack_latency_quantiles_seconds{quantile="0.95"} > 0.4
+        for: 5m
+        labels:
+          severity: warning
+          team: trade-ops
+        annotations:
+          summary: Signal → ack latency breaching 400 ms
+          description: p95 signal to acknowledgement latency exceeded 400 ms for 5 minutes
+      -
+        alert: TradePulseSignalToFillLatency
+        expr: tradepulse_signal_to_fill_latency_quantiles_seconds{quantile="0.99"} > 0.65
+        for: 5m
+        labels:
+          severity: critical
+          team: trade-ops
+        annotations:
+          summary: Signal → fill latency breaching 650 ms
+          description: p99 signal to fill latency exceeded 650 ms for 5 minutes
   -
     name: tradepulse.data
     interval: 2m

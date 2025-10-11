@@ -140,6 +140,57 @@ This produces PromQL series such as
 `tradepulse_signal_generation_latency_quantiles_seconds{quantile="0.95"}` which map
 directly to the p50/p95/p99 panels in Grafana.
 
+### Unified Time and Latency Governance
+
+**Deterministic timestamps depend on a single time source.** All TradePulse
+nodes (bare metal, VMs, containers) must synchronise against the same Stratum-1
+NTP pool (`time.tradepulse.net`) with `chronyd` configured for a 50 ms maximum
+offset. Co-located exchange gateways additionally enable PTP hardware timestamp
+support so the matching engine and strategy hosts remain within 5 μs of one
+another. Configuration management (Ansible role `infra.time-sync`) enforces the
+sources, polling intervals, and drift thresholds, while CI validates that
+`chronyc tracking` stays under the permitted offset before promoting an image.
+
+In application code, **timestamps derive from monotonic clocks** to avoid
+backwards jumps when wall-clock adjustments occur. Services measure durations via
+`time.monotonic_ns()` (Python) or `time.clock_gettime(CLOCK_MONOTONIC_RAW)`
+(Go). Every latency metric and span in the signal → order → ack → fill path
+records both the raw monotonic duration and the correlated wall-clock time to
+preserve auditability without regressing precision.
+
+### Signal → Order → Ack → Fill SLOs
+
+End-to-end trade latency is tracked with explicit service-level objectives and
+Grafana visualisations:
+
+- **p50**: ≤ 180 ms for the combined pipeline.
+- **p95**: ≤ 400 ms from signal emission to broker acknowledgement.
+- **p99**: ≤ 650 ms from signal emission to final fill notification.
+
+Instrumentation emits dedicated gauges for each hop and the aggregate path:
+
+```text
+tradepulse_signal_generation_latency_quantiles_seconds{quantile="0.95"}
+tradepulse_order_submission_latency_quantiles_seconds{quantile="0.95"}
+tradepulse_order_ack_latency_quantiles_seconds{quantile="0.95"}
+tradepulse_order_fill_latency_quantiles_seconds{quantile="0.95"}
+tradepulse_signal_to_fill_latency_quantiles_seconds{quantile="0.95"}
+```
+
+The `quantile` label exposes p50/p95/p99 so alerts can target specific tiers.
+Prometheus recording rules aggregate by `strategy` and `exchange` to surface
+outliers, and Grafana overlays SLA bands (p95 ≤ 0.4 s, p99 ≤ 0.65 s) for fast
+visual validation.
+
+Alerting policy:
+
+1. **Warning (SEV-2)** – p95 signal → ack latency breaches 400 ms for 5 minutes.
+2. **Critical (SEV-1)** – p99 signal → fill latency exceeds 650 ms for 5
+   minutes, triggering the on-call rotation and automated rollback guardrails.
+
+Alert rules appear in `observability/alerts.json` and the generated Prometheus
+manifest so staging and production share identical thresholds.
+
 ### Core Metrics
 
 #### Trading Metrics
@@ -151,7 +202,9 @@ trade_pnl_usd               # Summary: P&L per trade
 trade_latency_seconds       # Histogram: Order execution time
 tradepulse_signal_generation_latency_quantiles_seconds  # Gauge: Signal engine latency (p50/p95/p99)
 tradepulse_order_submission_latency_quantiles_seconds   # Gauge: Order placement latency (p50/p95/p99)
+tradepulse_order_ack_latency_quantiles_seconds          # Gauge: Submission → acknowledgement latency (p50/p95/p99)
 tradepulse_order_fill_latency_quantiles_seconds         # Gauge: Fill latency (p50/p95/p99)
+tradepulse_signal_to_fill_latency_quantiles_seconds     # Gauge: Signal → fill aggregate latency (p50/p95/p99)
 
 # Positions
 open_positions_count        # Gauge: Current open positions

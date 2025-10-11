@@ -254,6 +254,17 @@
       "type": "gauge"
     },
     {
+      "description": "Latency quantiles between exchange submission and broker acknowledgement.",
+      "labels": [
+        "exchange",
+        "symbol",
+        "quantile"
+      ],
+      "name": "tradepulse_order_ack_latency_quantiles_seconds",
+      "subsystem": "execution",
+      "type": "gauge"
+    },
+    {
       "description": "Latency quantiles between order ready time and fill.",
       "labels": [
         "exchange",
@@ -282,6 +293,18 @@
       ],
       "name": "tradepulse_signal_generation_latency_quantiles_seconds",
       "subsystem": "signals",
+      "type": "gauge"
+    },
+    {
+      "description": "Aggregate latency quantiles from signal emission to final fill.",
+      "labels": [
+        "strategy",
+        "exchange",
+        "symbol",
+        "quantile"
+      ],
+      "name": "tradepulse_signal_to_fill_latency_quantiles_seconds",
+      "subsystem": "execution",
       "type": "gauge"
     },
     {
