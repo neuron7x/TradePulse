@@ -26,6 +26,22 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Validate release metadata
+        id: release
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          version="${tag#v}"
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag '$tag' must follow SemVer (with optional leading 'v')."
+            exit 1
+          fi
+          file_version="$(tr -d "\n" < VERSION)"
+          if [ "$file_version" != "$version" ]; then
+            echo "::error::VERSION file ($file_version) does not match release tag ($version)."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -45,7 +61,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
-            type=raw,value=${{ github.event.release.tag_name }}
+            type=raw,value=${{ steps.release.outputs.version }}
             type=raw,value=latest
 
       - name: Build and push image

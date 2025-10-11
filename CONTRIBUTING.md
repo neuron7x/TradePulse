@@ -73,7 +73,7 @@ python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
 # Install Python dependencies (dev extras include runtime stack)
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.lock
 
 # Verify installations
 python --version  # Should be 3.11+

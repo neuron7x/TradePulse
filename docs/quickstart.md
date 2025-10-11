@@ -41,11 +41,16 @@ source .venv/bin/activate
 ## Step 3: Install Dependencies
 
 ```bash
-# Install runtime packages
-pip install -r requirements.txt
+# Install runtime packages (locked)
+pip install -r requirements.lock
 
-# Install development tools (optional, includes runtime stack)
-pip install -r requirements-dev.txt
+# Install development tools (optional, extends runtime lock)
+pip install -r requirements-dev.lock
+
+# Extras: install only what you need
+# pip install ".[connectors]"  # market & broker integrations
+# pip install ".[gpu]"         # GPU acceleration backends
+# pip install ".[docs]"        # documentation toolchain
 ```
 
 ---
@@ -371,7 +376,7 @@ pip install -e .
 If a package is missing:
 ```bash
 # Reinstall all dependencies (dev extras include runtime stack)
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.lock
 ```
 
 ### Permission Errors

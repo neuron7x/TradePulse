@@ -73,11 +73,16 @@ cd TradePulse
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
-# Install runtime dependencies (skip if you only need the dev stack)
-pip install -r requirements.txt
+# Install runtime dependencies (use the lock file for reproducibility)
+pip install -r requirements.lock
 
-# Install development & test dependencies (includes runtime stack)
-pip install -r requirements-dev.txt
+# Install development & test tooling (extends the runtime lock)
+pip install -r requirements-dev.lock
+
+# Optional extras (install only what you need)
+# pip install ".[connectors]"  # market & broker integrations
+# pip install ".[gpu]"         # GPU acceleration backends
+# pip install ".[docs]"        # documentation toolchain
 ```
 
 ### Installation with Docker
