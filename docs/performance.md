@@ -321,6 +321,9 @@ phases_gpu = compute_phase_gpu(data)
 
 **GPU acceleration benefits:**
 - 5-50x speedup for large arrays (>100K points)
+- Adaptive backend selection automatically routes workloads to GPU when the
+  dataset is large enough and device memory is sufficient, otherwise staying on
+  CPU to avoid unnecessary transfers.
 - Automatic fallback to CPU if GPU unavailable
 - Built-in error handling and logging
 
@@ -805,3 +808,32 @@ Key takeaways for optimal performance:
 5. ✅ **Leverage GPU when available** - 5-50x speedup
 6. ✅ **Combine optimizations** - multiply benefits
 7. ✅ **Test accuracy** - verify optimizations don't break correctness
+
+### Rust Numeric Accelerators
+
+For CPU-bound workloads we provide a thin Rust extension, built with
+[`maturin`](https://github.com/PyO3/maturin), that implements common numeric
+primitives such as sliding window extraction, quantile estimation, and
+1D convolution. These helpers are exposed via ``core.accelerators.numeric`` and
+automatically fall back to the NumPy implementations when the compiled module is
+not available.
+
+Build and install the extension in editable mode:
+
+```bash
+pip install maturin
+maturin develop --manifest-path rust/tradepulse-accel/Cargo.toml --release
+```
+
+Usage from Python:
+
+```python
+from core.accelerators import sliding_windows, quantiles, convolve
+
+windows = sliding_windows(series, window=64, step=8)
+percentiles = quantiles(series, (0.1, 0.5, 0.9))
+smoothed = convolve(series, kernel, mode="same")
+```
+
+Each wrapper exposes a ``use_rust`` flag if you want to force the pure Python
+fallback for validation or benchmarking.

@@ -1,0 +1,19 @@
+[package]
+name = "tradepulse-accel"
+version = "0.1.0"
+edition = "2021"
+description = "Rust accelerators for TradePulse numeric primitives"
+authors = ["TradePulse Contributors"]
+license = "MIT"
+readme = "README.md"
+
+[lib]
+name = "tradepulse_accel"
+crate-type = ["cdylib"]
+
+[dependencies]
+numpy = "0.22"
+pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[package.metadata.maturin]
+name = "tradepulse_accel"

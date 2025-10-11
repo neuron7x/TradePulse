@@ -13,6 +13,8 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
 
+from core.accelerators.numeric import quantiles as _accelerated_quantiles
+
 try:  # pragma: no cover - exercised indirectly in environments without numpy
     import numpy as np
 except ModuleNotFoundError:  # pragma: no cover - handled in fallback logic
@@ -26,7 +28,6 @@ try:
         Counter,
         Gauge,
         Histogram,
-        CollectorRegistry,
         generate_latest,
         start_http_server,
     )
@@ -422,7 +423,11 @@ class MetricsCollector:
             arr = np.fromiter(values, dtype=float, count=len(values))
             if arr.size == 0:
                 return
-            quantile_values = {q: float(np.quantile(arr, q)) for q in quantiles}
+            accelerated = _accelerated_quantiles(arr, quantiles)
+            quantile_values = {
+                q: float(value)
+                for q, value in zip(quantiles, accelerated, strict=False)
+            }
         else:
             quantile_values = _fallback_quantiles(values, quantiles)
 

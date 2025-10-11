@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from core.accelerators import convolve
+
 
 def moving_average_signal(prices: np.ndarray, window: int = 3) -> np.ndarray:
     """Return +1 when price is above its moving average else -1."""
@@ -12,7 +14,8 @@ def moving_average_signal(prices: np.ndarray, window: int = 3) -> np.ndarray:
         raise ValueError("window must be positive")
     if prices.size < window:
         raise ValueError("prices length must be >= window")
-    rolling = np.convolve(prices, np.ones(window) / window, mode="valid")
+    kernel = np.ones(window, dtype=np.float64) / float(window)
+    rolling = convolve(prices, kernel, mode="valid")
     aligned = np.concatenate([np.full(window - 1, rolling[0]), rolling])
     signal = np.where(prices >= aligned, 1.0, -1.0)
     return signal
