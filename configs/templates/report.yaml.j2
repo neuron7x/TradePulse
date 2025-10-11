@@ -1,13 +1,12 @@
-# SPDX-License-Identifier: MIT
-name: sample_report
-description: Markdown report combining ingestion, backtest and optimisation outputs.
+name: sample_report_job
+description: Example report configuration
 tags:
   - report
-  - analytics
-inputs:
-  - reports/backtests/sample_backtest.json
-  - reports/optimization/sample_optimization.json
-output_path: reports/summary/sample_report.md
-template: configs/templates/report.md.j2
 metadata:
   owner: analytics
+inputs:
+  - reports/backtest.json
+  - reports/exec.json
+output_path: reports/report.md
+versioning:
+  backend: none

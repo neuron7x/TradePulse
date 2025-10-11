@@ -1,32 +1,16 @@
-"""Objective helpers for parameter optimisation routines."""
+"""Objective functions for the optimize CLI command."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any, Dict
-
-import pandas as pd
-
-from core.agent.strategy import Strategy
-
-__all__ = ["mean_reversion_objective"]
+import numpy as np
 
 
-def mean_reversion_objective(
-    parameters: Dict[str, Any],
-    *,
-    data_path: str,
-    price_column: str = "close",
-) -> float:
-    """Evaluate :class:`core.agent.strategy.Strategy` on a dataset."""
+def sharpe_ratio(returns: np.ndarray, risk_free: float = 0.0) -> float:
+    """Compute a basic Sharpe ratio for a vector of returns."""
 
-    path = Path(data_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Data path {data_path} does not exist")
-
-    frame = pd.read_csv(path)
-    if price_column not in frame.columns:
-        raise ValueError(f"Column '{price_column}' not present in {data_path}")
-
-    strategy = Strategy(name="mean_reversion", params=dict(parameters))
-    return strategy.simulate_performance(frame[[price_column]].rename(columns={price_column: "close"}))
+    excess = returns - risk_free
+    mean = float(excess.mean())
+    std = float(excess.std(ddof=1)) if excess.size > 1 else 0.0
+    if std == 0.0:
+        return 0.0
+    return mean / std

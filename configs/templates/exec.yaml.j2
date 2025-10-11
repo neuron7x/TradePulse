@@ -1,29 +1,18 @@
-# SPDX-License-Identifier: MIT
-name: sample_execution
-description: Dry-run execution plan for a mean-reversion strategy.
+name: sample_exec_job
+description: Example execution configuration
 tags:
   - exec
-  - trading
+data:
+  kind: csv
+  path: data/sample.csv
+  timestamp_field: timestamp
+  value_field: price
 strategy:
-  entrypoint: core.strategies.signals:mean_reversion_signal
+  entrypoint: core.strategies.signals:threshold_signal
   parameters:
-    lookback: 20
-    zscore: 1.0
-    risk: 0.5
-broker:
-  provider: paper
-  account: DEMO-001
-  symbol: BTCUSDT
-  base_currency: USDT
-risk:
-  max_notional: 100000
-  max_drawdown: 0.1
-  stop_loss_bps: 150
+    threshold: 0.0
+results_path: reports/exec.json
+catalog:
+  path: data/feature_catalog.json
 versioning:
   backend: none
-  repo_path:
-  remote:
-  branch:
-  commit_message: Execution dry run snapshot
-metadata:
-  owner: trading

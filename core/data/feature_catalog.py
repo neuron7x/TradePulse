@@ -1,120 +1,100 @@
-"""Feature and signal catalog management for TradePulse."""
+"""File-backed feature catalog helpers used by the CLI."""
 
 from __future__ import annotations
 
 import json
-import os
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional
+from typing import Dict, Iterable, List, Optional
 
-from pydantic import BaseModel
-
-from core.config.template_manager import model_to_hash
-
-__all__ = ["CatalogEntry", "FeatureCatalog"]
+from core.config.cli_models import CatalogConfig, TradePulseBaseConfig
 
 
-@dataclass(slots=True)
+@dataclass
 class CatalogEntry:
-    """Metadata persisted for a registered artifact."""
+    """Represents a stored artifact in the feature catalog."""
 
     name: str
     path: Path
-    checksum: Optional[str]
-    config_hash: str
+    checksum: str
+    created_at: datetime
+    metadata: Dict[str, object]
     lineage: List[str]
-    metadata: Dict[str, Any]
-    timestamp: str
-
-    def as_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "path": str(self.path),
-            "checksum": self.checksum,
-            "config_hash": self.config_hash,
-            "lineage": self.lineage,
-            "metadata": self.metadata,
-            "timestamp": self.timestamp,
-        }
 
 
 class FeatureCatalog:
-    """Persist metadata about generated features, signals, and reports."""
+    """A minimal JSON file catalog for CLI artifact registration."""
 
-    def __init__(self, path: Path) -> None:
-        self.path = Path(path)
+    def __init__(self, config: CatalogConfig | Path) -> None:
+        if isinstance(config, CatalogConfig):
+            self.path = config.path
+        else:
+            self.path = Path(config)
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _load_entries(self) -> List[Dict[str, object]]:
         if not self.path.exists():
-            self.path.write_text(json.dumps({"artifacts": []}, indent=2), encoding="utf-8")
+            return []
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        return data.get("artifacts", []) if isinstance(data, dict) else []
 
-    def _load(self) -> MutableMapping[str, Any]:
-        with self.path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
-
-    def _save(self, payload: Mapping[str, Any]) -> None:
-        with self.path.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-
-    @staticmethod
-    def _checksum(path: Path) -> Optional[str]:
-        if not path.exists():
-            return None
-        if path.is_dir():
-            digest = __import__("hashlib").sha256()
-            for root, _dirs, files in os.walk(path):
-                for file_name in sorted(files):
-                    file_path = Path(root) / file_name
-                    digest.update(file_path.relative_to(path).as_posix().encode("utf-8"))
-                    digest.update(file_path.read_bytes())
-            return digest.hexdigest()
-        return __import__("hashlib").sha256(path.read_bytes()).hexdigest()
+    def _write_entries(self, entries: Iterable[Dict[str, object]]) -> None:
+        payload = {"artifacts": list(entries)}
+        self.path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
     def register(
         self,
         name: str,
         artifact_path: Path,
         *,
-        config: BaseModel,
-        lineage: Iterable[str] | None = None,
-        metadata: Mapping[str, Any] | None = None,
+        config: TradePulseBaseConfig,
+        lineage: Optional[Iterable[str]] = None,
+        metadata: Optional[Dict[str, object]] = None,
     ) -> CatalogEntry:
-        """Register an artifact and persist its metadata."""
-
-        payload = self._load()
-        artifacts: List[Dict[str, Any]] = list(payload.get("artifacts", []))
-        checksum = self._checksum(artifact_path)
-        timestamp = datetime.now(tz=timezone.utc).isoformat()
-        entry = CatalogEntry(
+        artifact_path = artifact_path.resolve()
+        checksum = _sha256_file(artifact_path)
+        config_dump = json.loads(config.model_dump_json())
+        entry = {
+            "name": name,
+            "path": str(artifact_path),
+            "checksum": checksum,
+            "created_at": datetime.now(tz=timezone.utc).isoformat(),
+            "config": config_dump,
+            "metadata": metadata or {},
+            "lineage": list(lineage or []),
+        }
+        entries = self._load_entries()
+        existing = [item for item in entries if item.get("name") != name]
+        existing.append(entry)
+        self._write_entries(existing)
+        return CatalogEntry(
             name=name,
-            path=artifact_path.resolve(),
+            path=artifact_path,
             checksum=checksum,
-            config_hash=model_to_hash(config),
-            lineage=list(lineage or []),
-            metadata=dict(metadata or {}),
-            timestamp=timestamp,
+            created_at=datetime.fromisoformat(entry["created_at"]),
+            metadata=entry["metadata"],
+            lineage=list(entry["lineage"]),
         )
-        artifacts = [item for item in artifacts if item.get("name") != name]
-        artifacts.append(entry.as_dict())
-        payload["artifacts"] = sorted(artifacts, key=lambda item: item["name"])
-        self._save(payload)
-        return entry
 
     def find(self, name: str) -> Optional[CatalogEntry]:
-        """Return catalog entry for *name* if registered."""
-
-        data = self._load()
-        for item in data.get("artifacts", []):
-            if item.get("name") == name:
+        for raw in self._load_entries():
+            if raw.get("name") == name:
                 return CatalogEntry(
-                    name=item["name"],
-                    path=Path(item["path"]),
-                    checksum=item.get("checksum"),
-                    config_hash=item.get("config_hash", ""),
-                    lineage=list(item.get("lineage", [])),
-                    metadata=dict(item.get("metadata", {})),
-                    timestamp=item.get("timestamp", ""),
+                    name=name,
+                    path=Path(raw["path"]),
+                    checksum=str(raw["checksum"]),
+                    created_at=datetime.fromisoformat(raw["created_at"]),
+                    metadata=dict(raw.get("metadata", {})),
+                    lineage=list(raw.get("lineage", [])),
                 )
         return None
 
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(8192), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
