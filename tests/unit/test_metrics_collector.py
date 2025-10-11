@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import math
+from collections import deque
+from typing import Iterable
+
+import numpy as np
 import pytest
 from prometheus_client import CollectorRegistry
 
@@ -10,6 +15,71 @@ def _sample_value(registry: CollectorRegistry, name: str, labels: dict[str, str]
     """Helper to extract metric samples from the registry."""
 
     return registry.get_sample_value(name, labels or {})
+
+
+def _p2_quantile(samples: Iterable[float], probability: float) -> float:
+    """Approximate quantile using the P² algorithm for benchmarking."""
+
+    values = list(map(float, samples))
+    if not 0.0 <= probability <= 1.0:
+        raise ValueError("probability must be within [0, 1]")
+    if len(values) < 5:
+        if not values:
+            raise ValueError("P² requires at least one sample")
+        ordered = sorted(values)
+        pos = probability * (len(ordered) - 1)
+        lower = math.floor(pos)
+        upper = math.ceil(pos)
+        if lower == upper:
+            return ordered[lower]
+        weight = pos - lower
+        return ordered[lower] + (ordered[upper] - ordered[lower]) * weight
+
+    ordered = sorted(values[:5])
+    positions = [1, 2, 3, 4, 5]
+    desired = [1.0, 1.0 + 2 * probability, 1.0 + 4 * probability, 3.0 + 2 * probability, 5.0]
+    increments = [0.0, probability / 2.0, probability, (1.0 + probability) / 2.0, 1.0]
+
+    for x in values[5:]:
+        if x < ordered[0]:
+            ordered[0] = x
+            k = 0
+        elif x < ordered[1]:
+            k = 0
+        elif x < ordered[2]:
+            k = 1
+        elif x < ordered[3]:
+            k = 2
+        elif x < ordered[4]:
+            k = 3
+        else:
+            ordered[4] = x
+            k = 3
+
+        for i in range(k + 1, 5):
+            positions[i] += 1
+
+        for i in range(5):
+            desired[i] += increments[i]
+
+        for i in range(1, 4):
+            d = desired[i] - positions[i]
+            if (d >= 1 and positions[i + 1] - positions[i] > 1) or (d <= -1 and positions[i - 1] - positions[i] < -1):
+                d_sign = 1 if d > 0 else -1
+                new_height = ordered[i] + d_sign / (positions[i + 1] - positions[i - 1]) * (
+                    (positions[i] - positions[i - 1] + d_sign) * (ordered[i + 1] - ordered[i]) / (positions[i + 1] - positions[i])
+                    + (positions[i + 1] - positions[i] - d_sign) * (ordered[i] - ordered[i - 1]) / (positions[i] - positions[i - 1])
+                )
+                if ordered[i - 1] < new_height < ordered[i + 1]:
+                    ordered[i] = new_height
+                else:
+                    if d_sign > 0:
+                        ordered[i] += (ordered[i + 1] - ordered[i]) / (positions[i + 1] - positions[i])
+                    else:
+                        ordered[i] += (ordered[i - 1] - ordered[i]) / (positions[i - 1] - positions[i])
+                positions[i] += d_sign
+
+    return float(ordered[2])
 
 
 def test_measure_data_ingestion_records_duration_and_status() -> None:
@@ -249,3 +319,63 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
     assert signal_quantile is not None
     assert fill_quantile is not None
     assert equity_gauge == 100.0
+
+
+@pytest.mark.parametrize(
+    "gauge_name,labels",
+    [
+        ("data_ingestion_latency_quantiles", {"source": "csv", "symbol": "BTC-USDT"}),
+        ("signal_generation_latency_quantiles", {"strategy": "trend"}),
+        ("order_submission_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
+        ("order_fill_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
+    ],
+)
+def test_deterministic_quantiles_match_numpy_and_benchmark(gauge_name: str, labels: dict[str, str]) -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    durations = list(np.linspace(0.01, 1.0, 200))
+    samples = deque(durations, maxlen=256)
+
+    gauge = getattr(collector, gauge_name)
+    collector._update_latency_quantiles(gauge, labels, samples)
+
+    for quantile, suffix in zip((0.5, 0.95, 0.99), ("p50", "p95", "p99")):
+        observed = _sample_value(
+            registry,
+            gauge._name,  # type: ignore[attr-defined]
+            {**labels, "quantile": suffix},
+        )
+        assert observed is not None
+        expected = np.quantile(durations, quantile)
+        np.testing.assert_allclose(observed, expected)
+
+        p2_estimate = _p2_quantile(durations, quantile)
+        assert abs(p2_estimate - observed) <= max(0.05, 0.05 * observed)
+
+
+def test_record_regression_metrics_sets_gauges() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    collector.record_regression_metrics("kuramoto", mae=0.12, rmse=0.3, r2=0.85)
+
+    mae_value = _sample_value(
+        registry,
+        "tradepulse_regression_metric",
+        {"model": "kuramoto", "metric": "mae"},
+    )
+    rmse_value = _sample_value(
+        registry,
+        "tradepulse_regression_metric",
+        {"model": "kuramoto", "metric": "rmse"},
+    )
+    r2_value = _sample_value(
+        registry,
+        "tradepulse_regression_metric",
+        {"model": "kuramoto", "metric": "r2"},
+    )
+
+    assert mae_value == pytest.approx(0.12)
+    assert rmse_value == pytest.approx(0.3)
+    assert r2_value == pytest.approx(0.85)

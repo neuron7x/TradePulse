@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Sequence
 
+import pandas as pd
 import numpy as np
 import pytest
-import pandas as pd
 
 from core.indicators.kuramoto import (
     KuramotoOrderFeature,
@@ -24,6 +25,9 @@ from core.indicators.multiscale_kuramoto import (
     TimeFrame,
     WaveletWindowSelector,
 )
+
+
+_SAMPLE_DATA_PATH = Path(__file__).resolve().parents[2] / "sample.csv"
 
 
 def test_compute_phase_matches_expected_linear_phase(sin_wave: np.ndarray) -> None:
@@ -163,6 +167,42 @@ def _synth_dataframe(periods: int = 4096) -> pd.DataFrame:
         + 0.25 * np.random.default_rng(0).normal(size=periods)
     )
     return pd.DataFrame({"close": price}, index=idx)
+
+
+def test_multiscale_kuramoto_matches_realistic_sample() -> None:
+    df = pd.read_csv(_SAMPLE_DATA_PATH, parse_dates=[0], index_col=0)
+    analyzer = MultiScaleKuramoto(
+        timeframes=(TimeFrame.M1, TimeFrame.M5),
+        use_adaptive_window=False,
+        base_window=64,
+    )
+    result = analyzer.analyze(df)
+
+    assert result.skipped_timeframes == ()
+    assert result.consensus_R == pytest.approx(0.34992364082320904, rel=1e-9)
+    assert result.cross_scale_coherence == pytest.approx(0.823211105621413, rel=1e-9)
+
+    R_values = [res.order_parameter for res in result.timeframe_results.values()]
+    assert all(0.0 <= value <= 1.0 for value in R_values)
+    assert result.timeframe_results[TimeFrame.M1].order_parameter == pytest.approx(0.173134746444622, rel=1e-9)
+    assert result.timeframe_results[TimeFrame.M5].order_parameter == pytest.approx(0.5267125352017961, rel=1e-9)
+
+
+def test_kuramoto_order_remains_stable_with_nan_and_clamp() -> None:
+    df = pd.read_csv(_SAMPLE_DATA_PATH, parse_dates=[0], index_col=0)
+    prices = df["close"].to_numpy(copy=True)
+    prices[5] = np.nan
+    prices[6] = np.inf
+    prices[7] = -np.inf
+
+    clean_phases = compute_phase(df["close"].to_numpy())
+    noisy_phases = compute_phase(prices)
+
+    clean_R = kuramoto_order(clean_phases[-256:])
+    noisy_R = kuramoto_order(noisy_phases[-256:])
+
+    assert 0.0 <= noisy_R <= 1.0
+    assert noisy_R == pytest.approx(clean_R, rel=5e-3, abs=5e-3)
 
 
 def test_multiscale_kuramoto_analyzer_reports_consensus_metrics() -> None:

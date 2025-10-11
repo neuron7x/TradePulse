@@ -227,6 +227,13 @@ class MetricsCollector:
             registry=registry,
         )
 
+        self.regression_metrics = Gauge(
+            "tradepulse_regression_metric",
+            "Regression quality metrics (e.g. MAE, RMSE, R2)",
+            ["model", "metric"],
+            registry=registry,
+        )
+
         self.signal_generation_latency_quantiles = Gauge(
             "tradepulse_signal_generation_latency_quantiles_seconds",
             "Signal generation latency quantiles",
@@ -600,6 +607,16 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.strategy_memory_size.set(size)
+
+    def record_regression_metrics(self, model: str, **metrics: float) -> None:
+        """Record regression evaluation metrics for a given model identifier."""
+
+        if not self._enabled:
+            return
+        for name, value in metrics.items():
+            if value is None:
+                continue
+            self.regression_metrics.labels(model=model, metric=str(name)).set(float(value))
 
     def record_equity_point(self, strategy: str, step: int, value: float) -> None:
         """Record a sample on the equity curve gauge."""
