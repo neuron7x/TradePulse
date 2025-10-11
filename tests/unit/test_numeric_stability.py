@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+import warnings
 
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
@@ -47,8 +48,26 @@ def test_kuramoto_order_handles_nan_and_inf_matrix() -> None:
         dtype=float,
     )
 
-    values = kuramoto_order(matrix)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        values = kuramoto_order(matrix)
 
+    assert not caught
     assert values.shape == (3,)
     assert np.all(np.isfinite(values))
     assert np.all((0.0 <= values) & (values <= 1.0))
+
+
+def test_kuramoto_order_accepts_complex_inputs_without_warning() -> None:
+    """Complex-valued phases should be projected safely onto the unit circle."""
+
+    phases = np.linspace(-np.pi, np.pi, 128)
+    complex_phases = np.exp(1j * phases)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        complex_value = kuramoto_order(complex_phases)
+
+    assert not caught
+    real_value = kuramoto_order(phases)
+    assert complex_value == pytest.approx(real_value, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
