@@ -41,7 +41,7 @@ def test_cli_generates_templates(tmp_path: Path) -> None:
     runner = CliRunner()
     for command in ("ingest", "backtest", "optimize", "exec", "report"):
         destination = tmp_path / f"{command}.yaml"
-        result = runner.invoke(cli, [command, "--generate-config", "--output", str(destination)])
+        result = runner.invoke(cli, [command, "--generate-config", "--template-output", str(destination)])
         assert result.exit_code == 0, result.output
         assert destination.exists()
 
@@ -137,6 +137,31 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
 
     catalog = json.loads(catalog_path.read_text())
     assert len(catalog["artifacts"]) >= 3
+
+
+def test_backtest_outputs_jsonl(tmp_path: Path, sample_prices: Path) -> None:
+    manager = ConfigTemplateManager(Path("configs/templates"))
+    backtest_cfg_path = tmp_path / "backtest.yaml"
+    manager.render("backtest", backtest_cfg_path)
+    cfg = _load_yaml(backtest_cfg_path)
+    cfg["data"]["path"] = str(sample_prices)
+    cfg["results_path"] = str(tmp_path / "results.json")
+    _write_yaml(backtest_cfg_path, cfg)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "backtest",
+            "--config",
+            str(backtest_cfg_path),
+            "--output",
+            "jsonl",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    lines = [line for line in result.output.splitlines() if line.startswith("{")]
+    assert any("\"metric\": \"total_return\"" in line for line in lines)
 
 
 def test_versioning_manager_writes_metadata(tmp_path: Path) -> None:
