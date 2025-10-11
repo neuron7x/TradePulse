@@ -44,16 +44,18 @@ jobs:
         uses: astral-sh/setup-uv@v3
       - name: Create virtual environment
         run: |
-          uv venv
-          echo "VIRTUAL_ENV=$PWD/.venv" >> $GITHUB_ENV
-          echo "$PWD/.venv/bin" >> $GITHUB_PATH
+          uv venv --python "$(command -v python)"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
       - name: Sync dependencies
-        run: uv pip sync requirements-dev.lock
+        run: |
+          UV_PYTHON="$VIRTUAL_ENV/bin/python" uv pip sync requirements-dev.lock
       - name: Install feature store extras
         if: matrix.python-version != '3.13'
-        run: uv pip install '.[feature-store]'
+        run: |
+          UV_PYTHON="$VIRTUAL_ENV/bin/python" uv pip install '.[feature-store]'
       - name: Run smoke tests
-        run: pytest tests/smoke -k feature_store
+        run: $VIRTUAL_ENV/bin/python -m pytest tests/smoke -k feature_store
 
   tests:
     runs-on: ubuntu-latest
