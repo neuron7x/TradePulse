@@ -11,7 +11,12 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Mapping, MutableSequence, Sequence
+from collections.abc import Iterable, Mapping, MutableSequence, Sequence
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+from typing import Any, Callable, Literal
+
+import asyncio
 
 from core.utils.metrics import get_metrics_collector
 from observability.tracing import pipeline_span
@@ -98,6 +103,91 @@ class FeatureBlock(BaseBlock):
         return outputs
 
 
+class ParallelFeatureBlock(BaseBlock):
+    """Block that executes features concurrently while sharing the same input buffer.
+
+    The block supports both thread-based (asyncio) fan-out and process-based
+    execution. Thread-based execution is typically sufficient when indicator
+    computations release the Global Interpreter Lock (for example NumPy or
+    CuPy heavy lifting). Process mode is available for CPU-bound pure Python
+    features.
+
+    Args:
+        features: Iterable of feature instances to orchestrate.
+        mode: ``"thread"`` to leverage :mod:`asyncio`/thread pools or
+            ``"process"`` for a :class:`concurrent.futures.ProcessPoolExecutor`.
+        max_workers: Optional hard limit for the executor.
+    """
+
+    def __init__(
+        self,
+        features: Sequence[BaseFeature] | None = None,
+        *,
+        name: str | None = None,
+        mode: Literal["thread", "process"] = "thread",
+        max_workers: int | None = None,
+    ) -> None:
+        super().__init__(features=features, name=name)
+        self.mode = mode
+        self.max_workers = max_workers
+
+    def run(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
+        if self.mode == "process":
+            return self._run_process(data, **kwargs)
+        return _run_block_thread(self.features, data, kwargs)
+
+    def _run_process(self, data: FeatureInput, **kwargs: Any) -> Mapping[str, Any]:
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            futures = [
+                executor.submit(_process_transform, feature, data, kwargs)
+                for feature in self.features
+            ]
+            results = [future.result() for future in futures]
+        return {result.name: result.value for result in results}
+
+
+def _run_block_thread(
+    features: Sequence[BaseFeature],
+    data: FeatureInput,
+    kwargs: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    async def _runner() -> Mapping[str, Any]:
+        loop = asyncio.get_running_loop()
+        tasks = [
+            loop.run_in_executor(
+                None,
+                partial(feature.transform, **dict(kwargs)),
+                data,
+            )
+            for feature in features
+        ]
+        results = await asyncio.gather(*tasks)
+        return {result.name: result.value for result in results}
+
+    try:
+        return asyncio.run(_runner())
+    except RuntimeError as exc:
+        if "event loop is running" not in str(exc):
+            raise
+        new_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(new_loop)
+            return new_loop.run_until_complete(_runner())
+        finally:
+            asyncio.set_event_loop(None)
+            new_loop.close()
+
+
+def _process_transform(feature: BaseFeature, data: FeatureInput, kwargs: Mapping[str, Any]) -> FeatureResult:
+    """Execute ``feature.transform`` in a child process.
+
+    The helper is module-level to ensure it is picklable for ``fork`` as well
+    as ``spawn`` start methods.
+    """
+
+    return feature.transform(data, **dict(kwargs))
+
+
 class FunctionalFeature(BaseFeature):
     """Adapter that wraps a plain function into the feature interface."""
 
@@ -121,6 +211,7 @@ __all__ = [
     "BaseFeature",
     "BaseBlock",
     "FeatureBlock",
+    "ParallelFeatureBlock",
     "FunctionalFeature",
     "FeatureResult",
 ]

@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-from typing import Any, Iterable
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Iterable, Literal
 import warnings
 
 import numpy as np
@@ -167,19 +169,34 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     dist = W1(a, b) if W1 is not None else _w1_fallback(a, b)
     return float(1.0 - dist / d_xy)
 
-def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool = False) -> float:
+def mean_ricci(
+    G: nx.Graph,
+    *,
+    chunk_size: int | None = None,
+    use_float32: bool = False,
+    parallel: Literal["none", "async"] = "none",
+    max_workers: int | None = None,
+) -> float:
     """Compute mean Ollivier-Ricci curvature over all edges.
     
     Args:
         G: NetworkX graph
         chunk_size: Process edges in chunks for large graphs (default: None, no chunking)
         use_float32: Use float32 precision for computations (default: False)
+        parallel: Parallel execution mode (``"async"`` uses asyncio thread pools)
+        max_workers: Optional limit for the async worker pool
         
     Returns:
         Mean Ricci curvature across all edges
     """
-    with _logger.operation("mean_ricci", edges=G.number_of_edges(), nodes=G.number_of_nodes(),
-                          chunk_size=chunk_size, use_float32=use_float32):
+    with _logger.operation(
+        "mean_ricci",
+        edges=G.number_of_edges(),
+        nodes=G.number_of_nodes(),
+        chunk_size=chunk_size,
+        use_float32=use_float32,
+        parallel=parallel,
+    ):
         if G.number_of_edges() == 0:
             return 0.0
         
@@ -189,7 +206,7 @@ def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool 
         if chunk_size is not None and len(edges) > chunk_size:
             dtype = np.float32 if use_float32 else float
             curvatures = []
-            
+
             for i in range(0, len(edges), chunk_size):
                 chunk_edges = edges[i:i + chunk_size]
                 chunk_curv = [ricci_curvature_edge(G, u, v) for u, v in chunk_edges]
@@ -198,7 +215,10 @@ def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool 
             return float(np.mean(np.array(curvatures, dtype=dtype)))
         
         # Standard processing
-        curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
+        if parallel == "async":
+            curv = _run_ricci_async(G, edges, max_workers)
+        else:
+            curv = [ricci_curvature_edge(G, u, v) for u, v in edges]
         dtype = np.float32 if use_float32 else float
         if not curv:  # pragma: no cover - empty graph handled above
             return 0.0
@@ -207,6 +227,36 @@ def mean_ricci(G: nx.Graph, *, chunk_size: int | None = None, use_float32: bool 
         if arr.size == 0:  # pragma: no cover - defensive guard
             return 0.0
         return float(np.mean(arr))
+
+def _run_ricci_async(G: nx.Graph, edges: list[tuple[int, int]], max_workers: int | None) -> list[float]:
+    async def _runner() -> list[float]:
+        loop = asyncio.get_running_loop()
+        executor: ThreadPoolExecutor | None = None
+        try:
+            if max_workers is not None:
+                executor = ThreadPoolExecutor(max_workers=max_workers)
+            futures = [
+                loop.run_in_executor(executor, ricci_curvature_edge, G, int(u), int(v))
+                for u, v in edges
+            ]
+            return await asyncio.gather(*futures)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
+
+    try:
+        return asyncio.run(_runner())
+    except RuntimeError as exc:
+        if "event loop is running" not in str(exc):
+            raise
+        new_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(new_loop)
+            return new_loop.run_until_complete(_runner())
+        finally:
+            asyncio.set_event_loop(None)
+            new_loop.close()
+
 
 def _w1_fallback(a, b):
     import numpy as _np
@@ -221,51 +271,61 @@ class MeanRicciFeature(BaseFeature):
     """Feature computing mean Ollivier–Ricci curvature of a price graph."""
 
     def __init__(
-        self, 
-        delta: float = 0.005, 
-        *, 
+        self,
+        delta: float = 0.005,
+        *,
         chunk_size: int | None = None,
         use_float32: bool = False,
-        name: str | None = None
+        parallel_async: bool = False,
+        max_workers: int | None = None,
+        name: str | None = None,
     ) -> None:
         """Initialize mean Ricci curvature feature.
-        
+
         Args:
             delta: Price quantization granularity (default: 0.005)
             chunk_size: Process edges in chunks for large graphs (default: None)
             use_float32: Use float32 precision for memory efficiency (default: False)
+            parallel_async: Execute curvature computations concurrently via
+                asyncio thread pools (default: False)
+            max_workers: Optional cap for the async worker pool (default: None)
             name: Optional custom name (default: "mean_ricci")
         """
         super().__init__(name or "mean_ricci")
         self.delta = float(delta)
         self.chunk_size = chunk_size
         self.use_float32 = use_float32
+        self.parallel_async = parallel_async
+        self.max_workers = max_workers
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
-        """Compute mean Ricci curvature of price graph.
-        
-        Args:
-            data: 1D array of prices
-            **_: Additional keyword arguments (ignored)
-            
-        Returns:
-            FeatureResult containing mean Ricci curvature and metadata
-        """
+        """Compute mean Ricci curvature of price graph."""
+
         with _metrics.measure_feature_transform(self.name, "ricci"):
             G = build_price_graph(data, delta=self.delta)
-            value = mean_ricci(G, chunk_size=self.chunk_size, use_float32=self.use_float32)
+            value = mean_ricci(
+                G,
+                chunk_size=self.chunk_size,
+                use_float32=self.use_float32,
+                parallel="async" if self.parallel_async else "none",
+                max_workers=self.max_workers,
+            )
             _metrics.record_feature_value(self.name, value)
             metadata: dict[str, Any] = {
-                "delta": self.delta, 
+                "delta": self.delta,
                 "nodes": G.number_of_nodes(),
                 "edges": G.number_of_edges(),
             }
-            # Only expose optional optimisation flags when they are actively used
             if self.use_float32:
                 metadata["use_float32"] = True
             if self.chunk_size is not None:
                 metadata["chunk_size"] = self.chunk_size
+            if self.parallel_async:
+                metadata["parallel"] = "async"
+            if self.max_workers is not None:
+                metadata["max_workers"] = self.max_workers
             return FeatureResult(name=self.name, value=value, metadata=metadata)
+
 
 
 __all__ = [

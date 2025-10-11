@@ -17,7 +17,11 @@ References:
 """
 from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
+
+import asyncio
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from typing import Any, Literal, Sequence
 
 import numpy as np
 
@@ -28,8 +32,54 @@ from ..utils.metrics import get_metrics_collector
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
 
+try:  # pragma: no cover - optional dependency
+    import cupy as cp  # type: ignore
+except Exception:  # pragma: no cover - fallback when CuPy missing
+    cp = None  # type: ignore
 
-def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, chunk_size: int | None = None) -> float:
+try:  # pragma: no cover - optional dependency
+    from numba import cuda
+except Exception:  # pragma: no cover - fallback when Numba missing
+    cuda = None  # type: ignore
+
+if cuda is not None:  # pragma: no cover - compiled at import time
+    import math
+
+    @cuda.jit
+    def _entropy_histogram_kernel(data, hist, min_v, max_v):
+        i = cuda.grid(1)
+        if i >= data.size:
+            return
+        value = data[i]
+        if not math.isfinite(value):
+            return
+        span = max_v - min_v
+        if span <= 0:
+            bin_id = 0
+        else:
+            pos = (value - min_v) / span
+            if pos < 0:
+                pos = 0.0
+            if pos > 0.999999:
+                pos = 0.999999
+            bin_id = int(pos * hist.size)
+            if bin_id >= hist.size:
+                bin_id = hist.size - 1
+        cuda.atomic.add(hist, bin_id, 1)
+else:  # pragma: no cover
+    _entropy_histogram_kernel = None
+
+
+def entropy(
+    series: np.ndarray,
+    bins: int = 30,
+    *,
+    use_float32: bool = False,
+    chunk_size: int | None = None,
+    parallel: Literal["none", "process", "async"] = "none",
+    max_workers: int | None = None,
+    backend: Literal["cpu", "gpu", "auto", "cupy", "numba"] = "cpu",
+) -> float:
     """Calculate Shannon entropy of a data series.
     
     Entropy quantifies the uncertainty or randomness in the data distribution.
@@ -45,6 +95,14 @@ def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, ch
         use_float32: Use float32 precision to reduce memory usage (default: False)
         chunk_size: Process data in chunks for large arrays (default: None, no chunking).
                    If specified, computes entropy by averaging over chunks.
+        parallel: Parallelization strategy for chunked execution. ``"process"``
+                   uses :class:`concurrent.futures.ProcessPoolExecutor`, while
+                   ``"async"`` executes chunks via :mod:`asyncio` thread pools.
+        max_workers: Optional maximum worker count for the selected parallel
+                   executor.
+        backend: Computation backend. ``"cpu"`` runs on NumPy, ``"gpu"``/``"auto"``
+                 pick the best available accelerator (CuPy first, then
+                 :mod:`numba.cuda`).
         
     Returns:
         Shannon entropy value. Higher values indicate more randomness/chaos.
@@ -66,8 +124,15 @@ def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, ch
         - Returns 0.0 if no valid data remains after filtering
         - Chunked processing computes weighted average entropy across chunks
     """
-    with _logger.operation("entropy", bins=bins, use_float32=use_float32, 
-                          chunk_size=chunk_size, data_size=len(series)):
+    with _logger.operation(
+        "entropy",
+        bins=bins,
+        use_float32=use_float32,
+        chunk_size=chunk_size,
+        data_size=len(series),
+        parallel=parallel,
+        backend=backend,
+    ):
         dtype = np.float32 if use_float32 else float
         x = np.asarray(series, dtype=dtype)
         if x.size == 0:
@@ -80,41 +145,41 @@ def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, ch
         if x.size == 0:
             return 0.0
 
+        selected_backend = _resolve_backend(backend)
+        if selected_backend != "cpu":
+            try:
+                return _entropy_gpu(x, bins, selected_backend)
+            except Exception as exc:  # pragma: no cover - defensive logging
+                _logger.warning(
+                    "GPU entropy backend '%s' failed (%s); falling back to CPU.",
+                    selected_backend,
+                    exc,
+                )
+
         # Chunked processing for large arrays
         if chunk_size is not None and x.size > chunk_size:
-            n_chunks = (x.size + chunk_size - 1) // chunk_size
-            entropies = []
-            weights = []
-            
-            for i in range(n_chunks):
-                start = i * chunk_size
-                end = min((i + 1) * chunk_size, x.size)
-                chunk = x[start:end]
-                
-                if chunk.size == 0:
-                    continue
-                
-                # Normalize chunk
-                scale = np.max(np.abs(chunk))
-                if scale and np.isfinite(scale):
-                    chunk = chunk / scale
-                
-                # Compute histogram for chunk
-                counts, _ = np.histogram(chunk, bins=bins, density=False)
-                total = counts.sum(dtype=dtype)
-                if total > 0:
-                    p = counts[counts > 0] / total
-                    chunk_entropy = float(-(p * np.log(p)).sum())
-                    entropies.append(chunk_entropy)
-                    weights.append(chunk.size)
-            
-            if not entropies:
+            chunks = [
+                x[i : min(i + chunk_size, x.size)]
+                for i in range(0, x.size, chunk_size)
+            ]
+            tasks = [(chunk, bins, dtype) for chunk in chunks if chunk.size > 0]
+            if not tasks:
                 return 0.0
-            
-            # Return weighted average entropy
+
+            if parallel == "process":
+                results = _run_entropy_process(tasks, max_workers)
+            elif parallel == "async":
+                results = _run_entropy_async(tasks, max_workers)
+            else:
+                results = [_entropy_chunk_worker(task) for task in tasks]
+
+            entropies, weights = zip(*results)
             weights_arr = np.array(weights, dtype=dtype)
             entropies_arr = np.array(entropies, dtype=dtype)
-            return float(np.average(entropies_arr, weights=weights_arr))
+            total_weight = weights_arr.sum(dtype=dtype)
+            if total_weight == 0:
+                return 0.0
+            return float(np.dot(entropies_arr, weights_arr) / total_weight)
 
         # Standard single-pass processing
         # Normalize to [-1, 1] for numerical stability
@@ -131,6 +196,138 @@ def entropy(series: np.ndarray, bins: int = 30, *, use_float32: bool = False, ch
         # Calculate Shannon entropy
         p = counts[counts > 0] / total
         return float(-(p * np.log(p)).sum())
+
+
+def _cuda_available() -> bool:
+    if cuda is None:
+        return False
+    try:
+        return bool(cuda.is_available())
+    except Exception:  # pragma: no cover - driver missing
+        return False
+
+
+def _resolve_backend(requested: str) -> str:
+    normalized = requested.lower()
+    if normalized not in {"cpu", "gpu", "auto", "cupy", "numba"}:
+        raise ValueError(f"Unsupported backend '{requested}'")
+    if normalized == "cpu":
+        return "cpu"
+    if normalized == "cupy":
+        return "cupy" if cp is not None else "cpu"
+    if normalized == "numba":
+        return "numba" if _cuda_available() else "cpu"
+    # gpu/auto prefer CuPy, then Numba
+    if cp is not None:
+        return "cupy"
+    if _cuda_available():
+        return "numba"
+    return "cpu"
+
+
+def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:
+    if backend == "cupy":
+        if cp is None:
+            raise RuntimeError("CuPy not available")
+        arr = cp.asarray(x, dtype=cp.float32)
+        mask = cp.isfinite(arr)
+        if not cp.all(mask):
+            arr = arr[mask]
+        if arr.size == 0:
+            return 0.0
+        scale = cp.max(cp.abs(arr))
+        scale_value = float(scale.get() if hasattr(scale, "get") else scale)
+        if scale_value != 0.0 and np.isfinite(scale_value):
+            arr = arr / scale_value
+        counts, _ = cp.histogram(arr, bins=bins)
+        total = counts.sum(dtype=cp.float32)
+        total_value = float(total.get() if hasattr(total, "get") else total)
+        if total_value == 0.0:
+            return 0.0
+        mask = counts > 0
+        probs = counts[mask] / total_value
+        entropy_value = -cp.sum(probs * cp.log(probs))
+        return float(entropy_value.get())
+
+    if backend == "numba":
+        if not _cuda_available() or _entropy_histogram_kernel is None:
+            raise RuntimeError("Numba CUDA backend is unavailable")
+        data = np.asarray(x, dtype=np.float32)
+        mask = np.isfinite(data)
+        if not mask.all():
+            data = data[mask]
+        if data.size == 0:
+            return 0.0
+        min_v = float(np.min(data))
+        max_v = float(np.max(data))
+        if not np.isfinite(min_v) or not np.isfinite(max_v) or max_v == min_v:
+            return 0.0
+        device_data = cuda.to_device(data)
+        device_hist = cuda.to_device(np.zeros(bins, dtype=np.int32))
+        threads = 256
+        blocks = (int(data.size) + threads - 1) // threads
+        _entropy_histogram_kernel[blocks, threads](device_data, device_hist, min_v, max_v)
+        cuda.synchronize()
+        counts = device_hist.copy_to_host().astype(np.float32)
+        total = counts.sum(dtype=np.float32)
+        if total == 0:
+            return 0.0
+        probs = counts[counts > 0] / total
+        return float(-(probs * np.log(probs)).sum())
+
+    raise ValueError(f"Unknown backend '{backend}'")
+
+
+def _entropy_chunk_worker(task: tuple[np.ndarray, int, np.dtype]) -> tuple[float, int]:
+    chunk, bins, dtype = task
+    chunk = np.asarray(chunk, dtype=dtype)
+    if chunk.size == 0:
+        return 0.0, 0
+    scale = np.max(np.abs(chunk))
+    if scale and np.isfinite(scale):
+        chunk = chunk / scale
+    counts, _ = np.histogram(chunk, bins=bins, density=False)
+    total = counts.sum(dtype=dtype)
+    if total <= 0:
+        return 0.0, int(chunk.size)
+    probs = counts[counts > 0] / total
+    entropy_value = float(-(probs * np.log(probs)).sum())
+    return entropy_value, int(chunk.size)
+
+
+def _run_entropy_process(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        return list(executor.map(_entropy_chunk_worker, tasks))
+
+
+def _run_entropy_async(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
+    async def _runner() -> list[tuple[float, int]]:
+        loop = asyncio.get_running_loop()
+        executor: ThreadPoolExecutor | None = None
+        try:
+            if max_workers is not None:
+                executor = ThreadPoolExecutor(max_workers=max_workers)
+            futures = [
+                loop.run_in_executor(executor, _entropy_chunk_worker, task)
+                for task in tasks
+            ]
+            return await asyncio.gather(*futures)
+        finally:
+            if executor is not None:
+                executor.shutdown(wait=True)
+
+    try:
+        return asyncio.run(_runner())
+    except RuntimeError as exc:
+        if "event loop is running" not in str(exc):
+            raise
+        new_loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(new_loop)
+            return new_loop.run_until_complete(_runner())
+        finally:
+            asyncio.set_event_loop(None)
+            new_loop.close()
 
 
 def delta_entropy(series: np.ndarray, window: int = 100, bins_range=(10, 50)) -> float:
@@ -193,6 +390,9 @@ class EntropyFeature(BaseFeature):
         bins: Number of histogram bins for entropy calculation
         use_float32: Use float32 precision to reduce memory usage
         chunk_size: Chunk size for processing large arrays
+        parallel: Parallelization mode for chunked execution
+        backend: Computation backend
+        max_workers: Optional worker cap
         name: Feature identifier
         
     Example:
@@ -211,11 +411,14 @@ class EntropyFeature(BaseFeature):
 
     def __init__(
         self, 
-        bins: int = 30, 
-        *, 
+        bins: int = 30,
+        *,
         use_float32: bool = False,
         chunk_size: int | None = None,
-        name: str | None = None
+        parallel: Literal["none", "process", "async"] = "none",
+        backend: Literal["cpu", "gpu", "auto", "cupy", "numba"] = "cpu",
+        max_workers: int | None = None,
+        name: str | None = None,
     ) -> None:
         """Initialize entropy feature.
         
@@ -223,12 +426,18 @@ class EntropyFeature(BaseFeature):
             bins: Number of bins for histogram discretization (default: 30)
             use_float32: Use float32 precision for memory efficiency (default: False)
             chunk_size: Chunk size for large arrays, None disables chunking (default: None)
+            parallel: Parallelization mode for chunked execution (default: "none")
+            backend: Computation backend (default: "cpu")
+            max_workers: Optional worker cap (default: None)
             name: Optional custom name for the feature (default: "entropy")
         """
         super().__init__(name or "entropy")
         self.bins = bins
         self.use_float32 = use_float32
         self.chunk_size = chunk_size
+        self.parallel = parallel
+        self.backend = backend
+        self.max_workers = max_workers
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Shannon entropy of input data.
@@ -241,8 +450,15 @@ class EntropyFeature(BaseFeature):
             FeatureResult containing entropy value and metadata
         """
         with _metrics.measure_feature_transform(self.name, "entropy"):
-            value = entropy(data, bins=self.bins, use_float32=self.use_float32, 
-                          chunk_size=self.chunk_size)
+            value = entropy(
+                data,
+                bins=self.bins,
+                use_float32=self.use_float32,
+                chunk_size=self.chunk_size,
+                parallel=self.parallel,
+                max_workers=self.max_workers,
+                backend=self.backend,
+            )
             _metrics.record_feature_value(self.name, value)
             metadata: dict[str, Any] = {"bins": self.bins}
 
@@ -257,6 +473,12 @@ class EntropyFeature(BaseFeature):
                 metadata["use_float32"] = True
             if self.chunk_size is not None:
                 metadata["chunk_size"] = self.chunk_size
+            if self.parallel != "none":
+                metadata["parallel"] = self.parallel
+            if self.max_workers is not None:
+                metadata["max_workers"] = self.max_workers
+            if self.backend != "cpu":
+                metadata["backend"] = self.backend
 
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 

@@ -22,6 +22,7 @@ from .hierarchical_features import (
     TimeFrameSpec,
     compute_hierarchical_features,
 )
+from .pipeline import IndicatorPipeline, PipelineResult
 from .multiscale_kuramoto import (
     KuramotoResult,
     MultiScaleKuramoto,
@@ -48,6 +49,8 @@ __all__ = [
     "HierarchicalFeatureResult",
     "TimeFrameSpec",
     "compute_hierarchical_features",
+    "IndicatorPipeline",
+    "PipelineResult",
     "BackfillState",
     "CacheRecord",
     "FileSystemIndicatorCache",
