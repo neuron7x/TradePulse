@@ -73,6 +73,23 @@ This document converts the proposed enhancements into concrete, actionable steps
    - Include diagrams of data flow (metrics, traces, logs).
    - _Success metric_: On-call engineers can resolve incidents using documentation alone.
 
+## FinOps Dashboards & Optimisation Guidance
+
+1. **Ship Cost Governance Dashboards**
+   - Build Grafana/Looker boards that attribute CPU minutes, GPU minutes, IO, and storage spend per team, strategy, and environment using the tagging scheme from the chaos cost controls programme.
+   - Surface daily and monthly burn rates with anomaly alerts that trigger when variance exceeds ±15% of forecast.
+   - _Success metric_: FinOps can trace ≥95% of spend spikes to a specific team/strategy within one business day.
+
+2. **Automate Savings Recommendations**
+   - Feed utilisation metrics into heuristics that flag opportunities: promote feature-cache hits, collapse redundant aggregations, and suggest throttling backtests when diminishing returns are detected.
+   - Publish weekly "cost optimisation" reports in `reports/finops/recommendations/` and expose a CLI (`tradepulse_cli finops suggestions`) to query live hints.
+   - _Success metric_: Quarterly review shows at least three high-impact savings actions implemented from the recommendation feed.
+
+3. **Close the Loop with Alerting**
+   - Integrate deviation alerts into PagerDuty/Slack with playbooks instructing teams to enable caches, adjust sampling, or reschedule heavy jobs.
+   - Record acknowledgement and remediation steps in `reports/finops/incidents/` for auditing and continuous improvement.
+   - _Success metric_: Mean time to mitigate cost overruns drops below 24 hours.
+
 ## Security Processes
 
 1. **Ship SBOM with Releases**
@@ -107,6 +124,23 @@ This document converts the proposed enhancements into concrete, actionable steps
    - Validate orchestrations (routing, risk checks) while isolating external dependencies.
    - _Success metric_: Tests run in CI without external services yet mimic production workflows.
 
+## Release Safety & Progressive Delivery
+
+1. **Enable Blue/Green and Rolling Deployments**
+   - Extend Kubernetes manifests/Helm charts under `deploy/k8s/` with deployment strategies that support blue/green cutovers and controlled rolling rollouts.
+   - Wire readiness probes to queue-drain hooks so pods stop receiving traffic only after in-flight work is flushed.
+   - _Success metric_: Production releases execute with zero dropped orders and no customer-visible downtime.
+
+2. **Pre-Flight Compatibility Checks**
+   - Implement schema and model compatibility validators that run before deployment (e.g., `make release-validate`) and block promotion when backward-incompatible changes are detected.
+   - Add a staging dry-run pipeline that replays real market data through the new release and validates metrics/signals before production rollout.
+   - _Success metric_: All releases include an attached staging dry-run report showing parity with the previous version.
+
+3. **Operationalise Health Verification**
+   - Capture health-check outcomes, queue depth, and drain duration in release notes for accountability.
+   - Automate rollback criteria: if health checks fail or queues fail to drain within SLA, trigger an immediate revert.
+   - _Success metric_: Release incident rate falls below 1 per quarter with automated rollback coverage.
+
 ## Backtest Engine Realism
 
 1. **Support Market Frictions**
@@ -123,6 +157,23 @@ This document converts the proposed enhancements into concrete, actionable steps
    - Run comparative tests between historical live execution logs and simulated runs.
    - Report deviations and calibrate parameters iteratively.
    - _Success metric_: Signed-off validation report stored under `reports/backtest_validation/`.
+
+## Data Quality & Golden Datasets
+
+1. **Publish Golden Indicator Datasets**
+   - Curate canonical datasets for key indicators and transformations, storing them in `data/golden/` with versioned metadata and documented expected outputs.
+   - Guard them with Great Expectations or Pandera suites that assert statistical properties and transformation correctness.
+   - _Success metric_: Indicator regressions trigger automated failures before merging.
+
+2. **Automate Regression Comparisons**
+   - Create pipelines that compare model outputs against golden baselines on every PR and release, highlighting drift and raising blocking alerts when tolerances are exceeded.
+   - Persist diff reports under `reports/data_quality/regressions/` with annotated charts/tables for reviewer insight.
+   - _Success metric_: No production deploy occurs without a passing regression comparison report attached.
+
+3. **Embed Expectations into CI/CD**
+   - Extend CI workflows to run data quality checks alongside unit tests, publishing artefacts for observability dashboards.
+   - Provide a `make data-quality` target for developers to run checks locally before pushing.
+   - _Success metric_: Data incidents tied to indicator/feature regressions fall to zero.
 
 ## Performance & Parallelism
 
