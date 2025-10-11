@@ -1,5 +1,19 @@
 """Configuration helpers for TradePulse components."""
 
+from .cli_models import (
+    BacktestConfig,
+    CatalogConfig,
+    DataSourceConfig,
+    ExecConfig,
+    ExecutionConfig,
+    IngestConfig,
+    OptimizeConfig,
+    ReportConfig,
+    StrategyConfig,
+    TradePulseBaseConfig,
+    VersioningConfig,
+)
+from .template_manager import ConfigTemplateManager
 from .kuramoto_ricci import (
     CompositeConfig,
     CompositeSignals,
@@ -17,17 +31,29 @@ from .kuramoto_ricci import (
 )
 
 __all__ = [
+    "BacktestConfig",
+    "CatalogConfig",
     "CompositeConfig",
     "CompositeSignals",
     "CompositeThresholds",
+    "ConfigTemplateManager",
+    "DataSourceConfig",
     "ConfigError",
+    "ExecConfig",
+    "ExecutionConfig",
     "KuramotoConfig",
     "KuramotoRicciIntegrationConfig",
     "RicciConfig",
     "RicciGraphConfig",
     "RicciTemporalConfig",
+    "IngestConfig",
+    "OptimizeConfig",
+    "ReportConfig",
     "TradePulseSettings",
     "YamlSettingsSource",
     "load_kuramoto_ricci_config",
     "parse_cli_overrides",
+    "StrategyConfig",
+    "TradePulseBaseConfig",
+    "VersioningConfig",
 ]

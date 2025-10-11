@@ -1,0 +1,12 @@
+name: sample_report_job
+description: Example report configuration
+tags:
+  - report
+metadata:
+  owner: analytics
+inputs:
+  - reports/backtest.json
+  - reports/exec.json
+output_path: reports/report.md
+versioning:
+  backend: none

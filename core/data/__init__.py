@@ -9,6 +9,8 @@ if not hasattr(_np, "float_"):
     _np.float_ = _np.float64
 
 from .catalog import normalize_symbol, normalize_venue
+from .feature_catalog import CatalogEntry, FeatureCatalog
+from .versioning import DataVersionManager, VersioningError
 from .models import (
     AggregateMetric,
     DataKind,
@@ -64,6 +66,10 @@ __all__ = [
     "Ticker",
     "normalize_symbol",
     "normalize_venue",
+    "CatalogEntry",
+    "FeatureCatalog",
+    "DataVersionManager",
+    "VersioningError",
     "TimeSeriesValidationConfig",
     "TimeSeriesValidationError",
     "ValueColumnConfig",
