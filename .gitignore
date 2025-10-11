@@ -34,3 +34,5 @@ Thumbs.db
 .env
 .env.local
 apps/web/node_modules/
+rust/target/
+rust/**/target/

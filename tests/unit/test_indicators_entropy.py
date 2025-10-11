@@ -227,7 +227,11 @@ def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) 
 
     dummy_logger = DummyLogger()
     monkeypatch.setattr(entropy_module, "_logger", dummy_logger)
-    monkeypatch.setattr(entropy_module, "_resolve_backend", lambda backend: "cupy")
+    monkeypatch.setattr(
+        entropy_module,
+        "_resolve_backend",
+        lambda backend, **_: "cupy",
+    )
 
     def _failing_gpu_backend(x: np.ndarray, bins: int, backend: str) -> float:
         raise RuntimeError("backend exploded")
@@ -239,6 +243,7 @@ def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) 
 
     assert np.isfinite(result)
     assert dummy_logger.warnings, "Expected GPU fallback warning to be emitted"
+    assert entropy_module._LAST_ENTROPY_BACKEND == "cpu"
 
 
 def test_entropy_process_executor_stub(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -265,3 +270,29 @@ def test_entropy_process_executor_stub(monkeypatch: pytest.MonkeyPatch) -> None:
     value = entropy_module.entropy(series, bins=32, chunk_size=64, parallel="process")
 
     assert np.isfinite(value)
+
+
+def test_entropy_resolve_backend_respects_data_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.indicators.entropy as entropy_module
+
+    monkeypatch.setattr(entropy_module, "cp", object())
+    monkeypatch.setattr(entropy_module, "_gpu_memory_info", lambda: (2**30, 2**30))
+    monkeypatch.setattr(entropy_module, "_cuda_available", lambda: False)
+
+    small_backend = entropy_module._resolve_backend("auto", data_bytes=1024)
+    large_backend = entropy_module._resolve_backend("auto", data_bytes=10 * entropy_module._GPU_MIN_SIZE_BYTES)
+
+    assert small_backend == "cpu"
+    assert large_backend == "cupy"
+
+
+def test_entropy_resolve_backend_handles_low_gpu_memory(monkeypatch: pytest.MonkeyPatch) -> None:
+    import core.indicators.entropy as entropy_module
+
+    monkeypatch.setattr(entropy_module, "cp", object())
+    monkeypatch.setattr(entropy_module, "_gpu_memory_info", lambda: (128 * 1024, 2**30))
+    monkeypatch.setattr(entropy_module, "_cuda_available", lambda: False)
+
+    backend = entropy_module._resolve_backend("auto", data_bytes=entropy_module._GPU_MIN_SIZE_BYTES * 2)
+
+    assert backend == "cpu"

@@ -32,6 +32,10 @@ from ..utils.metrics import get_metrics_collector
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
 
+_GPU_MIN_SIZE_BYTES = 512 * 1024
+_GPU_MEMORY_MARGIN = 1.4
+_LAST_ENTROPY_BACKEND = "cpu"
+
 try:  # pragma: no cover - optional dependency
     import cupy as cp  # type: ignore
 except Exception:  # pragma: no cover - fallback when CuPy missing
@@ -133,9 +137,12 @@ def entropy(
         parallel=parallel,
         backend=backend,
     ):
+        global _LAST_ENTROPY_BACKEND
+
         dtype = np.float32 if use_float32 else float
         x = np.asarray(series, dtype=dtype)
         if x.size == 0:
+            _LAST_ENTROPY_BACKEND = "cpu"
             return 0.0
 
         # Filter out non-finite values
@@ -143,18 +150,23 @@ def entropy(
         if not finite.all():
             x = x[finite]
         if x.size == 0:
+            _LAST_ENTROPY_BACKEND = "cpu"
             return 0.0
 
-        selected_backend = _resolve_backend(backend)
+        data_bytes = int(x.size) * np.dtype(dtype).itemsize
+        selected_backend = _resolve_backend(backend, data_bytes=data_bytes)
         if selected_backend != "cpu":
             try:
-                return _entropy_gpu(x, bins, selected_backend)
+                result = _entropy_gpu(x, bins, selected_backend)
+                _LAST_ENTROPY_BACKEND = selected_backend
+                return result
             except Exception as exc:  # pragma: no cover - defensive logging
                 _logger.warning(
                     "GPU entropy backend '%s' failed (%s); falling back to CPU.",
                     selected_backend,
                     exc,
                 )
+                _LAST_ENTROPY_BACKEND = "cpu"
 
         # Chunked processing for large arrays
         if chunk_size is not None and x.size > chunk_size:
@@ -164,6 +176,7 @@ def entropy(
             ]
             tasks = [(chunk, bins, dtype) for chunk in chunks if chunk.size > 0]
             if not tasks:
+                _LAST_ENTROPY_BACKEND = "cpu"
                 return 0.0
 
             if parallel == "process":
@@ -178,7 +191,9 @@ def entropy(
             entropies_arr = np.array(entropies, dtype=dtype)
             total_weight = weights_arr.sum(dtype=dtype)
             if total_weight == 0:
+                _LAST_ENTROPY_BACKEND = "cpu"
                 return 0.0
+            _LAST_ENTROPY_BACKEND = "cpu"
             return float(np.dot(entropies_arr, weights_arr) / total_weight)
 
         # Standard single-pass processing
@@ -191,10 +206,12 @@ def entropy(
         counts, _ = np.histogram(x, bins=bins, density=False)
         total = counts.sum(dtype=dtype)
         if total == 0:
+            _LAST_ENTROPY_BACKEND = "cpu"
             return 0.0
 
         # Calculate Shannon entropy
         p = counts[counts > 0] / total
+        _LAST_ENTROPY_BACKEND = "cpu"
         return float(-(p * np.log(p)).sum())
 
 
@@ -207,7 +224,18 @@ def _cuda_available() -> bool:
         return False
 
 
-def _resolve_backend(requested: str) -> str:
+def _gpu_memory_info() -> tuple[int, int] | None:
+    if cp is None or not hasattr(cp, "cuda"):
+        return None
+    try:  # pragma: no cover - interacts with GPU driver
+        device = cp.cuda.Device()  # type: ignore[attr-defined]
+        free_mem, total_mem = device.mem_info
+        return int(free_mem), int(total_mem)
+    except Exception:
+        return None
+
+
+def _resolve_backend(requested: str, data_bytes: int | None = None) -> str:
     normalized = requested.lower()
     if normalized not in {"cpu", "gpu", "auto", "cupy", "numba"}:
         raise ValueError(f"Unsupported backend '{requested}'")
@@ -218,9 +246,21 @@ def _resolve_backend(requested: str) -> str:
     if normalized == "numba":
         return "numba" if _cuda_available() else "cpu"
     # gpu/auto prefer CuPy, then Numba
+    if data_bytes is not None and data_bytes < _GPU_MIN_SIZE_BYTES:
+        return "cpu"
     if cp is not None:
-        return "cupy"
+        mem_info = _gpu_memory_info()
+        if mem_info is not None:
+            free_mem, _total_mem = mem_info
+            required = data_bytes if data_bytes is not None else _GPU_MIN_SIZE_BYTES
+            if free_mem > int(required * _GPU_MEMORY_MARGIN):
+                return "cupy"
+        else:
+            # Unable to query memory; be conservative and stay on CPU.
+            return "cpu"
     if _cuda_available():
+        if data_bytes is not None and data_bytes < _GPU_MIN_SIZE_BYTES:
+            return "cpu"
         return "numba"
     return "cpu"
 
@@ -477,8 +517,11 @@ class EntropyFeature(BaseFeature):
                 metadata["parallel"] = self.parallel
             if self.max_workers is not None:
                 metadata["max_workers"] = self.max_workers
-            if self.backend != "cpu":
-                metadata["backend"] = self.backend
+            actual_backend = _LAST_ENTROPY_BACKEND
+            if self.backend != "cpu" or actual_backend != "cpu":
+                metadata["backend"] = actual_backend
+                if self.backend != actual_backend:
+                    metadata["backend_requested"] = self.backend
 
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 

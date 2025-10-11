@@ -18,15 +18,16 @@ try:  # pragma: no cover - exercised indirectly in environments without numpy
 except ModuleNotFoundError:  # pragma: no cover - handled in fallback logic
     np = None  # type: ignore[assignment]
     _NUMPY_AVAILABLE = False
+    _accelerated_quantiles = None
 else:  # pragma: no cover - covered via normal test environment
     _NUMPY_AVAILABLE = True
+    from core.accelerators.numeric import quantiles as _accelerated_quantiles
 
 try:
     from prometheus_client import (
         Counter,
         Gauge,
         Histogram,
-        CollectorRegistry,
         generate_latest,
         start_http_server,
     )
@@ -418,11 +419,15 @@ class MetricsCollector:
             return
 
         quantiles = (0.5, 0.95, 0.99)
-        if _NUMPY_AVAILABLE and np is not None:
+        if _NUMPY_AVAILABLE and np is not None and _accelerated_quantiles is not None:
             arr = np.fromiter(values, dtype=float, count=len(values))
             if arr.size == 0:
                 return
-            quantile_values = {q: float(np.quantile(arr, q)) for q in quantiles}
+            accelerated = _accelerated_quantiles(arr, quantiles)
+            quantile_values = {
+                q: float(value)
+                for q, value in zip(quantiles, accelerated, strict=False)
+            }
         else:
             quantile_values = _fallback_quantiles(values, quantiles)
 
