@@ -33,6 +33,7 @@ focused document so contributors can quickly find the details they need.
 | Backtesting | Deterministic walk-forward engine, signal requirements, and diagnostics. | [`docs/backtest.md`](backtest.md), [`backtest/engine.py`](../backtest/engine.py) |
 | Execution & Risk | Order sizing utilities, portfolio heat checks, and integration touchpoints. | [`docs/execution.md`](execution.md), [`execution`](../execution) |
 | Execution Simulation | Latency, queueing, halts, and time-in-force handling for research-grade fills. | [`docs/backtest_execution_simulation.md`](backtest_execution_simulation.md), [`backtest/execution_simulation.py`](../backtest/execution_simulation.py) |
+| Stress & Portfolio Resilience | Historic scenario replays, chaos exercises, and capital allocation guardrails. | [`docs/stress_playbooks.md`](stress_playbooks.md) |
 | CLI & Interfaces | Automations for analysis/backtest/live commands and scripting entrypoints. | [`interfaces/cli.py`](../interfaces/cli.py) |
 
 ---
