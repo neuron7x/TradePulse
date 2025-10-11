@@ -129,5 +129,7 @@ class ReportConfig(TradePulseBaseConfig):
 
     inputs: List[Path]
     output_path: Path
+    html_output_path: Path | None = None
+    pdf_output_path: Path | None = None
     template: Optional[Path] = None
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)

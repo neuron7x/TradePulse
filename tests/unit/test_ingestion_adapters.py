@@ -7,9 +7,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import AsyncIterator
 
+import httpx
 import pandas as pd
 import pytest
-import httpx
+
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 POLYGON_TEST_KEY = "".join(
     ("p", "o", "l", "y", "g", "o", "n", "-", "d", "e", "m", "o", "-", "t", "o", "k", "e", "n")
@@ -98,7 +100,7 @@ async def test_parquet_adapter_fetch(tmp_path: Path) -> None:
     adapter = ParquetIngestionAdapter()
     ticks = await adapter.fetch(path=file_path, symbol="BTCUSD", venue="BINANCE")
     assert len(ticks) == 2
-    assert float(ticks[0].price) == pytest.approx(df.loc[0, "price"])
+    assert float(ticks[0].price) == pytest.approx(df.loc[0, "price"], rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
 @pytest.mark.asyncio
@@ -110,7 +112,7 @@ async def test_csv_adapter_stream(tmp_path: Path) -> None:
     stream = adapter.stream(path=csv_path, symbol="ETHUSD", venue="CSV")
     ticks = [tick async for tick in stream]
     assert len(ticks) == 2
-    assert float(ticks[1].price) == pytest.approx(101.0)
+    assert float(ticks[1].price) == pytest.approx(101.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
 class _StubExchange:

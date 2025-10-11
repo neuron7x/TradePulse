@@ -5,19 +5,27 @@ on:
     types: [published]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build-and-publish:
     name: Build and upload package
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Ensure release tag is signed
+        run: |
+          tag="${{ github.event.release.tag_name }}"
+          if ! git cat-file tag "$tag" | grep -q "BEGIN PGP SIGNATURE"; then
+            echo "::error::Tag $tag is not signed with a GPG signature."
+            exit 1
+          fi
 
       - name: Validate release metadata
         id: release
@@ -39,6 +47,39 @@ jobs:
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+
+      - name: Generate release notes and changelog
+        id: changelog
+        run: |
+          set -euo pipefail
+          tag="${{ github.event.release.tag_name }}"
+          prev_tag=""
+          if git describe --tags --abbrev=0 "${tag}^" >/dev/null 2>&1; then
+            prev_tag="$(git describe --tags --abbrev=0 "${tag}^")"
+          fi
+          if [ -n "$prev_tag" ]; then
+            python tools/release/conventional_changelog.py \
+              --current-tag "$tag" \
+              --previous-tag "$prev_tag" \
+              --output release-notes.md \
+              --changelog CHANGELOG.md
+          else:
+            python tools/release/conventional_changelog.py \
+              --current-tag "$tag" \
+              --output release-notes.md \
+              --changelog CHANGELOG.md
+          fi
+          echo "previous_tag=$prev_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release notes and changelog
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: release-notes.md
+          files: |
+            release-notes.md
+            CHANGELOG.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install build tooling
         run: |
@@ -70,3 +111,10 @@ jobs:
             exit 1
           fi
           twine upload dist/*
+
+      - name: Attach distribution artifacts to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

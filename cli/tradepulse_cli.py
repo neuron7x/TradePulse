@@ -23,6 +23,7 @@ from core.config.cli_models import (
 from core.config.template_manager import ConfigTemplateManager
 from core.data.feature_catalog import FeatureCatalog
 from core.data.versioning import DataVersionManager
+from core.reporting import generate_markdown_report, render_markdown_to_html, render_markdown_to_pdf
 
 DEFAULT_TEMPLATES_DIR = Path("configs/templates")
 
@@ -309,16 +310,19 @@ def report(ctx: click.Context, config: Path | None, generate_config: bool, outpu
         raise click.UsageError("--config is required when not generating a template")
 
     cfg = manager.load_config(config, ReportConfig)
-    sections = []
-    for artifact in cfg.inputs:
-        path = Path(artifact)
-        if not path.exists():
-            raise click.ClickException(f"Report input {path} does not exist")
-        sections.append(f"### {path.stem}\n``\n{path.read_text(encoding='utf-8').strip()}\n``")
-    report_text = "\n\n".join(sections)
+    try:
+        report_text = generate_markdown_report(cfg)
+    except FileNotFoundError as exc:
+        raise click.ClickException(str(exc)) from exc
+
     cfg.output_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.output_path.write_text(report_text, encoding="utf-8")
 
+    if cfg.html_output_path is not None:
+        render_markdown_to_html(report_text, cfg.html_output_path)
+    if cfg.pdf_output_path is not None:
+        render_markdown_to_pdf(report_text, cfg.pdf_output_path)
+
     version_mgr = DataVersionManager(cfg.versioning)
-    version_mgr.snapshot(cfg.output_path, metadata={"sections": len(sections)})
+    version_mgr.snapshot(cfg.output_path, metadata={"sections": len(cfg.inputs)})
     click.echo(f"Report written to {cfg.output_path}")
