@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, MutableSequence, Sequence
 
 from core.utils.metrics import get_metrics_collector
+from observability.tracing import pipeline_span
 
 FeatureInput = Any
 
@@ -45,8 +46,9 @@ class BaseFeature(ABC):
         metrics = get_metrics_collector()
         feature_type = kwargs.get("feature_type", "generic")
         
-        with metrics.measure_feature_transform(self.name, feature_type):
-            result = self.transform(data, **kwargs)
+        with pipeline_span("features.transform", feature_name=self.name, feature_type=feature_type):
+            with metrics.measure_feature_transform(self.name, feature_type):
+                result = self.transform(data, **kwargs)
             
         # Record the feature value if it's numeric
         if isinstance(result.value, (int, float)):

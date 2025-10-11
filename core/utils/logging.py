@@ -12,6 +12,14 @@ import sys
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, Iterator, Optional
+
+try:  # pragma: no cover - tracing is optional
+    from opentelemetry.trace import get_current_span
+
+    _TRACE_LOG_CORRELATION = True
+except Exception:  # pragma: no cover - optional dependency not installed
+    get_current_span = None  # type: ignore[assignment]
+    _TRACE_LOG_CORRELATION = False
 from uuid import uuid4
 
 
@@ -29,7 +37,24 @@ class JSONFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno,
         }
-        
+
+        if _TRACE_LOG_CORRELATION and get_current_span is not None:
+            span = get_current_span()
+            try:
+                context = span.get_span_context()  # type: ignore[assignment]
+            except AttributeError:  # pragma: no cover - defensive guard
+                context = None
+            if context:
+                is_valid_attr = getattr(context, "is_valid", None)
+                is_valid = bool(is_valid_attr()) if callable(is_valid_attr) else bool(is_valid_attr)
+                if is_valid:
+                    trace_id = getattr(context, "trace_id", 0)
+                    span_id = getattr(context, "span_id", 0)
+                    if trace_id:
+                        log_data["trace_id"] = f"{trace_id:032x}"
+                    if span_id:
+                        log_data["span_id"] = f"{span_id:016x}"
+
         # Add correlation ID if present
         if hasattr(record, "correlation_id"):
             log_data["correlation_id"] = record.correlation_id

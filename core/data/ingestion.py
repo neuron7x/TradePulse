@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 from core.data.models import InstrumentType, PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from interfaces.ingestion import DataIngestionService
+from observability.tracing import pipeline_span
 
 __all__ = ["Ticker", "DataIngestor", "BinanceStreamHandle"]
 
@@ -59,31 +60,38 @@ class DataIngestor(DataIngestionService):
         market: Optional[str] = None,
     ) -> None:
         missing: list[str] = []
-        with open(path, "r", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            if reader.fieldnames is None:
-                raise ValueError("CSV file must include a header row")
-            missing = [field for field in required_fields if field not in reader.fieldnames]
-            if missing:
-                raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
-            for row_number, row in enumerate(reader, start=2):
-                try:
-                    ts_raw = float(row["ts"])
-                    price = row["price"]
-                    volume = row.get("volume", 0.0) or 0.0
-                    timestamp = normalize_timestamp(ts_raw, market=market)
-                    tick = Ticker.create(
-                        symbol=symbol,
-                        venue=venue,
-                        price=price,
-                        timestamp=timestamp,
-                        volume=volume,
-                        instrument_type=instrument_type,
-                    )
-                except (TypeError, ValueError, InvalidOperation) as exc:
-                    logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
-                    continue
-                on_tick(tick)
+        with pipeline_span(
+            "ingest.historical_csv",
+            source="csv",
+            path=path,
+            symbol=symbol,
+            venue=venue,
+        ):
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames is None:
+                    raise ValueError("CSV file must include a header row")
+                missing = [field for field in required_fields if field not in reader.fieldnames]
+                if missing:
+                    raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
+                for row_number, row in enumerate(reader, start=2):
+                    try:
+                        ts_raw = float(row["ts"])
+                        price = row["price"]
+                        volume = row.get("volume", 0.0) or 0.0
+                        timestamp = normalize_timestamp(ts_raw, market=market)
+                        tick = Ticker.create(
+                            symbol=symbol,
+                            venue=venue,
+                            price=price,
+                            timestamp=timestamp,
+                            volume=volume,
+                            instrument_type=instrument_type,
+                        )
+                    except (TypeError, ValueError, InvalidOperation) as exc:
+                        logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
+                        continue
+                    on_tick(tick)
 
     def binance_ws(self, symbol: str, on_tick: Callable[[Ticker], None], *, interval: str = "1m") -> object:
         if BinanceWS is None:
@@ -111,6 +119,12 @@ class DataIngestor(DataIngestionService):
                 return
             on_tick(tick)
 
-        handle.start(symbol=symbol, interval=interval, callback=_callback)
+        with pipeline_span(
+            "ingest.live_stream",
+            source="binance",
+            symbol=symbol,
+            interval=interval,
+        ):
+            handle.start(symbol=symbol, interval=interval, callback=_callback)
         setattr(ws, "stream_handle", handle)
         return ws

@@ -780,38 +780,74 @@ docker compose up grafana
 
 ## Tracing
 
-### OpenTelemetry Integration (Planned)
+### OpenTelemetry Integration
+
+TradePulse now ships a first-class tracing module under `observability.tracing`
+that configures an OTLP exporter and exposes helpers for the ingest → features →
+signals → orders pipeline. Traces automatically correlate with structured logs
+when `JSONFormatter` is enabled.
 
 ```python
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.exporter.jaeger.thrift import JaegerExporter
+from observability.tracing import TracingConfig, configure_tracing, pipeline_span
 
-# Initialize tracer
-trace.set_tracer_provider(TracerProvider())
-tracer = trace.get_tracer(__name__)
-
-# Configure Jaeger exporter
-jaeger_exporter = JaegerExporter(
-    agent_host_name="localhost",
-    agent_port=6831,
-)
-trace.get_tracer_provider().add_span_processor(
-    BatchSpanProcessor(jaeger_exporter)
+# Configure tracing once during application start-up. The exporter endpoint can
+# also be controlled via OTEL_EXPORTER_OTLP_ENDPOINT.
+configure_tracing(
+    TracingConfig(service_name="tradepulse-api", environment="production")
 )
 
-# Use in code
-with tracer.start_as_current_span("execute_trade"):
-    with tracer.start_as_current_span("compute_indicators"):
-        indicators = compute_all_indicators(prices)
-    
-    with tracer.start_as_current_span("generate_signal"):
-        signal = generate_signal(indicators)
-    
-    with tracer.start_as_current_span("place_order"):
-        result = place_order(signal)
+def run_pipeline():
+    with pipeline_span("ingest.historical_csv", source="csv", symbol="ETHUSDT"):
+        load_prices()
+
+    with pipeline_span("features.transform", feature_name="mean_ricci"):
+        compute_features()
+
+    with pipeline_span("signals.simulate_performance", strategy="mean-reversion"):
+        signal = generate_signal()
+
+    with pipeline_span("orders.submit", symbol="ETHUSDT", side="buy"):
+        place_order(signal)
 ```
+
+Because `pipeline_span` yields the active span, advanced users can attach
+custom attributes or record exceptions. When OpenTelemetry libraries are not
+installed the helper degrades to a no-op so unit tests remain lightweight.
+
+### Health checks
+
+Use `observability.health.HealthServer` to expose `/healthz` and `/readyz`
+endpoints in a background thread:
+
+```python
+from observability.health import HealthServer
+
+with HealthServer(port=8085) as server:
+    server.set_ready(True)
+    server.update_component("postgres", healthy=True)
+    run_application_loop()
+```
+
+### Exporters in isolated processes
+
+The metrics stack can now be hosted outside the main interpreter to reduce
+contention:
+
+```python
+from core.utils.metrics import start_metrics_exporter_process, stop_metrics_exporter_process
+
+exporter = start_metrics_exporter_process(port=9000)
+try:
+    start_application()
+finally:
+    stop_metrics_exporter_process(exporter)
+```
+
+### Pipeline dashboards
+
+Grafana ships with `observability/dashboards/tradepulse-pipeline.json` which
+provides latency, throughput, and error-budget panels for the end-to-end
+pipeline. Import it alongside the existing overview dashboard to monitor SLOs.
 
 ---
 
