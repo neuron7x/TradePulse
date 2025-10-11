@@ -41,6 +41,21 @@ def test_secret_detector_respects_ignore_patterns(tmp_path_factory: pytest.TempP
     assert detector.scan_file(ignored) == []
 
 
+def test_secret_detector_does_not_ignore_non_test_prefixes(tmp_path_factory: pytest.TempPathFactory) -> None:
+    workspace = tmp_path_factory.mktemp("security-latest")
+    target = workspace / "latest_config.py"
+    target.write_text(
+        f"{PASSWORD_LABEL}='{GENERIC_SECRET_VALUE}'\n",
+        encoding="utf-8",
+    )
+
+    detector = SecretDetector()
+    findings = detector.scan_file(target)
+
+    assert findings, "Files with 'latest' in the name should not be ignored"
+    assert any(secret_type == PASSWORD_LABEL for secret_type, _, _ in findings)
+
+
 def test_scan_directory_filters_extensions(tmp_path_factory: pytest.TempPathFactory) -> None:
     workspace = tmp_path_factory.mktemp("security-scan")
     allowed = workspace / "settings.py"
