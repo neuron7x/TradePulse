@@ -31,3 +31,4 @@ clean-dist:
 .PHONY: generate
 generate:
 	buf generate
+	PYTHONPATH=. python tools/schema/generate_event_types.py
