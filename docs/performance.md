@@ -698,6 +698,65 @@ while True:
     # ... continue processing
 ```
 
+## Frontend Performance (Next.js)
+
+TradePulse dashboards rely on Next.js for research and execution workflows. The
+following tactics keep interaction latency low while preserving real-time
+integrations.
+
+### Code-Splitting and Bundle Hygiene
+
+- Use [dynamic imports](https://nextjs.org/docs/pages/building-your-application/optimizing/lazy-loading)
+  for heavy analytics widgets (`dynamic(() => import('./heatmap'), { ssr: false })`).
+- Create route-level segments for rarely used tools (e.g., strategy wizards) so
+  they ship as independent chunks.
+- Enable the Webpack bundle analyzer locally (`ANALYZE=true next build`) and
+  flag modules >150 KB. Move shared charting libraries to CDN-backed
+  `<script>` tags when possible.
+- Tree-shake date/time and math libraries by importing module-scoped functions
+  (`import { differenceInMinutes } from 'date-fns'`).
+
+### ISR/SSR Strategy
+
+- **Order blotters and live dashboards**: Server-Side Rendering (SSR) with
+  streaming to reduce Time-To-First-Byte (TTFB). Hydrate only controls that
+  require client interactivity.
+- **Research reports and analytics**: Incremental Static Regeneration (ISR)
+  with `revalidate` windows aligned to data freshness SLIs (e.g., 300 seconds
+  for signal explainers).
+- Cache SSR responses via the Next.js `Cache-Control` header using `s-maxage`
+  derived from service SLOs.
+
+### API Cache Coordination
+
+- Back caching decisions with the observability platform. Tag responses with
+  `x-tradepulse-cache-hit` headers and export them to Grafana.
+- For GraphQL endpoints, enable Apollo persisted queries and configure Redis
+  TTLs to match ISR intervals.
+- Use SWR or React Query on the client with background revalidation to prevent
+  cascade reloads.
+
+### Measuring LCP and TTFB
+
+- Instrument Web Vitals via `next/script` or the built-in `reportWebVitals`
+  hook. Ship metrics to the central telemetry topic with the following
+  dimensions: `route`, `deployment`, `device`, `connectionType`.
+- For local measurements use `npx next build && npx next start` paired with
+  Lighthouse CI. Capture TTFB using Chrome DevTools' Web Vitals overlay.
+- Investigate LCP regressions by correlating waterfall charts with chunk names
+  from the bundle analyzer. Prioritise reducing render-blocking fonts and
+  third-party scripts.
+
+### Performance Budgets
+
+- Set budgets per route: LCP ≤ 2.0 s (desktop), ≤ 2.5 s (mobile); TTFB ≤ 500 ms.
+- Add `lighthouse-ci` assertions in CI pipelines and fail builds when metrics
+  exceed thresholds.
+- Track bundle size budgets: initial JavaScript ≤ 200 KB, route-specific chunks
+  ≤ 150 KB, CSS ≤ 70 KB.
+- Document exceptions with expiry dates in the quality gates (see
+  `docs/quality_gates.md`).
+
 ## Troubleshooting
 
 ### High Memory Usage

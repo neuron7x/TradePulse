@@ -54,6 +54,18 @@ tracked weekly and trended quarterly.
 Targets assume at least 1,000 valid events per window; otherwise the period is
 flagged for manual review.
 
+### Streaming KPIs
+
+| Capability | SLI Definition | Target | Measurement Notes |
+| ---------- | -------------- | ------ | ----------------- |
+| Ingestion latency | Median time from exchange event to ingestion artifact registration | ≤ 45 s | Derived from catalog timestamps and upstream feed events. |
+| Signal freshness | Percentage of live signals generated within 500 ms of market tick | ≥ 99.2% | Calculated via CEP pipeline telemetry. |
+| Order acknowledgements | Ratio of orders acked < 250 ms / total orders | ≥ 99.5% | Split by venue; tracked via execution metrics. |
+| Fill ratio | Executed quantity / submitted quantity (per venue) | ≥ 92% | Evaluate over rolling 60 minutes with volume weighting. |
+
+SLIs feed Grafana dashboards and the automated quality gates. Any regression
+greater than 2% against target triggers an error-budget burn review.
+
 ### Error Budget Policy
 
 Error budgets are derived as `(1 - SLO target)` per window. The following guard
@@ -71,6 +83,17 @@ rails apply:
 Error budget burn rates are evaluated hourly using Grafana burn-rate panels and
 Prometheus recording rules. Alerts fire when projected exhaustion is under 72
 hours for Red services or 7 days for Yellow services.
+
+**Service-Specific Policies**
+
+- **Ingestion latency** – When burn rate exceeds 2×, pause non-essential ETL
+  jobs and require data team sign-off for schema migrations.
+- **Signal freshness** – Enable degraded-mode execution (wider throttles) after
+  25% budget consumption. Require strategy owners to provide mitigation plans.
+- **Order ACK latency** – Divert new releases away from affected brokers at
+  50% consumption; escalate to broker account managers.
+- **Fill ratio** – Enforce tighter risk caps (−20%) and trigger liquidity
+  provider outreach once consumption exceeds 60%.
 
 ## Alerting and Escalation
 

@@ -63,10 +63,18 @@ nav:
       - Technical Debt Playbook: technical-debt.md
       - Testing Guide: ../TESTING.md
       - Contributing: ../CONTRIBUTING.md
+      - CLI Reference: cli.md
+  - Cookbooks:
+      - Backtest to Live: cookbook_backtest_live.md
+  - Product Experience:
+      - UI Performance Playbook: performance.md
+      - Accessibility Playbook: accessibility.md
   - Operations:
       - Monitoring: monitoring.md
       - Scaling: scaling.md
       - Chaos Testing (GameDay): resilience.md
+      - Reliability Targets: reliability.md
+      - Incident Playbooks: incident_playbooks.md
       - Security: ../SECURITY.md
       - Governance and Data Controls: governance.md
       - Deployment: deployment.md
@@ -76,6 +84,9 @@ nav:
       - API Reference: integration-api.md
       - Indicators Reference: indicators.md
       - Examples: examples/
+  - Quality Management:
+      - DoR & DoD Checklist: quality-dor-dod.md
+      - Quality Gates: quality_gates.md
 
 markdown_extensions:
   - admonition
