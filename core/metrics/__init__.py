@@ -2,6 +2,13 @@
 
 """Expose metric utilities for external consumers."""
 
+from .microstructure import (
+    MicrostructureReport,
+    build_symbol_microstructure_report,
+    hasbrouck_information_impulse,
+    kyles_lambda,
+    queue_imbalance,
+)
 from .regression import (
     mean_absolute_error,
     mean_absolute_percentage_error,
@@ -12,6 +19,11 @@ from .regression import (
 )
 
 __all__ = [
+    "MicrostructureReport",
+    "build_symbol_microstructure_report",
+    "hasbrouck_information_impulse",
+    "kyles_lambda",
+    "queue_imbalance",
     "mean_absolute_error",
     "mean_absolute_percentage_error",
     "mean_squared_error",
