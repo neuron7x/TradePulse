@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
+
 from core.indicators.multiscale_kuramoto import (
     KuramotoResult,
     MultiScaleKuramoto,
@@ -129,9 +131,11 @@ def test_multiscale_feature_reports_metadata_and_custom_price_column() -> None:
 
     assert analyzer.price_cols == ["custom_price"]
     assert outcome.name == "calibrated"
-    assert outcome.value == pytest.approx(0.55, rel=1e-12)
+    assert outcome.value == pytest.approx(0.55, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
     assert outcome.metadata["dominant_timeframe"] == "M5"
     assert outcome.metadata["skipped_timeframes"] == ["M15"]
-    assert outcome.metadata["cross_scale_coherence"] == pytest.approx(0.82, rel=1e-12)
-    assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=1e-12)
+    assert outcome.metadata["cross_scale_coherence"] == pytest.approx(
+        0.82, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
+    assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
     assert outcome.metadata["window_M5"] == 144

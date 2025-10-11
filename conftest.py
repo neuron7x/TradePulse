@@ -16,6 +16,7 @@ This module performs two responsibilities:
 from __future__ import annotations
 
 import asyncio
+import os
 import pathlib
 import sys
 import types
@@ -29,6 +30,11 @@ except ImportError:  # pragma: no cover - Python <3.9 fallback
     from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
 
 import pytest
+
+from tests.tolerances import THREAD_BOUND_ENV_VARS
+
+for _env_key, _env_value in THREAD_BOUND_ENV_VARS.items():
+    os.environ.setdefault(_env_key, _env_value)
 
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
