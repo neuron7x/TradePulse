@@ -21,9 +21,6 @@ focused document so contributors can quickly find the details they need.
   [`docs/risk_ml_observability.md`](risk_ml_observability.md).
 - **Reliability & SRE** – SLA commitments, SLOs, error budgets, and escalation
   policy are outlined in [`docs/reliability.md`](reliability.md).
-- **Portfolio, scheduling, and API standards** – transaction cost modelling,
-  scheduler orchestration, and interface contracts are consolidated in
-  [`docs/portfolio_scheduler_api.md`](portfolio_scheduler_api.md).
 
 ---
 
