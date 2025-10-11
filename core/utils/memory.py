@@ -5,7 +5,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Iterable
-from typing import MutableMapping
+from contextlib import contextmanager
+from typing import Iterator, MutableMapping
 
 import numpy as np
 
@@ -26,11 +27,36 @@ class ArrayPool:
         return np.empty(key[0], dtype=requested_dtype)
 
     def release(self, array: np.ndarray) -> None:
+        if not isinstance(array, np.ndarray):  # pragma: no cover - defensive
+            raise TypeError("ArrayPool.release expects a numpy.ndarray")
+
+        if not array.flags.c_contiguous:
+            raise ValueError("Only contiguous arrays can be released back to the pool")
+
+        if not array.flags.owndata:
+            raise ValueError("Cannot release views that do not own their memory")
+
         key = (tuple(int(s) for s in array.shape), array.dtype)
         self._pool[key].append(array)
 
     def clear(self) -> None:
         self._pool.clear()
+
+    @contextmanager
+    def borrow(
+        self,
+        shape: Iterable[int],
+        *,
+        dtype: np.dtype | str | None = None,
+    ) -> Iterator[np.ndarray]:
+        """Context manager that automatically returns arrays to the pool."""
+
+        array = self.acquire(shape, dtype=dtype)
+
+        try:
+            yield array
+        finally:
+            self.release(array)
 
 
 __all__ = ["ArrayPool"]
