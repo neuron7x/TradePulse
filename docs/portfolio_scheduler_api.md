@@ -12,18 +12,18 @@ auditable process.
 
 | Topic | Standard | Implementation Notes |
 | --- | --- | --- |
-| **Cost Function** | Document the transaction cost and slippage assumptions alongside each strategy. | Capture the model description in the strategy documentation (`docs/scenarios.md`) and link to the experiment artefacts stored in `reports/`.
-| **Optimisation Problem** | Make the optimisation objective and constraints reproducible. | Commit solver notebooks or scripts under `docs/notebooks/` or `examples/` so the process can be replayed by reviewers.
-| **Decision Variables** | Clearly describe the inputs/outputs that flow into strategy code. | Align variable naming with the helpers in `core/strategies/` and surface expected shapes or domains in docstrings.
-| **Constraints** | Keep leverage, turnover, and exposure guardrails explicit. | Use configuration parameters in `configs/` (see `configs/README.md`) and reference them from the associated strategy module.
+| **Cost Function** | Document the transaction cost and slippage assumptions alongside each strategy. | Capture the model description in the strategy documentation (`docs/scenarios.md`) and link to artefacts stored in `reports/` so reviewers can inspect inputs and outputs.
+| **Optimisation Problem** | Make the optimisation objective and constraints reproducible. | Commit solver notebooks or scripts under `docs/notebooks/` or `examples/` so the process can be replayed using repository artefacts.
+| **Decision Variables** | Clearly describe the inputs/outputs that flow into strategy code. | Align variable naming with the helpers in `core/strategies/objectives.py` and surface expected shapes or domains in docstrings.
+| **Constraints** | Keep leverage, turnover, and exposure guardrails explicit. | Use configuration parameters in the existing strategy files inside `configs/` (for example `configs/amm_strategy.yaml`) and reference them from the associated module.
 | **Data Contracts** | Reference validated datasets when running simulations. | Point to the canonical sources described in `docs/dataset_catalog.md` and note any preprocessing carried out by `scripts/data_sanity.py`.
-| **Validation** | Pair each optimisation change with a measurable backtest. | Follow the workflow in `docs/backtest.md` and publish results in `reports/` for auditability.
+| **Validation** | Pair each optimisation change with a measurable backtest. | Follow the workflow in `docs/backtest.md` and publish results in `reports/` so the findings remain auditable.
 
 ### 1.1 Configuration
 
-- Store optimisation-specific parameters alongside existing configuration files
-  in `configs/` (for example `configs/amm_strategy.yaml`). Use schema comments in
-  the file to describe each field.
+- Store optimisation-specific parameters alongside the existing configuration
+  files in `configs/` (for example `configs/amm_strategy.yaml`). Use schema
+  comments in the file to describe each field.
 - Keep solver defaults near the corresponding strategy entry point in
   `core/strategies/` so code and configuration evolve together.
 
@@ -31,8 +31,8 @@ auditable process.
 
 | Test | Purpose | Frequency |
 | --- | --- | --- |
-| **Unit Coverage** | Exercise numerical helpers and constraint builders. | `pytest tests/unit -k optimisation` before publishing a change. |
-| **Scenario Regression** | Compare portfolio metrics for representative data slices. | Nightly or on-demand via the standard `pytest` workflows documented in `TESTING.md`. |
+| **Unit Coverage** | Exercise numerical helpers and constraint builders. | `pytest tests/unit/test_numeric_stability.py` before publishing a change. |
+| **Scenario Regression** | Compare portfolio metrics for representative data slices. | Nightly or on-demand via `pytest tests/strategies/test_amm_combo.py` or the other workflows documented in `TESTING.md`. |
 | **Governance Review** | Summarise TC assumptions, performance, and risk. | Monthly governance checkpoint with artefacts attached in `reports/`. |
 
 ---
@@ -41,7 +41,7 @@ auditable process.
 
 | Capability | Requirement | Tooling |
 | --- | --- | --- |
-| **Workflow Overview** | Describe the orchestration approach that triggers data, backfills, and reporting. | Maintain the narrative in `docs/monitoring.md` and extend it when adding new recurring tasks. |
+| **Workflow Overview** | Describe the orchestration approach that triggers data, backfills, and reporting. | Maintain the narrative in `docs/monitoring.md` and extend it when adding new recurring tasks or automation under `scripts/`. |
 | **SLA Tracking** | Define expected completion windows for critical pipelines. | Capture SLA thresholds in configuration or documentation and monitor via the metrics outlined in `observability/metrics.json`. |
 | **Retries & Alerts** | Capture how failures are surfaced to operators. | Reuse alerting conventions from `observability/alerts.json` and ensure escalation policies are documented. |
 | **Dependency Graph** | Make ordering between pipelines explicit. | Document dependencies in `docs/scenarios.md` (ingestion → backfill → reporting) and link to implementation scripts or runbooks. |
@@ -71,7 +71,7 @@ auditable process.
 
 | Control | Description | Implementation |
 | --- | --- | --- |
-| **Rotational Windows** | Shift feature refresh windows based on market sessions to minimise overlap. | Describe the rotation schedule in `docs/feature_store_sync_and_registry.md` and reference the controlling configuration values in `configs/`. |
+| **Rotational Windows** | Shift feature refresh windows based on market sessions to minimise overlap. | Describe the rotation schedule in `docs/feature_store_sync_and_registry.md` and reference the controlling configuration values in `configs/markets.yaml` or other strategy-specific files. |
 | **Completeness Check** | Validate feature availability before launching backtests. | Use the feature registry guidance in `docs/feature_store_sync_and_registry.md` and enforce checks in pre-launch scripts. |
 | **Staging Snapshot** | Produce immutable snapshots for reproducibility. | Store snapshot metadata or summaries within the `reports/` directory using timestamped filenames. |
 | **Audit Trail** | Log decisions made during window rotation and completeness checks. | Persist structured logs via the observability helpers in `observability/health.py` and archive outputs with other operational reports. |
