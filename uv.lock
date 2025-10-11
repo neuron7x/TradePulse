@@ -145,8 +145,6 @@ protobuf==6.32.1
     # via
     #   googleapis-common-protos
     #   opentelemetry-proto
-pyarrow==21.0.0
-    # via tradepulse (pyproject.toml)
 pycares==4.11.0
     # via aiodns
 pycparser==2.23

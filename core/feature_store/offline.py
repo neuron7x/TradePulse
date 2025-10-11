@@ -5,12 +5,21 @@ from __future__ import annotations
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Literal, Optional, Sequence
+from typing import TYPE_CHECKING, Any, Literal, Optional, Sequence, Tuple
 
 import pandas as pd
-import pyarrow as pa
-import pyarrow.dataset as ds
-import pyarrow.parquet as pq
+
+try:  # pragma: no cover - optional dependency import
+    import pyarrow as _pa
+    import pyarrow.dataset as _ds
+    import pyarrow.parquet as _pq
+except ImportError:  # pragma: no cover - optional dependency import
+    _pa = _ds = _pq = None  # type: ignore[assignment]
+
+if TYPE_CHECKING:  # pragma: no cover - used only for static type checking
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+    import pyarrow.parquet as pq
 
 from .config import OfflineStoreConfig
 from .models import FeatureSet
@@ -62,11 +71,20 @@ class ParquetOfflineStore(OfflineStore):
     def _dataset_path(self, feature_set_name: str) -> Path:
         return self.config.base_path / feature_set_name
 
+    def _require_pyarrow(self) -> Tuple[Any, Any, Any]:
+        if _pa is None or _ds is None or _pq is None:
+            raise RuntimeError(
+                "Parquet support requires the optional dependency 'pyarrow'. "
+                "Install TradePulse with `pip install tradepulse[feature-store]` to enable it."
+            )
+        return _pa, _ds, _pq
+
     def write(self, feature_set: FeatureSet, mode: WriteMode = "append") -> Path:
         self._ensure_partition_columns(feature_set)
         dataset_path = self._dataset_path(feature_set.name)
         if mode == "overwrite" and dataset_path.exists():
             shutil.rmtree(dataset_path)
+        pa, _, pq = self._require_pyarrow()
         table = pa.Table.from_pandas(feature_set.dataframe, preserve_index=False)
         pq.write_to_dataset(
             table,
@@ -83,6 +101,7 @@ class ParquetOfflineStore(OfflineStore):
         columns: Optional[Sequence[str]] = None,
         entity_filter: Optional[pd.DataFrame] = None,
     ) -> pd.DataFrame:
+        _, ds, _ = self._require_pyarrow()
         dataset_path = self._dataset_path(feature_set_name)
         if not dataset_path.exists():
             return pd.DataFrame()
@@ -98,6 +117,7 @@ class ParquetOfflineStore(OfflineStore):
         dataset_path = self._dataset_path(feature_set_name)
         if not dataset_path.exists():
             return None
+        _, ds, _ = self._require_pyarrow()
         dataset = ds.dataset(dataset_path, format="parquet")
         arrow_table = dataset.to_table(columns=[timestamp_column])
         if arrow_table.num_rows == 0:

@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from core.feature_store import (
     FeatureMaterializer,
@@ -7,6 +8,8 @@ from core.feature_store import (
     OfflineStoreConfig,
     OnlineStoreConfig,
 )
+
+pytest.importorskip("pyarrow")
 
 
 def test_feature_store_smoke(tmp_path):

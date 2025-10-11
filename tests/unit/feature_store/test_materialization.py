@@ -12,6 +12,8 @@ from core.feature_store import (
     SQLiteOnlineStore,
 )
 
+pytest.importorskip("pyarrow")
+
 
 @pytest.fixture
 def sample_config(tmp_path):

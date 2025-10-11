@@ -81,6 +81,7 @@ pip install -r requirements-dev.lock
 
 # Optional extras (install only what you need)
 # pip install ".[connectors]"  # market & broker integrations
+# pip install ".[feature-store]"  # Parquet/Delta/Iceberg feature store backends
 # pip install ".[gpu]"         # GPU acceleration backends
 # pip install ".[docs]"        # documentation toolchain
 ```
