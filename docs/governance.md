@@ -11,6 +11,20 @@ This guide defines the governance guardrails for TradePulse across access manage
 | **Execution Trader** | Live execution and risk control services | Approve deployment of execution models, adjust risk limits, halt strategies, monitor execution telemetry. Cannot modify ingestion connectors or raw data. | Fine-grained roles in execution control plane, feature-flag management, emergency break-glass tokens logged in PAM. |
 | **UI Analyst** | Web UI and analytics workspaces | View aggregated dashboards, download approved reports, annotate anomalies. No direct access to raw feature stores or execution toggles. | OIDC group `ui-analyst`, reverse-proxy ACLs, row/column level security on BI datasets. |
 
+### Strategy and Portfolio Permissions
+
+- **Action matrix** – Expose four canonical permissions per strategy or portfolio: `create`, `run`, `kill`, and `export`. Policies are codified in `configs/iam/strategies.yaml` with explicit role → strategy mappings and TTLs for temporary access.
+- **Hierarchical evaluation** – Portfolio-level grants inherit to contained strategies, while strategy overrides can further restrict actions (e.g., allow `run` but deny `export`). Evaluation uses OPA/Rego bundles shipped with deployment artifacts.
+- **Contextual constraints** – Runtime guards require the calling identity, declared change ticket, and deployment hash to match the signed approval manifest before executing `create` or `run` workflows. Requests failing validation are rejected with auditable error codes.
+- **Self-service workflow** – Access requests leverage ServiceNow-style forms that trigger Terraform Cloud runs updating the IAM config repository. All merges require multi-party approval (requester manager + system owner).
+
+### Access Logging and Configuration Integrity
+
+1. **Action audit trail** – Every invocation of `create`, `run`, `kill`, or `export` emits a structured log (JSON) to the governance topic with identity, strategy ID, parameter diff, and approval reference. Logs replicate to long-term storage with 400-day retention.
+2. **Configuration signing** – Strategy manifests, risk limits, and pipeline configs are stored in Git. A sigstore-based signing step runs in CI, attaching provenance metadata (commit SHA, signer identity) before release bundles are published.
+3. **Version rollback** – The deployment controller verifies signatures before promoting configs. If validation fails or a regression is detected, operators can request an automated rollback to the previous signed version, tracked through change tickets.
+4. **Immutable audit snapshots** – Each approved change generates an append-only record in the compliance ledger (PostgreSQL + pgcrypto) linking Git commit, signer, and deployment environment for evidentiary purposes.
+
 ### Service-Level Access Policies
 
 1. **Zero trust mesh** – mTLS enforced between services with SPIFFE identities, limiting service-to-service calls to declared intents (e.g., ingestion services cannot call execution write endpoints).
@@ -49,6 +63,27 @@ This guide defines the governance guardrails for TradePulse across access manage
    - Static checks ensuring migrations referencing PII tables include masking functions.
    - Unit tests verifying PII columns are excluded from public exports.
    - Automated policy-as-code (OPA/Rego) gate in CI to block deployments if datasets lack privacy tags or retention rules.
+
+## Legal and License Compliance
+
+- **Dependency bill of materials (SBOM)** – All Python, Rust, and Go builds emit SPDX-compatible SBOMs stored under `reports/sbom/`. SBOMs feed into the weekly license review job.
+- **License scanning pipeline** – CI runs `pip-licenses`, `cargo-deny`, and `go-licenses` with curated allow/deny lists defined in `conf/license_policies.yaml`. Builds fail if a dependency violates the whitelist or appears on the blacklist.
+- **Automated remediation PRs** – A scheduled GitHub Action opens pull requests applying the recommended upgrade or replacement for flagged dependencies, tagging the Security and Legal teams for review.
+- **Exception workflow** – Temporary exceptions require a signed waiver uploaded to `reports/legal/waivers/` and expire automatically after 30 days unless renewed.
+
+## Market Data Usage Governance
+
+1. **Source verification** – Data ingestion pipelines validate that feed metadata includes contractual identifiers (EULA ID, region, redistribution flag). Jobs without compliant metadata halt ingestion and alert the legal compliance channel.
+2. **Usage policy enforcement** – Export jobs evaluate data lineage. If an output includes sources tagged `redistribution-restricted`, only aggregated or delayed views are allowed. Attempted violations trigger automatic job cancellation.
+3. **Automated certification checks** – Daily compliance runs compare active sources against vendor whitelists/blacklists maintained in `data/market_data_sources.yaml`, producing signed attestations stored in `reports/legal/vendor_attestations/`.
+4. **Incident response** – Suspected misuse spawns a governance incident with forensic log preservation, root-cause template, and vendor notification workflow within 24 hours.
+
+## Documentation and Developer Experience Guardrails
+
+- **C4 model coverage** – Architectural documentation must provide system, container, and component-level C4 diagrams (`docs/assets/c4/`). Diagrams are versioned alongside the codebase and regenerated via `make docs-c4` before merge.
+- **Event lifecycle catalogues** – Each major workflow (ingestion, strategy deployment, execution) maintains an event sequence table detailing producers, consumers, schemas, and SLA expectations. Tables live in `docs/events/` and are linted for completeness during CI.
+- **Architecture Decision Records (ADR)** – Significant governance or platform decisions require ADRs stored in `docs/adr/` using the standard template. ADRs are referenced from affected documentation to keep context discoverable.
+- **Developer enablement** – MkDocs navigation exposes governance resources, and internal training includes quarterly refreshers with sandbox exercises reviewing access requests, legal scans, and documentation updates.
 
 ## Data Catalog, Lineage, and Source Inventory
 
