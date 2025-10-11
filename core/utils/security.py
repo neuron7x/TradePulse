@@ -34,7 +34,7 @@ IGNORE_PATTERNS = [
     r"\.env\.example$",
     r"\.md$",  # Documentation
     r"\.rst$",  # Documentation
-    r"test_",  # Test files often have mock secrets
+    r"(^|[\\/])test_",  # Test files often have mock secrets
     r"conftest\.py$",
 ]
 
