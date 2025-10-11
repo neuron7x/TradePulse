@@ -39,6 +39,7 @@ rollout.
 | **Cross-Validation** | Walk-forward cross-validation with purging/embargo to remove leakage. Support combinatorial CV for regime-specific models. | Extend `backtest/cv.py` to produce fold manifests; log coverage via MLflow. |
 | **Leakage Guards** | Validate no future data leakage via feature-lag audit, lookahead tests, and embargo enforcement. Add CI assertions that training features precede labels by ≥ 1 bar. | `tests/leakage/test_feature_lag.py` with property-based cases; integrate in `pytest` suite. |
 | **Model Registry Integration** | Store trained models with metadata (feature set hash, label config, drift thresholds). | Use existing registry in `core/registry` or extend to include drift baseline statistics. |
+| **Feature Signature Compatibility** | Enforce forward/backward compatibility across feature sets and serving schemas. | Model registry stores `feature_signature` describing column order, data types, and acceptable nullability ranges. Deploy pipeline blocks promotion when incoming scoring payload signature deviates beyond tolerance (e.g., missing/extra fields, distributional shifts outside guardrails). |
 
 ### Pipeline CI/CD Requirements
 
@@ -57,16 +58,56 @@ rollout.
 | **Drift Dashboard** | Grafana board combining PSI, KS, hit rate, and drawdown overlay. | Auto-annotate with deployment timestamps from model registry. |
 | **Automated Rollback** | Triggered when drift + performance breaches occur simultaneously or kill-switch engaged. | Deployment pipeline includes rollback playbook calling `core/models/registry.rollback_to(version)`. Record events in `reports/models/rollback_log.md`. |
 | **Model Audit Trail** | Maintain append-only ledger for scoring configs, barrier parameters, and alert acknowledgements. | Use `observability/audit/model_events.jsonl`; review weekly. |
+| **Drift Guardrails** | Pair PSI/JS divergence thresholds with feature-signature compatibility checks before scoring. | Streaming job validates that live payloads satisfy registry-stored guardrails; breaches quarantine payloads, raise PagerDuty alerts, and log drift context for retraining triage. |
+| **Auto-Requalification** | Automate retraining/validation jobs when drift persists after manual acknowledgement. | Trigger ML pipeline (`make retrain-model MODEL=<id>`) once drift metric stays above tolerance for N windows; require registry update with new baseline stats before re-enabling traffic. |
 
 ### Online Evaluation Loop
 
 1. **Ingest Live Metrics** – Export scoring payloads to Kafka topic `signals.monitoring`.
-2. **Compute PSI/KS** – Streaming job calculates drift stats every 15 minutes; write
-   to Prometheus via Pushgateway when running off-schedule.
-3. **Alert Routing** – Route drift alerts to on-call quant via PagerDuty with
+2. **Compute PSI/JS Divergence** – Streaming job calculates drift stats every 15 minutes; write
+   to Prometheus via Pushgateway when running off-schedule. JS divergence is reserved
+   for dense/continuous features where PSI is less sensitive.
+3. **Drift Guard Checkpoint** – Before forwarding payloads to the scoring service,
+   validate feature signatures against registry guardrails. On breach, send payloads
+   to a quarantine queue and flip the trading stack into "warm" state until resolved.
+4. **Alert Routing** – Route drift alerts to on-call quant via PagerDuty with
    runbook link. Escalate to trading desk if combined with drawdown alert.
-4. **Rollback Decision** – Incident commander checks registry metadata to select
+5. **Rollback or Requalify** – Incident commander checks registry metadata to select
    stable prior model; orchestrate redeploy and confirm metrics revert to baseline.
+   If drift persists but performance remains acceptable, schedule auto-requalification
+   run and keep quarantine queue under review.
+
+### Trade Halt Channel
+
+- **Automatic Halt** – When drift guardrails or PSI/JS divergence exceed
+  "stop-trading" thresholds, execution service receives a signed command from the
+  monitoring pipeline to pause new orders and gracefully flatten risk exposure.
+- **Manual Override** – Authorized operators may override the halt via secure CLI
+  that writes an immutable record to `observability/audit/halt_overrides.jsonl`
+  capturing user, reason, and time. Overrides require dual approval within 15
+  minutes or the halt reasserts.
+- **Audit Trail** – Weekly audit reviews reconcile overrides against incident
+  tickets and confirm that auto-halt conditions were addressed before resuming
+  normal trading.
+
+### Causal Signal Validation
+
+1. **A/B + CUPED** – Run holdout-based experiments for new signals with CUPED
+   variance reduction to detect small effects while controlling for market noise.
+   Store CUPED covariates and pre-exposure summaries in `reports/signals/ab/`.
+2. **Difference-in-Differences (DiD)** – For macro regime shifts or venue changes,
+   evaluate signal impact using DiD over relevant pre/post periods and matched
+   controls. Document assumptions and balance metrics in the model registry entry.
+3. **Placebo Tests** – Apply placebo interventions (e.g., randomized deployment
+   dates or non-treated symbols) to ensure observed lifts are causal and not
+   driven by drift or exogenous factors.
+4. **Stability Selection** – During model development, use stability selection to
+   confirm feature robustness across bootstrap samples. Only promote features
+   whose inclusion frequency clears policy thresholds.
+5. **Temporal SHAP Diagnostics** – Generate time-series SHAP explanations with
+   caution: smooth over intraday noise, clip outlier attributions, and compare to
+   baseline regimes. Annotate reports with warnings to prevent over-interpretation
+   during volatile periods.
 
 ---
 
