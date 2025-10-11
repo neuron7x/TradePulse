@@ -65,6 +65,24 @@ def test_rest_adapter_deduplicates_and_retries(monkeypatch):
     assert sleeps[0] >= 0.0
 
 
+def test_rest_adapter_injects_trace_context():
+    captured: dict[str, dict[str, str]] = {}
+
+    def request_fn(*_, **kwargs):
+        captured["headers"] = dict(kwargs.get("headers", {}))
+        return []
+
+    adapter = RestIngestionAdapter(
+        request_fn,
+        rate_limiter=RateLimiter(RateLimitRule(max_calls=10, period_s=1.0)),
+        backoff=BackoffPolicy(base_delay_s=0.1, max_delay_s=0.1),
+        context_injector=lambda headers: headers.__setitem__("traceparent", "00-test"),
+    )
+
+    adapter.fetch()
+    assert captured["headers"]["traceparent"] == "00-test"
+
+
 def test_websocket_adapter_reconnects(monkeypatch):
     attempts = [0]
 
@@ -87,4 +105,20 @@ def test_websocket_adapter_reconnects(monkeypatch):
     messages = list(adapter.messages())
     assert messages == [{"timestamp": 1, "value": "a"}, {"timestamp": 2, "value": "b"}]
     assert sleeps[0] >= 0.0
+
+
+def test_websocket_adapter_context_injection():
+    seen: list[dict[str, str]] = []
+
+    def connect(**kwargs):
+        seen.append(dict(kwargs.get("headers", {})))
+        return []
+
+    adapter = WebSocketIngestionAdapter(
+        connect,
+        context_injector=lambda headers: headers.__setitem__("traceparent", "00-ws"),
+    )
+
+    list(adapter.messages())
+    assert seen[0]["traceparent"] == "00-ws"
 

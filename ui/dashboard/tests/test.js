@@ -5,6 +5,12 @@ import {
   exportReport,
   DashboardState,
 } from '../src/core/index.js';
+import {
+  TRACEPARENT_HEADER,
+  createTraceparent,
+  ensureTraceHeaders,
+  extractTraceparent,
+} from '../src/core/telemetry.js';
 
 const configurator = createStrategyConfigurator([
   { name: 'trend', defaults: { lookback: 20, threshold: 0.6 } },
@@ -48,3 +54,10 @@ const exportedMarkdown = state.export('markdown');
 assert.ok(exportedMarkdown.includes('volatility'));
 
 console.log('dashboard tests passed');
+
+const generatedTraceparent = createTraceparent();
+assert.ok(generatedTraceparent.startsWith('00-'));
+const headers = ensureTraceHeaders({}, generatedTraceparent).headers;
+assert.strictEqual(headers[TRACEPARENT_HEADER], generatedTraceparent);
+assert.strictEqual(extractTraceparent(headers), generatedTraceparent);
+console.log('telemetry tests passed');

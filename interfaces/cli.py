@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pandas as pd
+
+from observability.tracing import activate_traceparent, current_traceparent, get_tracer
 
 from backtest.engine import walk_forward
 from core.indicators.entropy import delta_entropy, entropy
@@ -83,6 +86,15 @@ def _apply_config(args: argparse.Namespace) -> argparse.Namespace:
 
     return args
 
+def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
+    traceparent = current_traceparent()
+    if not traceparent:
+        return payload
+    enriched = dict(payload)
+    enriched["traceparent"] = traceparent
+    return enriched
+
+
 def cmd_analyze(args):
     args = _apply_config(args)
 
@@ -96,7 +108,21 @@ def cmd_analyze(args):
     kappa = mean_ricci(build_price_graph(prices[-args.window:], delta=args.delta))
     Hs = hurst_exponent(prices[-args.window:])
     phase = phase_flags(R, dH, kappa, H)
-    print(json.dumps({"R": float(R), "H": float(H), "delta_H": float(dH), "kappa_mean": float(kappa), "Hurst": float(Hs), "phase": phase}, indent=2))
+    print(
+        json.dumps(
+            _enrich_with_trace(
+                {
+                    "R": float(R),
+                    "H": float(H),
+                    "delta_H": float(dH),
+                    "kappa_mean": float(kappa),
+                    "Hurst": float(Hs),
+                    "phase": phase,
+                }
+            ),
+            indent=2,
+        )
+    )
 
 def cmd_backtest(args):
     args = _apply_config(args)
@@ -106,7 +132,7 @@ def cmd_backtest(args):
     from backtest.engine import walk_forward
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
     out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
-    print(json.dumps(out, indent=2))
+    print(json.dumps(_enrich_with_trace(out), indent=2))
 
 def cmd_live(args):
     args = _apply_config(args)
@@ -134,19 +160,45 @@ def cmd_live(args):
             kappa = mean_ricci(build_price_graph(p, delta=0.005))
             print(
                 json.dumps(
-                    {
-                        "ts": t.timestamp.isoformat(),
-                        "R": float(R),
-                        "H": float(H),
-                        "delta_H": float(dH),
-                        "kappa_mean": float(kappa),
-                    }
+                    _enrich_with_trace(
+                        {
+                            "ts": t.timestamp.isoformat(),
+                            "R": float(R),
+                            "H": float(H),
+                            "delta_H": float(dH),
+                            "kappa_mean": float(kappa),
+                        }
+                    )
                 )
             )
+
+
+def _run_with_trace_context(cmd_name: str, args: argparse.Namespace) -> None:
+    tracer = get_tracer("tradepulse.cli")
+    inbound = getattr(args, "traceparent", None) or os.environ.get("TRADEPULSE_TRACEPARENT")
+    with activate_traceparent(inbound):
+        with tracer.start_as_current_span(
+            f"cli.{cmd_name}",
+            attributes={"cli.command": cmd_name},
+        ):
+            outbound = current_traceparent()
+            previous = os.environ.get("TRADEPULSE_TRACEPARENT")
+            if outbound:
+                os.environ["TRADEPULSE_TRACEPARENT"] = outbound
+            try:
+                args.func(args)
+            finally:
+                if outbound:
+                    if previous is None:
+                        os.environ.pop("TRADEPULSE_TRACEPARENT", None)
+                    else:
+                        os.environ["TRADEPULSE_TRACEPARENT"] = previous
 
 def main():
     p = argparse.ArgumentParser(prog="tradepulse")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    trace_arg_help = "W3C traceparent header used to join an existing trace"
 
     pa = sub.add_parser("analyze")
     pa.add_argument("--csv", required=True)
@@ -156,6 +208,7 @@ def main():
     pa.add_argument("--delta", type=float, default=0.005)
     pa.add_argument("--config", help="YAML config path", default=None)
     pa.add_argument("--gpu", action="store_true")
+    pa.add_argument("--traceparent", default=None, help=trace_arg_help)
     pa.set_defaults(func=cmd_analyze)
 
     pb = sub.add_parser("backtest")
@@ -165,6 +218,7 @@ def main():
     pb.add_argument("--fee", type=float, default=0.0005)
     pb.add_argument("--config", help="YAML config path", default=None)
     pb.add_argument("--gpu", action="store_true")
+    pb.add_argument("--traceparent", default=None, help=trace_arg_help)
     pb.set_defaults(func=cmd_backtest)
 
     pl = sub.add_parser("live")
@@ -173,10 +227,11 @@ def main():
     pl.add_argument("--window", type=int, default=200)
     pl.add_argument("--config", help="YAML config path", default=None)
     pl.add_argument("--gpu", action="store_true")
+    pl.add_argument("--traceparent", default=None, help=trace_arg_help)
     pl.set_defaults(func=cmd_live)
 
     args = p.parse_args()
-    args.func(args)
+    _run_with_trace_context(args.cmd, args)
 
 if __name__ == "__main__":
     main()

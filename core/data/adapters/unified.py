@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Callable, Deque, Iterable, Iterator, Optional, Sequence
+from typing import Any, Callable, Deque, Iterable, Iterator, MutableMapping, Optional, Sequence
 
 
 class RateLimitExceededError(RuntimeError):
@@ -150,6 +150,7 @@ class RestIngestionAdapter:
         key_fields: Sequence[str] = ("timestamp",),
         sleep: Callable[[float], None] | None = None,
         retriable_exceptions: tuple[type[BaseException], ...] = (ConnectionError,),
+        context_injector: Callable[[MutableMapping[str, str]], None] | None = None,
     ) -> None:
         self._request_fn = request_fn
         self._rate_limiter = rate_limiter
@@ -159,6 +160,7 @@ class RestIngestionAdapter:
         self._key_fields = key_fields
         self._sleep = sleep or (lambda seconds: None)
         self._retriable_exceptions = retriable_exceptions
+        self._context_injector = context_injector
 
     def _sleep_if_needed(self, seconds: float) -> None:
         if seconds > 0:
@@ -172,6 +174,17 @@ class RestIngestionAdapter:
             wait_time = self._rate_limiter.consume()
             self._sleep_if_needed(wait_time)
             try:
+                if self._context_injector is not None:
+                    headers = kwargs.get("headers")
+                    header_carrier: MutableMapping[str, str]
+                    if headers is None:
+                        header_carrier = {}
+                    elif isinstance(headers, MutableMapping):
+                        header_carrier = headers
+                    else:
+                        header_carrier = dict(headers)
+                    self._context_injector(header_carrier)
+                    kwargs["headers"] = header_carrier
                 payload = self._request_fn(*args, **kwargs)
             except self._retriable_exceptions as exc:
                 attempt += 1
@@ -212,6 +225,7 @@ class WebSocketIngestionAdapter:
             ConnectionError,
             TimeoutError,
         ),
+        context_injector: Callable[[MutableMapping[str, str]], None] | None = None,
     ) -> None:
         self._connect = connect
         self._rate_limiter = rate_limiter
@@ -220,6 +234,7 @@ class WebSocketIngestionAdapter:
         self._key_fields = key_fields
         self._sleep = sleep or (lambda seconds: None)
         self._retriable_exceptions = retriable_exceptions
+        self._context_injector = context_injector
 
     def messages(self) -> Iterator[Any]:
         """Yield deduplicated messages, reconnecting with backoff as needed."""
@@ -231,7 +246,17 @@ class WebSocketIngestionAdapter:
                     wait_time = self._rate_limiter.consume()
                     if wait_time > 0:
                         self._sleep(wait_time)
-                for message in self._connect():
+                connect_kwargs: dict[str, MutableMapping[str, str]] = {}
+                if self._context_injector is not None:
+                    headers: MutableMapping[str, str] = {}
+                    self._context_injector(headers)
+                    if headers:
+                        connect_kwargs["headers"] = headers
+                try:
+                    stream = self._connect(**connect_kwargs)
+                except TypeError:
+                    stream = self._connect()
+                for message in stream:
                     if self._deduplicator.seen(message, key_fields=self._key_fields):
                         continue
                     attempt = 0
