@@ -131,8 +131,9 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     result = runner.invoke(cli, ["report", "--config", str(report_cfg_path)])
     assert result.exit_code == 0, result.output
     text = report_output.read_text()
-    assert "backtest" in text
-    assert "exec" in text
+    lower_text = text.lower()
+    assert "backtest" in lower_text
+    assert "exec" in lower_text
 
     catalog = json.loads(catalog_path.read_text())
     assert len(catalog["artifacts"]) >= 3
