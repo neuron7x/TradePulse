@@ -49,22 +49,39 @@ def compute_phase(x: np.ndarray, *, use_float32: bool = False) -> np.ndarray:
             a = np.fft.ifft(X * H)
         return np.angle(a)
 
-def kuramoto_order(phases: np.ndarray) -> float:
+def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     """Kuramoto order parameter R = |mean(exp(iθ))| for a set of phases.
+
     Args:
-        phases: array of shape (N,) or (N,T). If 1D, compute for one time slice;
-                if 2D, compute per-column over N oscillators.
+        phases: array of shape ``(N,)`` or ``(N, T)``. If 1D, compute for one time
+            slice; if 2D, compute per-column over ``N`` oscillators.
+
     Returns:
-        float if 1D else np.ndarray of shape (T,).
+        ``float`` if 1D else ``np.ndarray`` of shape ``(T,)``.
     """
-    phases = np.asarray(phases, dtype=float)
-    mask = np.isfinite(phases)
-    z = np.exp(1j * phases)
+
+    phases_arr = np.asarray(phases)
+    if phases_arr.ndim == 0:
+        raise ValueError("kuramoto_order expects at least one dimension")
+
+    if np.iscomplexobj(phases_arr):
+        # Support callers that accidentally pass analytic signals or complex
+        # phases. Preserve real-only values to avoid the branch-cut at zero.
+        if np.allclose(phases_arr.imag, 0.0):
+            phases_real = phases_arr.real.astype(float, copy=False)
+        else:
+            phases_real = np.angle(phases_arr)
+    else:
+        phases_real = phases_arr.astype(float, copy=False)
+
+    mask = np.isfinite(phases_real)
+    safe_phases = np.where(mask, phases_real, 0.0)
+    z = np.exp(1j * safe_phases)
+    z = np.where(mask, z, np.nan + 0j)
 
     if z.ndim == 1:
         if not mask.any():
             return 0.0
-        z = np.where(mask, z, np.nan + 0j)
         value = float(np.abs(np.nanmean(z)))
         # Numerical noise can push the magnitude above one by ~1e-16; clamp to unit
         # circle bounds so downstream users do not have to special-case tolerance.
@@ -73,12 +90,13 @@ def kuramoto_order(phases: np.ndarray) -> float:
     if z.ndim != 2:
         raise ValueError("kuramoto_order expects 1D or 2D array")
 
-    if not mask.any():
-        return float(0.0)
+    valid_counts = mask.sum(axis=0)
+    if not valid_counts.any():
+        return np.zeros(z.shape[1], dtype=float)
 
-    z = np.where(mask, z, np.nan + 0j)
-    values = np.abs(np.nanmean(z, axis=0)).astype(float)
-    return np.clip(values, 0.0, 1.0)
+    values = np.abs(np.nanmean(z, axis=0))
+    values = np.where(valid_counts == 0, 0.0, values)
+    return np.clip(values.astype(float, copy=False), 0.0, 1.0)
 
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Compute Kuramoto R across multiple synchronized assets (same length).
