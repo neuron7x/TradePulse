@@ -4,18 +4,18 @@ from __future__ import annotations
 
 import csv
 import math
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 try:
-    from hypothesis import given, settings, strategies as st, HealthCheck
+    from hypothesis import HealthCheck, given, settings, strategies as st
 except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
-from decimal import Decimal
-
 from core.data.ingestion import DataIngestor, Ticker
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 
 class TestCSVFuzzTests:
@@ -129,9 +129,9 @@ class TestCSVFuzzTests:
         ingestor.historical_csv(str(csv_path), records.append)
         
         assert len(records) == 1
-        assert records[0].ts == pytest.approx(ts, rel=1e-6, abs=1e-6)
-        assert float(records[0].price) == pytest.approx(price, rel=1e-6)
-        assert float(records[0].volume) == pytest.approx(volume, rel=1e-6)
+        assert records[0].ts == pytest.approx(ts, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+        assert float(records[0].price) == pytest.approx(price, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+        assert float(records[0].volume) == pytest.approx(volume, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
     def test_csv_handles_missing_volume_as_zero(self, tmp_path: Path) -> None:
         """CSV with missing volume field should default to 0."""
