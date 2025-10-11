@@ -97,6 +97,16 @@ pytest tests/fuzz/
 pytest tests/e2e/
 ```
 
+**Cross-architecture indicator parity (CPU/GPU/ARM simulacrum):**
+```bash
+pytest -m arm tests/performance/test_indicator_portability.py
+```
+
+**Heavy-math validation gate:**
+```bash
+pytest -m heavy_math tests/unit/config/test_heavy_math_jobs.py
+```
+
 ### Running Specific Test Files or Functions
 
 Run a specific test file:
@@ -158,6 +168,11 @@ The testing automation is split across two workflows:
   3. **Fuzz Tests**: Replay deterministic fuzz corpora.
   4. **Coverage Report**: Generated and uploaded to CI artifacts.
   5. **Coverage Threshold**: Build fails if coverage `< 80%`.
+- **`heavy-math.yml` (per PR, nightly)**
+  1. Executes the heavy-math suites defined in `configs/quality/heavy_math_jobs.yaml`.
+  2. Enforces CPU/memory quotas via workflow dispatch inputs.
+  3. Runs portability checks marked `arm` to assert CPU/GPU/ARM parity.
+  4. Blocks merge if any heavy-math job or portability test fails.
 
 - `.github/workflows/smoke-e2e.yml` (nightly + manual)
   1. **E2E Pipeline**: Executes `python scripts/smoke_e2e.py` against `data/sample.csv`.
