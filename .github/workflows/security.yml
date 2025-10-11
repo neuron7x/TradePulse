@@ -162,19 +162,20 @@ jobs:
         sarif_file: trivy-results.sarif
 
     - name: Run Grype scan (fail on critical CVEs)
+      id: grype-scan
       uses: anchore/scan-action@v3
       with:
         image: tradepulse:ci-scan
         fail-build: true
         severity-cutoff: critical
         output-format: sarif
-        output-file: grype-results
+        output-file: grype-results.sarif
 
     - name: Upload Grype SARIF results
       if: always()
       uses: github/codeql-action/upload-sarif@v3
       with:
-        sarif_file: anchore-reports/grype-results.sarif
+        sarif_file: ${{ steps.grype-scan.outputs.sarif }}
 
   codeql-analysis:
     name: CodeQL Analysis
