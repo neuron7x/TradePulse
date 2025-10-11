@@ -85,6 +85,40 @@ pip install -r requirements-dev.lock
 # pip install ".[docs]"        # documentation toolchain
 ```
 
+### Reproducible environments (`uv` + pip-tools)
+
+TradePulse ships lock files generated with both [pip-tools](https://github.com/jazzband/pip-tools) and
+[uv](https://github.com/astral-sh/uv) so local environments match CI precisely.
+
+```bash
+# Sync the runtime environment with uv (fast resolver + strict pins)
+uv pip sync uv.lock
+
+# Install the development toolchain (pytest, ruff, mypy, etc.)
+uv pip sync requirements-dev.lock
+
+# Refresh locks after dependency changes
+make lock
+```
+
+> ℹ️ The `make lock` target regenerates `requirements.lock`, `requirements-dev.lock`, and `uv.lock`
+> to keep all tooling in sync across contributors and CI runners.
+
+### Deterministic development shell with Nix
+
+If you prefer a fully reproducible toolchain (compilers, Redis client, Python interpreters for
+3.11–3.13), use the bundled [Nix](https://nixos.org/) flake:
+
+```bash
+nix develop
+
+# Inside the shell, install dependencies with uv
+uv pip sync requirements-dev.lock
+```
+
+The dev shell exposes CPython 3.11/3.12/3.13, `uv`, and build tooling required for native wheel
+compilation.
+
 ### Installation with Docker
 
 ```bash
