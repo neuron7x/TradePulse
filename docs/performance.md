@@ -77,6 +77,64 @@ print(f"Original: {df.memory_usage(deep=True).sum() / 1e6:.2f} MB")
 print(f"Optimized: {df_optimized.memory_usage(deep=True).sum() / 1e6:.2f} MB")
 ```
 
+### Polars Lazy Pipelines
+
+Use the optional Polars backend for zero-copy ingestion pipelines when you need to
+chain multiple stages without materialising intermediate frames:
+
+```python
+pip install "polars>=0.20" pyarrow
+```
+
+```python
+from pathlib import Path
+import polars as pl
+
+from core.data.polars_pipeline import (
+    collect_streaming,
+    enable_global_string_cache,
+    lazy_column_zero_copy,
+    scan_lazy,
+    use_arrow_memory_pool,
+)
+
+# Ensure categorical joins re-use string buffers across stages
+enable_global_string_cache(True)
+
+lazy_scan = scan_lazy(
+    Path("data/trades.csv"),
+    columns=["ts", "price", "volume"],
+    memory_map=True,
+    row_count_name="row_id",
+)
+
+# Apply feature engineering lazily; nothing is evaluated yet
+lazy_features = lazy_scan.with_columns(
+    [
+        pl.col("price").pct_change().alias("returns"),
+        pl.col("volume").rolling_mean(window_size=10).alias("vol_ma"),
+    ]
+)
+
+# Route allocations through a dedicated Arrow memory pool to avoid fragmentation
+import pyarrow as pa
+
+with use_arrow_memory_pool(pa.proxy_memory_pool(pa.default_memory_pool())):
+    df = collect_streaming(lazy_features, streaming=True)
+
+# Extract numpy views with zero-copy hand-off between stages
+returns = lazy_column_zero_copy(lazy_features, "returns")
+```
+
+**Key benefits:**
+
+- `scan_lazy` uses `pl.scan_csv` so files are streamed in batches.
+- `collect_streaming(..., streaming=True)` keeps peak memory flat on wide datasets.
+- `lazy_column_zero_copy` hands Arrow buffers to NumPy without copying so downstream
+  indicator kernels run on the same memory.
+- The optional `use_arrow_memory_pool` context keeps Arrow allocations inside a
+  shared pool, reducing fragmentation when many tasks run concurrently.
+
 ## Execution Profiling
 
 ### Structured Logging
@@ -158,6 +216,34 @@ python bench/bench_pipeline.py
 
 Run the script before and after optimisations to measure impact or to populate
 baseline data in CI.
+
+### Cold vs Hot Indicator Profiles
+
+Use `bench/bench_indicators.py` to compare cold-start costs (allocations, cache
+misses) against hot-loop performance of heavy indicators:
+
+```bash
+python bench/bench_indicators.py --repeat 10 --warmup 5
+# entropy                 cold_best= 14.11 ms  hot_best=  8.63 ms  hot/ cold= 0.61
+# hurst_exponent          cold_best= 28.54 ms  hot_best= 16.02 ms  hot/ cold= 0.56
+# compute_phase           cold_best= 19.97 ms  hot_best= 11.33 ms  hot/ cold= 0.57
+# mean_ricci              cold_best= 42.18 ms  hot_best= 24.90 ms  hot/ cold= 0.59
+```
+
+**Workflow recommendations:**
+
+- Run the indicator microbenchmarks locally before sending a PR when touching
+  indicator kernels.
+- Export the CSV-friendly output to `reports/performance/indicators_<commit>.txt`
+  so CI jobs can diff against the latest baseline.
+- Track the ratio (`hot/cold`) to confirm cache-aware optimisations are working
+  and to ensure cold-start regressions stay within budget.
+
+**CI regression budget:** wire the benchmark into CI (e.g. via `pytest-benchmark`)
+and fail the pipeline if median cold timings degrade by more than 10% or if hot
+timings exceed 5% of the stored baseline. Persist baseline stats under
+`tests/performance/baselines/` and update them intentionally when optimisations
+land.
 
 ## Chunked Processing
 
@@ -248,6 +334,77 @@ try:
 except ImportError:
     print("CuPy not installed - using CPU")
 ```
+
+### Numba CUDA Kernels for Heavy Indicators
+
+CuPy interops with `numba.cuda` so you can JIT bespoke kernels for the
+computation-heavy portions of an indicator while still orchestrating from Python:
+
+```python
+import math
+
+import cupy as cp
+from numba import cuda
+
+
+@cuda.jit
+def rolling_zscore(values, window, out):
+    i = cuda.grid(1)
+    if i >= values.size or i < window:
+        return
+    mean = 0.0
+    var = 0.0
+    for j in range(window):
+        x = values[i - j]
+        mean += x
+        var += x * x
+    mean /= window
+    std = math.sqrt(max(var / window - mean * mean, 1e-9))
+    out[i] = (values[i] - mean) / std
+
+
+values = cp.asarray(prices, dtype=cp.float32)
+out = cp.empty_like(values)
+
+threads = 128
+blocks = (values.size + threads - 1) // threads
+rolling_zscore[blocks, threads](values, 64, out)
+```
+
+### Track Host ↔ Device Copies
+
+Always validate that expensive buffers stay on the GPU. For CuPy kernels use the
+memory pool metrics:
+
+```python
+pool = cp.cuda.MemoryPool()
+with cp.cuda.using_allocator(pool.malloc):
+    values = cp.asarray(prices, dtype=cp.float32)
+    result = cp.fft.fft(values)
+    pool_used = pool.used_bytes()
+    ptr_meta = cp.cuda.runtime.pointerGetAttributes(int(result.data.ptr))
+    assert ptr_meta["memoryType"] == cp.cuda.runtime.cudaMemoryTypeDevice
+```
+
+When you must share data with NumPy/pandas, prefer zero-copy Arrow buffers from
+`lazy_column_zero_copy` and then pin the host memory before transferring:
+
+```python
+import cupy as cp
+from numba import cuda
+
+host_buffer = lazy_column_zero_copy(lazy_features, "returns")
+pinned = cuda.pinned_array_like(host_buffer)
+pinned[:] = host_buffer  # fast copy into pinned memory
+device = cp.asarray(pinned)
+
+# Work on GPU without further host transfers
+device_result = cp.log1p(device)
+```
+
+CuPy also exposes the default memory pool via `cp.cuda.set_allocator`. Configure
+it at startup so repeated indicator transforms reuse allocations instead of
+thrashing the allocator.
 
 ## Prometheus Metrics
 
