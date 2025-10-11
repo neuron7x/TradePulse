@@ -146,6 +146,8 @@ jobs:
         tags: tradepulse:ci-scan
 
     - name: Run Trivy scan (fail on critical CVEs)
+      id: trivy-scan
+      continue-on-error: true
       uses: aquasecurity/trivy-action@0.20.0
       with:
         image-ref: tradepulse:ci-scan
@@ -163,6 +165,7 @@ jobs:
 
     - name: Run Grype scan (fail on critical CVEs)
       id: grype-scan
+      continue-on-error: true
       uses: anchore/scan-action@v3
       with:
         image: tradepulse:ci-scan
@@ -176,6 +179,17 @@ jobs:
       uses: github/codeql-action/upload-sarif@v3
       with:
         sarif_file: ${{ steps.grype-scan.outputs.sarif }}
+
+    - name: Fail workflow on critical vulnerabilities
+      if: always()
+      env:
+        TRIVY_OUTCOME: ${{ steps.trivy-scan.outcome }}
+        GRYPE_OUTCOME: ${{ steps.grype-scan.outcome }}
+      run: |
+        if [ "$TRIVY_OUTCOME" = "failure" ] || [ "$GRYPE_OUTCOME" = "failure" ]; then
+          echo "One or more container scans reported critical vulnerabilities."
+          exit 1
+        fi
 
   codeql-analysis:
     name: CodeQL Analysis
