@@ -7,6 +7,56 @@ on:
     branches: [ main ]
 
 jobs:
+  smoke:
+    name: Smoke (Python ${{ matrix.python-version }} / ${{ matrix.architecture }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python-version: '3.11'
+            architecture: 'x64'
+            runs-on: ubuntu-latest
+          - python-version: '3.12'
+            architecture: 'x64'
+            runs-on: ubuntu-latest
+          - python-version: '3.13'
+            architecture: 'x64'
+            runs-on: ubuntu-latest
+          - python-version: '3.11'
+            architecture: 'arm64'
+            runs-on: ubuntu-24.04-arm
+          - python-version: '3.12'
+            architecture: 'arm64'
+            runs-on: ubuntu-24.04-arm
+          - python-version: '3.13'
+            architecture: 'arm64'
+            runs-on: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          architecture: ${{ matrix.architecture }}
+          allow-prereleases: ${{ matrix.python-version == '3.13' }}
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: |
+          uv venv --python "$(command -v python)"
+          echo "VIRTUAL_ENV=$PWD/.venv" >> "$GITHUB_ENV"
+          echo "$PWD/.venv/bin" >> "$GITHUB_PATH"
+      - name: Sync dependencies
+        run: |
+          UV_PYTHON="$VIRTUAL_ENV/bin/python" uv pip sync requirements-dev.lock
+      - name: Install feature store extras
+        if: matrix.python-version != '3.13'
+        run: |
+          UV_PYTHON="$VIRTUAL_ENV/bin/python" uv pip install '.[feature-store]'
+      - name: Run smoke tests
+        run: $VIRTUAL_ENV/bin/python -m pytest tests/smoke -k feature_store
+
   tests:
     runs-on: ubuntu-latest
     strategy:
@@ -25,6 +75,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.lock
           pip install -r requirements-dev.lock
+      - name: Install feature store extras
+        if: matrix.python-version != '3.13'
+        run: pip install '.[feature-store]'
       - name: Prepare test report directories
         run: |
           mkdir -p reports
@@ -76,7 +129,7 @@ jobs:
   pytest-xdist:
     name: Pytest (xdist profiling)
     runs-on: ubuntu-latest
-    needs: tests
+    needs: [smoke, tests]
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python

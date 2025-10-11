@@ -10,10 +10,11 @@ fpma-check:
 
 .PHONY: lock
 lock:
-	python -m pip install --upgrade pip
-	python -m pip install pip-tools
-	pip-compile --resolver=backtracking --strip-extras --no-annotate --output-file=requirements.lock requirements.txt
-	pip-compile --resolver=backtracking --strip-extras --no-annotate --output-file=requirements-dev.lock requirements-dev.txt
+        python -m pip install --upgrade pip
+        python -m pip install pip-tools uv
+        pip-compile pyproject.toml --resolver=backtracking --output-file=requirements.lock
+        pip-compile requirements-dev.txt --resolver=backtracking --output-file=requirements-dev.lock
+        uv pip compile pyproject.toml --output-file uv.lock
 
 .PHONY: build-package
 build-package: clean-dist
