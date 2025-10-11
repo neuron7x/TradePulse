@@ -46,7 +46,7 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies (dev extras include runtime stack)
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.lock
 
 # Install pre-commit hooks
 pre-commit install

@@ -49,7 +49,7 @@ Coverage is measured using `pytest-cov` and enforced in CI.
 
 Install dependencies (development file includes runtime stack):
 ```bash
-pip install -r requirements-dev.txt
+pip install -r requirements-dev.lock
 ```
 
 ### Running All Tests

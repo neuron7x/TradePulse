@@ -146,7 +146,7 @@ def process_price(price):
 **Keep dependencies up to date:**
 ```bash
 # Regular updates
-pip install -U -r requirements.txt
+pip install -U -r requirements.lock
 
 # Check for known vulnerabilities
 pip-audit

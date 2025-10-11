@@ -74,10 +74,10 @@ Try:
 pip install --upgrade pip
 
 # Install with verbose output
-pip install -v -r requirements.txt
+pip install -v -r requirements.lock
 
 # Or use conda
-conda install --file requirements.txt
+conda install --file requirements.lock
 ```
 
 See [Troubleshooting](troubleshooting.md) for more solutions.
