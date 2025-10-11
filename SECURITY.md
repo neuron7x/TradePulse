@@ -177,6 +177,23 @@ safety check
 - Avoid inline scripts; prefer vetted modules bundled at build time. When inline styles are required, keep them minimal and scoped.
 - Document any intentional CSP relaxations directly in the pull request and in `SECURITY.md`.
 
+#### CSRF and clickjacking test harness
+
+- The Playwright-based UI security suite asserts that all state-changing requests include valid CSRF tokens and that invalid tokens are rejected with HTTP 403 responses. The same suite verifies preflight requests and SameSite cookie attributes.
+- Clickjacking regression checks ensure that the `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'` headers are present on protected routes. Results are published as part of the `tests.yml` workflow and any regression blocks merges.
+- Any route that intentionally permits embedding must be documented with an allowlist and accompanied by compensating controls (e.g., signed iframe tokens).
+
+#### CSP reporting
+
+- CSP violation reports are collected at `/api/security/csp-report` and forwarded to the security data lake for triage. Dashboards in Grafana highlight spikes per origin and script hash to catch injection attempts.
+- PRs that change CSP headers must include updated detection rules and dashboard alerts. The security team triages new CSP report signatures within 24 hours.
+
+#### TLS baseline
+
+- All public endpoints terminate TLS at the edge with **minimum TLS 1.2** support; TLS 1.3 is preferred and enabled wherever client support allows.
+- Cipher suites follow Mozilla's "modern" profile: `TLS_AES_256_GCM_SHA384`, `TLS_AES_128_GCM_SHA256`, and `TLS_CHACHA20_POLY1305_SHA256`. Legacy RSA suites are disabled.
+- Automated TLS scans run weekly (`security.yml` schedule) using `sslyze` to detect regressions. Any downgrade fails the pipeline and pages the on-call engineer.
+
 #### 5. Code Review
 
 **Security checklist for PRs:**
@@ -235,6 +252,17 @@ pip-audit --desc --format json
 semgrep --config=auto .
 ```
 
+#### 6. Container vulnerability scanning
+
+Container images built from the root `Dockerfile` are scanned on every push, pull request, and weekly schedule. The `Security Scan` workflow builds a fresh image and executes Trivy and Grype against it. The pipeline fails immediately if any **critical** vulnerabilities are found (high severity findings are surfaced in SARIF reports but do not gate merges). Reports are uploaded to the repository's Security tab for triage and tracking.
+
+#### 7. TLS regression scanning
+```bash
+# Validate edge TLS posture
+poetry run sslyze edge.tradepulse.local --regular
+```
+The scheduled job exits non-zero if protocols below TLS 1.2 or non-approved cipher suites are presented.
+
 ### Pre-commit Hooks
 
 Install security checks as pre-commit hooks:
@@ -269,6 +297,25 @@ EXCHANGE_API_SECRET=your-secret
 - Use environment variables
 - Use secrets management (AWS Secrets Manager, HashiCorp Vault)
 - Rotate keys regularly
+
+#### Vault-backed secrets workflows
+
+- **Mount structure** – All runtime credentials are sourced from `secret/data/<service>/<env>` paths in HashiCorp Vault. Each service account has a scoped Vault role with narrowly defined policies that only allow reading its own path.
+- **Dynamic secrets** – Database and messaging credentials are provisioned via Vault database engines with 55-minute TTLs and automatic revocation on lease expiry. Application deployments request fresh leases during startup and refresh them every 45 minutes.
+- **Secret injection** – CI/CD pipelines authenticate to Vault using GitHub OIDC and render secrets into ephemeral environment variables. Long-lived static `.env` files are forbidden in production.
+
+#### Key rotation playbook
+
+1. **Registration** – Every secret stored in Vault is catalogued with owner, environment, rotation cadence, and fallback contact in the infrastructure configuration repository.
+2. **Automation** – A nightly GitHub Actions workflow verifies that no credential exceeds its max TTL. The workflow triggers Vault rotation APIs for any secret older than its policy window and files a ticket with the owning team.
+3. **Graceful reloads** – Services subscribe to secret update events via the secrets-rotator sidecar pattern. On rotation, the sidecar refreshes in-memory credentials, updates connection pools, and confirms healthy status to Vault.
+4. **Break-glass overrides** – Emergency tokens are generated with 1-hour TTLs, require dual approval in the PAM system, and are logged with justification.
+
+#### Secrets audit logging
+
+- Vault audit devices forward JSON logs to the centralized SIEM (`observability/audit-stream`). Logs capture token IDs, accessor, requesting service, path, and IP metadata.
+- Audit logs are retained for 400 days and analysed with anomaly detection rules (e.g., out-of-hours access, secrets enumeration attempts).
+- Weekly compliance reports enumerate rotation status, stale leases, and privileged access outliers. Findings trigger mandatory post-mortems for unresolved anomalies beyond 7 days.
 
 ### 2. Database Queries
 

@@ -53,7 +53,7 @@ jobs:
   dependency-scan:
     name: Scan Dependencies
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v5
     
@@ -121,6 +121,61 @@ jobs:
         path: |
           safety-report.json
           pip-audit-report.json
+
+  container-scan:
+    name: Container Image Scan
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build container image for scanning
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        file: ./Dockerfile
+        load: true
+        tags: tradepulse:ci-scan
+
+    - name: Run Trivy scan (fail on critical CVEs)
+      uses: aquasecurity/trivy-action@0.20.0
+      with:
+        image-ref: tradepulse:ci-scan
+        format: 'sarif'
+        severity: 'CRITICAL'
+        ignore-unfixed: true
+        exit-code: '1'
+        output: trivy-results.sarif
+
+    - name: Upload Trivy SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: trivy-results.sarif
+
+    - name: Run Grype scan (fail on critical CVEs)
+      id: grype-scan
+      uses: anchore/scan-action@v3
+      with:
+        image: tradepulse:ci-scan
+        fail-build: true
+        severity-cutoff: critical
+        output-format: sarif
+        output-file: grype-results.sarif
+
+    - name: Upload Grype SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.grype-scan.outputs.sarif }}
 
   codeql-analysis:
     name: CodeQL Analysis
