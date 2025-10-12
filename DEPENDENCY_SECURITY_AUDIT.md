@@ -109,7 +109,7 @@ This report documents the comprehensive security audit of all Python dependencie
 #### Core Dependencies Updated
 - Reorganized the file around runtime concerns (analytics, instrumentation, templating, and HTTP stack).
 - Removed development/test tooling (`hypothesis`, `pytest`, `ruff`, `mypy`) from the runtime install to avoid bloating production images.
-- Retained numeric stack upgrades (NumPy 1.26+, SciPy 1.11+, pandas 2.0+, NetworkX 3.2+) and PyYAML 6.0.2+.
+- Retained numeric stack upgrades (NumPy 1.26+, SciPy 1.11+, pandas 2.0+, NetworkX 3.5+ on Python ≥3.10 with a 3.1.x floor for Python 3.9) and PyYAML 6.0.2+.
 
 #### Security Dependencies Added
 ```diff
