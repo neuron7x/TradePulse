@@ -6,7 +6,7 @@ import logging
 import queue
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import TYPE_CHECKING, Callable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,10 @@ from .engine import LatencyConfig, OrderBookConfig, Result, SlippageConfig
 from .performance import compute_performance_metrics, export_performance_report
 from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
 from interfaces.backtest import BacktestEngine
+from backtest.transaction_costs import PerUnitCommission, TransactionCostModel
+
+if TYPE_CHECKING:
+    from backtest.market_calendar import MarketCalendar
 
 LOGGER = logging.getLogger(__name__)
 
@@ -196,7 +200,9 @@ class Portfolio:
 
     def on_fill(self, event: FillEvent) -> None:
         self.position += event.quantity
-        self.cash -= event.fee + event.slippage
+        extra_spread = getattr(event, "spread_cost", 0.0)
+        financing_cost = getattr(event, "financing_cost", 0.0)
+        self.cash -= event.fee + event.slippage + extra_spread + financing_cost
         self.trades += 1
         self._pending_target = self.position
         LOGGER.debug(
@@ -224,16 +230,20 @@ class SimulatedExecutionHandler:
         order_book: OrderBookConfig,
         slippage: SlippageConfig,
         fee_per_unit: float,
+        *,
+        transaction_cost_model: TransactionCostModel | None = None,
+        rng: np.random.Generator | None = None,
     ) -> None:
         self._order_book = order_book
         self._slippage = slippage
-        self._fee_per_unit = fee_per_unit
+        self._cost_model = transaction_cost_model or PerUnitCommission(fee_per_unit)
         self._price_history: List[float] = []
+        self._rng = rng or np.random.default_rng()
 
     def on_market_event(self, event: MarketEvent) -> None:
         self._price_history.append(event.price)
 
-    def execute(self, order: OrderEvent, current_step: int) -> tuple[FillEvent, float]:
+    def execute(self, order: OrderEvent, current_step: int) -> FillEvent:
         if not self._price_history:
             raise RuntimeError("Cannot execute order before receiving market data")
 
@@ -241,30 +251,72 @@ class SimulatedExecutionHandler:
         current_idx = min(current_step, prices.size - 1)
         side = "buy" if order.quantity > 0 else "sell"
         quantity = abs(order.quantity)
+        if quantity <= 0.0:
+            raise ValueError("Order quantity must be positive")
+
         mid_price = float(prices[current_idx])
         best_bid, best_ask = self._best_quotes(mid_price)
-        fill_price = self._fill_price(side, quantity, best_bid, best_ask)
-        if side == "buy":
-            slippage_cost = max(0.0, (fill_price - mid_price) * quantity)
-        else:
-            slippage_cost = max(0.0, (mid_price - fill_price) * quantity)
-        fee = quantity * self._fee_per_unit
+        reference_price = best_ask if side == "buy" else best_bid
+        (
+            avg_price,
+            filled_qty,
+            depth_slippage_cost,
+            remaining_qty,
+        ) = self._consume_depth(side, quantity, reference_price)
+
+        if filled_qty <= 0.0:
+            LOGGER.debug("order qty=%.4f not filled due to zero depth", quantity)
+            return FillEvent(
+                symbol=order.symbol,
+                quantity=0.0,
+                price=reference_price,
+                fee=0.0,
+                slippage=0.0,
+                step=current_step,
+            )
+
+        avg_price, per_unit_slippage_cost = self._apply_per_unit_slippage(avg_price, filled_qty, side)
+        avg_price, stochastic_slippage_cost = self._apply_stochastic_slippage(avg_price, filled_qty, side)
+
+        (
+            avg_price,
+            spread_model_cost,
+            slippage_model_cost,
+            commission_cost,
+        ) = self._apply_transaction_costs(avg_price, filled_qty, side)
+
+        spread_book_cost = abs(reference_price - mid_price) * filled_qty
+        total_slippage_cost = depth_slippage_cost + per_unit_slippage_cost + stochastic_slippage_cost + slippage_model_cost
+        total_spread_cost = spread_book_cost + spread_model_cost
+
         fill = FillEvent(
             symbol=order.symbol,
-            quantity=order.quantity,
-            price=fill_price,
-            fee=fee,
-            slippage=slippage_cost,
+            quantity=np.copysign(filled_qty, order.quantity),
+            price=float(avg_price),
+            fee=commission_cost,
+            slippage=total_slippage_cost,
             step=current_step,
+            spread_cost=total_spread_cost,
         )
-        LOGGER.debug(
-            "executed order qty=%.4f fill_price=%.4f slippage=%.6f fee=%.6f",
-            order.quantity,
-            fill_price,
-            slippage_cost,
-            fee,
-        )
-        return fill, slippage_cost
+
+        if remaining_qty > 0.0:
+            LOGGER.debug(
+                "partial fill qty=%.4f remaining=%.4f price=%.4f",
+                filled_qty,
+                remaining_qty,
+                avg_price,
+            )
+        else:
+            LOGGER.debug(
+                "executed order qty=%.4f price=%.4f commission=%.6f slippage=%.6f spread=%.6f",
+                fill.quantity,
+                avg_price,
+                commission_cost,
+                total_slippage_cost,
+                total_spread_cost,
+            )
+
+        return fill
 
     def _best_quotes(self, mid_price: float) -> tuple[float, float]:
         spread = mid_price * self._order_book.spread_bps * 1e-4
@@ -272,43 +324,99 @@ class SimulatedExecutionHandler:
         best_ask = mid_price + spread / 2.0
         return best_bid, best_ask
 
-    def _fill_price(self, side: str, quantity: float, best_bid: float, best_ask: float) -> float:
-        remaining = quantity
+    def _consume_depth(
+        self,
+        side: str,
+        quantity: float,
+        reference_price: float,
+    ) -> tuple[float, float, float, float]:
+        remaining = float(quantity)
         total_cost = 0.0
         filled = 0.0
+        depth_cost = 0.0
         depth = tuple(float(max(level, 0.0)) for level in self._order_book.depth_profile)
 
         for level_idx, capacity in enumerate(depth, start=1):
-            if remaining <= 0:
+            if remaining <= 0.0:
                 break
             take = min(remaining, capacity)
-            if take <= 0:
+            if take <= 0.0:
                 continue
             depth_penalty = self._slippage.depth_impact_bps * (level_idx - 1) * 1e-4
             if side == "buy":
-                level_price = best_ask * (1.0 + depth_penalty)
+                level_price = reference_price * (1.0 + depth_penalty)
+                depth_cost += (level_price - reference_price) * take
             else:
-                level_price = best_bid * (1.0 - depth_penalty)
+                level_price = reference_price * (1.0 - depth_penalty)
+                depth_cost += (reference_price - level_price) * take
             total_cost += level_price * take
             filled += take
             remaining -= take
 
-        if remaining > 0:
+        if remaining > 0.0 and self._order_book.infinite_depth:
             depth_penalty = self._slippage.depth_impact_bps * max(len(depth), 1) * 1e-4
             if side == "buy":
-                level_price = best_ask * (1.0 + depth_penalty)
+                level_price = reference_price * (1.0 + depth_penalty)
+                depth_cost += (level_price - reference_price) * remaining
             else:
-                level_price = best_bid * (1.0 - depth_penalty)
+                level_price = reference_price * (1.0 - depth_penalty)
+                depth_cost += (reference_price - level_price) * remaining
             total_cost += level_price * remaining
             filled += remaining
+            remaining = 0.0
 
-        avg_price = total_cost / filled if filled else (best_ask if side == "buy" else best_bid)
-        directional_adjustment = avg_price * self._slippage.per_unit_bps * 1e-4
+        avg_price = total_cost / filled if filled > 0.0 else reference_price
+        return float(avg_price), float(filled), float(depth_cost), float(remaining)
+
+    def _apply_per_unit_slippage(
+        self, avg_price: float, filled_qty: float, side: str
+    ) -> tuple[float, float]:
+        if filled_qty <= 0.0 or self._slippage.per_unit_bps == 0.0:
+            return avg_price, 0.0
+        adjustment = avg_price * self._slippage.per_unit_bps * 1e-4
         if side == "buy":
-            avg_price += directional_adjustment
+            new_price = avg_price + adjustment
+            cost = adjustment * filled_qty
         else:
-            avg_price -= directional_adjustment
-        return float(avg_price)
+            new_price = avg_price - adjustment
+            cost = adjustment * filled_qty
+        return float(new_price), float(max(cost, 0.0))
+
+    def _apply_stochastic_slippage(
+        self, avg_price: float, filled_qty: float, side: str
+    ) -> tuple[float, float]:
+        scale = self._slippage.stochastic_bps
+        if filled_qty <= 0.0 or scale <= 0.0:
+            return avg_price, 0.0
+        noise_fraction = float(self._rng.normal(loc=0.0, scale=scale)) * 1e-4
+        noise_fraction = max(min(noise_fraction, 1.0), -0.99)
+        if side == "buy":
+            new_price = avg_price * (1.0 + noise_fraction)
+            cost = max(0.0, (new_price - avg_price) * filled_qty)
+        else:
+            new_price = avg_price * (1.0 - noise_fraction)
+            cost = max(0.0, (avg_price - new_price) * filled_qty)
+        return float(new_price), float(cost)
+
+    def _apply_transaction_costs(
+        self, avg_price: float, filled_qty: float, side: str
+    ) -> tuple[float, float, float, float]:
+        model = self._cost_model
+        spread_adjustment = model.get_spread(avg_price, side)
+        spread_adjustment = max(float(spread_adjustment), 0.0)
+        slippage_adjustment = model.get_slippage(filled_qty, avg_price, side)
+        slippage_adjustment = max(float(slippage_adjustment), 0.0)
+        commission = model.get_commission(filled_qty, avg_price)
+        commission = max(float(commission), 0.0)
+
+        if side == "buy":
+            price = avg_price + spread_adjustment + slippage_adjustment
+        else:
+            price = avg_price - spread_adjustment - slippage_adjustment
+
+        spread_cost = spread_adjustment * filled_qty
+        slippage_cost = slippage_adjustment * filled_qty
+        return float(price), float(spread_cost), float(slippage_cost), float(commission)
 
 
 class EventDrivenBacktestEngine(BacktestEngine[Result]):
@@ -328,6 +436,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
         data_handler: MarketDataHandler | None = None,
         strategy: Strategy | None = None,
         chunk_size: Optional[int] = None,
+        transaction_cost_model: TransactionCostModel | None = None,
+        random_seed: int | None = None,
+        calendar: "MarketCalendar | None" = None,
     ) -> Result:
         latency_cfg = latency or LatencyConfig()
         order_book_cfg = order_book or OrderBookConfig()
@@ -357,9 +468,18 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
             current_step = -1
 
             portfolio = Portfolio(symbol=symbol, initial_capital=initial_capital, fee_per_unit=fee)
-            execution_handler = SimulatedExecutionHandler(order_book_cfg, slippage_cfg, fee)
+            rng = np.random.default_rng(random_seed)
+            execution_handler = SimulatedExecutionHandler(
+                order_book_cfg,
+                slippage_cfg,
+                fee,
+                transaction_cost_model=transaction_cost_model,
+                rng=rng,
+            )
 
             total_slippage = 0.0
+            total_commission = 0.0
+            total_spread = 0.0
 
             def schedule(event: SignalEvent | OrderEvent | FillEvent, delay: int) -> None:
                 nonlocal counter
@@ -377,6 +497,17 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
             for chunk in data_handler.stream():
                 for market_event in chunk:
                     current_step = market_event.step
+                    if (
+                        calendar is not None
+                        and market_event.timestamp is not None
+                        and not calendar.is_open(market_event.timestamp)
+                    ):
+                        LOGGER.debug(
+                            "skipping market event outside trading hours at %s", market_event.timestamp
+                        )
+                        release_ready()
+                        continue
+
                     event_queue.put(market_event)
                     release_ready()
 
@@ -396,9 +527,18 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                             if order is not None:
                                 schedule(order, latency_cfg.order_to_execution)
                         elif isinstance(event, OrderEvent):
-                            fill, slippage_cost = execution_handler.execute(event, current_step)
-                            total_slippage += slippage_cost
-                            schedule(fill, latency_cfg.execution_to_fill)
+                            fill = execution_handler.execute(event, current_step)
+                            spread_cost = float(getattr(fill, "spread_cost", 0.0))
+                            if (
+                                fill.quantity != 0.0
+                                or fill.fee
+                                or fill.slippage
+                                or spread_cost
+                            ):
+                                total_slippage += float(fill.slippage)
+                                total_commission += float(fill.fee)
+                                total_spread += spread_cost
+                                schedule(fill, latency_cfg.execution_to_fill)
                         elif isinstance(event, FillEvent):
                             portfolio.on_fill(event)
                         else:  # pragma: no cover - safety net
@@ -424,9 +564,18 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         if order is not None:
                             schedule(order, latency_cfg.order_to_execution)
                     elif isinstance(pending, OrderEvent):
-                        fill, slippage_cost = execution_handler.execute(pending, current_step)
-                        total_slippage += slippage_cost
-                        schedule(fill, latency_cfg.execution_to_fill)
+                        fill = execution_handler.execute(pending, current_step)
+                        spread_cost = float(getattr(fill, "spread_cost", 0.0))
+                        if (
+                            fill.quantity != 0.0
+                            or fill.fee
+                            or fill.slippage
+                            or spread_cost
+                        ):
+                            total_slippage += float(fill.slippage)
+                            total_commission += float(fill.fee)
+                            total_spread += spread_cost
+                            schedule(fill, latency_cfg.execution_to_fill)
                     elif isinstance(pending, FillEvent):
                         portfolio.on_fill(pending)
                     else:  # pragma: no cover - safety net
@@ -452,6 +601,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
             ctx["trades"] = trades
             ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
             ctx["status"] = "success"
+            ctx["commission_cost"] = float(total_commission)
+            ctx["spread_cost"] = float(total_spread)
+            ctx["slippage_cost"] = float(total_slippage)
 
             if metrics.enabled:
                 for step, value in enumerate(equity_curve):
@@ -482,6 +634,8 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                 equity_curve=equity_curve,
                 latency_steps=int(latency_cfg.total_delay),
                 slippage_cost=float(total_slippage),
+                commission_cost=float(total_commission),
+                spread_cost=float(total_spread),
                 performance=performance,
                 report_path=report_path,
             )

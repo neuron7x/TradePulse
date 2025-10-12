@@ -42,6 +42,7 @@ class OrderBookConfig:
 
     spread_bps: float = 0.0
     depth_profile: Sequence[float] = (1.0, 0.75, 0.5)
+    infinite_depth: bool = True
 
 
 @dataclass(slots=True)
@@ -50,6 +51,7 @@ class SlippageConfig:
 
     per_unit_bps: float = 0.0
     depth_impact_bps: float = 0.0
+    stochastic_bps: float = 0.0
 
 
 @dataclass(slots=True)
