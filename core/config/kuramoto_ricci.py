@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import os
+import json
 
 import yaml
 import pydantic
@@ -448,6 +448,27 @@ class TradePulseSettings(BaseSettings):
         )
 
 
+def export_tradepulse_settings_schema(
+    destination: str | Path | None = None,
+    *,
+    indent: int = 2,
+) -> dict[str, Any]:
+    """Return the JSON schema for :class:`TradePulseSettings`.
+
+    When ``destination`` is provided the schema is written to the given path on
+    disk using UTF-8 encoding. The resulting schema dictionary is always
+    returned which allows callers to inspect or further post-process it.
+    """
+
+    schema = TradePulseSettings.model_json_schema()
+    if destination is not None:
+        path = Path(destination)
+        payload = json.dumps(schema, indent=indent, sort_keys=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload, encoding="utf8")
+    return schema
+
+
 def parse_cli_overrides(pairs: Sequence[str] | None) -> dict[str, Any]:
     """Convert CLI ``key=value`` pairs into nested dictionaries."""
 
@@ -506,6 +527,7 @@ __all__ = [
     "RicciTemporalConfig",
     "TradePulseSettings",
     "YamlSettingsSource",
+    "export_tradepulse_settings_schema",
     "load_kuramoto_ricci_config",
     "parse_cli_overrides",
 ]

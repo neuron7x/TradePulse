@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import json
 import tempfile
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from core.config import (
     KuramotoRicciIntegrationConfig,
     TradePulseSettings,
     YamlSettingsSource,
+    export_tradepulse_settings_schema,
     load_kuramoto_ricci_config,
     parse_cli_overrides,
 )
@@ -202,3 +204,20 @@ def test_yaml_settings_source_surfaces_yaml_parse_errors(tmp_path: Path) -> None
 
     with pytest.raises(SettingsError, match="failed to parse YAML"):
         source()
+
+
+def test_export_tradepulse_schema_writes_file(tmp_path: Path) -> None:
+    destination = tmp_path / "tradepulse-schema.json"
+    schema = export_tradepulse_settings_schema(destination, indent=4)
+
+    assert destination.exists()
+    parsed = json.loads(destination.read_text(encoding="utf8"))
+    assert parsed["title"] == "TradePulseSettings"
+    assert schema == parsed
+
+
+def test_export_tradepulse_schema_returns_payload_without_writing() -> None:
+    schema = export_tradepulse_settings_schema(None)
+
+    assert "properties" in schema
+    assert "kuramoto" in schema["properties"]

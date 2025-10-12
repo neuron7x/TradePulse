@@ -107,3 +107,16 @@ cfg = load_kuramoto_ricci_config("configs/custom.yaml", cli_overrides=overrides)
 
 This keeps all configuration handling centralised and ensures new sources or validation
 rules are automatically applied across the code base.
+
+## Schema export
+
+Generate a JSON schema describing the full configuration model with the helper script:
+
+```bash
+python scripts/export_tradepulse_schema.py --output schemas/tradepulse-settings.schema.json
+```
+
+Omitting `--output` prints the schema to standard output, which makes it easy to pipe
+into tooling or inspect the structure inline. The schema is derived directly from
+`TradePulseSettings` so it always reflects the latest validation rules enforced at
+startup.
