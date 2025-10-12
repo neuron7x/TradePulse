@@ -125,6 +125,25 @@ def test_offline_validator_respects_interval(tmp_path, base_frame: pd.DataFrame)
     assert validator.should_run() is True
 
 
+def test_offline_validator_numeric_type_equivalence(tmp_path, base_frame: pd.DataFrame) -> None:
+    offline_path = tmp_path / "delta"
+    offline_payload = base_frame.copy()
+    offline_payload.loc[:, "value"] = offline_payload["value"].astype("Int64")
+    write_dataframe(offline_payload, offline_path, allow_json_fallback=True)
+    source = DeltaLakeSource(offline_path)
+
+    validator = OfflineStoreValidator(
+        "demo.fv",
+        source,
+        lambda _name: base_frame,
+        interval=pd.Timedelta(minutes=5),
+        clock=lambda: pd.Timestamp("2024-01-01 00:00:00", tz=UTC),
+    )
+
+    report = validator.run()
+    assert report.hash_differs is False
+
+
 def test_retention_policy_validation() -> None:
     with pytest.raises(ValueError):
         RetentionPolicy(ttl=pd.Timedelta(0))

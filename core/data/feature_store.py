@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from datetime import UTC
 import hashlib
 import hmac
 from io import BytesIO
 import sqlite3
 from pathlib import Path
-from typing import Callable, Literal, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 import pandas as pd
 from pandas.api import types as pd_types
@@ -388,6 +389,32 @@ class IntegrityReport:
             )
 
 
+def _format_numeric_value(value: Any) -> str:
+    """Return a normalized string representation for numeric comparisons."""
+
+    if pd.isna(value):
+        return "NaN"
+
+    text = str(value)
+    try:
+        decimal_value = Decimal(text)
+    except (InvalidOperation, ValueError, TypeError):
+        try:
+            decimal_value = Decimal(str(float(value)))
+        except (InvalidOperation, ValueError, TypeError):
+            return text
+
+    if decimal_value.is_nan():
+        return "NaN"
+    if decimal_value.is_infinite():
+        return "Infinity" if decimal_value > 0 else "-Infinity"
+
+    normalized = decimal_value.normalize()
+    if normalized == 0:
+        return "0"
+    return format(normalized, "f")
+
+
 class OnlineFeatureStore:
     """Simple parquet-backed store providing overwrite/append semantics."""
 
@@ -537,6 +564,10 @@ class OnlineFeatureStore:
                 normalized[column] = pd.to_datetime(series, utc=True)
                 continue
 
+            if pd_types.is_numeric_dtype(series):
+                normalized[column] = series.map(_format_numeric_value)
+                continue
+
             if pd_types.is_timedelta64_dtype(series):
                 # Represent timedeltas using ISO-8601 duration strings for stability.
                 normalized[column] = series.astype("timedelta64[ns]").astype(str)
@@ -545,18 +576,20 @@ class OnlineFeatureStore:
             if series.dtype == object:
                 # Attempt to coerce datetime-like payloads first.
                 try:
-                    coerced_datetime = pd.to_datetime(series, utc=True)
+                    coerced_datetime = pd.to_datetime(series, utc=True, errors="raise")
                 except (TypeError, ValueError):
                     coerced_datetime = None
                 if coerced_datetime is not None and pd_types.is_datetime64_any_dtype(coerced_datetime):
                     normalized[column] = coerced_datetime
                     continue
 
-                numeric = pd.to_numeric(series, errors="coerce")
-                if pd_types.is_numeric_dtype(numeric):
-                    if numeric.isna().equals(pd.isna(series)):
-                        normalized[column] = numeric
-                        continue
+                try:
+                    numeric = pd.to_numeric(series, errors="raise")
+                except (TypeError, ValueError):
+                    numeric = None
+                if numeric is not None and pd_types.is_numeric_dtype(numeric):
+                    normalized[column] = numeric.map(_format_numeric_value)
+                    continue
 
                 normalized[column] = series.astype(str)
 
