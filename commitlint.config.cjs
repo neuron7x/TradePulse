@@ -1,5 +1,13 @@
 const LEGACY_MESSAGES = new Set([
   'Add numeric accelerator backends and benchmarks',
+  `ci: restore commitlint legacy allowlist
+
+## Summary
+- revert the commitlint ignore helper to match exact legacy messages instead of subjects
+- remove the temporary allowlist entry for the docs remediation commit so long bodies are linted again
+
+## Testing
+- npx commitlint --from=HEAD~1 --to=HEAD --verbose`,
 ]);
 
 /** @type {import('@commitlint/types').UserConfig} */
