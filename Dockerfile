@@ -27,9 +27,12 @@ ENV VIRTUAL_ENV=/opt/venv \
 
 COPY --from=builder ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 
-RUN set -eu \ 
-    && groupadd --system --gid "${APP_GID}" "${APP_GROUP}" \ 
-    && useradd --system --no-log-init --uid "${APP_UID}" --gid "${APP_GID}" --home /home/"${APP_USER}" --create-home "${APP_USER}" \ 
+RUN set -eu \
+    && apt-get update \
+    && apt-get install --no-install-recommends --yes util-linux \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid "${APP_GID}" "${APP_GROUP}" \
+    && useradd --system --no-log-init --uid "${APP_UID}" --gid "${APP_GID}" --home /home/"${APP_USER}" --create-home "${APP_USER}" \
     && mkdir -p /app /var/lib/nfpro \ 
     && chown -R "${APP_UID}:${APP_GID}" /app /var/lib/nfpro /home/"${APP_USER}"
 
