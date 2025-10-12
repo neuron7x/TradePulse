@@ -505,7 +505,6 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         LOGGER.debug(
                             "skipping market event outside trading hours at %s", market_event.timestamp
                         )
-                        release_ready()
                         continue
 
                     event_queue.put(market_event)

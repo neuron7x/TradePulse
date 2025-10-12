@@ -250,3 +250,48 @@ def test_event_engine_respects_market_calendar() -> None:
 
     # Only two sessions should contribute to the equity curve because the holiday event is skipped.
     assert result.equity_curve.size == 2
+
+
+def test_event_engine_delayed_orders_wait_for_next_open_session() -> None:
+    calendar = MarketCalendar(
+        timezone="America/New_York",
+        regular_hours={idx: SessionHours(time(9, 30), time(16, 0)) for idx in range(5)},
+        holidays={datetime(2023, 1, 2).date()},
+    )
+
+    timestamps = [
+        datetime(2022, 12, 30, 14, 30),
+        datetime(2023, 1, 2, 14, 30),
+        datetime(2023, 1, 3, 14, 30),
+    ]
+    prices = np.array([100.0, 101.0, 102.0])
+    events = [
+        MarketEvent(symbol="TEST", price=float(price), step=idx, timestamp=ts)
+        for idx, (price, ts) in enumerate(zip(prices, timestamps, strict=True))
+    ]
+
+    class _StaticHandler(CSVChunkDataHandler):
+        def __init__(self, events):
+            self._events = events
+            self.symbol = "TEST"
+
+        def stream(self):
+            yield self._events
+
+    handler = _StaticHandler(events)
+    engine = EventDrivenBacktestEngine()
+    latency = LatencyConfig(signal_to_order=1)
+    result = engine.run(
+        prices,
+        _signal_function,
+        fee=0.0,
+        initial_capital=1_000.0,
+        data_handler=handler,
+        calendar=calendar,
+        strategy=_BuyOnceStrategy(),
+        latency=latency,
+    )
+
+    assert result.trades == 1
+    assert result.equity_curve.size == 2
+    assert math.isclose(float(result.equity_curve[-1]), 1_000.0)
