@@ -66,6 +66,8 @@ class FillEvent(Event):
     price: float
     fee: float
     slippage: float
+    spread_cost: float = 0.0
+    financing_cost: float = 0.0
 
     def __init__(
         self,
@@ -75,6 +77,9 @@ class FillEvent(Event):
         fee: float,
         slippage: float,
         step: int,
+        *,
+        spread_cost: float = 0.0,
+        financing_cost: float = 0.0,
     ) -> None:
         Event.__init__(self, type="FILL", step=step)
         self.symbol = symbol
@@ -82,3 +87,5 @@ class FillEvent(Event):
         self.price = float(price)
         self.fee = float(fee)
         self.slippage = float(slippage)
+        self.spread_cost = float(spread_cost)
+        self.financing_cost = float(financing_cost)
