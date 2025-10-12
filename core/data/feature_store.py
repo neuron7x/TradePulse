@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC
 import hashlib
 import hmac
-import pickle
+from io import BytesIO
 import sqlite3
 from pathlib import Path
 from typing import Callable, Literal, Protocol
@@ -106,6 +106,22 @@ class InMemoryKeyValueClient:
         self._store.pop(key, None)
 
 
+def _serialize_frame(frame: pd.DataFrame) -> bytes:
+    """Serialize a dataframe to bytes using the Parquet format."""
+
+    buffer = BytesIO()
+    frame.to_parquet(buffer, index=False, compression=None)
+    return buffer.getvalue()
+
+
+def _deserialize_frame(payload: bytes) -> pd.DataFrame:
+    """Deserialize a dataframe from Parquet-encoded bytes."""
+
+    if not payload:
+        return pd.DataFrame()
+    return pd.read_parquet(BytesIO(payload))
+
+
 class RedisOnlineFeatureStore:
     """Redis-backed feature store with TTL-aware retention policies."""
 
@@ -126,10 +142,10 @@ class RedisOnlineFeatureStore:
         payload = self._client.get(feature_view)
         if payload is None:
             return pd.DataFrame()
-        frame: pd.DataFrame = pickle.loads(payload)
+        frame = _deserialize_frame(payload)
         retained = self._retention.apply(frame)
         if not retained.equals(frame):
-            self._client.set(feature_view, pickle.dumps(retained))
+            self._client.set(feature_view, _serialize_frame(retained))
         return retained
 
     def sync(
@@ -175,7 +191,7 @@ class RedisOnlineFeatureStore:
 
     def _write(self, feature_view: str, frame: pd.DataFrame) -> pd.DataFrame:
         prepared = self._retention.apply(frame)
-        self._client.set(feature_view, pickle.dumps(prepared))
+        self._client.set(feature_view, _serialize_frame(prepared))
         return prepared.reset_index(drop=True)
 
 
@@ -209,7 +225,7 @@ class SQLiteOnlineFeatureStore:
         row = cursor.fetchone()
         if row is None:
             return pd.DataFrame()
-        frame: pd.DataFrame = pickle.loads(row[0])
+        frame = _deserialize_frame(row[0])
         retained = self._retention.apply(frame)
         if not retained.equals(frame):
             self._persist(feature_view, retained)
@@ -262,7 +278,7 @@ class SQLiteOnlineFeatureStore:
         return prepared.reset_index(drop=True)
 
     def _persist(self, feature_view: str, frame: pd.DataFrame) -> None:
-        payload = pickle.dumps(frame)
+        payload = _serialize_frame(frame)
         with self._connection:
             self._connection.execute(
                 "REPLACE INTO feature_views (name, payload) VALUES (?, ?)",
