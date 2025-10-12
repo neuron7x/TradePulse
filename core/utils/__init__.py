@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Shared utilities for TradePulse."""
 
+from .eventsdebug import ReplaySummary, replay_event_log
 from .logging import (
     JSONFormatter,
     StructuredLogger,
@@ -24,5 +25,7 @@ __all__ = [
     "start_metrics_server",
     "AutoRollbackGuard",
     "SLOConfig",
+    "ReplaySummary",
+    "replay_event_log",
 ]
 

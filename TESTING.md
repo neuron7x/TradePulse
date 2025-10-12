@@ -107,6 +107,15 @@ pytest -m arm tests/performance/test_indicator_portability.py
 pytest -m heavy_math tests/unit/config/test_heavy_math_jobs.py
 ```
 
+**Replay debug tests (`eventsdebug` marker):**
+```bash
+pytest -m eventsdebug
+```
+
+| Назва | Команда | Що робить | Навіщо | Перевірка |
+| --- | --- | --- | --- | --- |
+| Replay-тести | `pytest -m eventsdebug` | Повторне програвання журналу подій | Відтворюваність і дебаг | Порівнюй підсумкові стани/метрики |
+
 ### Running Specific Test Files or Functions
 
 Run a specific test file:

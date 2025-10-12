@@ -16,7 +16,7 @@ from core.utils.metrics import get_metrics_collector
 
 from .engine import LatencyConfig, OrderBookConfig, Result, SlippageConfig
 from .performance import compute_performance_metrics, export_performance_report
-from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
+from .events import Event, FillEvent, MarketEvent, OrderEvent, SignalEvent
 from interfaces.backtest import BacktestEngine
 
 LOGGER = logging.getLogger(__name__)
@@ -328,6 +328,7 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
         data_handler: MarketDataHandler | None = None,
         strategy: Strategy | None = None,
         chunk_size: Optional[int] = None,
+        event_recorder: Callable[[Event], None] | None = None,
     ) -> Result:
         latency_cfg = latency or LatencyConfig()
         order_book_cfg = order_book or OrderBookConfig()
@@ -361,6 +362,10 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
 
             total_slippage = 0.0
 
+            def record(event: Event) -> None:
+                if event_recorder is not None:
+                    event_recorder(event)
+
             def schedule(event: SignalEvent | OrderEvent | FillEvent, delay: int) -> None:
                 nonlocal counter
                 release = current_step + max(0, delay)
@@ -385,6 +390,8 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                             event = event_queue.get_nowait()
                         except queue.Empty:
                             break
+
+                        record(event)
 
                         if isinstance(event, MarketEvent):
                             execution_handler.on_market_event(event)
@@ -418,6 +425,8 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         pending = event_queue.get_nowait()
                     except queue.Empty:
                         break
+
+                    record(pending)
 
                     if isinstance(pending, SignalEvent):
                         order = portfolio.create_order(pending)
