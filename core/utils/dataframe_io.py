@@ -171,6 +171,13 @@ def write_dataframe(
     target = base.with_suffix(backend.suffix)
     target.parent.mkdir(parents=True, exist_ok=True)
     backend.write_fn(frame, target, index)
+
+    index_path = base.with_suffix(".index.json")
+    if index and backend.name == "polars":
+        index_frame = frame.index.to_frame(index=False)
+        _json_backend().write_fn(index_frame, index_path, index=False)
+    elif index_path.exists():
+        index_path.unlink()
     return target
 
 
@@ -182,13 +189,23 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
         suffix = path.suffix.lower()
         if suffix == _PARQUET_SUFFIX:
             if _pyarrow_available():
-                return _pyarrow_backend().read_fn(path)
-            try:
-                return _polars_backend().read_fn(path)
-            except MissingParquetDependencyError as exc:
-                raise MissingParquetDependencyError(
-                    "Unable to read parquet file without pyarrow or polars. Install 'tradepulse[feature_store]'."
-                ) from exc
+                frame = _pyarrow_backend().read_fn(path)
+            else:
+                try:
+                    frame = _polars_backend().read_fn(path)
+                except MissingParquetDependencyError as exc:
+                    raise MissingParquetDependencyError(
+                        "Unable to read parquet file without pyarrow or polars. Install 'tradepulse[feature_store]'."
+                    ) from exc
+            index_path = path.with_suffix(".index.json")
+            if index_path.exists():
+                index_frame = _json_backend().read_fn(index_path)
+                if index_frame.shape[1] == 1:
+                    column = index_frame.columns[0]
+                    frame.index = pd.Index(index_frame.iloc[:, 0], name=column)
+                else:
+                    frame.index = pd.MultiIndex.from_frame(index_frame, names=list(index_frame.columns))
+            return frame
         if allow_json_fallback and suffix == _JSON_SUFFIX:
             return _json_backend().read_fn(path)
         raise ValueError(f"Unsupported dataframe suffix '{suffix}'")
@@ -210,6 +227,9 @@ def purge_dataframe_artifacts(base_path: Path) -> None:
         candidate = base_path.with_suffix(suffix)
         if candidate.exists():
             candidate.unlink()
+    index_path = base_path.with_suffix(".index.json")
+    if index_path.exists():
+        index_path.unlink()
 
 
 def dataframe_to_parquet_bytes(frame: pd.DataFrame, *, index: bool = False) -> bytes:

@@ -280,12 +280,12 @@ class FileSystemIndicatorCache:
 
         # pandas structures
         if isinstance(value, pd.DataFrame):
-            stored_path = write_dataframe(value, data_path, index=False, allow_json_fallback=True)
+            stored_path = write_dataframe(value, data_path, index=True, allow_json_fallback=True)
             fmt = "parquet" if stored_path.suffix == ".parquet" else "dataframe-json"
             return stored_path.name, fmt, self._file_digest(stored_path)
         if isinstance(value, pd.Series):
             frame = value.to_frame(name=value.name)
-            stored_path = write_dataframe(frame, data_path, index=False, allow_json_fallback=True)
+            stored_path = write_dataframe(frame, data_path, index=True, allow_json_fallback=True)
             fmt = "parquet" if stored_path.suffix == ".parquet" else "series-json"
             return stored_path.name, fmt, self._file_digest(stored_path)
         if isinstance(value, np.ndarray):
