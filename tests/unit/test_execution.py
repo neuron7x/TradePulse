@@ -129,6 +129,15 @@ def test_risk_manager_triggers_kill_switch_on_max_loss() -> None:
         manager.validate_order("BTC", "buy", qty=1.0, price=90.0)
 
 
+def test_reset_realized_pnl_preserves_kill_switch_state() -> None:
+    manager = RiskManager(RiskLimits(max_notional=1_000.0, max_position=10.0))
+    manager.kill_switch.trigger("ops")
+
+    manager.reset_realized_pnl()
+
+    assert manager.kill_switch.is_triggered()
+
+
 def test_risk_manager_normalises_symbol_aliases() -> None:
     manager = RiskManager(RiskLimits(max_notional=1_000.0, max_position=10.0))
     manager.validate_order("btc-usdt", "buy", qty=1.0, price=20.0)

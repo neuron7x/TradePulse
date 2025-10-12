@@ -27,12 +27,14 @@ def test_broker_adapter_switches_between_paper_and_live() -> None:
     first = adapter.place_order(_limit_order())
     assert first.order_id is not None
     assert first.order_id in paper._orders  # noqa: SLF001 - inspect sandbox state for verification
+    assert adapter.sandbox is True
     adapter.ensure_paper()
 
     adapter.promote_to_live()
     second = adapter.place_order(_limit_order())
     assert second.order_id is not None
     assert second.order_id in live._orders  # noqa: SLF001
+    assert adapter.sandbox is False
     adapter.ensure_live()
 
     with pytest.raises(RiskError):

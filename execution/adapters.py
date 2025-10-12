@@ -83,6 +83,7 @@ class BrokerAdapter(ExecutionConnector):
         self._mode = start_in
         self._kill_switch = kill_switch or KillSwitch()
         self._throttle = throttle
+        self._sync_sandbox_flag()
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
@@ -122,9 +123,11 @@ class BrokerAdapter(ExecutionConnector):
 
     def promote_to_live(self) -> None:
         self._mode = BrokerMode.LIVE
+        self._sync_sandbox_flag()
 
     def demote_to_paper(self) -> None:
         self._mode = BrokerMode.PAPER
+        self._sync_sandbox_flag()
 
     @property
     def kill_switch(self) -> KillSwitch:
@@ -140,6 +143,11 @@ class BrokerAdapter(ExecutionConnector):
     # Connector interface
     def _active(self) -> ExecutionConnector:
         return self._live if self._mode is BrokerMode.LIVE else self._paper
+
+    def _sync_sandbox_flag(self) -> None:
+        """Mirror the active connector's sandbox flag."""
+
+        self.sandbox = self._active().sandbox
 
     def place_order(self, order: Order) -> Order:  # type: ignore[override]
         self._kill_switch.guard()

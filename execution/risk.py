@@ -219,12 +219,15 @@ class RiskManager(RiskController):
         return float(self._realized_pnl)
 
     def reset_realized_pnl(self) -> None:
-        """Reset PnL and soft limit state (e.g. start of trading session)."""
+        """Reset PnL and soft limit state (e.g. start of trading session).
+
+        The kill-switch state is intentionally preserved; callers that need a
+        fresh trading session must reset :attr:`kill_switch` explicitly.
+        """
 
         self._realized_pnl = 0.0
         self._soft_limit_breached = False
         self._soft_limit_reason = ""
-        self._kill_switch.reset()
 
     # ------------------------------------------------------------------
     # Loss-limit helpers
