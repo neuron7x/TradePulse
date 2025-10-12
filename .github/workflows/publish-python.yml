@@ -22,6 +22,7 @@ jobs:
         with:
           script: |
             const core = require('@actions/core');
+            const { URL } = require('url');
             const { owner, repo } = context.repo;
             const tagName = context.payload.release?.tag_name;
             if (!tagName) {
@@ -50,15 +51,71 @@ jobs:
               return;
             }
 
-            const response = await github.rest.checks.listForRef({
-              owner,
-              repo,
-              ref: targetSha,
-              per_page: 100,
-            });
+            let checkRunsForRef;
+            try {
+              checkRunsForRef = await github.paginate(
+                github.rest.checks.listForRef,
+                {
+                  owner,
+                  repo,
+                  ref: targetSha,
+                  per_page: 100,
+                },
+                (response) => response.data.check_runs,
+              );
+            } catch (error) {
+              core.setFailed(`Failed to enumerate check runs for commit ${targetSha}: ${error.message}`);
+              return;
+            }
+
+            let workflowJobs;
+            try {
+              workflowJobs = await github.paginate(
+                github.rest.actions.listJobsForWorkflowRun,
+                {
+                  owner,
+                  repo,
+                  run_id: context.runId,
+                  per_page: 100,
+                },
+                (response) => response.data.jobs ?? [],
+              );
+            } catch (error) {
+              core.setFailed(`Failed to enumerate workflow jobs: ${error.message}`);
+              return;
+            }
+
+            const currentJobCheckRunIds = new Set();
+            for (const job of workflowJobs) {
+              if (!job.check_run_url) {
+                continue;
+              }
+
+              try {
+                const checkRunUrl = new URL(job.check_run_url);
+                const segments = checkRunUrl.pathname.split('/').filter(Boolean);
+                const id = segments.pop();
+                if (id) {
+                  currentJobCheckRunIds.add(id);
+                }
+              } catch (error) {
+                core.warning(`Unable to parse check run URL for job ${job.id}: ${error.message}`);
+              }
+            }
 
             const workflowName = context.workflow;
-            const checkRuns = response.data.check_runs.filter((run) => run.name !== workflowName);
+
+            const checkRuns = checkRunsForRef.filter((run) => {
+              if (run.name === workflowName) {
+                return false;
+              }
+
+              if (currentJobCheckRunIds.has(String(run.id))) {
+                return false;
+              }
+
+              return true;
+            });
             if (checkRuns.length === 0) {
               core.setFailed(`No completed CI checks found for commit ${targetSha}. Run the test matrix before releasing.`);
               return;
