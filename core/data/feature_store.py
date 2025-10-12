@@ -66,6 +66,15 @@ class RetentionPolicy:
 
     ttl: timedelta | pd.Timedelta | None = None
     max_rows: int | None = None
+    max_versions: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.ttl is not None and pd.to_timedelta(self.ttl) <= pd.Timedelta(0):
+            raise ValueError("ttl must be positive when provided")
+        if self.max_rows is not None and self.max_rows <= 0:
+            raise ValueError("max_rows must be positive when provided")
+        if self.max_versions is not None and self.max_versions <= 0:
+            raise ValueError("max_versions must be positive when provided")
 
     def apply(
         self,
@@ -76,7 +85,7 @@ class RetentionPolicy:
     ) -> pd.DataFrame:
         """Return ``frame`` after enforcing the retention constraints."""
 
-        result = frame
+        result = frame.copy(deep=True)
         if self.ttl is not None and not result.empty:
             if timestamp_column not in result.columns:
                 raise ValueError(
@@ -97,6 +106,24 @@ class RetentionPolicy:
             timestamps = pd.to_datetime(result[timestamp_column], utc=True, errors="coerce")
             mask = timestamps >= cutoff
             result = result.loc[mask]
+        if self.max_versions is not None and not result.empty:
+            required = {"entity_id", timestamp_column}
+            missing = required - set(result.columns)
+            if missing:
+                joined = ", ".join(sorted(missing))
+                raise KeyError(
+                    "Retention policy with max_versions requires columns: "
+                    f"{joined}"
+                )
+            ordered = result.sort_values(
+                by=["entity_id", timestamp_column],
+                kind="mergesort",
+            )
+            limited = ordered.groupby("entity_id", as_index=False).tail(self.max_versions)
+            result = limited.sort_values(
+                by=["entity_id", timestamp_column],
+                kind="mergesort",
+            )
         if self.max_rows is not None and result.shape[0] > self.max_rows:
             result = result.iloc[-self.max_rows :]
         return result.reset_index(drop=True)

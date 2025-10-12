@@ -86,6 +86,25 @@ def test_retention_policy_cap_rows(tmp_path) -> None:
     assert set(stored["entity_id"]) == {"B", "C"}
 
 
+def test_retention_policy_limits_versions() -> None:
+    retention = RetentionPolicy(max_versions=1)
+    frame = _frame(
+        [
+            ("A", datetime(2024, 1, 1, tzinfo=UTC), 1.0),
+            ("A", datetime(2024, 1, 2, tzinfo=UTC), 2.0),
+            ("B", datetime(2024, 1, 3, tzinfo=UTC), 3.0),
+            ("B", datetime(2024, 1, 4, tzinfo=UTC), 4.0),
+        ]
+    )
+
+    retained = retention.apply(frame, timestamp_column="timestamp")
+
+    assert retained.shape[0] == 2
+    assert set(retained["entity_id"]) == {"A", "B"}
+    assert retained.loc[retained["entity_id"] == "A", "value"].iloc[0] == 2.0
+    assert retained.loc[retained["entity_id"] == "B", "value"].iloc[0] == 4.0
+
+
 def test_retention_policy_accepts_reference_now() -> None:
     policy = RetentionPolicy(ttl=timedelta(days=1))
     reference = datetime(2024, 5, 2, tzinfo=UTC)
