@@ -195,6 +195,46 @@ def load_dashboards(root: Path) -> List[Dict[str, Any]]:
     return dashboards
 
 
+_YAML_QUOTED_LITERALS = {
+    "true",
+    "false",
+    "null",
+    "~",
+    "yes",
+    "no",
+    "on",
+    "off",
+}
+
+
+def _needs_yaml_quotes(value: str) -> bool:
+    if value == "":
+        return True
+    if value != value.strip():
+        return True
+    if value.lower() in _YAML_QUOTED_LITERALS:
+        return True
+    if any(ch in value for ch in ":\n#{}[],&*?|-<>=!%@\\"):
+        return True
+    if value[0] in "-?:@&*!|>'\"%{}[],":
+        return True
+    return False
+
+
+def _format_yaml_scalar(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        if _needs_yaml_quotes(value):
+            return json.dumps(value)
+        return value
+    return json.dumps(value)
+
+
 def _dump_yaml(data: Any, indent: int = 0) -> List[str]:
     """Very small YAML encoder suited for Prometheus rules output."""
 
@@ -206,16 +246,16 @@ def _dump_yaml(data: Any, indent: int = 0) -> List[str]:
                 lines.append(f"{prefix}{key}:")
                 lines.extend(_dump_yaml(value, indent + 2))
             else:
-                lines.append(f"{prefix}{key}: {value}")
+                lines.append(f"{prefix}{key}: {_format_yaml_scalar(value)}")
     elif isinstance(data, list):
         for item in data:
             if isinstance(item, (dict, list)):
                 lines.append(f"{prefix}-")
                 lines.extend(_dump_yaml(item, indent + 2))
             else:
-                lines.append(f"{prefix}- {item}")
+                lines.append(f"{prefix}- {_format_yaml_scalar(item)}")
     else:
-        lines.append(f"{prefix}{data}")
+        lines.append(f"{prefix}{_format_yaml_scalar(data)}")
     return lines
 
 

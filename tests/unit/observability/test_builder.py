@@ -154,3 +154,73 @@ def test_build_bundle_generates_artifacts(tmp_path: Path) -> None:
     assert dashboard_payload["uid"] == "demo"
     assert manifest["dashboards"] == ["demo"]
     assert len(manifest["metrics"]) == 2
+
+
+def test_build_bundle_quotes_special_yaml_strings(tmp_path: Path) -> None:
+    root = tmp_path
+    dashboards = root / "dashboards"
+    dashboards.mkdir()
+
+    _write_json(
+        root / "metrics.json",
+        {
+            "metrics": [
+                {
+                    "name": "tradepulse_latency_seconds",
+                    "type": "histogram",
+                    "description": "Latency histogram",
+                    "labels": [],
+                    "subsystem": "api",
+                }
+            ]
+        },
+    )
+
+    _write_json(
+        root / "alerts.json",
+        {
+            "groups": [
+                {
+                    "name": "api",
+                    "rules": [
+                        {
+                            "alert": "LatencySLOViolation",
+                            "expr": "histogram_quantile(0.99, tradepulse_latency_seconds_bucket) > 1.5",
+                            "annotations": {
+                                "summary": "Latency: 99th percentile breached",
+                                "description": "Investigate upstream: dependency #1",
+                            },
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
+    _write_json(
+        dashboards / "latency.json",
+        {
+            "uid": "latency",
+            "title": "Latency",
+            "panels": [
+                {
+                    "type": "timeseries",
+                    "targets": [
+                        {
+                            "expr": "histogram_quantile(0.99, tradepulse_latency_seconds_bucket)",
+                            "refId": "A",
+                        }
+                    ],
+                }
+            ],
+        },
+    )
+
+    output_dir = root / "generated"
+    build_bundle(root, output_dir)
+
+    alerts_file = output_dir / "prometheus" / "alerts.yaml"
+    rendered = alerts_file.read_text(encoding="utf-8")
+
+    assert 'summary: "Latency: 99th percentile breached"' in rendered
+    assert 'description: "Investigate upstream: dependency #1"' in rendered
