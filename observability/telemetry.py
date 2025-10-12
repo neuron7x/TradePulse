@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping
 
 from .tracing import TracingConfig, configure_tracing
 
@@ -87,16 +87,18 @@ def _resource_from_attributes(
     if not _OTEL_AVAILABLE or Resource is None:  # pragma: no cover - defensive guard
         return None
 
-    attributes: MutableMapping[str, Any] = {
-        "service.name": service_name,
-        "service.namespace": "tradepulse",
-    }
-    if environment:
-        attributes["deployment.environment"] = environment
+    attributes: dict[str, Any] = {}
     if base_attributes:
         attributes.update(dict(base_attributes))
     if override:
         attributes.update(dict(override))
+
+    if environment:
+        attributes["deployment.environment"] = environment
+    if service_name:
+        attributes["service.name"] = service_name
+        attributes.setdefault("service.namespace", "tradepulse")
+
     return Resource.create(dict(attributes))
 
 
