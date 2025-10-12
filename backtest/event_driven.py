@@ -496,7 +496,7 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
 
             for chunk in data_handler.stream():
                 for market_event in chunk:
-                    current_step = market_event.step
+                    next_step = market_event.step
                     if (
                         calendar is not None
                         and market_event.timestamp is not None
@@ -507,6 +507,7 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         )
                         continue
 
+                    current_step = next_step
                     event_queue.put(market_event)
                     release_ready()
 

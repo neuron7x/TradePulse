@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 from datetime import datetime, time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,7 @@ from backtest.event_driven import (
     SimulatedExecutionHandler,
     Strategy,
 )
-from backtest.events import MarketEvent, OrderEvent, SignalEvent
+from backtest.events import FillEvent, MarketEvent, OrderEvent, SignalEvent
 from backtest.market_calendar import MarketCalendar, SessionHours
 from backtest.transaction_costs import (
     CompositeTransactionCostModel,
@@ -281,17 +282,29 @@ def test_event_engine_delayed_orders_wait_for_next_open_session() -> None:
     handler = _StaticHandler(events)
     engine = EventDrivenBacktestEngine()
     latency = LatencyConfig(signal_to_order=1)
-    result = engine.run(
-        prices,
-        _signal_function,
-        fee=0.0,
-        initial_capital=1_000.0,
-        data_handler=handler,
-        calendar=calendar,
-        strategy=_BuyOnceStrategy(),
-        latency=latency,
-    )
+    execution_steps: list[int] = []
+
+    original_execute = SimulatedExecutionHandler.execute
+
+    def _recording_execute(
+        self: SimulatedExecutionHandler, order: OrderEvent, current_step: int
+    ) -> FillEvent:
+        execution_steps.append(current_step)
+        return original_execute(self, order, current_step)
+
+    with patch.object(SimulatedExecutionHandler, "execute", _recording_execute):
+        result = engine.run(
+            prices,
+            _signal_function,
+            fee=0.0,
+            initial_capital=1_000.0,
+            data_handler=handler,
+            calendar=calendar,
+            strategy=_BuyOnceStrategy(),
+            latency=latency,
+        )
 
     assert result.trades == 1
     assert result.equity_curve.size == 2
     assert math.isclose(float(result.equity_curve[-1]), 1_000.0)
+    assert execution_steps == [2]
