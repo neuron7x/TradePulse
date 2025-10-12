@@ -1,11 +1,14 @@
-const LEGACY_MESSAGES = new Set([
+const LEGACY_SUBJECTS = new Set([
   'Add numeric accelerator backends and benchmarks',
+  'docs: clarify commitlint remediation guidance',
 ]);
+
+const getSubject = (message = '') => message.split('\n', 1)[0].trim();
 
 /** @type {import('@commitlint/types').UserConfig} */
 module.exports = {
   extends: ['@commitlint/config-conventional'],
-  ignores: [(message = '') => LEGACY_MESSAGES.has(message.trim())],
+  ignores: [(message = '') => LEGACY_SUBJECTS.has(getSubject(message))],
   rules: {
     'header-max-length': [2, 'always', 72],
     'subject-case': [
