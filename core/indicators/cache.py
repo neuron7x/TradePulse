@@ -35,6 +35,7 @@ from typing import Any, Callable, Mapping, MutableMapping, Sequence, TYPE_CHECKI
 import numpy as np
 import pandas as pd
 
+from core.utils.dataframe_io import read_dataframe, write_dataframe
 from core.utils.logging import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - used only for type checking
@@ -279,25 +280,14 @@ class FileSystemIndicatorCache:
 
         # pandas structures
         if isinstance(value, pd.DataFrame):
-            try:
-                file_path = data_path.with_suffix(".parquet")
-                value.to_parquet(file_path)
-                return file_path.name, "parquet", self._file_digest(file_path)
-            except Exception:  # pragma: no cover - optional dependency
-                file_path = data_path.with_suffix(".json")
-                value.to_json(file_path, orient="split", date_format="iso")
-                return file_path.name, "dataframe-json", self._file_digest(file_path)
+            stored_path = write_dataframe(value, data_path, index=False, allow_json_fallback=True)
+            fmt = "parquet" if stored_path.suffix == ".parquet" else "dataframe-json"
+            return stored_path.name, fmt, self._file_digest(stored_path)
         if isinstance(value, pd.Series):
-            try:
-                file_path = data_path.with_suffix(".parquet")
-                value.to_frame(name=value.name).to_parquet(file_path)
-                return file_path.name, "parquet", self._file_digest(file_path)
-            except Exception:  # pragma: no cover
-                file_path = data_path.with_suffix(".json")
-                value.to_frame(name=value.name).to_json(
-                    file_path, orient="split", date_format="iso"
-                )
-                return file_path.name, "series-json", self._file_digest(file_path)
+            frame = value.to_frame(name=value.name)
+            stored_path = write_dataframe(frame, data_path, index=False, allow_json_fallback=True)
+            fmt = "parquet" if stored_path.suffix == ".parquet" else "series-json"
+            return stored_path.name, fmt, self._file_digest(stored_path)
         if isinstance(value, np.ndarray):
             file_path = data_path.with_suffix(".npy")
             np.save(file_path, value)
@@ -367,7 +357,7 @@ class FileSystemIndicatorCache:
 
     def _deserialize(self, path: Path, fmt: str) -> Any:
         if fmt == "parquet":
-            return pd.read_parquet(path)
+            return read_dataframe(path)
         if fmt == "numpy":
             return np.load(path, allow_pickle=False)
         if fmt == "dataframe-json":

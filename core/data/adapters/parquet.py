@@ -12,6 +12,7 @@ from core.data.adapters.base import IngestionAdapter
 from core.data.models import InstrumentType, PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from core.utils.logging import get_logger
+from core.utils.dataframe_io import MissingParquetDependencyError, read_dataframe
 
 logger = get_logger(__name__)
 
@@ -25,7 +26,13 @@ class ParquetIngestionAdapter(IngestionAdapter):
         super().__init__(*args, **kwargs)
 
     async def _read_parquet(self, path: str | Path, columns: Optional[Iterable[str]] = None) -> pd.DataFrame:
-        return await asyncio.to_thread(pd.read_parquet, path, columns=columns)
+        def _load() -> pd.DataFrame:
+            frame = read_dataframe(Path(path), allow_json_fallback=False)
+            if columns is not None:
+                return frame.loc[:, list(columns)]
+            return frame
+
+        return await asyncio.to_thread(_load)
 
     async def fetch(
         self,
@@ -41,7 +48,12 @@ class ParquetIngestionAdapter(IngestionAdapter):
     ) -> list[Ticker]:
         """Return ticks from the parquet dataset as ``Ticker`` objects."""
 
-        df = await self._run_with_policy(lambda: self._read_parquet(path, columns))
+        try:
+            df = await self._run_with_policy(lambda: self._read_parquet(path, columns))
+        except MissingParquetDependencyError as exc:
+            raise RuntimeError(
+                "Parquet ingestion requires either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
         if timestamp_field not in df.columns or price_field not in df.columns:
             missing = {timestamp_field, price_field} - set(df.columns)
             raise ValueError(f"Parquet dataset missing required columns: {missing}")
