@@ -8,7 +8,9 @@ import pytest
 from core.data.feature_store import (
     DeltaLakeSource,
     FeatureStoreIntegrityError,
+    IntegrityReport,
     OfflineStoreValidator,
+    OnlineFeatureStore,
     RedisOnlineFeatureStore,
     RetentionPolicy,
     SQLiteOnlineFeatureStore,
@@ -121,3 +123,153 @@ def test_offline_validator_respects_interval(tmp_path, base_frame: pd.DataFrame)
     assert validator.should_run() is False
     clock.advance(pd.Timedelta(minutes=1))
     assert validator.should_run() is True
+
+
+def test_retention_policy_validation() -> None:
+    with pytest.raises(ValueError):
+        RetentionPolicy(ttl=pd.Timedelta(0))
+    with pytest.raises(ValueError):
+        RetentionPolicy(max_versions=0)
+
+
+def test_ttl_requires_timestamp_column() -> None:
+    store = RedisOnlineFeatureStore(
+        client=_DictClient(), retention_policy=RetentionPolicy(ttl=pd.Timedelta(minutes=5))
+    )
+    payload = pd.DataFrame({"entity_id": ["a"], "value": [1.0]})
+
+    with pytest.raises(KeyError, match="'ts'"):
+        store.sync("demo.fv", payload, mode="overwrite", validate=False)
+
+
+def test_max_versions_requires_entity_identifier() -> None:
+    ts = pd.Timestamp("2024-01-01 00:00:00", tz=UTC)
+    store = RedisOnlineFeatureStore(
+        client=_DictClient(), retention_policy=RetentionPolicy(max_versions=1)
+    )
+    payload = pd.DataFrame({"ts": [ts], "value": [1.0]})
+
+    with pytest.raises(KeyError, match="entity_id"):
+        store.sync("demo.fv", payload, mode="overwrite", validate=False)
+
+
+def test_redis_sync_validates_mode(base_frame: pd.DataFrame) -> None:
+    store = RedisOnlineFeatureStore(client=_DictClient())
+
+    with pytest.raises(ValueError):
+        store.sync("demo.fv", base_frame, mode="invalid", validate=False)
+
+
+def test_redis_append_enforces_schema(base_frame: pd.DataFrame) -> None:
+    store = RedisOnlineFeatureStore(client=_DictClient())
+    store.sync("demo.fv", base_frame, mode="overwrite")
+
+    with pytest.raises(ValueError):
+        store.sync("demo.fv", base_frame.drop(columns=["value"]), mode="append")
+
+
+def test_redis_append_returns_delta(base_frame: pd.DataFrame) -> None:
+    store = RedisOnlineFeatureStore(client=_DictClient())
+    report = store.sync("demo.fv", base_frame, mode="overwrite")
+    assert report.row_count_diff == 0
+
+    newer = base_frame.copy()
+    newer.loc[:, "value"] = [10.0, 11.0, 12.0]
+    newer.loc[:, "ts"] = newer["ts"] + pd.Timedelta(minutes=5)
+
+    report = store.sync("demo.fv", newer, mode="append")
+    assert report.offline_rows == newer.shape[0]
+    assert report.online_rows == newer.shape[0]
+    stored = store.load("demo.fv")
+    assert stored.shape[0] == base_frame.shape[0] + newer.shape[0]
+
+
+def test_empty_payload_round_trip() -> None:
+    client = _DictClient()
+    store = RedisOnlineFeatureStore(client=client)
+    client.payloads["demo.fv"] = b""
+
+    loaded = store.load("demo.fv")
+    assert loaded.empty
+
+
+def test_sqlite_append_validates_schema(tmp_path, base_frame: pd.DataFrame) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+    store.sync("demo.fv", base_frame, mode="overwrite")
+
+    with pytest.raises(ValueError):
+        store.sync("demo.fv", base_frame.drop(columns=["value"]), mode="append")
+
+
+def test_sqlite_append_combines_rows(tmp_path, base_frame: pd.DataFrame) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+    initial = store.sync("demo.fv", base_frame, mode="overwrite")
+    assert initial.offline_rows == base_frame.shape[0]
+
+    newer = base_frame.copy()
+    newer.loc[:, "ts"] = newer["ts"] + pd.Timedelta(minutes=5)
+    report = store.sync("demo.fv", newer, mode="append")
+
+    assert report.row_count_diff == 0
+    stored = store.load("demo.fv")
+    assert stored.shape[0] == base_frame.shape[0] + newer.shape[0]
+
+
+def test_online_feature_store_workflow(tmp_path, base_frame: pd.DataFrame) -> None:
+    store = OnlineFeatureStore(tmp_path / "online")
+    overwrite = store.sync("demo.fv", base_frame, mode="overwrite")
+    assert overwrite.offline_rows == base_frame.shape[0]
+
+    newer = base_frame.copy()
+    newer.loc[:, "value"] = [5.0, 6.0, 7.0]
+    newer.loc[:, "ts"] = newer["ts"] + pd.Timedelta(minutes=10)
+    append_report = store.sync("demo.fv", newer, mode="append")
+    assert append_report.row_count_diff == 0
+
+    stored = store.load("demo.fv")
+    assert stored.shape[0] == base_frame.shape[0] + newer.shape[0]
+
+    integrity = store.compute_integrity("demo.fv", stored)
+    assert integrity.row_count_diff == 0
+
+
+def test_online_feature_store_invalid_mode(tmp_path, base_frame: pd.DataFrame) -> None:
+    store = OnlineFeatureStore(tmp_path / "online")
+    with pytest.raises(ValueError):
+        store.sync("demo.fv", base_frame, mode="merge")
+
+
+def test_integrity_report_validation_errors() -> None:
+    base = IntegrityReport(
+        feature_view="demo.fv",
+        offline_rows=2,
+        online_rows=3,
+        row_count_diff=1,
+        offline_hash="abc",
+        online_hash="def",
+        hash_differs=True,
+    )
+
+    with pytest.raises(FeatureStoreIntegrityError, match="Row count mismatch"):
+        base.ensure_valid()
+
+    consistent = IntegrityReport(
+        feature_view="demo.fv",
+        offline_rows=2,
+        online_rows=2,
+        row_count_diff=0,
+        offline_hash="abc",
+        online_hash="def",
+        hash_differs=True,
+    )
+
+    with pytest.raises(FeatureStoreIntegrityError, match="Hash mismatch"):
+        consistent.ensure_valid()
+
+
+def test_canonicalize_sorts_and_stabilises_rows() -> None:
+    frame = pd.DataFrame({"b": [2, 1], "a": [1, 2]})
+    canonical = OnlineFeatureStore._canonicalize(frame)
+    assert list(canonical.columns) == ["a", "b"]
+    assert canonical.iloc[0].to_dict() == {"a": 1, "b": 2}
+

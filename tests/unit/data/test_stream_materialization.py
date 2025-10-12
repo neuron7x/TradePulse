@@ -78,3 +78,57 @@ def test_deduplicate_requires_keys(stream_payload: pd.DataFrame) -> None:
     with pytest.raises(KeyError):
         bad_payload = stream_payload.drop(columns=["ts"])
         materializer.materialize("features.demo", bad_payload)
+
+
+def test_materializer_configuration_guards() -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+
+    with pytest.raises(ValueError):
+        StreamMaterializer(lambda *_: None, checkpoint_store, microbatch_size=0)
+
+    with pytest.raises(ValueError):
+        StreamMaterializer(lambda *_: None, checkpoint_store, dedup_keys=())
+
+
+def test_materialize_accepts_iterable_batches(stream_payload: pd.DataFrame) -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    writes: list[pd.DataFrame] = []
+
+    materializer = StreamMaterializer(
+        lambda _name, frame: writes.append(frame.copy()),
+        checkpoint_store,
+        microbatch_size=3,
+    )
+
+    materializer.materialize("features.demo", [stream_payload])
+    assert writes
+
+
+def test_backfill_only_updates_checkpoint(stream_payload: pd.DataFrame) -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    writes: list[pd.DataFrame] = []
+
+    deduped = stream_payload.sort_values(by=["entity_id", "ts"], kind="mergesort").drop_duplicates(
+        ["entity_id", "ts"], keep="last"
+    )
+
+    materializer = StreamMaterializer(
+        lambda _name, frame: writes.append(frame.copy()),
+        checkpoint_store,
+        backfill_loader=lambda _name: deduped,
+    )
+
+    materializer.materialize("features.demo", stream_payload)
+    assert writes == []
+    checkpoint = checkpoint_store.load("features.demo")
+    assert checkpoint is not None
+    assert len(checkpoint.checkpoint_ids) == 1
+
+
+def test_checkpoint_add_does_not_mutate_original() -> None:
+    checkpoint = Checkpoint("demo", frozenset({"one"}))
+    updated = checkpoint.add("two")
+
+    assert checkpoint is not updated
+    assert checkpoint.checkpoint_ids == frozenset({"one"})
+    assert updated.checkpoint_ids == frozenset({"one", "two"})
