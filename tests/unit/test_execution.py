@@ -89,6 +89,46 @@ def test_kill_switch_blocks_all_orders() -> None:
         manager.validate_order("BTC", "buy", qty=1.0, price=10.0)
 
 
+def test_risk_manager_soft_and_hard_loss_limits() -> None:
+    limits = RiskLimits(
+        max_notional=1_000_000,
+        max_position=10.0,
+        max_daily_loss=100.0,
+        soft_loss_ratio=0.5,
+    )
+    manager = RiskManager(limits)
+
+    manager.register_fill("BTC", "buy", qty=1.0, price=100.0)
+    manager.register_fill("BTC", "sell", qty=1.0, price=40.0)
+
+    assert manager.realized_pnl == pytest.approx(-60.0)
+    with pytest.raises(LimitViolation):
+        manager.validate_order("BTC", "buy", qty=1.0, price=90.0)
+
+    # Subsequent profitable trades should clear the soft limit once PnL recovers.
+    manager.register_fill("BTC", "buy", qty=1.0, price=90.0)
+    manager.register_fill("BTC", "sell", qty=1.0, price=140.0)
+    assert manager.realized_pnl == pytest.approx(-10.0)
+    manager.validate_order("BTC", "buy", qty=0.5, price=95.0)
+
+
+def test_risk_manager_triggers_kill_switch_on_max_loss() -> None:
+    limits = RiskLimits(
+        max_notional=1_000_000,
+        max_position=10.0,
+        max_daily_loss=50.0,
+        soft_loss_ratio=0.0,
+    )
+    manager = RiskManager(limits)
+
+    manager.register_fill("BTC", "buy", qty=1.0, price=100.0)
+    manager.register_fill("BTC", "sell", qty=1.0, price=40.0)
+
+    assert manager.kill_switch.is_triggered()
+    with pytest.raises(RiskError):
+        manager.validate_order("BTC", "buy", qty=1.0, price=90.0)
+
+
 def test_risk_manager_normalises_symbol_aliases() -> None:
     manager = RiskManager(RiskLimits(max_notional=1_000.0, max_position=10.0))
     manager.validate_order("btc-usdt", "buy", qty=1.0, price=20.0)
