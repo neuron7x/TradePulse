@@ -22,6 +22,12 @@ criteria across testing, performance, and reliability domains.
    `arm` marker compare CPU, GPU, and float32 (ARM-simulated) execution paths.
    CI requires parity within ±0.005 absolute tolerance; deviations block the
    pipeline and page the platform quality channel.
+6. **Fuzz Robustness (`fuzzrobustness`)** – Automated fuzz harnesses bombard
+   ingestion, messaging, and API surfaces with massively randomized inputs.
+   The job fails the pipeline on any crash, resource leak, or inconsistent
+   system state, enforcing resilience against malformed or adversarial
+   payloads. Лише стабільні збірки, що проходять це випробування, можуть бути
+   об'єднані.
 
 ## Nightly Benchmarks and Auto-Triage
 
