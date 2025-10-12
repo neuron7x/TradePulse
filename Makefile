@@ -30,5 +30,10 @@ clean-dist:
 
 .PHONY: generate
 generate:
-	buf generate
-	PYTHONPATH=. python tools/schema/generate_event_types.py
+        buf generate
+        PYTHONPATH=. python tools/schema/generate_event_types.py
+
+.PHONY: mutation-test
+mutation-test:
+        mutmut run --use-coverage
+        mutmut results

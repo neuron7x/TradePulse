@@ -167,12 +167,17 @@ The testing automation is split across two workflows:
   2. **Property-Based Tests**: Run with Hypothesis statistics enabled.
   3. **Fuzz Tests**: Replay deterministic fuzz corpora.
   4. **Coverage Report**: Generated and uploaded to CI artifacts.
-  5. **Coverage Threshold**: Build fails if coverage `< 80%`.
+  5. **Coverage Threshold**: Build fails if coverage `< 90%`.
 - **`heavy-math.yml` (per PR, nightly)**
   1. Executes the heavy-math suites defined in `configs/quality/heavy_math_jobs.yaml`.
   2. Enforces CPU/memory quotas via workflow dispatch inputs.
   3. Runs portability checks marked `arm` to assert CPU/GPU/ARM parity.
   4. Blocks merge if any heavy-math job or portability test fails.
+
+- `.github/workflows/mutation-tests.yml` (weekly + manual)
+  1. Runs targeted mutation testing against `core/`, `backtest/`, and `execution/`.
+  2. Publishes mutation reports and caches as CI artifacts for triage.
+  3. Reuses the pytest coverage data to short-circuit equivalent mutants.
 
 - `.github/workflows/smoke-e2e.yml` (nightly + manual)
   1. **E2E Pipeline**: Executes `python scripts/smoke_e2e.py` against `data/sample.csv`.
@@ -185,13 +190,26 @@ The CI enforces coverage thresholds using `pytest-cov`:
 ```bash
 pytest --cov=core --cov=backtest --cov=execution \
        --cov-report=term-missing \
-       --cov-fail-under=80
+       --cov-fail-under=90
 ```
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=80
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=90
 ```
+
+### Mutation Testing
+
+Mutation analysis is enforced for the core trading engine modules using [`mutmut`](https://mutmut.readthedocs.io/). The default configuration lives in `pyproject.toml` and targets `core/`, `backtest/`, and `execution/` with the unit, integration, and property suites as the runner.
+
+Run the mutation suite locally (requires the `dev` extras or `requirements-dev.txt`):
+
+```bash
+mutmut run --use-coverage
+mutmut results
+```
+
+The command caches results under `.mutmut-cache/` and reuses coverage data to accelerate re-runs. Use `mutmut show <mutation-id>` to inspect surviving mutants in detail.
 
 ## Writing Tests
 

@@ -43,8 +43,8 @@ This document converts the proposed enhancements into concrete, actionable steps
 1. **Raise Coverage for `core` and `libs/utils`**
    - Identify untested modules via `coverage html` reports.
    - Prioritize edge-case unit tests (e.g., invalid order states, latency spikes).
-   - Enforce 80% threshold in CI via `pytest --cov-fail-under=80` for those packages.
-   - _Success metric_: Coverage dashboard in CI stays ≥80% across main.
+   - Enforce 90% threshold in CI via `pytest --cov-fail-under=90` for those packages.
+   - _Success metric_: Coverage dashboard in CI stays ≥90% across main.
 
 2. **Add End-to-End Scenarios**
    - Build integration fixtures that run ingestion → signal generation → order placement → settlement on sample data.

@@ -69,6 +69,7 @@ dev = [
     "pytest-html>=4.1.1",
     "pytest-xdist>=3.6.1",
     "pytest-profiling>=1.7.0; python_version < \"3.13\"",
+    "mutmut>=3.3.1",
     "hypothesis>=6.140.3",
     "scalene>=1.5.55",
     "py-spy>=0.4.1",
@@ -121,6 +122,16 @@ include = [
     "tools.*",
 ]
 exclude = ["tests", "tests.*", "docs", "docs.*"]
+
+[tool.mutmut]
+paths_to_mutate = [
+    "core",
+    "backtest",
+    "execution",
+]
+tests_dir = "tests"
+runner = "python -m pytest tests/unit tests/integration tests/property -q"
+use_coverage = true
 
 [tool.ruff]
 line-length = 100
