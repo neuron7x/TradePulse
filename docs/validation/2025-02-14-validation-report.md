@@ -8,6 +8,10 @@
 - `ruff check` surfaced **1,091** findings across `tests/` and `tools/vendor/fpma/`.
 - Most issues are formatting-related (line length, import ordering); **565** are auto-fixable with `ruff --fix` (additional fixes available with `--unsafe-fixes`).
 
+## Commit Message Lint (`commitlint`)
+- `commitlint --from HEAD~1 --to HEAD` flagged the latest conventional commit for exceeding the **100-character** body line limit enforced by `body-max-line-length`.
+- Reflow verbose bullet points in the commit body (or move detail into linked artifacts) before pushing to keep each line within the configured threshold.
+
 ## Type Checking (`mypy .`)
 - `mypy` reported missing stubs for the `yaml` dependency within several modules (`backtest/transaction_costs.py`, `core/config/kuramoto_ricci.py`, `core/config/template_manager.py`, `interfaces/cli.py`).
 - Duplicate module discovery for `cli/tradepulse_cli.py` (seen as both `tradepulse_cli` and `cli.tradepulse_cli`), suggesting the need for package layout adjustments or explicit package bases.
