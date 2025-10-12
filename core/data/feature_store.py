@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Callable, Literal, Protocol
 
 import pandas as pd
+from pandas.api import types as pd_types
 
 from core.utils.dataframe_io import (
     purge_dataframe_artifacts,
@@ -499,7 +500,8 @@ class OnlineFeatureStore:
     @staticmethod
     def _snapshot(frame: pd.DataFrame) -> IntegritySnapshot:
         canonical = OnlineFeatureStore._canonicalize(frame)
-        payload = canonical.to_json(
+        normalized = OnlineFeatureStore._normalize_for_hash(canonical)
+        payload = normalized.to_json(
             orient="split",
             index=False,
             date_format="iso",
@@ -518,6 +520,47 @@ class OnlineFeatureStore:
         if columns:
             canonical = canonical.sort_values(by=columns, kind="mergesort")
         return canonical.reset_index(drop=True)
+
+    @staticmethod
+    def _normalize_for_hash(frame: pd.DataFrame) -> pd.DataFrame:
+        """Coerce values into stable types prior to hashing."""
+
+        if frame.empty:
+            return frame.copy()
+
+        normalized = frame.copy()
+
+        for column in normalized.columns:
+            series = normalized[column]
+
+            if pd_types.is_datetime64_any_dtype(series):
+                normalized[column] = pd.to_datetime(series, utc=True)
+                continue
+
+            if pd_types.is_timedelta64_dtype(series):
+                # Represent timedeltas using ISO-8601 duration strings for stability.
+                normalized[column] = series.astype("timedelta64[ns]").astype(str)
+                continue
+
+            if series.dtype == object:
+                # Attempt to coerce datetime-like payloads first.
+                try:
+                    coerced_datetime = pd.to_datetime(series, utc=True)
+                except (TypeError, ValueError):
+                    coerced_datetime = None
+                if coerced_datetime is not None and pd_types.is_datetime64_any_dtype(coerced_datetime):
+                    normalized[column] = coerced_datetime
+                    continue
+
+                numeric = pd.to_numeric(series, errors="coerce")
+                if pd_types.is_numeric_dtype(numeric):
+                    if numeric.isna().equals(pd.isna(series)):
+                        normalized[column] = numeric
+                        continue
+
+                normalized[column] = series.astype(str)
+
+        return normalized
 
 
 __all__ = [
