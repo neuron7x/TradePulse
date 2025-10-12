@@ -127,3 +127,24 @@ helm upgrade --install tradepulse deploy/helm/tradepulse \
 - **Dashboards** – point Grafana or your preferred UI to the Prometheus instance and alert on failed health probes, high error rates, or scrape gaps.
 
 Following these practices keeps deployments reproducible across environments while giving operations teams the hooks they need for automation, alerting, and incident response.
+
+## Release Automation
+
+TradePulse releases are automated through GitHub Actions:
+
+1. **Drafting** – The `Release Drafter` workflow updates a draft release on every push to `main`, grouping merged PRs by labels via `.github/release-drafter.yml`.
+2. **Changelog fragments** – Every change must include a Towncrier fragment under `newsfragments/` (see `newsfragments/README.md`). When the release workflow runs it stitches the fragments into `CHANGELOG.md` and generates the GitHub release notes.
+3. **SemVer tags only** – Publishing requires annotated tags that follow `vMAJOR.MINOR.PATCH`. The workflow verifies that the tag matches the version recorded in the `VERSION` file before continuing.
+4. **Green CI gate** – Releases are blocked unless all checks on the tagged commit have completed successfully. The workflow inspects the commit status and fails fast if required jobs (tests, lint, build) are pending or red.
+5. **Signature enforcement** – Tags must carry a cryptographic signature, and build artifacts (wheels and sdists) are signed with Sigstore before they are uploaded to the release and PyPI.
+
+To perform a release:
+
+```bash
+# ensure CI is green and fragments exist
+# create a signed SemVer tag and push it
+ git tag -s vX.Y.Z -m "TradePulse vX.Y.Z"
+ git push origin vX.Y.Z
+```
+
+GitHub Actions will take over from there, generate the changelog, attach the signed artifacts, and publish to PyPI once the release is approved.

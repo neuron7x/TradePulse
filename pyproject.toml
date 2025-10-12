@@ -82,6 +82,7 @@ dev = [
     "twine>=5.1.1",
     "pip-tools>=7.5.1",
     "cibuildwheel>=2.16",
+    "towncrier>=23.11",
 ]
 docs = [
     "mkdocs>=1.6.0",
@@ -145,3 +146,66 @@ ignore = ["E203"]
 [tool.mypy]
 ignore_missing_imports = true
 plugins = ["numpy.typing.mypy_plugin"]
+
+[tool.towncrier]
+directory = "newsfragments"
+filename = "CHANGELOG.md"
+start_string = "<!-- towncrier release notes start -->\n"
+template = "tools/release/towncrier_template.jinja"
+title_format = "{name} {version} ({project_date})"
+issue_format = "#{issue}"
+name = "TradePulse"
+
+[[tool.towncrier.section]]
+path = ""
+name = "TradePulse"
+
+[[tool.towncrier.type]]
+directory = "feature"
+name = "🚀 Features"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "bugfix"
+name = "🐛 Fixes"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "performance"
+name = "⚡ Performance"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "maintenance"
+name = "🧹 Maintenance"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "docs"
+name = "📝 Documentation"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "tests"
+name = "✅ Tests"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "ci"
+name = "🤖 CI"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "build"
+name = "📦 Build"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "security"
+name = "🔐 Security"
+showcontent = true
+
+[[tool.towncrier.type]]
+directory = "chore"
+name = "🧰 Chores"
+showcontent = true
