@@ -34,6 +34,18 @@ except Exception:  # pragma: no cover - rust extension not built or numpy missin
     _RUST_ACCEL_AVAILABLE = False
 
 
+def numpy_available() -> bool:
+    """Return ``True`` when NumPy is importable."""
+
+    return bool(_NUMPY_AVAILABLE and np is not None)
+
+
+def rust_available() -> bool:
+    """Return ``True`` when the compiled Rust extension is importable."""
+
+    return bool(_RUST_ACCEL_AVAILABLE)
+
+
 def _ensure_vector_numpy(data: Sequence[float] | np.ndarray) -> "np.ndarray":
     arr = np.ascontiguousarray(data, dtype=np.float64)
     if arr.ndim != 1:
@@ -48,6 +60,43 @@ def _ensure_vector_python(data: Iterable[float]) -> list[float]:
             raise ValueError("input must be 1-dimensional")
         result.append(float(item))
     return result
+
+
+def sliding_windows_python_backend(
+    data: Iterable[float],
+    window: int,
+    step: int,
+) -> list[list[float]]:
+    """Pure-Python sliding window helper for benchmarking and fallbacks."""
+
+    arr_list = _ensure_vector_python(data)
+    return _sliding_windows_python(arr_list, int(window), int(step))
+
+
+def sliding_windows_numpy_backend(
+    data: Sequence[float] | np.ndarray,
+    window: int,
+    step: int,
+) -> "np.ndarray":
+    """NumPy implementation of :func:`sliding_windows`."""
+
+    if not numpy_available():
+        raise RuntimeError("NumPy backend requested but NumPy is not available")
+    arr = _ensure_vector_numpy(data)
+    return _sliding_windows_numpy(arr, int(window), int(step))
+
+
+def sliding_windows_rust_backend(
+    data: Sequence[float] | np.ndarray,
+    window: int,
+    step: int,
+) -> "np.ndarray":
+    """Rust-accelerated implementation of :func:`sliding_windows`."""
+
+    if not (numpy_available() and rust_available() and _rust_sliding_windows is not None):
+        raise RuntimeError("Rust backend requested but the extension is not available")
+    arr = _ensure_vector_numpy(data)
+    return _rust_sliding_windows(arr, int(window), int(step))
 
 
 def _sliding_windows_numpy(arr: "np.ndarray", window: int, step: int) -> "np.ndarray":
@@ -150,6 +199,41 @@ def _quantiles_python(arr: list[float], probabilities: Sequence[float]) -> list[
     return results
 
 
+def quantiles_python_backend(
+    data: Iterable[float],
+    probabilities: Sequence[float],
+) -> list[float]:
+    """Pure-Python implementation of :func:`quantiles`."""
+
+    arr_list = _ensure_vector_python(data)
+    return _quantiles_python(arr_list, probabilities)
+
+
+def quantiles_numpy_backend(
+    data: Sequence[float] | np.ndarray,
+    probabilities: Sequence[float],
+) -> "np.ndarray":
+    """NumPy implementation of :func:`quantiles`."""
+
+    if not numpy_available():
+        raise RuntimeError("NumPy backend requested but NumPy is not available")
+    arr = _ensure_vector_numpy(data)
+    return _quantiles_numpy(arr, probabilities)
+
+
+def quantiles_rust_backend(
+    data: Sequence[float] | np.ndarray,
+    probabilities: Sequence[float],
+) -> "np.ndarray":
+    """Rust-accelerated implementation of :func:`quantiles`."""
+
+    if not (numpy_available() and rust_available() and _rust_quantiles is not None):
+        raise RuntimeError("Rust backend requested but the extension is not available")
+    arr = _ensure_vector_numpy(data)
+    result = _rust_quantiles(arr, list(float(p) for p in probabilities))
+    return np.asarray(result, dtype=np.float64)
+
+
 def quantiles(
     data: Sequence[float] | np.ndarray,
     probabilities: Sequence[float] | np.ndarray,
@@ -191,6 +275,10 @@ def _convolve_python(
     *,
     mode: str = "full",
 ) -> list[float]:
+    if not signal:
+        raise ValueError("convolution signal must not be empty")
+    if not kernel:
+        raise ValueError("convolution kernel must not be empty")
     if any(isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)) for v in signal):
         raise ValueError("convolution inputs must be 1-dimensional")
     if any(isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)) for v in kernel):
@@ -220,6 +308,49 @@ def _convolve_python(
     raise ValueError(f"invalid convolution mode: {mode}")
 
 
+def convolve_python_backend(
+    signal: Iterable[float],
+    kernel: Iterable[float],
+    *,
+    mode: str = "full",
+) -> list[float]:
+    """Pure-Python implementation of :func:`convolve`."""
+
+    signal_list = _ensure_vector_python(signal)
+    kernel_list = _ensure_vector_python(kernel)
+    return _convolve_python(signal_list, kernel_list, mode=mode)
+
+
+def convolve_numpy_backend(
+    signal: Sequence[float] | np.ndarray,
+    kernel: Sequence[float] | np.ndarray,
+    *,
+    mode: str = "full",
+) -> "np.ndarray":
+    """NumPy implementation of :func:`convolve`."""
+
+    if not numpy_available():
+        raise RuntimeError("NumPy backend requested but NumPy is not available")
+    signal_arr = _ensure_vector_numpy(signal)
+    kernel_arr = _ensure_vector_numpy(kernel)
+    return _convolve_numpy(signal_arr, kernel_arr, mode=mode)
+
+
+def convolve_rust_backend(
+    signal: Sequence[float] | np.ndarray,
+    kernel: Sequence[float] | np.ndarray,
+    *,
+    mode: str = "full",
+) -> "np.ndarray":
+    """Rust-accelerated implementation of :func:`convolve`."""
+
+    if not (numpy_available() and rust_available() and _rust_convolve is not None):
+        raise RuntimeError("Rust backend requested but the extension is not available")
+    signal_arr = _ensure_vector_numpy(signal)
+    kernel_arr = _ensure_vector_numpy(kernel)
+    return _rust_convolve(signal_arr, kernel_arr, mode)
+
+
 def convolve(
     signal: Sequence[float] | np.ndarray,
     kernel: Sequence[float] | np.ndarray,
@@ -247,4 +378,19 @@ def convolve(
     return _convolve_python(signal_list, kernel_list, mode=mode)
 
 
-__all__ = ["sliding_windows", "quantiles", "convolve"]
+__all__ = [
+    "sliding_windows",
+    "quantiles",
+    "convolve",
+    "numpy_available",
+    "rust_available",
+    "sliding_windows_python_backend",
+    "sliding_windows_numpy_backend",
+    "sliding_windows_rust_backend",
+    "quantiles_python_backend",
+    "quantiles_numpy_backend",
+    "quantiles_rust_backend",
+    "convolve_python_backend",
+    "convolve_numpy_backend",
+    "convolve_rust_backend",
+]
