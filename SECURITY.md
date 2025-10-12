@@ -120,9 +120,14 @@ api_key = "sk-12345..."  # in code
 
 **Check for secrets before committing:**
 ```bash
-# Use git-secrets or similar tools
-git secrets --scan
+# Run the bundled detect-secrets hook
+pre-commit run detect-secrets --all-files
+
+# Or run the scanner directly when pre-commit is unavailable
+detect-secrets scan --all-files --baseline .secrets.baseline
 ```
+
+> ℹ️  The repository enforces a detect-secrets policy in CI. Update `.secrets.baseline` with `detect-secrets scan --update .secrets.baseline` **only after** auditing each finding and marking false positives with `"is_secret": false`.
 
 #### 2. Input Validation
 

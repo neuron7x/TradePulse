@@ -27,16 +27,55 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install bandit safety
-    
-    - name: Run custom secret scanner
+        pip install bandit detect-secrets safety
+
+    - name: Run detect-secrets policy check
       run: |
-        python -c "
-        from core.utils.security import check_for_hardcoded_secrets
+        detect-secrets scan --all-files --force-use-all-plugins --output .secrets.ci.baseline
+        python - <<'PY'
+        import json
         import sys
-        if check_for_hardcoded_secrets('.'):
+        from pathlib import Path
+
+        baseline_path = Path('.secrets.baseline')
+        ci_path = Path('.secrets.ci.baseline')
+
+        if not baseline_path.is_file():
+            sys.exit('Missing required baseline file: .secrets.baseline')
+        if not ci_path.is_file():
+            sys.exit('CI baseline was not generated; detect-secrets may have failed')
+
+        def load_findings(path: Path) -> dict[str, set[tuple[str, str]]]:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            findings: dict[str, set[tuple[str, str]]] = {}
+            for filename, secrets in data.get('results', {}).items():
+                bucket = findings.setdefault(filename, set())
+                for secret in secrets:
+                    hashed = secret.get('hashed_secret')
+                    secret_type = secret.get('type') or secret.get('secret_type')
+                    if hashed:
+                        bucket.add((hashed, secret_type or 'unknown'))
+            return findings
+
+        baseline_findings = load_findings(baseline_path)
+        current_findings = load_findings(ci_path)
+
+        new_findings: list[tuple[str, str, str]] = []
+        for filename, secrets in sorted(current_findings.items()):
+            baseline_hashes = baseline_findings.get(filename, set())
+            for hashed_secret, secret_type in sorted(secrets):
+                if (hashed_secret, secret_type) not in baseline_hashes:
+                    new_findings.append((filename, secret_type, hashed_secret))
+
+        if new_findings:
+            print('ERROR: new potential secrets detected compared to .secrets.baseline:')
+            for filename, secret_type, hashed_secret in new_findings:
+                print(f'  - {filename}: {secret_type} (hash: {hashed_secret})')
             sys.exit(1)
-        "
+
+        print('No new secrets detected; .secrets.baseline is still valid.')
+        PY
+        rm .secrets.ci.baseline
     
     - name: Run Bandit security linter
       run: |
