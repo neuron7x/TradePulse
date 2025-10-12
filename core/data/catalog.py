@@ -131,6 +131,11 @@ def _split_by_known_quotes(symbol: str) -> Sequence[str] | None:
     for quote in _KNOWN_QUOTES:
         if symbol.endswith(quote) and len(symbol) > len(quote):
             base = symbol[: -len(quote)]
+            # Some market codes include a separator right before the quote
+            # currency (e.g. ``BTC_USDT``).  ``rstrip`` ensures we discard
+            # trailing separators introduced by upstream providers without
+            # accidentally dropping alphanumeric characters.
+            base = base.rstrip("".join(_SEPARATORS))
             if base:
                 return [base, quote]
     return None
