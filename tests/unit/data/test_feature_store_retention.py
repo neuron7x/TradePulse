@@ -86,6 +86,21 @@ def test_retention_policy_cap_rows(tmp_path) -> None:
     assert set(stored["entity_id"]) == {"B", "C"}
 
 
+def test_retention_policy_accepts_reference_now() -> None:
+    policy = RetentionPolicy(ttl=timedelta(days=1))
+    reference = datetime(2024, 5, 2, tzinfo=UTC)
+    frame = _frame(
+        [
+            ("A", reference - timedelta(days=2), 1.0),
+            ("A", reference - timedelta(hours=12), 2.0),
+        ]
+    )
+    retained = policy.apply(frame, timestamp_column="timestamp", now=reference)
+
+    assert retained.shape[0] == 1
+    assert retained.iloc[0]["value"] == 2.0
+
+
 def test_sqlite_backend_respects_retention(tmp_path) -> None:
     backend = SQLiteFeatureStoreBackend(tmp_path / "features.db")
     retention = RetentionPolicy(max_rows=1)

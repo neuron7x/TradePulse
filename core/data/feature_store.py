@@ -64,20 +64,36 @@ class IntegrityReport:
 class RetentionPolicy:
     """Retention settings applied after each write."""
 
-    ttl: timedelta | None = None
+    ttl: timedelta | pd.Timedelta | None = None
     max_rows: int | None = None
 
-    def apply(self, frame: pd.DataFrame, *, timestamp_column: str) -> pd.DataFrame:
+    def apply(
+        self,
+        frame: pd.DataFrame,
+        *,
+        timestamp_column: str,
+        now: pd.Timestamp | datetime | None = None,
+    ) -> pd.DataFrame:
         """Return ``frame`` after enforcing the retention constraints."""
 
         result = frame
         if self.ttl is not None and not result.empty:
-            cutoff = datetime.now(tz=UTC) - self.ttl
             if timestamp_column not in result.columns:
                 raise ValueError(
                     "Retention policy requires timestamp column "
                     f"{timestamp_column!r} to be present"
                 )
+
+            if now is None:
+                reference = pd.Timestamp.now(tz=UTC)
+            else:
+                reference = pd.Timestamp(now)
+                if reference.tzinfo is None:
+                    reference = reference.tz_localize(UTC)
+                else:
+                    reference = reference.tz_convert(UTC)
+
+            cutoff = reference - pd.to_timedelta(self.ttl)
             timestamps = pd.to_datetime(result[timestamp_column], utc=True, errors="coerce")
             mask = timestamps >= cutoff
             result = result.loc[mask]
@@ -480,7 +496,9 @@ class OnlineFeatureStore:
                 updated = updated.drop_duplicates(subset=self._dedup_keys, keep="last")
             if self._retention is not None:
                 updated = self._retention.apply(
-                    updated, timestamp_column=self._timestamp_column
+                    updated,
+                    timestamp_column=self._timestamp_column,
+                    now=pd.Timestamp.now(tz=UTC),
                 )
             if not updated.equals(current):
                 self._backend.write(feature_view, updated, mode="overwrite")
