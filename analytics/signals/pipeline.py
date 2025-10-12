@@ -421,6 +421,13 @@ class SignalModelSelector:
             split_details: list[SplitPerformance] = []
             regression_rows = []
             aggregate_store: dict[str, list[float]] = {}
+            additive_totals: dict[str, float] = {}
+            additive_keys = {
+                "total_pnl",
+                "long_contribution",
+                "short_contribution",
+                "gross_exposure",
+            }
             for split_idx, (train_idx, test_idx) in enumerate(self._iter_splits(frame)):
                 train = frame.iloc[train_idx]
                 test = frame.iloc[test_idx]
@@ -439,7 +446,10 @@ class SignalModelSelector:
                 predictions = model.predict(X_test)
                 metrics, pnl, _ = _evaluate_predictions(predictions, y_test)
                 for key, value in metrics.items():
-                    aggregate_store.setdefault(key, []).append(float(value))
+                    if key in additive_keys:
+                        additive_totals[key] = additive_totals.get(key, 0.0) + float(value)
+                    else:
+                        aggregate_store.setdefault(key, []).append(float(value))
                 start = test.index.min()
                 end = test.index.max()
                 regression = {
@@ -461,6 +471,7 @@ class SignalModelSelector:
             aggregate_metrics = {
                 key: float(np.mean(values)) for key, values in aggregate_store.items() if values
             }
+            aggregate_metrics.update(additive_totals)
             regression_report = pd.DataFrame(regression_rows)
             evaluations.append(
                 SignalModelEvaluation(
