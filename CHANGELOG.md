@@ -1,7 +1,11 @@
-# CHANGELOG
-Ведемо зміни за правилами [Keep a Changelog](https://keepachangelog.com/) та [SemVer](https://semver.org/).
+# Changelog
 
-## [Unreleased]
+Ведемо зміни за правилами [Keep a Changelog](https://keepachangelog.com/) та [SemVer](https://semver.org/).
+Цей файл автоматично оновлюється за допомогою [Towncrier](https://towncrier.readthedocs.io/).
+Додавайте короткі фрагменти до каталогу `newsfragments/` для кожного Pull Request.
+
+<!-- towncrier release notes start -->
+
 ## [2.1.3] - 2025-10-05
 ### Added
 - Новий конвеєр **CI/CD**: `ci.yml` (матриці лінтів/тестів, concurrency, кеші), `pre-commit.yml`, `auto-merge.yml`, `sbom-scan.yml`, `publish-image.yml` (cosign), `data-sanity.yml`.
