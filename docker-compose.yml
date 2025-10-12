@@ -1,12 +1,59 @@
 # SPDX-License-Identifier: MIT
 version: '3.9'
+
+x-default-deploy: &default-deploy
+  resources:
+    limits:
+      cpus: '1.00'
+      memory: 512M
+    reservations:
+      cpus: '0.25'
+      memory: 128M
+
 services:
   tradepulse:
     build: .
-    ports: ["8001:8001"]
+    profiles: ["dev", "test", "prod"]
+    ports:
+      - "8001:8001"
     restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import sys,urllib.request; urllib.request.urlopen('http://localhost:8001/health').read()"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    deploy: *default-deploy
+    networks:
+      - app-net
+      - monitoring-net
+
   prometheus:
-    image: prom/prometheus
+    image: prom/prometheus:latest
+    profiles: ["dev", "prod"]
     volumes:
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports: ["9090:9090"]
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --spider -q http://localhost:9090/-/ready || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy: *default-deploy
+    networks:
+      - monitoring-net
+    depends_on:
+      tradepulse:
+        condition: service_healthy
+
+networks:
+  app-net:
+    driver: bridge
+  monitoring-net:
+    driver: bridge
