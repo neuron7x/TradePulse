@@ -1,21 +1,19 @@
 # SPDX-License-Identifier: MIT
-"""Async data ingestion APIs for TradePulse.
-
-This module provides async support for data ingestion from various sources
-including CSV files and WebSocket streams.
-"""
+"""Async data ingestion APIs for TradePulse with strict path validation."""
 from __future__ import annotations
 
 import asyncio
 import csv
 from datetime import datetime, timezone
 from decimal import InvalidOperation
-from typing import AsyncIterator, Callable, Optional
+from pathlib import Path
+from typing import AsyncIterator, Callable, Iterable, Optional
 
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 
 from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
 from interfaces.ingestion import AsyncDataIngestionService
 
@@ -27,16 +25,29 @@ metrics = get_metrics_collector()
 
 class AsyncDataIngestor(AsyncDataIngestionService):
     """Async data ingestion with support for CSV and streaming sources."""
-    
-    def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
+
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        *,
+        allowed_roots: Iterable[str | Path] | None = None,
+        max_csv_bytes: Optional[int] = None,
+        follow_symlinks: bool = False,
+    ):
         """Initialize async data ingestor.
-        
+
         Args:
             api_key: Optional API key for authenticated sources
             api_secret: Optional API secret for authenticated sources
         """
         self.api_key = api_key
         self.api_secret = api_secret
+        self._path_guard = DataPathGuard(
+            allowed_roots=allowed_roots,
+            max_bytes=max_csv_bytes,
+            follow_symlinks=follow_symlinks,
+        )
         
     async def read_csv(
         self,
@@ -66,9 +77,11 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         Raises:
             ValueError: If CSV is missing required columns
         """
-        with logger.operation("async_csv_read", path=path, symbol=symbol):
+        resolved_path = self._path_guard.resolve(path, description="CSV data file")
+
+        with logger.operation("async_csv_read", path=str(resolved_path), symbol=symbol):
             try:
-                with open(path, "r", encoding="utf-8") as f:
+                with resolved_path.open("r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
                     
                     if reader.fieldnames is None:

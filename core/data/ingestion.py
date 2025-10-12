@@ -4,6 +4,7 @@ from __future__ import annotations
 import csv
 import logging
 from decimal import InvalidOperation
+from pathlib import Path
 from typing import Callable, Iterable, Optional
 
 try:
@@ -14,6 +15,7 @@ except Exception:  # pragma: no cover - optional dependency
 logger = logging.getLogger(__name__)
 
 from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
 from interfaces.ingestion import DataIngestionService
 from observability.tracing import pipeline_span
@@ -44,9 +46,22 @@ class BinanceStreamHandle:
 
 
 class DataIngestor(DataIngestionService):
-    def __init__(self, api_key: Optional[str] = None, api_secret: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        api_secret: Optional[str] = None,
+        *,
+        allowed_roots: Iterable[str | Path] | None = None,
+        max_csv_bytes: Optional[int] = None,
+        follow_symlinks: bool = False,
+    ):
         self.api_key = api_key
         self.api_secret = api_secret
+        self._path_guard = DataPathGuard(
+            allowed_roots=allowed_roots,
+            max_bytes=max_csv_bytes,
+            follow_symlinks=follow_symlinks,
+        )
 
     def historical_csv(
         self,
@@ -60,14 +75,16 @@ class DataIngestor(DataIngestionService):
         market: Optional[str] = None,
     ) -> None:
         missing: list[str] = []
+        resolved_path = self._path_guard.resolve(path, description="CSV data file")
+
         with pipeline_span(
             "ingest.historical_csv",
             source="csv",
-            path=path,
+            path=str(resolved_path),
             symbol=symbol,
             venue=venue,
         ):
-            with open(path, "r", encoding="utf-8") as f:
+            with resolved_path.open("r", encoding="utf-8") as f:
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     raise ValueError("CSV file must include a header row")
