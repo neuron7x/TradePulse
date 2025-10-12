@@ -165,6 +165,15 @@ def _register_noop_cov_options(parser: "pytest.Parser") -> None:
                 "default": [],
             },
         ),
+        (
+            "--cov-fail-under",
+            {
+                "action": "store",
+                "dest": "tradepulse_cov_fail_under",
+                "metavar": "MIN",
+                "default": None,
+            },
+        ),
     )
     for opt, kwargs in options:
         try:

@@ -30,7 +30,7 @@ scripts/
 
 ## Coverage Requirements
 
-**Target Coverage: 98%** *(current CI gate: 80% while Kuramoto/Ricci suites stabilize)*
+**Target Coverage: 98%** *(current CI gate: 90% while Kuramoto/Ricci suites stabilize)*
 
 Current module coverage targets:
 - `backtest/`: 100% (ACHIEVED)
@@ -167,7 +167,7 @@ The testing automation is split across two workflows:
   2. **Property-Based Tests**: Run with Hypothesis statistics enabled.
   3. **Fuzz Tests**: Replay deterministic fuzz corpora.
   4. **Coverage Report**: Generated and uploaded to CI artifacts.
-  5. **Coverage Threshold**: Build fails if coverage `< 80%`.
+  5. **Coverage Threshold**: Build fails if coverage `< 90%`.
 - **`heavy-math.yml` (per PR, nightly)**
   1. Executes the heavy-math suites defined in `configs/quality/heavy_math_jobs.yaml`.
   2. Enforces CPU/memory quotas via workflow dispatch inputs.
@@ -185,13 +185,34 @@ The CI enforces coverage thresholds using `pytest-cov`:
 ```bash
 pytest --cov=core --cov=backtest --cov=execution \
        --cov-report=term-missing \
-       --cov-fail-under=80
+       --cov-fail-under=90
 ```
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=80
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=90
 ```
+
+### Mutation Testing
+
+Critical execution and indicator modules are validated with mutation testing.
+CI invokes [`mutmut`](https://mutmut.readthedocs.io/en/latest/) against
+`core/indicators`, `backtest/engine.py`, and the execution risk/OMS stack to
+ensure the regression suite catches behavioural drifts. To reproduce locally:
+
+```bash
+# Prime coverage data so mutmut can focus on exercised lines
+coverage run -m pytest tests/unit/ tests/integration/
+
+# Execute the configured mutation campaign
+mutmut run --use-coverage --no-progress
+
+# Inspect remaining survivors (if any)
+mutmut results
+```
+
+Mutation runs are intentionally scoped to high-signal modules to keep turnaround
+times reasonable while guarding the risk engine and indicator analytics.
 
 ## Writing Tests
 

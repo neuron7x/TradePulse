@@ -16,6 +16,7 @@ pytest-html==4.1.1
 pytest-xdist==3.6.1
 pytest-profiling==1.7.0; python_version < "3.13"
 click>=8.1.7
+mutmut==2.4.5
 
 # Profiling tools
 scalene>=1.5.55

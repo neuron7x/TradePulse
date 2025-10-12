@@ -1,6 +1,8 @@
 # Core analytics stack
-numpy>=2.3.3
-scipy>=1.16.2
+numpy>=2.3.3; python_version >= "3.10"
+numpy>=1.26.4,<2.0; python_version < "3.10"
+scipy>=1.16.2; python_version >= "3.10"
+scipy>=1.10.0,<1.11; python_version < "3.10"
 pandas>=2.3.3
 networkx>=3.5
 

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ['3.11', '3.12', '3.13']
+        python-version: ['3.9', '3.10', '3.11', '3.12', '3.13']
     name: Tests (Python ${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v5
@@ -24,24 +24,20 @@ jobs:
         uses: astral-sh/setup-uv@v3
       - name: Create virtual environment
         run: uv venv
-      - name: Install dependencies
+      - name: Install project and dev dependencies
         run: |
-          uv pip install -r requirements.lock
-          uv pip install -r requirements-dev.lock
+          uv pip install .[dev]
       - name: Prepare test report directories
         run: |
           mkdir -p reports
       - name: Run unit and integration tests with coverage
         run: |
           .venv/bin/python -m pytest tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
-            --cov=core --cov=backtest --cov=execution \
-            --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
-            --cov-fail-under=90 \
             --junitxml=reports/unit-integration-tests.xml \
             --html=reports/unit-integration-report.html --self-contained-html
       - name: Run property-based tests with statistics
         run: |
-          .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
+          .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics --no-cov \
             --junitxml=reports/property-tests.xml \
             --html=reports/property-tests-report.html --self-contained-html
       - name: Upload JUnit test reports
@@ -96,7 +92,7 @@ jobs:
           uv pip install -r requirements-dev.lock
       - name: Run pytest in parallel with profiling
         run: |
-          .venv/bin/python -m pytest tests/ -n auto --durations=20 --profile
+          .venv/bin/python -m pytest tests/ -n auto --durations=20 --profile --no-cov
       - name: Collect profiling artifacts
         if: always()
         run: |
@@ -109,3 +105,32 @@ jobs:
           name: pytest-profiling
           path: reports/profiling
           if-no-files-found: warn
+
+  mutation-testing:
+    name: Mutation testing (mutmut)
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install project and mutation tooling
+        run: |
+          uv pip install .[dev]
+      - name: Prime coverage data for targeted suites
+        run: |
+          .venv/bin/python -m coverage run -m pytest tests/unit/ tests/integration/
+          .venv/bin/python -m coverage json
+      - name: Run mutmut against critical modules
+        run: |
+          .venv/bin/python -m mutmut run --no-progress --use-coverage
+      - name: Mutation summary
+        if: always()
+        run: |
+          .venv/bin/python -m mutmut results

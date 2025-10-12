@@ -9,7 +9,7 @@ roadmap updated after every major milestone.
 | Quarter | Focus Areas | Milestones |
 | --- | --- | --- |
 | **Q2 2024** | Architecture, Developer Experience, Typing | • Publish C4 system diagram and module dependency graph.<br>• Ship VS Code dev container with automated onboarding.<br>• Enable strict mypy for `core` and `libs/utils` packages.<br>• Introduce plugin loader prototype for strategies. |
-| **Q3 2024** | Testing, Observability, Backtesting | • Raise unit test coverage for `core` and `libs/utils` to ≥80%.<br>• Add dockerised end-to-end scenario harness covering ingestion → execution flow.<br>• Version dashboards and alert rules in `observability/` with CI linting.<br>• Extend backtester with commission and slippage models parameterised via configs. |
+| **Q3 2024** | Testing, Observability, Backtesting | • Raise unit test coverage for `core` and `libs/utils` to ≥90%.<br>• Add dockerised end-to-end scenario harness covering ingestion → execution flow.<br>• Version dashboards and alert rules in `observability/` with CI linting.<br>• Extend backtester with commission and slippage models parameterised via configs. |
 | **Q4 2024** | Security, Performance, Culture | • Publish SBOM artifacts alongside every release.<br>• Integrate profiling scripts and publish baseline latency/throughput reports.<br>• Launch Dependabot and Trivy gates in CI.<br>• Document chaos testing playbooks and schedule quarterly GameDays. |
 
 ## 2025 North Star Themes

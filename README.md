@@ -247,7 +247,11 @@ TradePulse relies on an extensive pytest testbed covering unit, integration, pro
 pytest tests/
 
 # Run with coverage and HTML report
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html --cov-fail-under=90
+
+# Targeted mutation testing for critical modules
+coverage run -m pytest tests/unit/ tests/integration/
+mutmut run --use-coverage --no-progress
 
 # Skip slow tests during development
 pytest tests/ -m "not slow"
@@ -260,6 +264,16 @@ pytest tests/integration/
 ```
 
 Refer to [TESTING.md](TESTING.md) and [TESTING_SUMMARY.md](TESTING_SUMMARY.md) for deeper insights into coverage targets, fixtures, and workflow integration.
+
+## 📦 Distribution
+
+- Wheels are built with [cibuildwheel](https://cibuildwheel.readthedocs.io/en/stable/)
+  for CPython 3.9–3.13 across `manylinux_2_28`, `musllinux_1_2`, Windows (MSVC),
+  and macOS `universal2` targets.
+- `auditwheel` and `delocate` verification runs automatically during wheel
+  repair to guarantee compliant binary artifacts.
+- Signed sdists and wheels are published via the release workflow alongside
+  CycloneDX SBOMs.
 
 ---
 
