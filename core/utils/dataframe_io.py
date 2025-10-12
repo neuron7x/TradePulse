@@ -181,6 +181,43 @@ def write_dataframe(
     return target
 
 
+def _drop_polars_index_columns(frame: pd.DataFrame, index_frame: pd.DataFrame) -> None:
+    """Remove duplicate index columns created by the polars parquet round-trip."""
+
+    if index_frame.empty:
+        return
+
+    index_series = [index_frame.iloc[:, i].reset_index(drop=True) for i in range(index_frame.shape[1])]
+    matched_levels: set[int] = set()
+    drop_labels: list[str] = []
+
+    # First match columns by the names stored in the index payload.
+    for level_idx, level_name in enumerate(index_frame.columns):
+        if level_name in frame.columns:
+            candidate = frame[level_name].reset_index(drop=True)
+            if candidate.equals(index_series[level_idx]):
+                drop_labels.append(level_name)
+                matched_levels.add(level_idx)
+
+    # Fall back to positional matching for legacy payloads where the column
+    # names differ (e.g. ``level_0`` vs ``0`` for unnamed indexes).
+    if len(matched_levels) < len(index_series):
+        remaining_levels = [idx for idx in range(len(index_series)) if idx not in matched_levels]
+        for position, column in enumerate(frame.columns):
+            if not remaining_levels or position >= len(index_series):
+                break
+            if column in drop_labels:
+                continue
+            candidate = frame.iloc[:, position].reset_index(drop=True)
+            level_idx = remaining_levels[0]
+            if candidate.equals(index_series[level_idx]):
+                drop_labels.append(column)
+                remaining_levels.pop(0)
+
+    if drop_labels:
+        frame.drop(columns=drop_labels, inplace=True)
+
+
 def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataFrame:
     """Load a dataframe from ``path`` using the first compatible backend."""
 
@@ -188,11 +225,14 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
     if path.suffix:
         suffix = path.suffix.lower()
         if suffix == _PARQUET_SUFFIX:
+            backend_name = None
             if _pyarrow_available():
                 frame = _pyarrow_backend().read_fn(path)
+                backend_name = "pyarrow"
             else:
                 try:
                     frame = _polars_backend().read_fn(path)
+                    backend_name = "polars"
                 except MissingParquetDependencyError as exc:
                     raise MissingParquetDependencyError(
                         "Unable to read parquet file without pyarrow or polars. Install 'tradepulse[feature_store]'."
@@ -205,6 +245,8 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
                     frame.index = pd.Index(index_frame.iloc[:, 0], name=column)
                 else:
                     frame.index = pd.MultiIndex.from_frame(index_frame, names=list(index_frame.columns))
+                if backend_name == "polars":
+                    _drop_polars_index_columns(frame, index_frame)
             return frame
         if allow_json_fallback and suffix == _JSON_SUFFIX:
             return _json_backend().read_fn(path)
