@@ -8,7 +8,7 @@ option go_package = "github.com/tradepulse/gen/events";
 
 message TickEventV1 {
   string event_id = 1;
-  uint32 schema_version = 2;
+  string schema_version = 2;
   string symbol = 3;
   int64 timestamp = 4;
   double bid_price = 5;
@@ -26,7 +26,7 @@ message TickMicrostructure {
 
 message BarEventV1 {
   string event_id = 1;
-  uint32 schema_version = 2;
+  string schema_version = 2;
   string symbol = 3;
   int64 timestamp = 4;
   string interval = 5;
@@ -47,7 +47,7 @@ enum SignalDirection {
 
 message SignalEventV1 {
   string event_id = 1;
-  uint32 schema_version = 2;
+  string schema_version = 2;
   string symbol = 3;
   int64 timestamp = 4;
   string signal_type = 5;
@@ -78,7 +78,7 @@ enum TimeInForce {
 
 message OrderEventV1 {
   string event_id = 1;
-  uint32 schema_version = 2;
+  string schema_version = 2;
   string symbol = 3;
   int64 timestamp = 4;
   string order_id = 5;
@@ -104,7 +104,7 @@ enum FillLiquidity {
 
 message FillEventV1 {
   string event_id = 1;
-  uint32 schema_version = 2;
+  string schema_version = 2;
   string symbol = 3;
   int64 timestamp = 4;
   string order_id = 5;
@@ -123,5 +123,5 @@ message EventEnvelope {
   string event_id = 3;
   bytes payload = 4;
   string content_type = 5;
-  uint32 schema_version = 6;
+  string schema_version = 6;
 }

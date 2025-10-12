@@ -29,7 +29,7 @@ async def test_kafka_publish_uses_symbol_partition_key() -> None:
         event_id="evt-1",
         payload=b"payload",
         content_type="avro/binary",
-        schema_version=1,
+        schema_version="1.0.0",
     )
 
     await bus.publish(EventTopic.MARKET_TICKS, envelope)

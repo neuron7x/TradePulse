@@ -90,7 +90,7 @@ class BaseMarketDataConnector:
         self._dead_letters = dead_letter_queue or DeadLetterQueue()
         self._registry = schema_registry or EventSchemaRegistry.from_directory(DEFAULT_SCHEMA_ROOT)
         schema_info = self._registry.latest(event_type, SchemaFormat.AVRO)
-        self._schema_version = schema_info.version
+        self._schema_version = schema_info.version_str
         schema_doc = schema_info.load()
         self._required_fields = {
             field["name"]

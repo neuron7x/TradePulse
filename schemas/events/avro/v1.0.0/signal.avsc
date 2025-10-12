@@ -1,11 +1,11 @@
 {
   "type": "record",
   "name": "SignalEvent",
-  "namespace": "tradepulse.events.signals",
+  "namespace": "tradepulse.events.signals.v1_0_0",
   "doc": "Generated trading signal with metadata and routing hints.",
   "fields": [
     {"name": "event_id", "type": "string", "doc": "Globally unique identifier for idempotency."},
-    {"name": "schema_version", "type": "int", "doc": "Schema major version."},
+    {"name": "schema_version", "type": "string", "doc": "Semantic version of the schema (major.minor.patch)."},
     {"name": "symbol", "type": "string", "doc": "Trading symbol."},
     {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-micros"}, "doc": "Signal emission timestamp."},
     {"name": "signal_type", "type": "string", "doc": "Type of signal (momentum, mean_reversion, etc)."},
