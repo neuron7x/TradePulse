@@ -107,19 +107,18 @@ class InMemoryKeyValueClient:
 
 
 def _serialize_frame(frame: pd.DataFrame) -> bytes:
-    """Serialize a dataframe to bytes using the Parquet format."""
+    """Serialize a dataframe to bytes using a safe JSON representation."""
 
-    buffer = BytesIO()
-    frame.to_parquet(buffer, index=False, compression=None)
-    return buffer.getvalue()
+    payload = frame.to_json(orient="table", index=False, date_unit="ns")
+    return payload.encode("utf-8")
 
 
 def _deserialize_frame(payload: bytes) -> pd.DataFrame:
-    """Deserialize a dataframe from Parquet-encoded bytes."""
+    """Deserialize a dataframe from the JSON representation used in storage."""
 
     if not payload:
         return pd.DataFrame()
-    return pd.read_parquet(BytesIO(payload))
+    return pd.read_json(BytesIO(payload), orient="table")
 
 
 class RedisOnlineFeatureStore:
