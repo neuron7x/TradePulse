@@ -69,7 +69,7 @@ def run_cli_analyze(csv_path: Path, seed: int) -> Dict[str, Any]:
 
 
 def ingest_prices(csv_path: Path) -> list[Ticker]:
-    ingestor = DataIngestor()
+    ingestor = DataIngestor(allowed_roots=[csv_path.resolve().parent])
     ticks: list[Ticker] = []
     ingestor.historical_csv(str(csv_path), ticks.append, required_fields=("ts", "price", "volume"))
     if not ticks:

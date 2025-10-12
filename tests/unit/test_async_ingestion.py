@@ -91,7 +91,7 @@ class TestAsyncDataIngestor:
             writer.writerow(["ts", "price", "volume"])
             for i in range(25):
                 writer.writerow([float(i), 100.0 + i, 1000])
-                
+
         ingestor = AsyncDataIngestor()
         batches = []
         
@@ -100,12 +100,40 @@ class TestAsyncDataIngestor:
             
         ticks_iter = ingestor.read_csv(str(csv_file))
         total = await ingestor.batch_process(ticks_iter, collect_batch, batch_size=10)
-        
+
         assert total == 25
         assert len(batches) == 3  # 10 + 10 + 5
         assert batches[0] == 10
         assert batches[1] == 10
         assert batches[2] == 5
+
+    @pytest.mark.asyncio
+    async def test_read_csv_respects_allowed_roots(self, tmp_path: Path) -> None:
+        """The async ingestor should reject paths outside the configured roots."""
+
+        csv_file = tmp_path / "outside.csv"
+        csv_file.write_text("ts,price\n1,1\n", encoding="utf-8")
+        allowed_root = tmp_path / "allowed"
+        allowed_root.mkdir()
+
+        ingestor = AsyncDataIngestor(allowed_roots=[allowed_root])
+
+        with pytest.raises(PermissionError):
+            async for _ in ingestor.read_csv(str(csv_file)):
+                pass
+
+    @pytest.mark.asyncio
+    async def test_read_csv_respects_size_limit(self, tmp_path: Path) -> None:
+        """The async ingestor should enforce configured file size limits."""
+
+        csv_file = tmp_path / "big.csv"
+        csv_file.write_text("ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8")
+
+        ingestor = AsyncDataIngestor(allowed_roots=[tmp_path], max_csv_bytes=32)
+
+        with pytest.raises(ValueError, match="exceeds"):
+            async for _ in ingestor.read_csv(str(csv_file)):
+                pass
         
 
 class TestMergeStreams:

@@ -88,3 +88,40 @@ def test_historical_csv_skips_malformed_rows(tmp_path: Path, caplog: pytest.LogC
     assert len(collected) == 1
     assert collected[0].price == pytest.approx(101.0)
     assert any("Skipping malformed row" in message for message in caplog.messages)
+
+
+def test_historical_csv_rejects_path_outside_allowlist(tmp_path: Path) -> None:
+    csv_path = tmp_path / "outside.csv"
+    csv_path.write_text("ts,price\n1,1\n", encoding="utf-8")
+    allowed_root = tmp_path / "allowed"
+    allowed_root.mkdir()
+
+    ingestor = DataIngestor(allowed_roots=[allowed_root])
+
+    with pytest.raises(PermissionError):
+        ingestor.historical_csv(str(csv_path), lambda _: None)
+
+
+def test_historical_csv_rejects_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "data.csv"
+    target.write_text("ts,price\n1,1\n", encoding="utf-8")
+    symlink = tmp_path / "link.csv"
+    try:
+        symlink.symlink_to(target)
+    except OSError:  # pragma: no cover - platform without symlink support
+        pytest.skip("symlinks not supported")
+
+    ingestor = DataIngestor(allowed_roots=[tmp_path])
+
+    with pytest.raises(PermissionError):
+        ingestor.historical_csv(str(symlink), lambda _: None)
+
+
+def test_historical_csv_enforces_size_limit(tmp_path: Path) -> None:
+    csv_path = tmp_path / "large.csv"
+    csv_path.write_text("ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8")
+
+    ingestor = DataIngestor(allowed_roots=[tmp_path], max_csv_bytes=32)
+
+    with pytest.raises(ValueError, match="exceeds"):
+        ingestor.historical_csv(str(csv_path), lambda _: None)

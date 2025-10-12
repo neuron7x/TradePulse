@@ -15,6 +15,7 @@ import pandas as pd
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
 
 from backtest.engine import walk_forward
+from core.data.ingestion import DataIngestor
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
@@ -86,6 +87,16 @@ def _apply_config(args: argparse.Namespace) -> argparse.Namespace:
 
     return args
 
+
+def _make_data_ingestor(csv_path: str | None = None) -> DataIngestor:
+    """Return a DataIngestor constrained to directories derived from *csv_path*."""
+
+    allowed = None
+    if csv_path:
+        allowed = [Path(csv_path).expanduser().resolve(strict=False).parent]
+    return DataIngestor(allowed_roots=allowed)
+
+
 def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     traceparent = current_traceparent()
     if not traceparent:
@@ -136,13 +147,13 @@ def cmd_backtest(args):
 
 def cmd_live(args):
     args = _apply_config(args)
-    from core.data.ingestion import DataIngestor, Ticker
+    from core.data.ingestion import Ticker
     import queue, threading
     q = queue.Queue(maxsize=10000)
     def on_tick(t: Ticker):
         q.put(t)
     if args.source == "csv":
-        DataIngestor().historical_csv(args.path, on_tick)
+        _make_data_ingestor(args.path).historical_csv(args.path, on_tick)
     else:
         raise SystemExit("Only CSV demo supported in CLI live mode.")
 
