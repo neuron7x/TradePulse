@@ -65,6 +65,37 @@ def test_microbatch_checkpointing(stream_payload: pd.DataFrame) -> None:
     assert len(checkpoint.checkpoint_ids) == 2
 
 
+def test_refresh_history_keys_between_batches() -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    writes: list[pd.DataFrame] = []
+
+    materializer = StreamMaterializer(
+        lambda _name, frame: writes.append(frame.copy()),
+        checkpoint_store,
+        microbatch_size=10,
+    )
+
+    first = pd.DataFrame(
+        {
+            "entity_id": ["dup"],
+            "ts": [pd.Timestamp("2024-01-01 00:00:00", tz=UTC)],
+            "value": [1.0],
+        }
+    )
+    second = pd.DataFrame(
+        {
+            "entity_id": ["dup"],
+            "ts": [pd.Timestamp("2024-01-01 00:00:00", tz=UTC)],
+            "value": [1.0],
+        }
+    )
+
+    materializer.materialize("features.demo", [first, second])
+
+    assert len(writes) == 1
+    assert writes[0].equals(first.reset_index(drop=True))
+
+
 def test_deduplicate_requires_keys(stream_payload: pd.DataFrame) -> None:
     checkpoint_store = InMemoryCheckpointStore()
 

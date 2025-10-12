@@ -96,7 +96,7 @@ class StreamMaterializer:
         self,
         feature_view: str,
         batch: pd.DataFrame,
-        history_keys: frozenset[tuple[Any, ...]],
+        history_keys: set[tuple[Any, ...]],
     ) -> None:
         deduped = self._deduplicate(batch)
         if deduped.empty:
@@ -112,12 +112,13 @@ class StreamMaterializer:
             return
 
         self._writer(feature_view, new_rows.reset_index(drop=True))
+        history_keys.update(self._iter_key_tuples(new_rows))
         self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
 
     def _filter_new_rows(
         self,
         frame: pd.DataFrame,
-        history_keys: frozenset[tuple[Any, ...]],
+        history_keys: set[tuple[Any, ...]],
     ) -> pd.DataFrame:
         if not history_keys:
             return frame
@@ -149,14 +150,14 @@ class StreamMaterializer:
         digest.update(payload.encode("utf-8"))
         return digest.hexdigest()
 
-    def _load_history_keys(self, feature_view: str) -> frozenset[tuple[Any, ...]]:
+    def _load_history_keys(self, feature_view: str) -> set[tuple[Any, ...]]:
         if self._backfill_loader is None:
-            return frozenset()
+            return set()
         history = self._backfill_loader(feature_view)
         if history.empty:
-            return frozenset()
+            return set()
         deduped_history = self._deduplicate(history)
-        return frozenset(self._iter_key_tuples(deduped_history))
+        return set(self._iter_key_tuples(deduped_history))
 
     def _iter_key_tuples(
         self, frame: pd.DataFrame
