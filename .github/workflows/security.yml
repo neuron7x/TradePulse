@@ -45,32 +45,38 @@ jobs:
         if not ci_path.is_file():
             sys.exit('CI baseline was not generated; detect-secrets may have failed')
 
-        def load_findings(path: Path) -> dict[str, set[tuple[str, str]]]:
+        from collections import Counter
+
+        def load_findings(path: Path) -> dict[str, Counter[tuple[str | None, str, int | None]]]:
             data = json.loads(path.read_text(encoding='utf-8'))
-            findings: dict[str, set[tuple[str, str]]] = {}
+            findings: dict[str, Counter[tuple[str | None, str, int | None]]] = {}
             for filename, secrets in data.get('results', {}).items():
-                bucket = findings.setdefault(filename, set())
+                bucket = findings.setdefault(filename, Counter())
                 for secret in secrets:
                     hashed = secret.get('hashed_secret')
-                    secret_type = secret.get('type') or secret.get('secret_type')
+                    secret_type = secret.get('type') or secret.get('secret_type') or 'unknown'
+                    line_number = secret.get('line_number')
                     if hashed:
-                        bucket.add((hashed, secret_type or 'unknown'))
+                        bucket[(hashed, secret_type, line_number)] += 1
             return findings
 
         baseline_findings = load_findings(baseline_path)
         current_findings = load_findings(ci_path)
 
-        new_findings: list[tuple[str, str, str]] = []
+        new_findings: list[tuple[str, str, str, int | None]] = []
         for filename, secrets in sorted(current_findings.items()):
-            baseline_hashes = baseline_findings.get(filename, set())
-            for hashed_secret, secret_type in sorted(secrets):
-                if (hashed_secret, secret_type) not in baseline_hashes:
-                    new_findings.append((filename, secret_type, hashed_secret))
+            baseline_hashes = baseline_findings.get(filename, Counter())
+            diff = secrets - baseline_hashes
+            for secret_key, count in sorted(diff.items()):
+                hashed_secret, secret_type, line_number = secret_key
+                for _ in range(count):
+                    new_findings.append((filename, secret_type, hashed_secret, line_number))
 
         if new_findings:
             print('ERROR: new potential secrets detected compared to .secrets.baseline:')
-            for filename, secret_type, hashed_secret in new_findings:
-                print(f'  - {filename}: {secret_type} (hash: {hashed_secret})')
+            for filename, secret_type, hashed_secret, line_number in new_findings:
+                location = f'line {line_number}' if line_number is not None else 'unknown line'
+                print(f'  - {filename}:{location}: {secret_type} (hash: {hashed_secret})')
             sys.exit(1)
 
         print('No new secrets detected; .secrets.baseline is still valid.')
