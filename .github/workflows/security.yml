@@ -31,7 +31,7 @@ jobs:
 
     - name: Run detect-secrets policy check
       run: |
-        detect-secrets scan --all-files --force-use-all-plugins --output .secrets.ci.baseline
+        detect-secrets scan --all-files --force-use-all-plugins > .secrets.ci.baseline
         python - <<'PY'
         import json
         import sys
