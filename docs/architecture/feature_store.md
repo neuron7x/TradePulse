@@ -25,3 +25,22 @@ the materialised online payloads and raises
 `FeatureStoreIntegrityError` whenever mismatches are detected. This
 allows production runs to gate deployments on validation checks while
 still benefiting from hot storage TTL enforcement.
+
+## Streaming materialisation
+
+Real-time payloads are ingested through the `StreamMaterializer`
+utility in `core.data.materialization`. It turns potentially unbounded
+streams into deterministic micro-batches that can be reconciled with the
+online store safely:
+
+* **Micro-batching** keeps memory utilisation predictable while still
+  delivering timely writes to the online store.
+* **Checkpointing** persists a digest of each processed batch so that
+  replays remain idempotent even when the streaming source delivers data
+  with at-least-once semantics.
+* **Backfill integration** consults the existing online payload through
+  an optional loader hook, preventing duplicate `(entity_id, ts)` rows
+  from being written twice.
+* **Deterministic deduplication** normalises both stream payloads and
+  historical frames before hashing, ensuring consistent behaviour across
+  pandas and backend versions.

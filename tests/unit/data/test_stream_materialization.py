@@ -125,6 +125,29 @@ def test_backfill_only_updates_checkpoint(stream_payload: pd.DataFrame) -> None:
     assert len(checkpoint.checkpoint_ids) == 1
 
 
+def test_backfill_loader_called_once(stream_payload: pd.DataFrame) -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    writes: list[pd.DataFrame] = []
+    loader_calls: list[int] = []
+
+    def loader(_name: str) -> pd.DataFrame:
+        loader_calls.append(1)
+        return stream_payload.iloc[0:0]
+
+    materializer = StreamMaterializer(
+        lambda _name, frame: writes.append(frame.copy()),
+        checkpoint_store,
+        microbatch_size=1,
+        backfill_loader=loader,
+    )
+
+    materializer.materialize("features.demo", stream_payload)
+
+    assert len(loader_calls) == 1
+    expected_batches = len(stream_payload.drop_duplicates(["entity_id", "ts"]))
+    assert len(writes) == expected_batches
+
+
 def test_checkpoint_add_does_not_mutate_original() -> None:
     checkpoint = Checkpoint("demo", frozenset({"one"}))
     updated = checkpoint.add("two")
