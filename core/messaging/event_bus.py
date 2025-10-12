@@ -71,7 +71,7 @@ class EventEnvelope:
     event_id: str
     payload: bytes
     content_type: str
-    schema_version: int
+    schema_version: str
     occurred_at: datetime = field(default_factory=current_timestamp)
     headers: MutableMapping[str, str] = field(default_factory=dict)
 
@@ -328,7 +328,7 @@ def _envelope_from_kafka_message(message) -> EventEnvelope:  # type: ignore[no-u
         event_id=headers.get("event_id", ""),
         payload=message.value,
         content_type=headers.get("content_type", "application/octet-stream"),
-        schema_version=int(headers.get("schema_version", "1")),
+        schema_version=headers.get("schema_version", "0.0.0"),
         occurred_at=occurred_at,
         headers=headers,
     )
@@ -348,7 +348,7 @@ def _envelope_from_nats_message(message) -> EventEnvelope:  # type: ignore[no-un
         event_id=headers.get("event_id", ""),
         payload=bytes(message.data),
         content_type=headers.get("content_type", "application/octet-stream"),
-        schema_version=int(headers.get("schema_version", "1")),
+        schema_version=headers.get("schema_version", "0.0.0"),
         occurred_at=occurred_at,
         headers={k: (v if isinstance(v, str) else json.dumps(v)) for k, v in headers.items()},
     )

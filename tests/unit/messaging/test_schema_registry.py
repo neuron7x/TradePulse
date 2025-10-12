@@ -24,13 +24,19 @@ def test_registry_loads_known_events() -> None:
     assert schema["name"] == "TickEvent"
 
 
+def test_registry_exposes_subject_and_namespace() -> None:
+    registry = EventSchemaRegistry.from_directory("schemas/events")
+    assert registry.subject("ticks") == "tradepulse.market.ticks.v1_0_0"
+    assert registry.namespace("ticks") == "tradepulse.events.marketdata.v1_0_0"
+
+
 def test_backward_compatibility_violation_detected(tmp_path: Path) -> None:
     source_dir = Path("schemas/events")
     target = tmp_path / "events"
     shutil.copytree(source_dir, target)
 
-    tick_v1_path = target / "avro" / "v1" / "tick.avsc"
-    tick_v2_path = target / "avro" / "v2" / "tick.avsc"
+    tick_v1_path = target / "avro" / "v1.0.0" / "tick.avsc"
+    tick_v2_path = target / "avro" / "v2.0.0" / "tick.avsc"
     tick_v2_path.parent.mkdir(parents=True, exist_ok=True)
     with tick_v1_path.open("r", encoding="utf-8") as handle:
         schema = json.load(handle)
@@ -42,8 +48,8 @@ def test_backward_compatibility_violation_detected(tmp_path: Path) -> None:
     registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
     registry_payload["events"]["ticks"]["versions"].append(
         {
-            "version": 2,
-            "avro": "avro/v2/tick.avsc",
+            "version": "2.0.0",
+            "avro": "avro/v2.0.0/tick.avsc",
             "protobuf": "../../libs/proto/events.proto",
         }
     )
@@ -59,8 +65,8 @@ def test_forward_compatibility_allows_nullable_fields(tmp_path: Path) -> None:
     target = tmp_path / "events"
     shutil.copytree(source_dir, target)
 
-    tick_v1_path = target / "avro" / "v1" / "tick.avsc"
-    tick_v2_path = target / "avro" / "v2" / "tick.avsc"
+    tick_v1_path = target / "avro" / "v1.0.0" / "tick.avsc"
+    tick_v2_path = target / "avro" / "v2.0.0" / "tick.avsc"
     tick_v2_path.parent.mkdir(parents=True, exist_ok=True)
 
     with tick_v1_path.open("r", encoding="utf-8") as handle:
@@ -73,8 +79,8 @@ def test_forward_compatibility_allows_nullable_fields(tmp_path: Path) -> None:
     registry_payload = json.loads(registry_path.read_text(encoding="utf-8"))
     registry_payload["events"]["ticks"]["versions"].append(
         {
-            "version": 2,
-            "avro": "avro/v2/tick.avsc",
+            "version": "2.0.0",
+            "avro": "avro/v2.0.0/tick.avsc",
             "protobuf": "../../libs/proto/events.proto",
         }
     )

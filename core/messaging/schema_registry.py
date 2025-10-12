@@ -8,12 +8,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
+from packaging.version import Version
+
 
 class SchemaFormat(str, Enum):
     """Supported serialization formats."""
 
     AVRO = "avro"
     PROTOBUF = "protobuf"
+    JSON = "json_schema"
 
 
 class SchemaCompatibilityError(RuntimeError):
@@ -24,14 +27,17 @@ class SchemaCompatibilityError(RuntimeError):
 class SchemaVersionInfo:
     """Metadata describing a concrete schema version."""
 
-    version: int
+    version: Version
+    version_str: str
     path: Path
     format: SchemaFormat
+    subject: str | None = None
+    namespace: str | None = None
 
     def load(self) -> Mapping[str, Any]:
         """Return the parsed schema document."""
 
-        if self.format is SchemaFormat.AVRO:
+        if self.format in (SchemaFormat.AVRO, SchemaFormat.JSON):
             with self.path.open("r", encoding="utf-8") as handle:
                 return json.load(handle)
         raise ValueError(f"Unsupported load operation for {self.format}")
@@ -40,9 +46,17 @@ class SchemaVersionInfo:
 class EventSchemaRegistry:
     """Local schema registry backed by JSON metadata files."""
 
-    def __init__(self, base_path: Path, registry: Dict[str, List[SchemaVersionInfo]]):
+    def __init__(
+        self,
+        base_path: Path,
+        registry: Dict[str, List[SchemaVersionInfo]],
+        subjects: Dict[str, Dict[Version, str]],
+        namespaces: Dict[str, Dict[Version, str]],
+    ):
         self._base_path = base_path
         self._registry = registry
+        self._subjects = subjects
+        self._namespaces = namespaces
 
     @classmethod
     def from_directory(cls, base_path: str | Path) -> "EventSchemaRegistry":
@@ -55,26 +69,59 @@ class EventSchemaRegistry:
         with registry_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         events: Dict[str, List[SchemaVersionInfo]] = {}
+        subjects: Dict[str, Dict[Version, str]] = {}
+        namespaces: Dict[str, Dict[Version, str]] = {}
         for event_type, event_data in payload.get("events", {}).items():
             versions: List[SchemaVersionInfo] = []
+            subject_map: Dict[Version, str] = {}
+            namespace_map: Dict[Version, str] = {}
             for version_info in event_data.get("versions", []):
+                raw_version = version_info["version"]
+                parsed_version = Version(raw_version)
+                subject = version_info.get("subject") or event_data.get("subject")
+                namespace = version_info.get("namespace") or event_data.get("namespace")
+                if subject:
+                    subject_map[parsed_version] = subject
+                if namespace:
+                    namespace_map[parsed_version] = namespace
                 avro_path = root / version_info[SchemaFormat.AVRO.value]
                 versions.append(
                     SchemaVersionInfo(
-                        version=version_info["version"],
+                        version=parsed_version,
+                        version_str=raw_version,
                         path=avro_path,
                         format=SchemaFormat.AVRO,
+                        subject=subject,
+                        namespace=namespace,
                     )
                 )
-                versions.append(
-                    SchemaVersionInfo(
-                        version=version_info["version"],
-                        path=(root / version_info[SchemaFormat.PROTOBUF.value]).resolve(),
-                        format=SchemaFormat.PROTOBUF,
+                if SchemaFormat.JSON.value in version_info:
+                    json_path = root / version_info[SchemaFormat.JSON.value]
+                    versions.append(
+                        SchemaVersionInfo(
+                            version=parsed_version,
+                            version_str=raw_version,
+                            path=json_path,
+                            format=SchemaFormat.JSON,
+                            subject=subject,
+                            namespace=namespace,
+                        )
                     )
-                )
+                if SchemaFormat.PROTOBUF.value in version_info:
+                    versions.append(
+                        SchemaVersionInfo(
+                            version=parsed_version,
+                            version_str=raw_version,
+                            path=(root / version_info[SchemaFormat.PROTOBUF.value]).resolve(),
+                            format=SchemaFormat.PROTOBUF,
+                            subject=subject,
+                            namespace=namespace,
+                        )
+                    )
             events[event_type] = versions
-        return cls(root, events)
+            subjects[event_type] = subject_map
+            namespaces[event_type] = namespace_map
+        return cls(root, events, subjects, namespaces)
 
     def available_events(self) -> Iterable[str]:
         return self._registry.keys()
@@ -95,6 +142,34 @@ class EventSchemaRegistry:
         if not versions:
             raise KeyError(f"No {fmt.value} schema registered for '{event_type}'")
         return max(versions, key=lambda info: info.version)
+
+    def subject(self, event_type: str, version: str | Version | None = None) -> str:
+        """Return the canonical subject for the requested event version."""
+
+        if event_type not in self._subjects:
+            raise KeyError(f"Unknown event type '{event_type}'")
+        if version is None:
+            version = self.latest(event_type, SchemaFormat.AVRO).version
+        elif isinstance(version, str):
+            version = Version(version)
+        subject_map = self._subjects[event_type]
+        if version not in subject_map:
+            raise KeyError(f"No subject registered for version '{version}' of '{event_type}'")
+        return subject_map[version]
+
+    def namespace(self, event_type: str, version: str | Version | None = None) -> str:
+        """Return the canonical Avro namespace for the requested event version."""
+
+        if event_type not in self._namespaces:
+            raise KeyError(f"Unknown event type '{event_type}'")
+        if version is None:
+            version = self.latest(event_type, SchemaFormat.AVRO).version
+        elif isinstance(version, str):
+            version = Version(version)
+        namespace_map = self._namespaces[event_type]
+        if version not in namespace_map:
+            raise KeyError(f"No namespace registered for version '{version}' of '{event_type}'")
+        return namespace_map[version]
 
     def validate_backward_and_forward(self, event_type: str) -> None:
         """Ensure all registered versions are backward and forward compatible."""

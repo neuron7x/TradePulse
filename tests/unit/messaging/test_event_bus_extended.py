@@ -208,7 +208,7 @@ async def test_kafka_subscribe_processes_message_and_commits(stub_aiokafka) -> N
         ("event_type", b"ticks"),
         ("partition_key", b"AAPL"),
         ("event_id", b"evt-123"),
-        ("schema_version", b"1"),
+        ("schema_version", b"1.0.0"),
         ("content_type", b"application/avro"),
         ("occurred_at", b"2024-01-01T00:00:00"),
     ]
@@ -248,7 +248,7 @@ async def test_kafka_retry_and_dlq_routing(stub_aiokafka) -> None:
         event_id="evt-1",
         payload=b"payload",
         content_type="application/avro",
-        schema_version=1,
+        schema_version="1.0.0",
     )
 
     await bus._publish_retry_or_dlq(EventTopic.MARKET_TICKS, envelope)
@@ -277,7 +277,7 @@ async def test_nats_publish_subscribe_and_retry(stub_nats) -> None:
         event_id="evt-1",
         payload=b"payload",
         content_type="application/json",
-        schema_version=1,
+        schema_version="1.0.0",
     )
 
     await bus.publish(EventTopic.SIGNALS, envelope)
@@ -329,7 +329,7 @@ def test_envelope_serialisation_round_trip(stub_aiokafka) -> None:
         event_id="evt-42",
         payload=b"payload",
         content_type="application/avro",
-        schema_version=3,
+        schema_version="3.0.0",
         headers={"extra": "value"},
     )
     headers = [(key, value.encode("utf-8")) for key, value in envelope.as_message().items()]
@@ -344,12 +344,12 @@ def test_nats_envelope_deserialisation(stub_nats) -> None:
         "event_type": "signals",
         "partition_key": "AAPL",
         "event_id": "evt-100",
-        "schema_version": "5",
+        "schema_version": "5.0.0",
         "content_type": "application/json",
         "occurred_at": "2024-01-01T00:00:00",
     }
     message = stub_nats.DummyNATSMessage(headers=headers, data=b"payload")
     reconstructed = _envelope_from_nats_message(message)
-    assert reconstructed.schema_version == 5
+    assert reconstructed.schema_version == "5.0.0"
     assert reconstructed.payload == b"payload"
 

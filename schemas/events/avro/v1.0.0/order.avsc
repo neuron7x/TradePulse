@@ -1,11 +1,11 @@
 {
   "type": "record",
   "name": "OrderEvent",
-  "namespace": "tradepulse.events.execution",
+  "namespace": "tradepulse.events.execution.v1_0_0",
   "doc": "Order instruction emitted by the execution service.",
   "fields": [
     {"name": "event_id", "type": "string", "doc": "Globally unique identifier for idempotency."},
-    {"name": "schema_version", "type": "int", "doc": "Schema major version."},
+    {"name": "schema_version", "type": "string", "doc": "Semantic version of the schema (major.minor.patch)."},
     {"name": "symbol", "type": "string", "doc": "Trading symbol."},
     {"name": "timestamp", "type": {"type": "long", "logicalType": "timestamp-micros"}, "doc": "Order creation timestamp."},
     {"name": "order_id", "type": "string", "doc": "Order identifier tracked across the lifecycle."},

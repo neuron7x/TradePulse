@@ -19,7 +19,7 @@ from core.events.models import (
 def test_event_dataclasses_support_expected_fields() -> None:
     bar = BarEvent(
         event_id="evt-bar",
-        schema_version=1,
+        schema_version="1.0.0",
         symbol="AAPL",
         timestamp=1,
         interval="1m",
@@ -34,7 +34,7 @@ def test_event_dataclasses_support_expected_fields() -> None:
 
     fill = FillEvent(
         event_id="evt-fill",
-        schema_version=1,
+        schema_version="1.0.0",
         symbol="AAPL",
         timestamp=1,
         order_id="ord-1",
@@ -49,7 +49,7 @@ def test_event_dataclasses_support_expected_fields() -> None:
 
     order = OrderEvent(
         event_id="evt-order",
-        schema_version=1,
+        schema_version="1.0.0",
         symbol="AAPL",
         timestamp=1,
         order_id="ord-1",
@@ -63,7 +63,7 @@ def test_event_dataclasses_support_expected_fields() -> None:
 
     signal = SignalEvent(
         event_id="evt-signal",
-        schema_version=1,
+        schema_version="1.0.0",
         symbol="AAPL",
         timestamp=1,
         signal_type="mean-reversion",
@@ -75,7 +75,7 @@ def test_event_dataclasses_support_expected_fields() -> None:
 
     tick = TickEvent(
         event_id="evt-tick",
-        schema_version=1,
+        schema_version="1.0.0",
         symbol="AAPL",
         timestamp=1,
         bid_price=100.0,

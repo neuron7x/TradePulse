@@ -40,7 +40,7 @@ export enum TimeInForce {
 
 export interface BarEvent {
   event_id: string;
-  schema_version: number;
+  schema_version: string;
   symbol: string;
   timestamp: number;
   interval: string;
@@ -55,7 +55,7 @@ export interface BarEvent {
 
 export interface FillEvent {
   event_id: string;
-  schema_version: number;
+  schema_version: string;
   symbol: string;
   timestamp: number;
   order_id: string;
@@ -70,7 +70,7 @@ export interface FillEvent {
 
 export interface OrderEvent {
   event_id: string;
-  schema_version: number;
+  schema_version: string;
   symbol: string;
   timestamp: number;
   order_id: string;
@@ -85,7 +85,7 @@ export interface OrderEvent {
 
 export interface SignalEvent {
   event_id: string;
-  schema_version: number;
+  schema_version: string;
   symbol: string;
   timestamp: number;
   signal_type: string;
@@ -97,7 +97,7 @@ export interface SignalEvent {
 
 export interface TickEvent {
   event_id: string;
-  schema_version: number;
+  schema_version: string;
   symbol: string;
   timestamp: number;
   bid_price: number;

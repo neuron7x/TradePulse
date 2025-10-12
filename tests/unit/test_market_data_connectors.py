@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Any, AsyncIterator, List
 
 import pytest
+from packaging.version import Version
 
 from core.data.adapters.base import IngestionAdapter
 from core.data.connectors import (
@@ -68,7 +69,7 @@ async def test_binance_connector_fetch_snapshot_produces_tick_events() -> None:
     assert len(events) == 1
     event = events[0]
     assert event.symbol == tick.symbol
-    assert event.schema_version >= 1
+    assert Version(event.schema_version) >= Version("1.0.0")
     assert event.bid_price == pytest.approx(float(tick.price))
     assert event.volume == int(tick.volume)
 
