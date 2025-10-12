@@ -7,6 +7,7 @@ from decimal import Decimal, InvalidOperation
 from datetime import UTC
 import hashlib
 import hmac
+import math
 from io import BytesIO
 import sqlite3
 from pathlib import Path
@@ -78,6 +79,18 @@ class _RetentionManager:
 
         return result.reset_index(drop=True)
 
+    def ttl_seconds(self) -> int | None:
+        """Return the configured TTL in whole seconds if one has been set."""
+
+        if self._policy is None or self._policy.ttl is None:
+            return None
+
+        total_seconds = self._policy.ttl.total_seconds()
+        if total_seconds <= 0:
+            return None
+
+        return max(1, math.ceil(total_seconds))
+
 
 class KeyValueClient(Protocol):
     """Minimal protocol for key-value stores such as Redis."""
@@ -146,7 +159,7 @@ class RedisOnlineFeatureStore:
         frame = _deserialize_frame(payload)
         retained = self._retention.apply(frame)
         if not retained.equals(frame):
-            self._client.set(feature_view, _serialize_frame(retained))
+            self._persist(feature_view, retained)
         return retained
 
     def sync(
@@ -192,8 +205,20 @@ class RedisOnlineFeatureStore:
 
     def _write(self, feature_view: str, frame: pd.DataFrame) -> pd.DataFrame:
         prepared = self._retention.apply(frame)
-        self._client.set(feature_view, _serialize_frame(prepared))
+        self._persist(feature_view, prepared)
         return prepared.reset_index(drop=True)
+
+    def _persist(self, feature_view: str, frame: pd.DataFrame) -> None:
+        payload = _serialize_frame(frame)
+        ttl_seconds = self._retention.ttl_seconds()
+        if ttl_seconds is not None:
+            if hasattr(self._client, "setex"):
+                self._client.setex(feature_view, ttl_seconds, payload)  # type: ignore[misc]
+                return
+            if hasattr(self._client, "set_with_ttl"):
+                self._client.set_with_ttl(feature_view, payload, ttl_seconds)  # type: ignore[misc]
+                return
+        self._client.set(feature_view, payload)
 
 
 class SQLiteOnlineFeatureStore:

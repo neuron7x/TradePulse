@@ -43,6 +43,16 @@ class _DictClient:
         self.payloads.pop(key, None)
 
 
+class _TTLDictClient(_DictClient):
+    def __init__(self) -> None:
+        super().__init__()
+        self.expiries: dict[str, int] = {}
+
+    def setex(self, key: str, ttl: int, value: bytes) -> None:
+        self.payloads[key] = value
+        self.expiries[key] = ttl
+
+
 @pytest.fixture
 def base_frame() -> pd.DataFrame:
     ts = pd.Timestamp("2024-01-01 00:00:00", tz=UTC)
@@ -64,6 +74,16 @@ def test_redis_ttl_retention(base_frame: pd.DataFrame) -> None:
     stored = store.load("demo.fv")
     assert stored.shape[0] == 2
     assert stored["ts"].min() >= clock.now() - pd.Timedelta(hours=1)
+
+
+def test_redis_ttl_uses_native_expiry(base_frame: pd.DataFrame) -> None:
+    client = _TTLDictClient()
+    policy = RetentionPolicy(ttl=pd.Timedelta(seconds=90))
+    store = RedisOnlineFeatureStore(client=client, retention_policy=policy)
+
+    store.sync("demo.fv", base_frame, mode="overwrite", validate=False)
+
+    assert client.expiries["demo.fv"] == 90
 
 
 def test_sqlite_max_versions(tmp_path, base_frame: pd.DataFrame) -> None:
