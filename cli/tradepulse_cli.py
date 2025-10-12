@@ -17,6 +17,7 @@ import click
 import numpy as np
 import pandas as pd
 
+from analytics.finops import DailyCostReport, build_daily_cost_report
 from core.utils.dataframe_io import (
     MissingParquetDependencyError,
     dataframe_to_parquet_bytes,
@@ -25,6 +26,7 @@ from core.utils.dataframe_io import (
 
 from core.config.cli_models import (
     BacktestConfig,
+    CostReportConfig,
     ExecConfig,
     IngestConfig,
     OptimizeConfig,
@@ -155,6 +157,43 @@ def _load_prices(cfg: IngestConfig | BacktestConfig | ExecConfig) -> pd.DataFram
     return frame
 
 
+def _load_cost_records(cfg: CostReportConfig) -> pd.DataFrame:
+    source = cfg.source
+    if not source.path.exists():
+        raise ArtifactError(f"Cost data source {source.path} does not exist")
+    if source.kind == "csv":
+        frame = pd.read_csv(source.path)
+    elif source.kind == "parquet":
+        try:
+            frame = read_dataframe(Path(source.path), allow_json_fallback=False)
+        except MissingParquetDependencyError as exc:
+            raise ArtifactError(
+                "Parquet sources require either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
+    else:  # pragma: no cover - defensive guard
+        raise ConfigError(f"Unsupported cost data source '{source.kind}'")
+
+    expected_columns = [
+        source.timestamp_field,
+        source.cpu_field,
+        source.gpu_field,
+        source.io_field,
+        *source.dimensions,
+    ]
+    missing = [column for column in expected_columns if column not in frame.columns]
+    if missing:
+        raise ConfigError(f"Cost dataset is missing required columns: {', '.join(missing)}")
+
+    rename_map = {
+        source.timestamp_field: "timestamp",
+        source.cpu_field: "cpu_cost",
+        source.gpu_field: "gpu_cost",
+        source.io_field: "io_cost",
+    }
+    frame = frame.rename(columns=rename_map)
+    return frame
+
+
 def _resolve_strategy(strategy_cfg: StrategyConfig) -> Callable[[np.ndarray], np.ndarray]:
     fn = _load_callable(strategy_cfg.entrypoint)
 
@@ -191,6 +230,30 @@ def _write_json(destination: Path, payload: Dict[str, Any], *, command: str) -> 
 def _write_text(destination: Path, text: str, *, command: str) -> str:
     digest, _ = _write_bytes(destination, text.encode("utf-8"), command=command)
     return digest
+
+
+def _emit_cost_report_output(report: DailyCostReport, output_format: str | None) -> None:
+    if output_format is None:
+        return
+    if output_format == "json":
+        click.echo(json.dumps(report.to_dict(), indent=2, sort_keys=True))
+        return
+    if output_format == "table":
+        latest_date = report.daily_totals["date"].max().strftime("%Y-%m-%d")
+        headers = ["segment", *report.resources, "total_cost"]
+        click.echo(f"date: {latest_date}")
+        click.echo(" | ".join(headers))
+        click.echo(" | ".join("---" for _ in headers))
+        mask = report.daily_totals["date"] == report.daily_totals["date"].max()
+        subset = report.daily_totals.loc[mask, headers]
+        for _, row in subset.iterrows():
+            cells: list[str] = [str(row["segment"])]
+            for column in (*report.resources, "total_cost"):
+                value = row[column]
+                cells.append(f"{float(value):.2f}")
+            click.echo(" | ".join(cells))
+        return
+    raise ConfigError(f"Unsupported output format '{output_format}'")
 
 
 @click.group()
@@ -680,3 +743,76 @@ def report(
         version_mgr.snapshot(cfg.output_path, metadata={"sections": len(cfg.inputs)})
     _emit_report_output(cfg, report_text, output_format, command=command)
     click.echo(f"[{command}] completed sections={len(cfg.inputs)} sha256={digest}")
+
+
+@cli.command("finops-cost-report")
+@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to FinOps cost report YAML config.")
+@click.option("--generate-config", is_flag=True, help="Write the default FinOps cost report config template.")
+@click.option(
+    "--template-output",
+    type=click.Path(path_type=Path),
+    help="Destination for generated template.",
+)
+@click.option(
+    "--output-format",
+    "--output",
+    type=click.Choice(["table", "json"]),
+    help="Optionally emit the computed report to stdout in the requested format.",
+)
+@click.pass_context
+def finops_cost_report(
+    ctx: click.Context,
+    config: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+    output_format: str | None,
+) -> None:
+    """Generate a FinOps daily cost report with confidence bands and regression alerts."""
+
+    command = "finops-cost-report"
+    manager = _get_manager(ctx)
+    if generate_config:
+        if template_output is None:
+            raise click.UsageError("--template-output must be provided when generating a template")
+        manager.render("finops_cost_report", template_output)
+        click.echo(f"[{command}] template written to {template_output}")
+        return
+    if config is None:
+        raise click.UsageError("--config is required when not generating a template")
+
+    with step_logger(command, "load config"):
+        cfg = manager.load_config(config, CostReportConfig)
+    with step_logger(command, "load cost data"):
+        frame = _load_cost_records(cfg)
+    with step_logger(command, "compute analytics"):
+        report = build_daily_cost_report(
+            frame,
+            segments=cfg.source.dimensions,
+            confidence=cfg.confidence_level,
+            baseline_window=cfg.baseline_window,
+            trend_threshold=cfg.trend_threshold,
+            zscore_threshold=cfg.zscore_threshold,
+        )
+        report.metadata.update(
+            {
+                "name": cfg.name,
+                "description": cfg.description,
+                "tags": cfg.tags,
+                "metadata": cfg.metadata,
+            }
+        )
+    with step_logger(command, "persist report"):
+        digest = _write_json(cfg.output_path, report.to_dict(), command=command)
+    markdown_path = cfg.markdown_output_path
+    if markdown_path is not None:
+        with step_logger(command, "write markdown"):
+            markdown = report.to_markdown()
+            _write_text(markdown_path, markdown, command=command)
+    with step_logger(command, "snapshot version"):
+        version_mgr = DataVersionManager(cfg.versioning)
+        version_mgr.snapshot(cfg.output_path, metadata=report.metadata)
+    _emit_cost_report_output(report, output_format)
+    segment_count = len(report.daily_totals["segment"].unique())
+    click.echo(
+        f"[{command}] completed segments={segment_count} rows={len(report.daily_totals)} sha256={digest}"
+    )

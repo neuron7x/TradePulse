@@ -175,6 +175,41 @@
       "description": "Iterations completed by the optimisation engine.",
       "labels": ["optimizer_type"],
       "subsystem": "optimization"
+    },
+    {
+      "name": "tradepulse_cost_cpu_daily_usd",
+      "type": "gauge",
+      "description": "Daily CPU spend attributed to workloads in USD.",
+      "labels": ["team", "environment", "service"],
+      "subsystem": "finops"
+    },
+    {
+      "name": "tradepulse_cost_gpu_daily_usd",
+      "type": "gauge",
+      "description": "Daily GPU spend attributed to workloads in USD.",
+      "labels": ["team", "environment", "service"],
+      "subsystem": "finops"
+    },
+    {
+      "name": "tradepulse_cost_io_daily_usd",
+      "type": "gauge",
+      "description": "Daily IO spend attributed to workloads in USD.",
+      "labels": ["team", "environment", "service"],
+      "subsystem": "finops"
+    },
+    {
+      "name": "tradepulse_cost_total_daily_usd",
+      "type": "gauge",
+      "description": "Aggregate infrastructure spend captured across CPU, GPU, and IO components in USD.",
+      "labels": ["team", "environment", "service"],
+      "subsystem": "finops"
+    },
+    {
+      "name": "tradepulse_cost_budget_variance_usd",
+      "type": "gauge",
+      "description": "Budget variance for the current day in USD (positive indicates overspend).",
+      "labels": ["team", "environment", "service"],
+      "subsystem": "finops"
     }
   ]
 }

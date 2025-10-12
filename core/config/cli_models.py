@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field, model_validator
 __all__ = [
     "CatalogConfig",
     "DataSourceConfig",
+    "CostReportConfig",
+    "CostSourceConfig",
     "ExecutionConfig",
     "IngestConfig",
     "OptimizeConfig",
@@ -48,6 +50,25 @@ class DataSourceConfig(BaseModel):
     path: Path
     timestamp_field: str = "timestamp"
     value_field: str = "price"
+
+
+class CostSourceConfig(BaseModel):
+    """Configuration describing where FinOps cost records live."""
+
+    kind: Literal["csv", "parquet"] = "csv"
+    path: Path
+    timestamp_field: str = "timestamp"
+    dimensions: List[str] = Field(default_factory=lambda: ["team", "environment", "service"])
+    cpu_field: str = "cpu_cost"
+    gpu_field: str = "gpu_cost"
+    io_field: str = "io_cost"
+
+    @model_validator(mode="after")
+    def _validate_fields(self) -> "CostSourceConfig":
+        resources = {self.cpu_field, self.gpu_field, self.io_field}
+        if len(resources) != 3:
+            raise ValueError("Resource field names must be distinct")
+        return self
 
 
 class StrategyConfig(BaseModel):
@@ -133,3 +154,28 @@ class ReportConfig(TradePulseBaseConfig):
     pdf_output_path: Path | None = None
     template: Optional[Path] = None
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)
+
+
+class CostReportConfig(TradePulseBaseConfig):
+    """Configuration for FinOps daily cost reporting."""
+
+    source: CostSourceConfig
+    output_path: Path = Field(default=Path("reports/finops/daily_cost_report.json"))
+    markdown_output_path: Path | None = Field(default=Path("reports/finops/daily_cost_report.md"))
+    baseline_window: int = 7
+    confidence_level: float = 0.95
+    trend_threshold: float = 0.15
+    zscore_threshold: float = 1.5
+    versioning: VersioningConfig = Field(default_factory=VersioningConfig)
+
+    @model_validator(mode="after")
+    def _validate_parameters(self) -> "CostReportConfig":
+        if not 0.0 < self.confidence_level < 1.0:
+            raise ValueError("confidence_level must lie in the open interval (0, 1)")
+        if self.baseline_window < 3:
+            raise ValueError("baseline_window must be at least 3")
+        if self.trend_threshold <= 0.0:
+            raise ValueError("trend_threshold must be positive")
+        if self.zscore_threshold <= 0.0:
+            raise ValueError("zscore_threshold must be positive")
+        return self

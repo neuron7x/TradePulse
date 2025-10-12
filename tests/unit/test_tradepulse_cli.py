@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
+import numpy as np
 import pandas as pd
 import pytest
 import yaml
@@ -39,7 +40,7 @@ def _write_yaml(path: Path, data: Dict[str, Any]) -> None:
 
 def test_cli_generates_templates(tmp_path: Path) -> None:
     runner = CliRunner()
-    for command in ("ingest", "backtest", "optimize", "exec", "report"):
+    for command in ("ingest", "backtest", "optimize", "exec", "report", "finops-cost-report"):
         destination = tmp_path / f"{command}.yaml"
         result = runner.invoke(cli, [command, "--generate-config", "--template-output", str(destination)])
         assert result.exit_code == 0, result.output
@@ -162,6 +163,52 @@ def test_backtest_outputs_jsonl(tmp_path: Path, sample_prices: Path) -> None:
     assert result.exit_code == 0, result.output
     lines = [line for line in result.output.splitlines() if line.startswith("{")]
     assert any("\"metric\": \"total_return\"" in line for line in lines)
+
+
+def test_finops_cost_report_command(tmp_path: Path) -> None:
+    manager = ConfigTemplateManager(Path("configs/templates"))
+    template_path = tmp_path / "finops.yaml"
+    manager.render("finops_cost_report", template_path)
+    cfg = _load_yaml(template_path)
+
+    cost_path = tmp_path / "costs.csv"
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=10, freq="D"),
+            "team": ["alpha"] * 10,
+            "environment": ["prod"] * 10,
+            "service": ["research"] * 10,
+            "cpu_cost": np.linspace(100.0, 280.0, num=10),
+            "gpu_cost": np.linspace(50.0, 120.0, num=10),
+            "io_cost": np.linspace(20.0, 40.0, num=10),
+        }
+    )
+    frame.to_csv(cost_path, index=False)
+
+    cfg["source"]["path"] = str(cost_path)
+    cfg["output_path"] = str(tmp_path / "finops.json")
+    cfg["markdown_output_path"] = str(tmp_path / "finops.md")
+    repo_path = tmp_path / "repo"
+    repo_path.mkdir()
+    cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
+    _write_yaml(template_path, cfg)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli,
+        [
+            "finops-cost-report",
+            "--config",
+            str(template_path),
+            "--output",
+            "table",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads((tmp_path / "finops.json").read_text())
+    assert payload["daily_totals"], "daily totals should be present"
+    assert payload["confidence_intervals"], "confidence intervals should be present"
+    assert (tmp_path / "finops.md").exists()
 
 
 def test_versioning_manager_writes_metadata(tmp_path: Path) -> None:

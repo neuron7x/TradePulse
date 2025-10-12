@@ -111,6 +111,12 @@ GameDay, CI, and FinOps cadences.
 - Add monthly review checklist to `reports/finops/budget_review.md` capturing
   decisions, exceptions, and remediation tasks.
 
+### Daily Cost Attribution Artefacts
+
+- Use `tradepulse_cli finops-cost-report` to turn tagged infrastructure telemetry into markdown + JSON artefacts with confidence intervals and regression-driven alerts. 【F:cli/tradepulse_cli.py†L1-L400】【F:analytics/finops/cost_reports.py†L1-L240】
+- Store generated outputs under `reports/finops/` to feed weekly executive reviews and postmortems. 【F:configs/templates/finops_cost_report.yaml.j2†L1-L23】
+- Wire Grafana to the Prometheus metrics `tradepulse_cost_*_daily_usd` to visualise CPU/GPU/IO burn and budget variance in near real-time. 【F:observability/metrics.json†L1-L220】【F:observability/dashboards/tradepulse-costs.json†L1-L400】
+
 ---
 
 ## 3. Research Workload Cost Controls

@@ -1,0 +1,25 @@
+name: finops-daily-costs
+description: Daily CPU/GPU/IO cost attribution summary with regression alerts.
+tags:
+  - finops
+  - cost
+source:
+  kind: csv
+  path: data/costs/daily_costs.csv
+  timestamp_field: timestamp
+  dimensions:
+    - team
+    - environment
+    - service
+  cpu_field: cpu_cost
+  gpu_field: gpu_cost
+  io_field: io_cost
+baseline_window: 7
+confidence_level: 0.95
+trend_threshold: 0.15
+zscore_threshold: 1.5
+output_path: reports/finops/daily_cost_report.json
+markdown_output_path: reports/finops/daily_cost_report.md
+versioning:
+  backend: none
+metadata: {}
