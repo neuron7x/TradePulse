@@ -102,6 +102,7 @@ jobs:
           if-no-files-found: error
 
       - name: Evaluate alert configuration
+        if: always()
         id: alert-config
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SMOKE_SLACK_WEBHOOK_URL }}
