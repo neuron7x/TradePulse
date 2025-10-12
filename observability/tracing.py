@@ -48,6 +48,7 @@ LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_TRACER_NAME = "tradepulse.pipeline"
 _TRACEPARENT_HEADER = "traceparent"
+_TRACESTATE_HEADER = "tracestate"
 
 
 if _TRACE_AVAILABLE:
@@ -233,20 +234,45 @@ def current_traceparent() -> str | None:
     return carrier.get(_TRACEPARENT_HEADER)
 
 
-@contextmanager
-def activate_traceparent(traceparent: str | None) -> Iterator[bool]:
-    """Temporarily activate the provided ``traceparent`` header."""
+def current_tracestate() -> str | None:
+    """Return the W3C ``tracestate`` header for the current span, if any."""
 
-    if not (_TRACE_AVAILABLE and traceparent and otel_context and _W3C_PROPAGATOR and _DICT_GETTER):
+    if not (_TRACE_AVAILABLE and _W3C_PROPAGATOR and _DICT_SETTER):
+        return None
+    carrier: Dict[str, str] = {}
+    _W3C_PROPAGATOR.inject(carrier, setter=_DICT_SETTER)
+    return carrier.get(_TRACESTATE_HEADER)
+
+
+@contextmanager
+def activate_trace_headers(headers: Mapping[str, str] | None) -> Iterator[bool]:
+    """Temporarily activate a context derived from W3C trace headers."""
+
+    if not (_TRACE_AVAILABLE and headers and otel_context and _W3C_PROPAGATOR and _DICT_GETTER):
         yield False
         return
 
-    context = _W3C_PROPAGATOR.extract({_TRACEPARENT_HEADER: traceparent}, getter=_DICT_GETTER)
+    context = _W3C_PROPAGATOR.extract(headers, getter=_DICT_GETTER)
     token = otel_context.attach(context)
     try:
         yield True
     finally:
         otel_context.detach(token)
+
+
+@contextmanager
+def activate_traceparent(traceparent: str | None, *, tracestate: str | None = None) -> Iterator[bool]:
+    """Temporarily activate the provided ``traceparent``/``tracestate`` headers."""
+
+    if traceparent is None:
+        yield False
+        return
+
+    headers: Dict[str, str] = {_TRACEPARENT_HEADER: traceparent}
+    if tracestate:
+        headers[_TRACESTATE_HEADER] = tracestate
+    with activate_trace_headers(headers) as activated:
+        yield activated
 
 
 @contextmanager
@@ -407,6 +433,8 @@ __all__ = [
     "inject_trace_context",
     "extract_trace_context",
     "current_traceparent",
+    "current_tracestate",
+    "activate_trace_headers",
     "activate_traceparent",
     "pipeline_span",
     "SelectiveSampler",

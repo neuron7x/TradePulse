@@ -20,6 +20,119 @@ from core.messaging.event_bus import (
 from core.messaging.idempotency import InMemoryEventIdempotencyStore
 
 
+@pytest.mark.asyncio
+async def test_kafka_publish_injects_trace_headers(stub_aiokafka) -> None:
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    import observability.tracing as tracing_module
+
+    if not getattr(tracing_module, "_TRACE_AVAILABLE", False):
+        pytest.skip("OpenTelemetry tracing extras not installed")
+
+    current_provider = trace.get_tracer_provider()
+    if not isinstance(current_provider, TracerProvider):
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(InMemorySpanExporter()))
+        trace.set_tracer_provider(provider)
+    else:
+        provider = current_provider
+
+    config = EventBusConfig(backend=EventBusBackend.KAFKA, bootstrap_servers="kafka:9092")
+    bus = KafkaEventBus(config)
+    await bus.start()
+
+    envelope = EventEnvelope(
+        event_type="test",  # pragma: no cover - descriptive payload
+        partition_key="BTCUSDT",
+        event_id="evt-123",
+        payload=b"payload",
+        content_type="application/json",
+        schema_version="1.0.0",
+    )
+
+    tracer = tracing_module.get_tracer("tests.kafka")
+    try:
+        with tracer.start_as_current_span("publish"):
+            await bus.publish(EventTopic.MARKET_TICKS, envelope)
+
+        producer = stub_aiokafka.AIOKafkaProducer.instances[-1]
+        assert producer.sent, "producer should record at least one send"
+        header_map = {key: value.decode("utf-8") for key, value in producer.sent[-1]["headers"]}
+        assert "traceparent" in header_map
+    finally:
+        await bus.stop()
+
+
+@pytest.mark.asyncio
+async def test_kafka_subscribe_activates_trace_context(stub_aiokafka) -> None:
+    pytest.importorskip("opentelemetry.sdk.trace")
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+    from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+
+    import observability.tracing as tracing_module
+
+    if not getattr(tracing_module, "_TRACE_AVAILABLE", False):
+        pytest.skip("OpenTelemetry tracing extras not installed")
+
+    current_provider = trace.get_tracer_provider()
+    if not isinstance(current_provider, TracerProvider):
+        provider = TracerProvider()
+        provider.add_span_processor(SimpleSpanProcessor(InMemorySpanExporter()))
+        trace.set_tracer_provider(provider)
+    else:
+        provider = current_provider
+
+    envelope = EventEnvelope(
+        event_type="test",
+        partition_key="ETHUSDT",
+        event_id="evt-456",
+        payload=b"payload",
+        content_type="application/octet-stream",
+        schema_version="1.0.0",
+    )
+    tracer = tracing_module.get_tracer("tests.kafka")
+    with tracer.start_as_current_span("seed"):
+        tracing_module.inject_trace_context(envelope.headers)
+    expected_traceparent = envelope.headers.get("traceparent")
+    assert expected_traceparent is not None
+    expected_trace_id = expected_traceparent.split("-")[1]
+
+    stub_aiokafka.AIOKafkaConsumer.queued_messages = [
+        stub_aiokafka.DummyKafkaMessage(
+            key=envelope.partition_key.encode("utf-8"),
+            value=envelope.payload,
+            headers=[(k, v.encode("utf-8")) for k, v in envelope.as_message().items()],
+        )
+    ]
+
+    captured_trace_ids: list[str] = []
+
+    async def handler(incoming: EventEnvelope) -> None:
+        span = trace.get_current_span()
+        ctx = span.get_span_context()
+        captured_trace_ids.append(f"{ctx.trace_id:032x}")
+
+    config = EventBusConfig(backend=EventBusBackend.KAFKA, bootstrap_servers="kafka:9092")
+    bus = KafkaEventBus(config)
+    await bus.start()
+    try:
+        await bus.subscribe(EventTopic.MARKET_TICKS, handler)
+        await asyncio.sleep(0)  # allow the consumer task to start
+        await asyncio.sleep(0.05)
+    finally:
+        await bus.stop()
+        stub_aiokafka.AIOKafkaConsumer.queued_messages.clear()
+
+    assert captured_trace_ids
+    assert captured_trace_ids[0] == expected_trace_id
+
+
 @pytest.fixture(autouse=True)
 def stub_aiokafka(monkeypatch):
     """Inject a lightweight aiokafka stub for KafkaEventBus tests."""

@@ -9,6 +9,8 @@ from datetime import datetime
 from enum import Enum
 from typing import Awaitable, Callable, Dict, MutableMapping, Optional
 
+from observability.tracing import activate_trace_headers, inject_trace_context
+
 from .idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore, current_timestamp
 
 
@@ -163,6 +165,7 @@ class KafkaEventBus(BaseEventBus):
     async def publish(self, topic: EventTopic, envelope: EventEnvelope) -> None:
         if self._producer is None:
             raise RuntimeError("KafkaEventBus.start() must be called before publish()")
+        inject_trace_context(envelope.headers)
         key = envelope.partition_key.encode("utf-8")
         headers = [(name, value.encode("utf-8")) for name, value in envelope.as_message().items()]
         await self._producer.send_and_wait(topic.metadata.name, envelope.payload, key=key, headers=headers)
@@ -194,7 +197,8 @@ class KafkaEventBus(BaseEventBus):
                         await consumer.commit()
                         continue
                     try:
-                        await handler(envelope)
+                        with activate_trace_headers(envelope.headers):
+                            await handler(envelope)
                         self.idempotency_store.mark_processed(envelope.event_id)
                         await consumer.commit()
                     except Exception:
@@ -253,6 +257,7 @@ class NATSEventBus(BaseEventBus):
         if not self._nc or not self._js:
             raise RuntimeError("NATSEventBus.start() must be called before publish()")
         await self._ensure_stream(topic)
+        inject_trace_context(envelope.headers)
         headers = {k: v for k, v in envelope.as_message().items()}
         await self._js.publish(
             subject=topic.metadata.name,
@@ -278,7 +283,8 @@ class NATSEventBus(BaseEventBus):
                 await msg.ack()
                 return
             try:
-                await handler(envelope)
+                with activate_trace_headers(envelope.headers):
+                    await handler(envelope)
                 self.idempotency_store.mark_processed(envelope.event_id)
                 await msg.ack()
             except Exception:
