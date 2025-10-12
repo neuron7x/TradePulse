@@ -1,0 +1,46 @@
+name: Mutation Tests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * 1'
+
+permissions:
+  contents: read
+  actions: read
+  checks: write
+  statuses: write
+
+jobs:
+  mutmut:
+    name: Mutation Testing (mutmut)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.lock
+          uv pip install -r requirements-dev.lock
+      - name: Prepare mutation report directory
+        run: mkdir -p reports/mutmut
+      - name: Run mutation tests
+        run: |
+          .venv/bin/mutmut run --use-coverage
+          .venv/bin/mutmut results | tee reports/mutmut/results.txt
+      - name: Upload mutation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-testing-results
+          path: |
+            .mutmut-cache
+            reports/mutmut
+          if-no-files-found: warn
