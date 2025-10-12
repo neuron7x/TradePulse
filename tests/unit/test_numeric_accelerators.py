@@ -48,6 +48,13 @@ def test_convolve_rejects_multidimensional_inputs() -> None:
         convolve(signal, kernel)
 
 
+def test_convolve_python_backend_rejects_empty_inputs() -> None:
+    with pytest.raises(ValueError):
+        convolve_python_backend([], [1.0])
+    with pytest.raises(ValueError):
+        convolve_python_backend([1.0], [])
+
+
 def test_python_backends_match_public_api() -> None:
     data = [0.0, 1.0, 2.0, 3.0]
     windows_py = sliding_windows_python_backend(data, 2, 1)

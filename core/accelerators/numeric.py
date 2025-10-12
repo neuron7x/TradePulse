@@ -275,6 +275,10 @@ def _convolve_python(
     *,
     mode: str = "full",
 ) -> list[float]:
+    if not signal:
+        raise ValueError("convolution signal must not be empty")
+    if not kernel:
+        raise ValueError("convolution kernel must not be empty")
     if any(isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)) for v in signal):
         raise ValueError("convolution inputs must be 1-dimensional")
     if any(isinstance(v, Sequence) and not isinstance(v, (str, bytes, bytearray)) for v in kernel):
