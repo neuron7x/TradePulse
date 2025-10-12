@@ -13,6 +13,7 @@ except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
 from core.data.adapters import CSVIngestionAdapter, ParquetIngestionAdapter
+from core.utils.dataframe_io import MissingParquetDependencyError, write_dataframe
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL, TIMESTAMP_ABS_TOL
 
 
@@ -80,7 +81,10 @@ def test_parquet_adapter_matches_source_values(rows: list[dict[str, float]], tmp
     """Parquet ingestion should match the source values within tolerance."""
     parquet_path = tmp_path / "ticks.parquet"
     frame = pd.DataFrame(rows)
-    frame.to_parquet(parquet_path, index=False)
+    try:
+        write_dataframe(frame, parquet_path, index=False)
+    except MissingParquetDependencyError:
+        pytest.skip("Parquet backend unavailable for property test")
 
     adapter = ParquetIngestionAdapter()
     ticks = asyncio.run(

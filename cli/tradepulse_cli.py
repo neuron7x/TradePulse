@@ -17,6 +17,12 @@ import click
 import numpy as np
 import pandas as pd
 
+from core.utils.dataframe_io import (
+    MissingParquetDependencyError,
+    dataframe_to_parquet_bytes,
+    read_dataframe,
+)
+
 from core.config.cli_models import (
     BacktestConfig,
     ExecConfig,
@@ -135,7 +141,12 @@ def _load_prices(cfg: IngestConfig | BacktestConfig | ExecConfig) -> pd.DataFram
     if data_cfg.kind == "csv":
         frame = pd.read_csv(data_cfg.path)
     else:
-        frame = pd.read_parquet(data_cfg.path)
+        try:
+            frame = read_dataframe(Path(data_cfg.path), allow_json_fallback=False)
+        except MissingParquetDependencyError as exc:
+            raise ArtifactError(
+                "Parquet sources require either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
     if data_cfg.timestamp_field not in frame.columns:
         raise ConfigError("Timestamp column missing from data source")
     if data_cfg.value_field not in frame.columns:
@@ -159,9 +170,12 @@ def _write_frame(frame: pd.DataFrame, destination: Path, *, command: str = "cli"
     if suffix in {".csv", ""}:
         payload = frame.to_csv(index=False).encode("utf-8")
     elif suffix == ".parquet":
-        buffer = io.BytesIO()
-        frame.to_parquet(buffer, index=False)
-        payload = buffer.getvalue()
+        try:
+            payload = dataframe_to_parquet_bytes(frame, index=False)
+        except MissingParquetDependencyError as exc:
+            raise ConfigError(
+                "Writing parquet outputs requires either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
     else:
         raise ConfigError(f"Unsupported destination format '{suffix}'")
     digest, _ = _write_bytes(destination, payload, command=command)

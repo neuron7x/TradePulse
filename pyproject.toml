@@ -43,7 +43,6 @@ dependencies = [
     "ccxt>=4.5.9",
     "tenacity>=9.1.2",
     "aiolimiter>=1.2.1",
-    "pyarrow>=21.0.0",
     "jinja2>=3.1.6",
     "setuptools>=78.1.1",
     "requests>=2.32.5",
@@ -58,6 +57,10 @@ connectors = [
     "websockets>=15.0.1",
     "alpaca-py>=0.18.0",
     "polygon-api-client>=1.15.0",
+]
+feature_store = [
+    "pyarrow>=21.0.0",
+    "polars>=1.21.0",
 ]
 dev = [
     "black>=25.1.0",

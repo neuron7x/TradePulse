@@ -4,6 +4,7 @@ import pandas as pd
 import pytest
 
 from core.data.feature_store import FeatureStoreIntegrityError, OnlineFeatureStore
+from core.utils import dataframe_io
 
 
 def _frame(values: list[int]) -> pd.DataFrame:
@@ -56,3 +57,38 @@ def test_overwrite_calls_purge(tmp_path, monkeypatch):
     store.sync("signals", _frame([2, 3]), mode="overwrite")
 
     assert calls == ["signals"]
+
+
+def test_polars_fallback_without_pyarrow(monkeypatch, tmp_path):
+    pytest.importorskip("polars")
+    dataframe_io.reset_dataframe_io_backends()
+    monkeypatch.setattr(dataframe_io, "_pyarrow_available", lambda: False)
+
+    store = OnlineFeatureStore(tmp_path)
+    payload = _frame([5, 6, 7])
+    store.sync("alt.features", payload, mode="overwrite")
+
+    stored = store.load("alt.features")
+    pd.testing.assert_frame_equal(stored.reset_index(drop=True), payload.reset_index(drop=True))
+
+    parquet_path = (tmp_path / "alt.features").with_suffix(".parquet")
+    assert parquet_path.exists()
+
+def test_json_fallback_when_no_parquet_backend(monkeypatch, tmp_path):
+    dataframe_io.reset_dataframe_io_backends()
+    monkeypatch.setattr(dataframe_io, "_pyarrow_available", lambda: False)
+
+    def _only_json() -> list:
+        return [dataframe_io._json_backend()]
+
+    monkeypatch.setattr(dataframe_io, "_available_backends", _only_json)
+
+    store = OnlineFeatureStore(tmp_path)
+    payload = _frame([9, 10])
+    store.sync("json.features", payload, mode="overwrite")
+
+    stored = store.load("json.features")
+    pd.testing.assert_frame_equal(stored.reset_index(drop=True), payload.reset_index(drop=True))
+
+    json_path = store._resolve_path("json.features").with_suffix(".json")
+    assert json_path.exists()

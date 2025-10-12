@@ -85,7 +85,6 @@ propcache==0.4.1
 protobuf==5.29.5
 psutil==7.1.0
 py-spy==0.4.1
-pyarrow==21.0.0
 pycares==4.11.0
 pycparser==2.23
 pydantic==2.12.0

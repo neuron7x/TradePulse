@@ -10,6 +10,12 @@ from typing import Literal
 
 import pandas as pd
 
+from core.utils.dataframe_io import (
+    purge_dataframe_artifacts,
+    read_dataframe,
+    write_dataframe,
+)
+
 
 class FeatureStoreIntegrityError(RuntimeError):
     """Raised when integrity invariants fail for the online feature store."""
@@ -58,23 +64,20 @@ class OnlineFeatureStore:
         self._root.mkdir(parents=True, exist_ok=True)
 
     def _resolve_path(self, feature_view: str) -> Path:
-        safe_name = feature_view.replace("/", "__")
-        return self._root / f"{safe_name}.parquet"
+        safe_name = feature_view.replace("/", "__").replace(".", "__")
+        return self._root / safe_name
 
     def purge(self, feature_view: str) -> None:
         """Remove persisted artefacts for ``feature_view`` if they exist."""
 
         path = self._resolve_path(feature_view)
-        if path.exists():
-            path.unlink()
+        purge_dataframe_artifacts(path)
 
     def load(self, feature_view: str) -> pd.DataFrame:
         """Load the persisted dataframe for ``feature_view``."""
 
         path = self._resolve_path(feature_view)
-        if not path.exists():
-            return pd.DataFrame()
-        return pd.read_parquet(path)
+        return read_dataframe(path, allow_json_fallback=True)
 
     def sync(
         self,
@@ -139,8 +142,7 @@ class OnlineFeatureStore:
 
     def _write_frame(self, path: Path, frame: pd.DataFrame) -> pd.DataFrame:
         prepared = frame.reset_index(drop=True)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        prepared.to_parquet(path, index=False)
+        write_dataframe(prepared, path, index=False, allow_json_fallback=True)
         return prepared
 
     def _build_report(

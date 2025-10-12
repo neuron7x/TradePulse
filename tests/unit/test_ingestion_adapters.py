@@ -57,6 +57,7 @@ from core.data.adapters import (
 from core.data.adapters import ccxt as ccxt_module
 from core.data.adapters.base import IngestionAdapter
 from core.data.models import PriceTick as Ticker
+from core.utils.dataframe_io import MissingParquetDependencyError, write_dataframe
 
 
 class DummyAdapter(IngestionAdapter):
@@ -95,7 +96,10 @@ async def test_parquet_adapter_fetch(tmp_path: Path) -> None:
         }
     )
     file_path = tmp_path / "ticks.parquet"
-    df.to_parquet(file_path)
+    try:
+        write_dataframe(df, file_path)
+    except MissingParquetDependencyError:
+        pytest.skip("Parquet backend unavailable")
 
     adapter = ParquetIngestionAdapter()
     ticks = await adapter.fetch(path=file_path, symbol="BTCUSD", venue="BINANCE")
