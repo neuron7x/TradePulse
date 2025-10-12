@@ -7,19 +7,22 @@ APP_UID=${APP_UID:-1000}
 APP_GID=${APP_GID:-1000}
 READ_ONLY_ROOT=${READ_ONLY_ROOT:-1}
 
+is_root_ro() {
+    awk '$2=="/" {if ($4 ~ /(^|,)ro(,|$)/) exit 0} END {exit 1}' /proc/mounts
+}
+
 if [ "$(id -u)" -eq 0 ]; then
     if [ "${READ_ONLY_ROOT}" = "1" ]; then
-        if ! mountpoint -q /tmp; then
-            mkdir -p /tmp
-            mount -t tmpfs tmpfs /tmp
-        fi
-        if [ -d /var/lib/nfpro ] && ! mountpoint -q /var/lib/nfpro; then
-            mount -t tmpfs tmpfs /var/lib/nfpro
-        fi
-        if ! mount | grep -E ' on / ' | grep -q '(ro'; then
-            mount -o remount,ro /
+        if ! is_root_ro; then
+            echo "[entrypoint] root filesystem must be mounted read-only; run the container with --read-only" >&2
+            exit 70
         fi
     fi
+
+    if [ -d /var/lib/nfpro ]; then
+        chown "${APP_UID}:${APP_GID}" /var/lib/nfpro 2>/dev/null || true
+    fi
+
     exec setpriv \
         --reuid="${APP_UID}" \
         --regid="${APP_GID}" \
