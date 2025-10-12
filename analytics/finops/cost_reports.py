@@ -175,6 +175,15 @@ def build_daily_cost_report(
 
     if records.empty:
         raise ValueError("Cost records are empty")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must lie in the open interval (0, 1)")
+    if baseline_window < 2:
+        raise ValueError("baseline_window must be at least 2")
+    if trend_threshold <= 0.0:
+        raise ValueError("trend_threshold must be positive")
+    if zscore_threshold <= 0.0:
+        raise ValueError("zscore_threshold must be positive")
+
     frame = records.copy()
 
     timestamp_field = "timestamp"

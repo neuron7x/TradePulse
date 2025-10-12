@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pandas as pd
 import pytest
 
@@ -49,3 +51,27 @@ def test_build_daily_cost_report_requires_timestamp_column() -> None:
     frame = pd.DataFrame({"cpu_cost": [1, 2, 3]})
     with pytest.raises(ValueError):
         build_daily_cost_report(frame)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"confidence": 1.0}, "confidence"),
+        ({"baseline_window": 1}, "baseline_window"),
+        ({"trend_threshold": 0.0}, "trend_threshold"),
+        ({"zscore_threshold": 0.0}, "zscore_threshold"),
+    ],
+)
+def test_build_daily_cost_report_validates_parameters(kwargs: dict[str, Any], message: str) -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=3, freq="D"),
+            "cpu_cost": [10.0, 11.0, 12.0],
+            "gpu_cost": [5.0, 5.5, 6.0],
+            "io_cost": [2.0, 2.5, 3.0],
+        }
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        build_daily_cost_report(frame, **kwargs)
+    assert message in str(excinfo.value)
