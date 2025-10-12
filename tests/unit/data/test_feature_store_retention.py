@@ -9,6 +9,7 @@ from core.data.feature_store import (
     DeltaLakeSource,
     FeatureStoreIntegrityError,
     IntegrityReport,
+    IcebergSource,
     OfflineStoreValidator,
     OnlineFeatureStore,
     RedisOnlineFeatureStore,
@@ -32,6 +33,7 @@ class _MutableClock:
 class _DictClient:
     def __init__(self) -> None:
         self.payloads: dict[str, bytes] = {}
+        self.expire_calls: list[tuple[str, int]] = []
 
     def get(self, key: str):  # pragma: no cover - trivial
         return self.payloads.get(key)
@@ -41,6 +43,9 @@ class _DictClient:
 
     def delete(self, key: str) -> None:  # pragma: no cover - defensive
         self.payloads.pop(key, None)
+
+    def expire(self, key: str, ttl_seconds: int) -> None:
+        self.expire_calls.append((key, ttl_seconds))
 
 
 @pytest.fixture
@@ -64,6 +69,25 @@ def test_redis_ttl_retention(base_frame: pd.DataFrame) -> None:
     stored = store.load("demo.fv")
     assert stored.shape[0] == 2
     assert stored["ts"].min() >= clock.now() - pd.Timedelta(hours=1)
+
+
+def test_redis_sets_key_ttl(base_frame: pd.DataFrame) -> None:
+    policy = RetentionPolicy(ttl=pd.Timedelta(minutes=5))
+    client = _DictClient()
+    store = RedisOnlineFeatureStore(client=client, retention_policy=policy)
+
+    store.sync("demo.fv", base_frame, mode="overwrite", validate=False)
+
+    assert client.expire_calls == [("demo.fv", 300)]
+
+
+def test_redis_does_not_set_ttl_without_policy(base_frame: pd.DataFrame) -> None:
+    client = _DictClient()
+    store = RedisOnlineFeatureStore(client=client)
+
+    store.sync("demo.fv", base_frame, mode="overwrite", validate=False)
+
+    assert client.expire_calls == []
 
 
 def test_sqlite_max_versions(tmp_path, base_frame: pd.DataFrame) -> None:
@@ -141,6 +165,23 @@ def test_offline_validator_numeric_type_equivalence(tmp_path, base_frame: pd.Dat
     )
 
     report = validator.run()
+    assert report.hash_differs is False
+
+
+def test_offline_validator_iceberg_source(tmp_path, base_frame: pd.DataFrame) -> None:
+    offline_path = tmp_path / "iceberg"
+    write_dataframe(base_frame, offline_path, allow_json_fallback=True)
+    source = IcebergSource(offline_path)
+
+    validator = OfflineStoreValidator(
+        "demo.fv",
+        source,
+        lambda _name: base_frame,
+        interval=pd.Timedelta(minutes=10),
+        clock=lambda: pd.Timestamp("2024-01-01 00:10:00", tz=UTC),
+    )
+
+    report = validator.run(enforce=False)
     assert report.hash_differs is False
 
 

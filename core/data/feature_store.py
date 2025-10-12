@@ -8,6 +8,7 @@ from datetime import UTC
 import hashlib
 import hmac
 from io import BytesIO
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
@@ -78,6 +79,12 @@ class _RetentionManager:
 
         return result.reset_index(drop=True)
 
+    @property
+    def policy(self) -> RetentionPolicy | None:
+        """Return the configured retention policy if present."""
+
+        return self._policy
+
 
 class KeyValueClient(Protocol):
     """Minimal protocol for key-value stores such as Redis."""
@@ -91,21 +98,46 @@ class KeyValueClient(Protocol):
     def delete(self, key: str) -> None:
         ...
 
+    def expire(self, key: str, ttl_seconds: int) -> None:
+        ...
+
 
 class InMemoryKeyValueClient:
     """In-memory key-value client used for tests and local development."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, clock: Callable[[], pd.Timestamp] | None = None) -> None:
         self._store: dict[str, bytes] = {}
+        self._expiry: dict[str, pd.Timestamp] = {}
+        self._clock = clock or (lambda: pd.Timestamp.now(tz=UTC))
+
+    def _is_expired(self, key: str) -> bool:
+        expiry = self._expiry.get(key)
+        if expiry is None:
+            return False
+        if self._clock() >= expiry:
+            self._store.pop(key, None)
+            self._expiry.pop(key, None)
+            return True
+        return False
 
     def get(self, key: str) -> bytes | None:  # pragma: no cover - trivial
+        if self._is_expired(key):
+            return None
         return self._store.get(key)
 
     def set(self, key: str, value: bytes) -> None:
         self._store[key] = value
+        self._expiry.pop(key, None)
 
     def delete(self, key: str) -> None:
         self._store.pop(key, None)
+        self._expiry.pop(key, None)
+
+    def expire(self, key: str, ttl_seconds: int) -> None:
+        if ttl_seconds <= 0:
+            self.delete(key)
+            return
+        self._expiry[key] = self._clock() + pd.Timedelta(seconds=ttl_seconds)
 
 
 def _serialize_frame(frame: pd.DataFrame) -> bytes:
@@ -133,7 +165,7 @@ class RedisOnlineFeatureStore:
         retention_policy: RetentionPolicy | None = None,
         clock: Callable[[], pd.Timestamp] | None = None,
     ) -> None:
-        self._client = client or InMemoryKeyValueClient()
+        self._client = client or InMemoryKeyValueClient(clock=clock)
         self._retention = _RetentionManager(retention_policy, clock=clock)
 
     def purge(self, feature_view: str) -> None:
@@ -147,6 +179,7 @@ class RedisOnlineFeatureStore:
         retained = self._retention.apply(frame)
         if not retained.equals(frame):
             self._client.set(feature_view, _serialize_frame(retained))
+            self._apply_key_ttl(feature_view)
         return retained
 
     def sync(
@@ -193,7 +226,23 @@ class RedisOnlineFeatureStore:
     def _write(self, feature_view: str, frame: pd.DataFrame) -> pd.DataFrame:
         prepared = self._retention.apply(frame)
         self._client.set(feature_view, _serialize_frame(prepared))
+        self._apply_key_ttl(feature_view)
         return prepared.reset_index(drop=True)
+
+    def _apply_key_ttl(self, feature_view: str) -> None:
+        policy = self._retention.policy
+        if policy is None or policy.ttl is None:
+            return
+
+        ttl_seconds = math.ceil(policy.ttl.total_seconds())
+        if ttl_seconds <= 0:
+            return
+
+        try:
+            self._client.expire(feature_view, ttl_seconds)
+        except AttributeError:  # pragma: no cover - defensive
+            # The provided client may not support expirations (e.g. custom mocks).
+            return
 
 
 class SQLiteOnlineFeatureStore:

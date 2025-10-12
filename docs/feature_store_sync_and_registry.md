@@ -17,6 +17,12 @@ feature pipelines and the lifecycle of ML models deployed into production.
 | **Dependency Pinning** | Ensure identical dependency sets (Python packages, model binaries) between offline training containers and live inference pods. | Publish lockfiles to OCI registry; deploy online services from the same digest used to run the offline pipeline. | CI job `make parity-verify` reconstructs containers and validates SHA256 digests. |
 | **Schema Evolution** | Guard against breaking schema changes by enforcing backwards-compatible evolution and timestamped migrations. | Use `core.messaging.EventSchemaRegistry` for feature payload schemas; require schema update proposals with automated backward-compatibility checks. | CI asserts new schemas append-only and include migration notes in `docs/changelog/features.md`. |
 
+### Retention and Online Cache Hygiene
+
+- **Redis TTL Alignment** – Apply `RetentionPolicy.ttl` directly on Redis keys during sync so that hot caches expire alongside row-level filtering. This prevents stale feature views from lingering beyond the configured horizon and mirrors the retention expectations enforced in offline datasets.
+- **SQLite Version Caps** – Enforce `RetentionPolicy.max_versions` within the SQLite-backed store to keep the on-disk payload lean. Rows are sorted by entity + timestamp and truncated to the most recent `N` versions before persisting.
+- **Offline Authority Snapshots** – Materialise Delta Lake or Apache Iceberg tables as the system of record. The `OfflineStoreValidator` loads the authoritative snapshot on a schedule and compares hashes/row counts against the online cache, optionally running in non-enforcing mode to gather diagnostics before alerting.
+
 ### 1.1 Synchronisation Workflows
 
 1. **Manifest Promotion** – Offline pipeline publishes manifests to `s3://tradepulse-feature-manifests/<hash>.json`. Deployment workflow promotes manifest by updating `configs/features/active_manifest.yaml` with hash + timestamp.

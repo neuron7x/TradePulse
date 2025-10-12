@@ -10,7 +10,18 @@ if not hasattr(_np, "float_"):
 
 from .catalog import normalize_symbol, normalize_venue
 from .feature_catalog import CatalogEntry, FeatureCatalog
-from .feature_store import FeatureStoreIntegrityError, IntegrityReport, OnlineFeatureStore
+from .feature_store import (
+    DeltaLakeSource,
+    FeatureStoreIntegrityError,
+    IcebergSource,
+    InMemoryKeyValueClient,
+    IntegrityReport,
+    OfflineStoreValidator,
+    OnlineFeatureStore,
+    RedisOnlineFeatureStore,
+    RetentionPolicy,
+    SQLiteOnlineFeatureStore,
+)
 from .versioning import DataVersionManager, VersioningError
 from .models import (
     AggregateMetric,
@@ -69,9 +80,16 @@ __all__ = [
     "normalize_venue",
     "CatalogEntry",
     "FeatureCatalog",
+    "DeltaLakeSource",
     "FeatureStoreIntegrityError",
+    "IcebergSource",
+    "InMemoryKeyValueClient",
     "IntegrityReport",
     "OnlineFeatureStore",
+    "OfflineStoreValidator",
+    "RedisOnlineFeatureStore",
+    "RetentionPolicy",
+    "SQLiteOnlineFeatureStore",
     "DataVersionManager",
     "VersioningError",
     "TimeSeriesValidationConfig",
