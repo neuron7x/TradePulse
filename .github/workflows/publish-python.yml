@@ -58,7 +58,36 @@ jobs:
             });
 
             const workflowName = context.workflow;
-            const checkRuns = response.data.check_runs.filter((run) => run.name !== workflowName);
+            let currentJobs;
+            try {
+              currentJobs = await github.rest.actions.listJobsForWorkflowRun({
+                owner,
+                repo,
+                run_id: context.runId,
+                per_page: 100,
+              });
+            } catch (error) {
+              core.setFailed(`Failed to enumerate workflow jobs: ${error.message}`);
+              return;
+            }
+
+            const currentJobCheckRunIds = new Set(
+              currentJobs.data.jobs
+                .map((job) => job.check_run_url?.split('/').pop())
+                .filter(Boolean),
+            );
+
+            const checkRuns = response.data.check_runs.filter((run) => {
+              if (run.name === workflowName) {
+                return false;
+              }
+
+              if (currentJobCheckRunIds.has(String(run.id))) {
+                return false;
+              }
+
+              return true;
+            });
             if (checkRuns.length === 0) {
               core.setFailed(`No completed CI checks found for commit ${targetSha}. Run the test matrix before releasing.`);
               return;
