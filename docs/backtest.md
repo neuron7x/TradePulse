@@ -56,6 +56,72 @@ fills), wrap the existing engine so legacy tests remain deterministic.
 
 ---
 
+## Deterministic Seeds & Replays
+
+Research runs should always record the pseudo-random seed so that fills, signal
+generation, and performance reports can be reproduced. The analytics runner
+exposes a single helper that synchronises Python's `random`, NumPy, and
+`PYTHONHASHSEED` state for you—call it once at process start and persist the
+value alongside the experiment metadata. 【F:analytics/runner.py†L52-L69】
+
+```python
+from analytics.runner import set_random_seeds
+
+set_random_seeds(20240315)  # repeatable backtests across machines
+```
+
+For automated sweeps, capture the accompanying metadata (git SHA, environment
+name, seed) via `collect_run_metadata` so any regression can be replayed exactly
+with the same configuration snapshot. 【F:analytics/runner.py†L72-L113】
+
+---
+
+## Transaction Costs & Slippage
+
+The execution layer composes granular transaction cost components—commission,
+spread, slippage, and financing—before attributing them in the returned
+`Result`. Each component ships with reusable policies such as per-unit fees,
+basis-point spreads, or square-root market impact curves, allowing you to mix
+and match venue-specific behaviour. 【F:backtest/transaction_costs.py†L1-L150】
+
+When `market` is provided, the engine loads YAML-backed presets via
+`load_market_costs`, so that the same configuration can be reused across
+strategies. Otherwise, pass a bespoke `TransactionCostModel` instance to encode
+custom fee schedules (maker/taker, tiered pricing, rebates). 【F:backtest/engine.py†L200-L287】【F:backtest/transaction_costs.py†L152-L239】
+
+---
+
+## Latency, Queueing & Partial Fills
+
+Beyond vectorised backtests, TradePulse offers a deterministic matching engine
+that honours latency pipelines, price-time priority, and incremental fills.
+Orders experience configurable delays (`signal → order → execution`), are queued
+by availability time, and interact with resting liquidity according to their
+time-in-force semantics (market, limit, IOC, FOK). 【F:backtest/execution_simulation.py†L1-L190】
+
+You can preload order books with passive depth via `add_passive_liquidity`,
+inject market halts, or cap participation during partial outages. Execution
+reports accumulate per order so strategies can audit queue position, realised
+prices, and slippage attribution for every fill. 【F:backtest/execution_simulation.py†L190-L330】
+
+---
+
+## Market Hours & Holiday Calendars
+
+Backtests automatically respect venue trading sessions through the
+`MarketCalendar` abstraction. Calendars can be sourced from
+`exchange_calendars` (for exchanges such as XNYS, XNAS, CMES) or created
+manually for bespoke venues, and each exposes DST-aware timezone conversion and
+holiday/weekend closures. 【F:core/data/timeutils.py†L15-L149】
+
+Use `is_market_open(timestamp, market)` to gate order generation, or
+`convert_timestamp` / `to_utc` to align historical bars captured in local time
+with UTC analytics. DST transitions and overnight futures sessions are handled
+via the underlying exchange metadata, ensuring realistic behaviour across
+holiday boundaries. 【F:core/data/timeutils.py†L139-L229】
+
+---
+
 ## Diagnostics & Extensions
 
 - Use `Result.commission_cost`, `Result.spread_cost`, and
