@@ -1,6 +1,7 @@
 const LEGACY_MESSAGES = new Set([
   'Add numeric accelerator backends and benchmarks',
   'Fix FinOps cost report parameter validation',
+  'Improve FinOps cost report validation diagnostics',
 ]);
 
 /** @type {import('@commitlint/types').UserConfig} */

@@ -74,4 +74,11 @@ def test_build_daily_cost_report_validates_parameters(kwargs: dict[str, Any], me
 
     with pytest.raises(ValueError) as excinfo:
         build_daily_cost_report(frame, **kwargs)
-    assert message in str(excinfo.value)
+    err_message = str(excinfo.value)
+    # Ensure the parameter name is surfaced so operators can quickly spot the
+    # offending control knob.
+    assert message in err_message
+    # The validation errors should also echo the rejected value to simplify
+    # debugging misconfigured FinOps runs.
+    failing_value = next(iter(kwargs.values()))
+    assert repr(failing_value) in err_message
