@@ -26,6 +26,7 @@ from .kuramoto_ricci import (
     RicciTemporalConfig,
     TradePulseSettings,
     YamlSettingsSource,
+    export_tradepulse_settings_schema,
     load_kuramoto_ricci_config,
     parse_cli_overrides,
 )
@@ -51,6 +52,7 @@ __all__ = [
     "ReportConfig",
     "TradePulseSettings",
     "YamlSettingsSource",
+    "export_tradepulse_settings_schema",
     "load_kuramoto_ricci_config",
     "parse_cli_overrides",
     "StrategyConfig",
