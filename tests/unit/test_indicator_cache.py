@@ -141,3 +141,28 @@ def test_multiscale_feature_uses_cache(tmp_path: Path) -> None:
     state = cache.get_backfill_state(TimeFrame.M1)
     assert state is not None
     assert state.last_timestamp is not None
+
+
+def test_cache_preserves_dataframe_index(tmp_path: Path) -> None:
+    cache = FileSystemIndicatorCache(tmp_path)
+    index = pd.date_range("2024-01-01", periods=5, freq="1min", tz="UTC")
+    frame = pd.DataFrame({"value": range(5)}, index=index)
+    params = {"alpha": 0.9}
+    data_hash = hash_input_data(frame.to_numpy())
+
+    cache.store(
+        indicator_name="df_indicator",
+        params=params,
+        data_hash=data_hash,
+        value=frame,
+    )
+
+    record = cache.load(
+        indicator_name="df_indicator",
+        params=params,
+        data_hash=data_hash,
+    )
+
+    assert record is not None
+    assert isinstance(record.value, pd.DataFrame)
+    pd.testing.assert_frame_equal(record.value, frame, check_freq=False)
