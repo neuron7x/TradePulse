@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
-from typing import Callable, Iterable, MutableMapping, Protocol, Sequence
+from typing import Any, Callable, Iterable, MutableMapping, Protocol, Sequence
 
 import pandas as pd
 
@@ -85,13 +85,19 @@ class StreamMaterializer:
     ) -> None:
         """Materialise ``payload`` into the online store respecting checkpoints."""
 
+        history_keys = self._load_history_keys(feature_view)
         batches = self._iter_batches(payload)
         for batch in batches:
             if batch.empty:
                 continue
-            self._process_batch(feature_view, batch)
+            self._process_batch(feature_view, batch, history_keys)
 
-    def _process_batch(self, feature_view: str, batch: pd.DataFrame) -> None:
+    def _process_batch(
+        self,
+        feature_view: str,
+        batch: pd.DataFrame,
+        history_keys: set[tuple[Any, ...]],
+    ) -> None:
         deduped = self._deduplicate(batch)
         if deduped.empty:
             return
@@ -100,28 +106,25 @@ class StreamMaterializer:
         if last and last.contains(checkpoint_id):
             return
 
-        new_rows = deduped
-        if self._backfill_loader is not None:
-            history = self._backfill_loader(feature_view)
-            if not history.empty:
-                combined = self._deduplicate(
-                    pd.concat([history, deduped], ignore_index=True)
-                )
-                key_columns = list(self._dedup_keys)
-                history_keys = history[key_columns].drop_duplicates()
-                merged = combined.merge(
-                    history_keys,
-                    on=key_columns,
-                    how="left",
-                    indicator=True,
-                )
-                new_rows = merged[merged["_merge"] == "left_only"].drop(columns="_merge")
+        new_rows = self._filter_new_rows(deduped, history_keys)
         if new_rows.empty:
             self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
             return
 
         self._writer(feature_view, new_rows.reset_index(drop=True))
+        history_keys.update(self._iter_key_tuples(new_rows))
         self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
+
+    def _filter_new_rows(
+        self,
+        frame: pd.DataFrame,
+        history_keys: set[tuple[Any, ...]],
+    ) -> pd.DataFrame:
+        if not history_keys:
+            return frame
+        key_series = frame[list(self._dedup_keys)].apply(tuple, axis=1)
+        mask = ~key_series.isin(history_keys)
+        return frame.loc[mask].reset_index(drop=True)
 
     def _deduplicate(self, frame: pd.DataFrame) -> pd.DataFrame:
         missing = set(self._dedup_keys) - set(frame.columns)
@@ -146,6 +149,21 @@ class StreamMaterializer:
         digest.update(feature_view.encode("utf-8"))
         digest.update(payload.encode("utf-8"))
         return digest.hexdigest()
+
+    def _load_history_keys(self, feature_view: str) -> set[tuple[Any, ...]]:
+        if self._backfill_loader is None:
+            return set()
+        history = self._backfill_loader(feature_view)
+        if history.empty:
+            return set()
+        deduped_history = self._deduplicate(history)
+        return set(self._iter_key_tuples(deduped_history))
+
+    def _iter_key_tuples(
+        self, frame: pd.DataFrame
+    ) -> Iterable[tuple[Any, ...]]:
+        key_columns = list(self._dedup_keys)
+        yield from frame[key_columns].itertuples(index=False, name=None)
 
     def _iter_batches(
         self,

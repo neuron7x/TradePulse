@@ -11,6 +11,12 @@ if not hasattr(_np, "float_"):
 from .catalog import normalize_symbol, normalize_venue
 from .feature_catalog import CatalogEntry, FeatureCatalog
 from .feature_store import FeatureStoreIntegrityError, IntegrityReport, OnlineFeatureStore
+from .materialization import (
+    Checkpoint,
+    CheckpointStore,
+    InMemoryCheckpointStore,
+    StreamMaterializer,
+)
 from .versioning import DataVersionManager, VersioningError
 from .models import (
     AggregateMetric,
@@ -72,6 +78,10 @@ __all__ = [
     "FeatureStoreIntegrityError",
     "IntegrityReport",
     "OnlineFeatureStore",
+    "Checkpoint",
+    "CheckpointStore",
+    "InMemoryCheckpointStore",
+    "StreamMaterializer",
     "DataVersionManager",
     "VersioningError",
     "TimeSeriesValidationConfig",
