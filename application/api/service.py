@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
+import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
@@ -20,7 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.trading import signal_to_dto
+from execution.risk import RiskLimits, RiskManager
 from domain import Signal, SignalAction
+from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from src.audit.audit_logger import AuditLogger
+from src.risk.risk_manager import RiskManagerFacade
 
 
 @dataclass(slots=True)
@@ -240,6 +246,20 @@ def create_app(
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
 
+    admin_token = os.environ.get("TRADEPULSE_ADMIN_TOKEN")
+    audit_secret = os.environ.get("TRADEPULSE_AUDIT_SECRET")
+    if not admin_token or not audit_secret:
+        logging.getLogger(__name__).warning(
+            "Administrative remote control configured with development defaults; set "
+            "TRADEPULSE_ADMIN_TOKEN and TRADEPULSE_AUDIT_SECRET for production.",
+        )
+        admin_token = admin_token or "dev-admin-token"
+        audit_secret = audit_secret or "dev-audit-secret"
+
+    risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
+    audit_logger = AuditLogger(secret=audit_secret)
+    authenticator = TokenAuthenticator(token=admin_token)
+
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period
     loop_limiters: WeakKeyDictionary[asyncio.AbstractEventLoop, AsyncLimiter] = WeakKeyDictionary()
@@ -273,6 +293,10 @@ def create_app(
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["*"]
     )
+
+    app.include_router(create_remote_control_router(risk_manager_facade, audit_logger, authenticator))
+    app.state.risk_manager = risk_manager_facade.risk_manager
+    app.state.audit_logger = audit_logger
 
     async def enforce_rate_limit() -> None:
         loop = asyncio.get_running_loop()
