@@ -51,9 +51,11 @@ scripts-dev-down:
 
 .PHONY: mutation-test
 mutation-test:
+	mkdir -p reports/mutmut
 	python -m coverage run -m pytest tests/unit tests/integration tests/property -q
-	mutmut run
-	mutmut results
+	python -m mutmut run --no-progress
+	python -m mutmut results | tee reports/mutmut/results.txt
+	python tools/ci/check_mutation_threshold.py --threshold 60 --summary-json reports/mutmut/summary.json
 
 .PHONY: security-audit
 security-audit:

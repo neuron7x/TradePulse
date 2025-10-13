@@ -195,18 +195,24 @@ The testing automation is split across two workflows:
 
 ### Coverage Enforcement
 
-The CI enforces coverage thresholds using `pytest-cov`:
+The CI enforces both line and branch coverage thresholds using `pytest-cov`:
 
 ```bash
 pytest --cov=core --cov=backtest --cov=execution \
+       --cov-branch \
        --cov-report=term-missing \
        --cov-fail-under=90
 ```
 
-To test locally with the same threshold:
+To test locally with the same thresholds:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=90
+pytest tests/ \
+  --cov=core --cov=backtest --cov=execution \
+  --cov-branch \
+  --cov-fail-under=90
 ```
+
+The CI workflow also surfaces a coverage summary in the job logs and fails when branch coverage drops below 90%.
 
 ### Mutation Testing
 
@@ -215,12 +221,10 @@ Mutation analysis is enforced for the core indicator domain using [`mutmut`](htt
 Run the mutation suite locally (requires the `dev` extras or `requirements-dev.txt`):
 
 ```bash
-python -m coverage run -m pytest tests/unit tests/integration tests/property -q
-mutmut run
-mutmut results
+make mutation-test
 ```
 
-The command caches results under `.mutmut-cache/` and reuses coverage data to accelerate re-runs. Use `mutmut show <mutation-id>` to inspect surviving mutants in detail.
+This target primes coverage, executes `mutmut`, persists results to `reports/mutmut/`, and enforces the same 60% mutation score gate used in CI via `tools/ci/check_mutation_threshold.py`. The command caches results under `.mutmut-cache/` and reuses coverage data to accelerate re-runs. Use `mutmut show <mutation-id>` to inspect surviving mutants in detail.
 
 ## Writing Tests
 
