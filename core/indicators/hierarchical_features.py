@@ -9,9 +9,8 @@ import numpy as np
 import pandas as pd
 
 from core.data.resampling import align_timeframes
-from .entropy import entropy
 from .hurst import hurst_exponent
-from .kuramoto import compute_phase, kuramoto_order
+from .kuramoto import compute_phase
 
 
 @dataclass(frozen=True)
@@ -29,9 +28,44 @@ class FeatureBufferCache:
     store: MutableMapping[str, np.ndarray] = field(default_factory=dict)
 
     def array(self, key: str, values: Sequence[float]) -> np.ndarray:
-        arr = np.asarray(values, dtype=np.float32)
-        self.store[key] = arr
+        src = np.asarray(values, dtype=np.float32)
+        existing = self.store.get(key)
+        if existing is None or existing.shape != src.shape:
+            existing = np.empty_like(src)
+            self.store[key] = existing
+        np.copyto(existing, src, casting="unsafe")
+        return existing
+
+    def buffer(
+        self,
+        key: str,
+        shape: tuple[int, ...],
+        *,
+        dtype: np.dtype | type = np.float32,
+    ) -> np.ndarray:
+        arr = self.store.get(key)
+        if arr is None or arr.shape != shape or arr.dtype != np.dtype(dtype):
+            arr = np.empty(shape, dtype=dtype)
+            self.store[key] = arr
         return arr
+
+
+def _shannon_entropy(series: np.ndarray, bins: int = 30) -> float:
+    values = series[np.isfinite(series)]
+    if values.size == 0:
+        return 0.0
+
+    max_abs = float(np.max(np.abs(values)))
+    if max_abs and np.isfinite(max_abs):
+        values = values / max_abs
+
+    counts, _ = np.histogram(values, bins=bins, density=False)
+    total = float(counts.sum())
+    if total <= 0:
+        return 0.0
+
+    probs = counts[counts > 0].astype(np.float32) / total
+    return float(-(probs * np.log(probs, dtype=np.float32)).sum(dtype=np.float32))
 
 
 @dataclass
@@ -62,16 +96,62 @@ def compute_hierarchical_features(
     reference = next(iter(ohlcv_by_tf))
     aligned = align_timeframes(ohlcv_by_tf, reference=reference)
     features: Dict[str, Dict[str, float]] = {}
-    phase_stack = []
-    for name, frame in aligned.items():
-        close = cache.array(f"{name}:close", frame["close"].to_numpy())
-        returns = np.diff(close, prepend=close[0])
-        phases = compute_phase(returns)
-        phase_stack.append(phases)
+    aligned_items = list(aligned.items())
+    if not aligned_items:
+        raise ValueError("aligned timeframes must not be empty")
+    sample_count = len(aligned_items[0][1]["close"])
+    agg_cos = cache.buffer("phase_accum_cos", (sample_count,))
+    agg_sin = cache.buffer("phase_accum_sin", (sample_count,))
+    agg_counts = cache.buffer("phase_accum_counts", (sample_count,), dtype=np.int32)
+    agg_cos.fill(0.0)
+    agg_sin.fill(0.0)
+    agg_counts.fill(0)
+    for name, frame in aligned_items:
+        close = cache.array(
+            f"{name}:close", frame["close"].to_numpy(dtype=np.float32, copy=False)
+        )
+        returns = cache.buffer(f"{name}:returns", (close.size,))
+        returns[0] = np.float32(0.0)
+        if close.size > 1:
+            np.subtract(close[1:], close[:-1], out=returns[1:])
+        phases = compute_phase(
+            returns,
+            use_float32=True,
+            out=cache.buffer(f"{name}:phase", (close.size,)),
+        )
+        mask = np.isfinite(phases)
+        cos_vals = cache.buffer(f"{name}:phase_cos", (close.size,))
+        sin_vals = cache.buffer(f"{name}:phase_sin", (close.size,))
+        valid_count = int(mask.sum(dtype=np.int32))
+        if valid_count:
+            np.cos(phases, out=cos_vals)
+            np.sin(phases, out=sin_vals)
+            cos_vals[~mask] = 0.0
+            sin_vals[~mask] = 0.0
+            np.add(agg_cos[: close.size], cos_vals, out=agg_cos[: close.size], where=mask)
+            np.add(agg_sin[: close.size], sin_vals, out=agg_sin[: close.size], where=mask)
+            agg_counts[: close.size] += mask
+            local_sum_real = float(np.add.reduce(cos_vals, dtype=np.float64))
+            local_sum_imag = float(np.add.reduce(sin_vals, dtype=np.float64))
+            local_magnitude = (local_sum_real * local_sum_real + local_sum_imag * local_sum_imag) ** 0.5
+            local_kuramoto = float(np.clip(local_magnitude / valid_count, 0.0, 1.0))
+        else:
+            cos_vals.fill(0.0)
+            sin_vals.fill(0.0)
+            local_kuramoto = 0.0
+        hurst_scratch = cache.buffer(f"{name}:hurst_diff", (close.size,))
+        hurst_tau = cache.buffer(f"{name}:hurst_tau", (_DEFAULT_LAGS.size,))
         features[name] = {
-            "entropy": float(entropy(returns, use_float32=True)),
-            "hurst": float(hurst_exponent(close, use_float32=True)),
-            "kuramoto": float(kuramoto_order(phases)),
+            "entropy": _shannon_entropy(returns),
+            "hurst": float(
+                hurst_exponent(
+                    close,
+                    use_float32=True,
+                    scratch=hurst_scratch,
+                    tau_buffer=hurst_tau,
+                )
+            ),
+            "kuramoto": local_kuramoto,
         }
         if book_by_tf and name in book_by_tf:
             book = book_by_tf[name]
@@ -83,8 +163,23 @@ def compute_hierarchical_features(
                 microprice = np.asarray(microprice, dtype=np.float32)
                 price_delta = microprice - close
                 features[name]["microprice_basis"] = float(np.nanmean(price_delta))
-    phase_matrix = np.vstack(phase_stack)
-    phase_coherence = float(np.nanmean(kuramoto_order(phase_matrix)))
+    valid = agg_counts > 0
+    if not np.any(valid):
+        phase_coherence = 0.0
+    else:
+        magnitude = np.hypot(
+            agg_cos.astype(np.float64, copy=False),
+            agg_sin.astype(np.float64, copy=False),
+        )
+        counts = agg_counts.astype(np.float64, copy=False)
+        coherence = np.divide(
+            magnitude,
+            counts,
+            out=np.zeros_like(magnitude, dtype=np.float64),
+            where=valid,
+        )
+        coherence[~valid] = np.nan
+        phase_coherence = float(np.nanmean(coherence))
     benchmark_diff: Dict[str, float] = {}
     if benchmarks:
         flat = _flatten(features)
@@ -106,3 +201,4 @@ __all__ = [
     "compute_hierarchical_features",
 ]
 
+_DEFAULT_LAGS = np.arange(2, 51, dtype=int)

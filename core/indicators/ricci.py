@@ -5,6 +5,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, Literal
 import warnings
+import logging
 
 import numpy as np
 
@@ -14,6 +15,12 @@ from ..utils.metrics import get_metrics_collector
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
+
+
+def _log_debug_enabled() -> bool:
+    base_logger = getattr(_logger, "logger", None)
+    check = getattr(base_logger, "isEnabledFor", None)
+    return bool(check and check(logging.DEBUG))
 
 try:
     import networkx as nx
@@ -154,10 +161,7 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     m = max(len(mu_x), len(mu_y))
     a = np.pad(mu_x, (0, m-len(mu_x)))
     b = np.pad(mu_y, (0, m-len(mu_y)))
-    if hasattr(G, "shortest_path_length"):
-        d_xy = G.shortest_path_length(x, y, weight="weight")
-    else:  # pragma: no cover - networkx path
-        d_xy = nx.shortest_path_length(G, x, y, weight="weight")
+    d_xy = _shortest_path_length_safe(G, x, y)
     if not np.isfinite(d_xy) or d_xy <= 0:
         return 0.0
     if W1 is None:
@@ -168,6 +172,30 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
         )
     dist = W1(a, b) if W1 is not None else _w1_fallback(a, b)
     return float(1.0 - dist / d_xy)
+
+
+def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
+    """Return a robust shortest path length that tolerates bad edge weights."""
+
+    def _call_shortest_path(graph: nx.Graph, weight: str | None) -> float:
+        if hasattr(graph, "shortest_path_length"):
+            return graph.shortest_path_length(x, y, weight=weight)
+        return nx.shortest_path_length(graph, x, y, weight=weight)
+
+    try:
+        return float(_call_shortest_path(G, "weight"))
+    except ValueError as exc:
+        if _log_debug_enabled():
+            _logger.debug(
+                "ricci.shortest_path: falling back to unweighted distance for edge (%s,%s)",
+                x,
+                y,
+                error=str(exc),
+            )
+        try:
+            return float(_call_shortest_path(G, None))
+        except Exception:
+            return float("inf")
 
 def mean_ricci(
     G: nx.Graph,
