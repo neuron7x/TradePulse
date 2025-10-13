@@ -11,6 +11,7 @@ from typing import Iterable
 
 import numpy as np
 from numpy.typing import NDArray
+from scipy import stats
 
 _PERIODS_PER_YEAR = 252
 _DEFAULT_ALPHA = 0.05
@@ -30,6 +31,9 @@ class PerformanceReport:
 
     sharpe_ratio: float | None = None
     sortino_ratio: float | None = None
+    probabilistic_sharpe_ratio: float | None = None
+    sharpe_p_value: float | None = None
+    certainty_equivalent: float | None = None
     cagr: float | None = None
     max_drawdown: float | None = None
     expected_shortfall: float | None = None
@@ -54,6 +58,9 @@ class PerformanceReport:
         return {
             "sharpe_ratio": self._clean(self.sharpe_ratio),
             "sortino_ratio": self._clean(self.sortino_ratio),
+            "probabilistic_sharpe_ratio": self._clean(self.probabilistic_sharpe_ratio),
+            "sharpe_p_value": self._clean(self.sharpe_p_value),
+            "certainty_equivalent": self._clean(self.certainty_equivalent),
             "cagr": self._clean(self.cagr),
             "max_drawdown": self._clean(self.max_drawdown),
             "expected_shortfall": self._clean(self.expected_shortfall),
@@ -77,6 +84,8 @@ def compute_performance_metrics(
     risk_free_rate: float = 0.0,
     alpha: float = _DEFAULT_ALPHA,
     benchmark_returns: Iterable[float] | NDArray[np.float64] | None = None,
+    psr_target: float = 0.0,
+    risk_aversion: float = 1.0,
 ) -> PerformanceReport:
     """Compute a :class:`PerformanceReport` from backtest series."""
 
@@ -99,11 +108,33 @@ def compute_performance_metrics(
     excess_rate = risk_free_rate / periods_per_year if periods_per_year > 0 else 0.0
 
     sharpe_ratio: float | None = None
+    probabilistic_sharpe_ratio: float | None = None
+    sharpe_p_value: float | None = None
     if returns.size:
         excess_returns = returns - excess_rate
-        volatility = float(np.std(excess_returns, ddof=1)) if excess_returns.size > 1 else float(np.std(excess_returns))
+        mean_excess = float(np.mean(excess_returns)) if excess_returns.size else 0.0
+        volatility = (
+            float(np.std(excess_returns, ddof=1)) if excess_returns.size > 1 else float(np.std(excess_returns))
+        )
         if volatility > 0:
-            sharpe_ratio = float(np.mean(excess_returns)) / volatility * annualisation
+            sr_periodic = mean_excess / volatility
+            sharpe_ratio = sr_periodic * annualisation
+            n_obs = excess_returns.size
+            if n_obs > 1:
+                t_stat = sr_periodic * math.sqrt(n_obs)
+                sharpe_p_value = float(2.0 * stats.t.sf(abs(t_stat), n_obs - 1))
+
+                centered = excess_returns - mean_excess
+                m2 = float(np.mean(centered**2)) if centered.size else 0.0
+                if m2 > 1e-12:
+                    m3 = float(np.mean(centered**3))
+                    m4 = float(np.mean(centered**4))
+                    skewness = m3 / (m2 ** 1.5) if m2 > 0 else 0.0
+                    kurtosis = m4 / (m2**2) if m2 > 0 else 3.0
+                    denom_term = 1.0 - skewness * sr_periodic + ((kurtosis - 1.0) / 4.0) * sr_periodic**2
+                    if denom_term > 1e-12:
+                        z_score = (sr_periodic - psr_target) * math.sqrt(n_obs - 1) / math.sqrt(denom_term)
+                        probabilistic_sharpe_ratio = float(stats.norm.cdf(z_score))
 
     sortino_ratio: float | None = None
     if returns.size:
@@ -117,6 +148,27 @@ def compute_performance_metrics(
                 sortino_ratio = float(np.mean(excess_returns)) / downside_vol * annualisation
         elif excess_returns.size:
             sortino_ratio = math.inf
+
+    certainty_equivalent: float | None = None
+    if returns.size:
+        variance = float(np.var(returns, ddof=1)) if returns.size > 1 else float(np.var(returns))
+        mean_return = float(np.mean(returns))
+        ce_periodic = mean_return - 0.5 * float(max(risk_aversion, 0.0)) * variance
+        if periods_per_year > 0:
+            base = 1.0 + ce_periodic
+            if base <= 0.0:
+                certainty_equivalent = -1.0
+            else:
+                exponent = periods_per_year * math.log(base)
+                finfo = np.finfo(float)
+                if exponent > math.log(finfo.max):
+                    certainty_equivalent = math.inf
+                elif exponent < math.log(finfo.tiny):
+                    certainty_equivalent = -1.0
+                else:
+                    certainty_equivalent = float(math.expm1(exponent))
+        else:
+            certainty_equivalent = ce_periodic
 
     cagr: float | None = None
     if equity.size and initial_capital > 0.0 and equity[-1] > 0.0 and periods_per_year > 0:
@@ -183,6 +235,9 @@ def compute_performance_metrics(
     return PerformanceReport(
         sharpe_ratio=sharpe_ratio,
         sortino_ratio=sortino_ratio,
+        probabilistic_sharpe_ratio=probabilistic_sharpe_ratio,
+        sharpe_p_value=sharpe_p_value,
+        certainty_equivalent=certainty_equivalent,
         cagr=cagr,
         max_drawdown=max_drawdown,
         expected_shortfall=expected_shortfall,
