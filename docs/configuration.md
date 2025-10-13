@@ -85,19 +85,20 @@ and CLI overrides.
 
 ### Exchange connector credentials
 
-Live trading connectors read their API secrets from dedicated environment variables that
-mirror each venue's naming. The Binance and Coinbase adapters expect the following keys:
+The live trading connectors under `execution.adapters` consume venue credentials from the
+process environment (or `.env` files) and keep REST/WebSocket sessions authenticated. Set
+the following keys before starting the live execution loop:
 
-| Venue    | Required variables                                    | Optional variables |
-|----------|--------------------------------------------------------|--------------------|
-| Binance  | `BINANCE_API_KEY`, `BINANCE_API_SECRET`                | –                  |
-| Coinbase | `COINBASE_API_KEY`, `COINBASE_API_SECRET`              | `COINBASE_API_PASSPHRASE` |
+| Venue    | Required variables                                                 | Optional variables |
+|----------|--------------------------------------------------------------------|--------------------|
+| Binance  | `BINANCE_API_KEY`, `BINANCE_API_SECRET`                            | `BINANCE_RECV_WINDOW` |
+| Coinbase | `COINBASE_API_KEY`, `COINBASE_API_SECRET`, `COINBASE_API_PASSPHRASE` | – |
 
-Set these variables directly in the process environment or define them in a `.env` file.
-For teams operating with HashiCorp Vault or a similar secrets manager, export
-`BINANCE_VAULT_PATH` / `COINBASE_VAULT_PATH` to point at the Vault mount. The execution
-layer will automatically call the registered resolver, refresh credentials after
-rotation, and propagate updates to active HTTP/WebSocket sessions.
+Place these variables directly in the environment or commit them to your secret manager
+flow (Vault, AWS Secrets Manager, etc.). `BINANCE_RECV_WINDOW` lets operators widen the
+server timestamp tolerance when venues are under load. The connectors reuse the
+credentials for HMAC signing, automatically rotate listen keys, and reconnect WebSocket
+streams after transient failures.
 
 Example `.env` snippet:
 
