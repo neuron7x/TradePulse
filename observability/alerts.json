@@ -122,6 +122,64 @@
           }
         }
       ]
+    },
+    {
+      "name": "tradepulse.platform",
+      "interval": "1m",
+      "rules": [
+        {
+          "alert": "TradePulseRequestErrorRate",
+          "expr": "sum(rate(tradepulse_request_errors_total[5m])) / sum(rate(tradepulse_http_requests_total[5m])) > 0.02",
+          "for": "10m",
+          "labels": {
+            "severity": "critical",
+            "team": "sre"
+          },
+          "annotations": {
+            "summary": "Request error rate above 2%",
+            "description": "The platform error rate exceeded 2% for 10 minutes. Investigate recent deploys and dependency health."
+          }
+        },
+        {
+          "alert": "TradePulseLatencyP99",
+          "expr": "histogram_quantile(0.99, sum(rate(tradepulse_request_duration_seconds_bucket[5m])) by (le, route)) > 1.5",
+          "for": "15m",
+          "labels": {
+            "severity": "warning",
+            "team": "sre"
+          },
+          "annotations": {
+            "summary": "Request latency p99 breaching 1.5s",
+            "description": "p99 request latency remained above 1.5 seconds for 15 minutes. Check upstream dependencies and autoscaling."
+          }
+        },
+        {
+          "alert": "TradePulseSaturationHigh",
+          "expr": "max(tradepulse_service_saturation{resource=\"cpu\"}) > 0.85",
+          "for": "10m",
+          "labels": {
+            "severity": "warning",
+            "team": "sre"
+          },
+          "annotations": {
+            "summary": "CPU saturation above 85%",
+            "description": "Critical services are above 85% CPU utilisation. Consider scaling out or throttling research workloads."
+          }
+        },
+        {
+          "alert": "TradePulseEventLoopBacklog",
+          "expr": "max(tradepulse_event_loop_backlog) > 50",
+          "for": "5m",
+          "labels": {
+            "severity": "warning",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Async task backlog detected",
+            "description": "More than 50 tasks are waiting on the event loop. Review I/O dependencies and long-running coroutines."
+          }
+        }
+      ]
     }
   ]
 }

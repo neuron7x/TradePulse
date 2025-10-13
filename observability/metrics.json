@@ -149,6 +149,41 @@
       "subsystem": "signals"
     },
     {
+      "name": "tradepulse_http_requests_total",
+      "type": "counter",
+      "description": "Total HTTP requests served by TradePulse APIs.",
+      "labels": ["route", "status_class"],
+      "subsystem": "platform"
+    },
+    {
+      "name": "tradepulse_request_duration_seconds",
+      "type": "histogram",
+      "description": "Request latency distribution for external clients.",
+      "labels": ["route"],
+      "subsystem": "platform"
+    },
+    {
+      "name": "tradepulse_request_errors_total",
+      "type": "counter",
+      "description": "HTTP request failures segmented by status class.",
+      "labels": ["route", "status_class"],
+      "subsystem": "platform"
+    },
+    {
+      "name": "tradepulse_service_saturation",
+      "type": "gauge",
+      "description": "Proportion of critical resources consumed (CPU, memory, queue depth).",
+      "labels": ["resource", "service"],
+      "subsystem": "platform"
+    },
+    {
+      "name": "tradepulse_event_loop_backlog",
+      "type": "gauge",
+      "description": "Number of queued async tasks awaiting execution.",
+      "labels": ["service"],
+      "subsystem": "platform"
+    },
+    {
       "name": "tradepulse_strategy_score",
       "type": "gauge",
       "description": "Composite score for a strategy's live performance.",

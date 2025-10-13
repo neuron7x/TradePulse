@@ -85,7 +85,7 @@ jobs:
     permissions:
       contents: write
       id-token: write
-      actions: write
+      actions: read
     outputs:
       version: ${{ steps.release.outputs.version }}
     steps:

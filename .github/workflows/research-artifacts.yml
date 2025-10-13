@@ -1,0 +1,42 @@
+name: Research HTML artifacts
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  generate:
+    name: Generate ${matrix.target} HTML report
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [backtest, train, publish]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+      - name: Generate HTML report
+        run: |
+          .venv/bin/python reports/ci_html_reports.py --target ${{ matrix.target }} --output-dir reports/ci-html
+      - name: Upload HTML artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-${{ matrix.target }}-html-report
+          path: |
+            reports/ci-html/*${{ matrix.target }}*_report.html
+          if-no-files-found: error

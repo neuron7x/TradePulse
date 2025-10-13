@@ -183,6 +183,10 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         ticks: AsyncIterator[Ticker],
         callback: Callable[[list[Ticker]], None],
         batch_size: int = 100,
+        *,
+        max_retries: int = 3,
+        retry_backoff_ms: int = 0,
+        retry_exceptions: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, OSError),
     ) -> int:
         """Process ticks in batches with async callback.
         
@@ -194,6 +198,13 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         Returns:
             Total number of ticks processed
         """
+        if batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if retry_backoff_ms < 0:
+            raise ValueError("retry_backoff_ms cannot be negative")
+
         batch: list[Ticker] = []
         total = 0
         
@@ -202,14 +213,47 @@ class AsyncDataIngestor(AsyncDataIngestionService):
             total += 1
             
             if len(batch) >= batch_size:
-                callback(batch)
+                await self._dispatch_batch(
+                    callback,
+                    batch,
+                    max_retries=max_retries,
+                    retry_backoff_ms=retry_backoff_ms,
+                    retry_exceptions=retry_exceptions,
+                )
                 batch = []
                 
         # Process remaining ticks
         if batch:
-            callback(batch)
-            
+            await self._dispatch_batch(
+                callback,
+                batch,
+                max_retries=max_retries,
+                retry_backoff_ms=retry_backoff_ms,
+                retry_exceptions=retry_exceptions,
+            )
+
         return total
+
+    async def _dispatch_batch(
+        self,
+        callback: Callable[[list[Ticker]], None],
+        batch: list[Ticker],
+        *,
+        max_retries: int,
+        retry_backoff_ms: int,
+        retry_exceptions: tuple[type[Exception], ...],
+    ) -> None:
+        attempts = 0
+        while True:
+            try:
+                callback(batch)
+                return
+            except retry_exceptions:
+                if attempts >= max_retries:
+                    raise
+                attempts += 1
+                if retry_backoff_ms > 0:
+                    await asyncio.sleep(retry_backoff_ms / 1000 * attempts)
 
 
 class AsyncWebSocketStream:

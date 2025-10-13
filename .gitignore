@@ -15,6 +15,9 @@ build/
 htmlcov/
 coverage_html/
 reports/
+!reports/ci_html_reports.py
+!tests/unit/reports/
+!tests/unit/reports/test_ci_html_reports.py
 .pytest_cache/
 .hypothesis/
 

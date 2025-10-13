@@ -67,16 +67,26 @@ class StreamMaterializer:
         microbatch_size: int = 500,
         dedup_keys: Sequence[str] = ("entity_id", "ts"),
         backfill_loader: Callable[[str], pd.DataFrame] | None = None,
+        max_retries: int = 3,
+        retry_exceptions: tuple[type[Exception], ...] = (ConnectionError, TimeoutError, OSError),
+        retry_backoff_seconds: float = 0.0,
     ) -> None:
         if microbatch_size <= 0:
             raise ValueError("microbatch_size must be positive")
         if not dedup_keys:
             raise ValueError("dedup_keys cannot be empty")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds cannot be negative")
         self._writer = writer
         self._checkpoint_store = checkpoint_store
         self._microbatch_size = microbatch_size
         self._dedup_keys = tuple(dedup_keys)
         self._backfill_loader = backfill_loader
+        self._max_retries = max_retries
+        self._retry_exceptions = retry_exceptions
+        self._retry_backoff_seconds = retry_backoff_seconds
 
     def materialize(
         self,
@@ -111,9 +121,26 @@ class StreamMaterializer:
             self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
             return
 
-        self._writer(feature_view, new_rows.reset_index(drop=True))
+        self._write_with_retry(feature_view, new_rows.reset_index(drop=True))
         history_keys.update(self._iter_key_tuples(new_rows))
         self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
+
+    def _write_with_retry(self, feature_view: str, frame: pd.DataFrame) -> None:
+        attempts = 0
+        while True:
+            try:
+                self._writer(feature_view, frame)
+                return
+            except self._retry_exceptions as exc:
+                if attempts >= self._max_retries:
+                    raise
+                attempts += 1
+                if self._retry_backoff_seconds > 0:
+                    import time
+
+                    time.sleep(self._retry_backoff_seconds * attempts)
+            except Exception:
+                raise
 
     def _filter_new_rows(
         self,
