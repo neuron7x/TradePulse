@@ -15,7 +15,7 @@ from domain import Order
 from interfaces.execution import RiskController
 
 from core.utils.metrics import get_metrics_collector
-from .connectors import ExecutionConnector, OrderError
+from .connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
 @dataclass(slots=True)
@@ -24,6 +24,8 @@ class QueuedOrder:
 
     correlation_id: str
     order: Order
+    attempts: int = 0
+    last_error: str | None = None
 
 
 @dataclass(slots=True)
@@ -32,10 +34,16 @@ class OMSConfig:
 
     state_path: Path
     auto_persist: bool = True
+    max_retries: int = 3
+    backoff_seconds: float = 0.0
 
     def __post_init__(self) -> None:
         if not isinstance(self.state_path, Path):
             object.__setattr__(self, "state_path", Path(self.state_path))
+        if self.max_retries < 1:
+            object.__setattr__(self, "max_retries", 1)
+        if self.backoff_seconds < 0.0:
+            object.__setattr__(self, "backoff_seconds", 0.0)
 
 
 class OrderManagementSystem:
@@ -55,6 +63,7 @@ class OrderManagementSystem:
         self._processed: Dict[str, str] = {}
         self._metrics = get_metrics_collector()
         self._ack_timestamps: Dict[str, datetime] = {}
+        self._pending: Dict[str, Order] = {}
         self._load_state()
 
     # ------------------------------------------------------------------
@@ -66,6 +75,8 @@ class OrderManagementSystem:
                 {
                     "correlation_id": item.correlation_id,
                     "order": self._serialize_order(item.order),
+                    "attempts": item.attempts,
+                    "last_error": item.last_error,
                 }
                 for item in self._queue
             ],
@@ -90,10 +101,16 @@ class OrderManagementSystem:
             if order.order_id
         }
         self._queue = deque(
-            QueuedOrder(item["correlation_id"], self._restore_order(item["order"]))
+            QueuedOrder(
+                item["correlation_id"],
+                self._restore_order(item["order"]),
+                int(item.get("attempts", 0)),
+                str(item.get("last_error")) if item.get("last_error") is not None else None,
+            )
             for item in payload.get("queue", [])
         )
         self._processed = {str(k): str(v) for k, v in payload.get("processed", {}).items()}
+        self._pending = {item.correlation_id: item.order for item in self._queue}
 
     # ------------------------------------------------------------------
     # Serialization helpers
@@ -138,27 +155,56 @@ class OrderManagementSystem:
         if correlation_id in self._processed:
             order_id = self._processed[correlation_id]
             return self._orders[order_id]
+        if correlation_id in self._pending:
+            return self._pending[correlation_id]
 
         reference_price = order.price if order.price is not None else max(order.average_price or 0.0, 1.0)
         self.risk.validate_order(order.symbol, order.side.value, order.quantity, reference_price)
 
         queued_order = QueuedOrder(correlation_id, order)
         self._queue.append(queued_order)
+        self._pending[correlation_id] = order
         self._persist_state()
         return order
 
     def process_next(self) -> Order:
         if not self._queue:
             raise LookupError("No orders pending")
-        item = self._queue.popleft()
-        try:
-            start = time.perf_counter()
-            submitted = self.connector.place_order(item.order)
-            ack_latency = time.perf_counter() - start
-        except OrderError as exc:
-            item.order.reject(str(exc))
-            self._persist_state()
-            return item.order
+        item = self._queue[0]
+        retryable: tuple[type[Exception], ...] = (
+            TransientOrderError,
+            TimeoutError,
+            ConnectionError,
+        )
+        max_retries = max(1, int(self.config.max_retries))
+        while True:
+            item.attempts += 1
+            try:
+                start = time.perf_counter()
+                submitted = self.connector.place_order(item.order, idempotency_key=item.correlation_id)
+                ack_latency = time.perf_counter() - start
+            except retryable as exc:
+                item.last_error = str(exc)
+                if item.attempts >= max_retries:
+                    self._queue.popleft()
+                    self._pending.pop(item.correlation_id, None)
+                    item.order.reject(str(exc))
+                    self._persist_state()
+                    return item.order
+                backoff = max(0.0, float(self.config.backoff_seconds))
+                self._persist_state()
+                if backoff:
+                    time.sleep(backoff * item.attempts)
+                continue
+            except OrderError as exc:
+                self._queue.popleft()
+                self._pending.pop(item.correlation_id, None)
+                item.order.reject(str(exc))
+                self._persist_state()
+                return item.order
+            break
+        self._queue.popleft()
+        self._pending.pop(item.correlation_id, None)
         if submitted.order_id is None:
             raise RuntimeError("Connector returned order without ID")
         self._orders[submitted.order_id] = submitted
@@ -227,6 +273,7 @@ class OrderManagementSystem:
         self._orders.clear()
         self._processed.clear()
         self._ack_timestamps.clear()
+        self._pending.clear()
         self._load_state()
 
     def outstanding(self) -> Iterable[Order]:

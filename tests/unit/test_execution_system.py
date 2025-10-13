@@ -184,7 +184,7 @@ def test_vwap_algorithm_backfills_rounding_residuals() -> None:
 
 def test_oms_rejection_and_empty_queue_behaviour(tmp_path, risk_manager: RiskManager) -> None:
     class FailingConnector(BinanceConnector):
-        def place_order(self, order: Order) -> Order:
+        def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:
             raise OrderError("venue unavailable")
 
     state_path = tmp_path / "reject_state.json"
@@ -220,4 +220,53 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
 
     oms.reload()
     assert any(o.order_id == placed.order_id for o in oms.outstanding())
+
+
+def test_oms_retries_transient_failures(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "retry_state.json"
+    config = OMSConfig(state_path=state_path, max_retries=3)
+    connector = BinanceConnector(failure_plan=["network"])
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.5, price=20_100, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="retry-1")
+    placed = oms.process_next()
+
+    assert placed.order_id is not None
+    assert placed.filled_quantity == pytest.approx(0.0)
+
+    duplicate = connector.place_order(
+        Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.5, price=20_100, order_type=OrderType.LIMIT),
+        idempotency_key="retry-1",
+    )
+    assert duplicate is placed
+
+
+def test_oms_rejects_after_exhausting_retries(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "retry_fail_state.json"
+    config = OMSConfig(state_path=state_path, max_retries=2)
+    connector = BinanceConnector(failure_plan=["429", "timeout", "network"])
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.5, price=20_500, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="retry-fail")
+    rejected = oms.process_next()
+
+    assert rejected.status.name == "REJECTED"
+    assert "rate limited" in (rejected.rejection_reason or "") or "timeout" in (rejected.rejection_reason or "")
+    assert not oms._queue
+
+
+def test_oms_submit_is_idempotent_for_pending_orders(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "pending_state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=19_900, order_type=OrderType.LIMIT)
+    first = oms.submit(order, correlation_id="dup-1")
+    second = oms.submit(order, correlation_id="dup-1")
+
+    assert first is second
+    assert len(oms._queue) == 1
 
