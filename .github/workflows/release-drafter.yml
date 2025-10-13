@@ -30,7 +30,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          config_path=".github/release-drafter.yml"
+          config_dir=".github"
+          config_name="release-drafter.yml"
+          config_path="$config_dir/$config_name"
           action_dir=".github/actions/release-drafter-retry"
           if [[ ! -f "$config_path" ]]; then
             echo "::error::Release Drafter configuration '$config_path' was not found." >&2
@@ -40,15 +42,15 @@ jobs:
             echo "::error::Local action definition was not found in '$action_dir'." >&2
             exit 1
           fi
-          echo "config-path=$config_path" >> "$GITHUB_OUTPUT"
+          echo "config-name=$config_name" >> "$GITHUB_OUTPUT"
           echo "action-dir=$action_dir" >> "$GITHUB_OUTPUT"
-          echo "Using config file at '$config_path' with action located in '$action_dir'."
+          echo "Using config file '$config_name' in '$config_dir' with action located in '$action_dir'."
 
       - name: Update draft release notes
         uses: ./.github/actions/release-drafter-retry
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          config-name: ${{ steps.validate.outputs.config-path }}
+          config-name: ${{ steps.validate.outputs.config-name }}
 
       - name: Summarize Release Drafter run
         if: always()
