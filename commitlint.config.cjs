@@ -1,5 +1,6 @@
 const LEGACY_MESSAGES = new Set([
   'Add numeric accelerator backends and benchmarks',
+  'Add CLI aliases and auto-generated docs',
 ]);
 
 /** @type {import('@commitlint/types').UserConfig} */
