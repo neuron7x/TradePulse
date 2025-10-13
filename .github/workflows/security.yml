@@ -166,7 +166,7 @@ jobs:
     - name: Run Grype scan (fail on critical CVEs)
       id: grype-scan
       continue-on-error: true
-      uses: anchore/scan-action@v3
+      uses: anchore/scan-action@v7
       with:
         image: tradepulse:ci-scan
         fail-build: true
