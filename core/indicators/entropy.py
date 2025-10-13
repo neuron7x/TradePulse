@@ -21,7 +21,9 @@ from __future__ import annotations
 
 import asyncio
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+from contextlib import nullcontext
 from typing import Any, Literal, Sequence
+import logging
 
 import numpy as np
 
@@ -31,6 +33,12 @@ from ..utils.metrics import get_metrics_collector
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
+
+
+def _log_debug_enabled() -> bool:
+    base_logger = getattr(_logger, "logger", None)
+    check = getattr(base_logger, "isEnabledFor", None)
+    return bool(check and check(logging.DEBUG))
 
 _GPU_MIN_SIZE_BYTES = 512 * 1024
 _GPU_MEMORY_MARGIN = 1.4
@@ -128,15 +136,20 @@ def entropy(
         - Returns 0.0 if no valid data remains after filtering
         - Chunked processing computes weighted average entropy across chunks
     """
-    with _logger.operation(
-        "entropy",
-        bins=bins,
-        use_float32=use_float32,
-        chunk_size=chunk_size,
-        data_size=len(series),
-        parallel=parallel,
-        backend=backend,
-    ):
+    context_manager = (
+        _logger.operation(
+            "entropy",
+            bins=bins,
+            use_float32=use_float32,
+            chunk_size=chunk_size,
+            data_size=len(series),
+            parallel=parallel,
+            backend=backend,
+        )
+        if _log_debug_enabled()
+        else nullcontext()
+    )
+    with context_manager:
         global _LAST_ENTROPY_BACKEND
 
         dtype = np.float32 if use_float32 else float

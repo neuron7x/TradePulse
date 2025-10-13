@@ -17,6 +17,8 @@ References:
 """
 from __future__ import annotations
 
+import logging
+from contextlib import nullcontext
 from typing import Any
 
 import numpy as np
@@ -28,8 +30,24 @@ from ..utils.metrics import get_metrics_collector
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
 
+_DEFAULT_MIN_LAG = 2
+_DEFAULT_MAX_LAG = 50
+_DEFAULT_LAGS = np.arange(_DEFAULT_MIN_LAG, _DEFAULT_MAX_LAG + 1, dtype=int)
+_DEFAULT_DESIGN = np.vstack(
+    [np.ones_like(_DEFAULT_LAGS, dtype=float), np.log(_DEFAULT_LAGS)]
+).T
+_DEFAULT_PSEUDO = np.linalg.pinv(_DEFAULT_DESIGN)
 
-def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50, *, use_float32: bool = False) -> float:
+
+def hurst_exponent(
+    ts: np.ndarray,
+    min_lag: int = 2,
+    max_lag: int = 50,
+    *,
+    use_float32: bool = False,
+    scratch: np.ndarray | None = None,
+    tau_buffer: np.ndarray | None = None,
+) -> float:
     """Estimate Hurst exponent using rescaled range (R/S) analysis.
     
     The Hurst exponent characterizes the long-term statistical dependencies
@@ -73,22 +91,61 @@ def hurst_exponent(ts: np.ndarray, min_lag: int = 2, max_lag: int = 50, *, use_f
         - More data generally provides more reliable estimates
         - float32 mode reduces memory footprint for large datasets
     """
-    with _logger.operation("hurst_exponent", min_lag=min_lag, max_lag=max_lag, 
-                          use_float32=use_float32, data_size=len(ts)):
+    base_logger = getattr(_logger, "logger", None)
+    check = getattr(base_logger, "isEnabledFor", None)
+    context_manager = (
+        _logger.operation(
+            "hurst_exponent",
+            min_lag=min_lag,
+            max_lag=max_lag,
+            use_float32=use_float32,
+            data_size=len(ts),
+        )
+        if check and check(logging.DEBUG)
+        else nullcontext()
+    )
+    with context_manager:
         dtype = np.float32 if use_float32 else float
         x = np.asarray(ts, dtype=dtype)
         if x.size < max_lag * 2:
             return 0.5
         
-        # Calculate standard deviation of differences for each lag
-        lags = np.arange(min_lag, max_lag + 1)
-        tau = [np.std(np.subtract(x[lag:], x[:-lag])) for lag in lags]
-        
+        if min_lag == _DEFAULT_MIN_LAG and max_lag == _DEFAULT_MAX_LAG:
+            lags = _DEFAULT_LAGS
+            pseudo = _DEFAULT_PSEUDO
+        else:
+            lags = np.arange(min_lag, max_lag + 1)
+            design = np.vstack(
+                [np.ones_like(lags, dtype=float), np.log(lags)]
+            ).T
+            pseudo = np.linalg.pinv(design)
+
+        tau = tau_buffer
+        if tau is None or tau.shape[0] != len(lags):
+            tau = np.empty(len(lags), dtype=float)
+        buffer = scratch
+        if buffer is None or buffer.shape[0] < x.size:
+            buffer = np.empty_like(x, dtype=float)
+        for idx, lag in enumerate(lags):
+            np.subtract(x[lag:], x[:-lag], out=buffer[: x.size - lag])
+            segment = buffer[: x.size - lag]
+            count = float(segment.size)
+            if count == 0:
+                tau[idx] = 0.0
+                continue
+            sum_vals = float(segment.sum(dtype=float))
+            sum_sq = float(np.dot(segment, segment))
+            mean = sum_vals / count
+            var = sum_sq / count - mean * mean
+            tau[idx] = float(np.sqrt(var if var > 0.0 else 0.0))
+
         # Perform log-log linear regression
-        # log(tau) = log(c) + H * log(lag)
         y = np.log(tau)
-        X = np.vstack([np.ones_like(lags, dtype=dtype), np.log(lags)]).T
-        beta = np.linalg.lstsq(X, y, rcond=None)[0]
+        if min_lag == _DEFAULT_MIN_LAG and max_lag == _DEFAULT_MAX_LAG:
+            beta = pseudo @ y
+        else:
+            X = np.vstack([np.ones_like(lags, dtype=float), np.log(lags)]).T
+            beta = np.linalg.lstsq(X, y, rcond=None)[0]
         H = beta[1]  # Slope is Hurst exponent
         
         return float(np.clip(H, 0.0, 1.0))
