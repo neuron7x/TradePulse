@@ -2,7 +2,9 @@
 
 The roadmap translates the long-term improvement plan into a time-phased delivery schedule. It highlights the initiatives
 required to keep TradePulse production-grade while enabling sustainable growth. Progress should be reviewed monthly and the
-roadmap updated after every major milestone.
+roadmap updated after every major milestone. For a gap analysis of what is still missing for live trading, consult the
+[Production Readiness Assessment](production-readiness.md) and keep the deliverables in that checklist aligned with the
+quarterly milestones captured here.
 
 ## 2024 Outlook
 

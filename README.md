@@ -46,6 +46,8 @@ TradePulse delivers end-to-end tooling for quantitative research teams:
 
 Whether you are prototyping strategies or orchestrating production trading bots, TradePulse provides production-ready scaffolding that remains flexible for experimentation.
 
+> **Production status:** TradePulse is suitable for research, experimentation, and GitHub releases, but it is **not** ready for production live trading yet. Review the [Production Readiness Assessment](docs/production-readiness.md) for the outstanding work on live execution, exchange integrations, real-market testing, risk controls, documentation, and dashboards before considering deployment.
+
 ---
 
 ## ✅ Continuous Integration & Quality
