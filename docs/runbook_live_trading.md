@@ -1,116 +1,84 @@
-# Runbook: Live Trading Operations
+# Live Trading Runbook
 
-This runbook provides step-by-step guidance for launching, monitoring, and safely
-halting live trading sessions in TradePulse. It is structured as a checklist to
-minimise ambiguity during critical operations.
+This runbook documents the operator procedures for starting, monitoring, and
+safely shutting down the live execution loop. It assumes the
+`LiveExecutionLoop` orchestrator introduced under `execution/live_loop.py`.
 
-## 1. Preconditions and Environment Checks
+## Cold Start Procedure
 
-1. **Change approvals** – Confirm the deployment ticket is approved and the
-   signed strategy manifest is present in `reports/change_manifest/`.
-2. **Health gate** – Verify the latest CI build is green, including heavy-math
-   gates and cross-architecture indicator comparisons (see [Testing Guide](../TESTING.md)).
-3. **Market readiness** – Inspect the market calendar for the target venues. If a
-   holiday or trading halt is active, postpone activation and communicate via
-   `#trading-ops`.
-4. **Risk envelope** – Ensure guardrails in `configs/risk/limits.yaml` reflect
-   the approved exposure (per-instrument notional, leverage caps, kill thresholds).
-5. **Control tower sign-off** – Confirm every item in
-   [`docs/operational_readiness_runbooks.md`](operational_readiness_runbooks.md#1-pre-launch-control-checklist)
-   is checked with evidence attached to the deployment ticket.
+A cold start should be used when bootstrapping a new trading session or after
+performing maintenance that invalidates local execution state.
 
-## 2. Launch Procedure
+1. **Review change windows** – confirm the trading window is clear of market
+   events that would violate the desk's risk appetite.
+2. **Prepare credentials** – export venue API keys and network allow-list
+   entries in the runtime environment.
+3. **Bootstrap services** – ensure data ingestion, strategy runners, and risk
+   services are healthy before enabling execution.
+4. **Invoke the loop** – instantiate `LiveExecutionLoop` and call
+   `start(cold_start=True)`. The loop performs the following steps:
+   - Connects to every configured execution connector with exponential
+     backoff.
+   - Purges persisted OMS state and resets the risk kill-switch.
+   - Spins up background workers for order submission, fill polling, and
+     heartbeat monitoring.
+5. **Verify readiness** – tail structured logs for `event="cold_start"` and
+   confirm metrics such as `tradepulse_open_positions` report zeroed state.
+6. **Enable strategies** – once the loop is live, release strategy signals into
+   the queue.
 
-| Step | Action | Owner | Telemetry |
-| ---- | ------ | ----- | --------- |
-| 1 | Lock the deployment in the orchestrator to prevent concurrent edits. | Execution Trader | `orchestrator.lock` audit log |
-| 2 | Run `tradepulse-cli deploy --env prod --strategy <id>` with the approved
-    artifact digest. | Execution Trader | CLI output archived in `reports/live/<date>/deploy.log` |
-| 3 | Validate strategy parameters against the governance service. Two-factor
-    confirmation is required for the final promote step. | Execution Trader + Risk Officer | `governance.strategy_changes` topic |
-| 4 | Trigger smoke validation: replay last 15 minutes of market data in
-    dry-run mode to ensure orders remain within tolerance bands. | Quant On Call | `reports/live/<date>/smoke.json` |
-| 5 | Flip the `live.enabled` feature flag through the control plane UI. | Execution Trader | Feature flag audit trail |
+## Warm Start / Restart Procedure
 
-**Go/No-Go Criteria**
+Warm starts are used during controlled restarts where existing orders must be
+reconciled.
 
-- Telemetry dashboards (`observability/dashboards/tradepulse-overview.json`) show healthy order
-  acknowledgements and no queue backlog.
-- Risk service confirms effective limits and kill-switch wiring via `risk/live/status`.
-- Governance topic contains a signed change event with matching digest.
+1. **Quiesce strategies** – pause new order generation to avoid duplicate
+   submissions.
+2. **Restart the loop** – call `start(cold_start=False)` on a new
+   `LiveExecutionLoop` instance.
+3. **State hydration** – the loop reloads OMS state from disk, fetches
+   `open_orders()` from each connector, adopts venue orders that are missing
+   locally, and re-enqueues orphaned OMS orders for resubmission.
+4. **Position snapshot** – monitor emitted position callbacks/logs to confirm
+   exposure matches desk records.
+5. **Resume strategies** – after reconciliation logs
+   `event="warm_start"`, re-enable signal generation.
 
-## 3. Routine Monitoring
+## Monitoring & Alerting
 
-1. **Heartbeat checks** – Streaming ingestion, feature store, execution gateways,
-   and order acknowledgements must report within SLA (1 minute for market data,
-   2 seconds for execution).
-2. **Latency guardrails** – Order round-trip latency must remain below 120 ms.
-   Breaches trigger automated throttling and Slack alerts.
-3. **Position drift** – Compare live positions against portfolio targets every
-   minute. Differences >0.5% notional require manual review.
-4. **Risk telemetry** – Ensure kill-switch subscriptions are active and risk
-   service heartbeat is green. Missing heartbeats for 3 cycles mandate
-   pre-emptive trading halt.
+- **Heartbeats** – heartbeat workers call `get_positions()` on each connector
+  and emit structured logs with `event="heartbeat"`. Alert if no heartbeat is
+  observed within two heartbeat intervals.
+- **Reconnection events** – reconnection callbacks signal when the loop had to
+  recover connectivity. Persistent reconnections should page engineering.
+- **Kill-switch triggers** – any critical failure or risk violation triggers
+  the kill-switch and emits `event="kill_switch"`. Operators must investigate
+  the root cause and reset the kill-switch only after remediation.
+- **Metrics** – scrape Prometheus metrics (if enabled) for order latency,
+  queue depth, and open positions to ensure they remain within operational
+  thresholds.
 
-## 4. Planned Stop Procedure
+## Shutdown Procedure
 
-1. Announce planned halt in `#trading-ops` and update the trading calendar.
-2. Flip `live.enabled` feature flag to `false`. Capture the resulting audit event.
-3. Wait for open orders to settle (monitor until `open_orders` metric is zero).
-4. Run `tradepulse-cli settle --strategy <id>` to flush residual state.
-5. Archive run artefacts: order logs, PnL snapshots, risk metrics.
-6. Record stop confirmation in the governance ledger referencing ticket ID.
+1. **Cease order intake** – instruct strategies to stop enqueuing orders.
+2. **Drain queue** – allow the order submission worker to finish outstanding
+   placements or cancel as necessary.
+3. **Call `shutdown()`** – the loop stops workers, disconnects connectors, and
+   logs `event="loop_shutdown"`.
+4. **Post-mortem** – archive logs and metrics for audit, especially if the
+   kill-switch was triggered.
 
-## 5. Emergency Scenarios
+## Incident Response
 
-### 5.1 Kill-Switch Activation
+- **Connector outage** – the loop automatically retries connections with
+  exponential backoff. If the outage persists beyond desk tolerance, trigger
+  the kill-switch and hedge positions manually.
+- **Data inconsistencies** – if position snapshots diverge from ledger
+  records, halt trading via the kill-switch, reconcile with the venue, and
+  warm-start once the discrepancy is resolved.
+- **Unexpected fills** – the fill polling worker records partial fills. If
+  fills cannot be matched to OMS orders, escalate to engineering and risk for
+  investigation before resuming trading.
 
-1. Trigger kill-switch via the hardware console or
-   `tradepulse-cli kill --strategy <id> --reason <text>`.
-2. Confirm the kill event appears in `observability/audit/kill_events.jsonl` with
-   dual signatures (initiator + confirmer).
-3. Notify `#trading-ops`, `#risk`, and the on-call engineer. Include expected
-   recovery timeline.
-4. Freeze further deployments until post-mortem sign-off.
-
-### 5.2 Market Data Outage
-
-1. Switch strategies into safe mode (halt new orders, cancel resting ones).
-2. Engage the data incident runbook (see [Data Incident Runbook](runbook_data_incident.md)).
-3. Maintain manual oversight of risk exposures until feeds stabilise.
-
-### 5.3 Execution Venue Instability
-
-1. Throttle order rate using execution control plane (set `max_orders_per_sec`
-   to mitigation value).
-2. Contact venue support and log ticket ID in `reports/live/<date>/venue_incidents.md`.
-3. If instability persists >5 minutes or threatens risk posture, execute
-   kill-switch procedure.
-
-## 6. Communication Matrix
-
-| Trigger | Audience | Channel | Template |
-| ------- | -------- | ------- | -------- |
-| Launch start | Trading Ops, Risk, Quant On Call | `#trading-ops` | `Runbook: Launching <strategy>` |
-| Kill-switch activation | Executive, Compliance, Trading Ops | PagerDuty bridge + `#incidents` | `Kill-switch triggered for <strategy> due to <reason>` |
-| Planned halt | Trading Ops, Risk | `#trading-ops` | `Runbook: Stopping <strategy>` |
-| Recovery complete | Trading Ops, Risk, Compliance | `#trading-ops` + email | `Strategy <id> restored at <time>, metrics nominal` |
-
-## 7. Post-Run Activities
-
-1. Submit annotated summary to `reports/live/<date>/summary.md`.
-2. Update telemetry dashboards with any threshold adjustments.
-3. File retrospective issues for automation gaps or manual toil.
-4. Review audit logs ensuring all 2FA confirmations and signatures are present.
-
-## 8. Checklist Summary
-
-- [ ] Approvals verified and manifests signed
-- [ ] CI, heavy-math, and cross-architecture tests green
-- [ ] Launch smoke tests completed and archived
-- [ ] Communications executed per matrix
-- [ ] Audit artefacts stored and linked to ticket
-- [ ] Post-run review completed
-
-Keeping this runbook current is mandatory; review quarterly and after every
-live-trading exercise.
+Maintaining this runbook ensures that live trading operations remain safe,
+repeatable, and auditable.

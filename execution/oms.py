@@ -222,6 +222,14 @@ class OrderManagementSystem:
 
     # ------------------------------------------------------------------
     # Lifecycle helpers
+    def purge_state(self) -> None:
+        """Remove persisted state and reset in-memory caches."""
+
+        path = self.config.state_path
+        if path.exists():
+            path.unlink()
+        self.reload()
+
     def cancel(self, order_id: str) -> bool:
         if order_id not in self._orders:
             return False
@@ -275,6 +283,37 @@ class OrderManagementSystem:
         self._ack_timestamps.clear()
         self._pending.clear()
         self._load_state()
+
+    def adopt_order(self, order: Order) -> None:
+        """Adopt an externally recovered order into local state."""
+
+        if not order.order_id:
+            raise ValueError("order must have an order_id to be adopted")
+        self._orders[order.order_id] = order
+        self._persist_state()
+
+    def enqueue_for_resubmission(self, order: Order, *, correlation_id: str) -> None:
+        """Queue an order for resubmission after reconciliation."""
+
+        if not correlation_id:
+            raise ValueError("correlation_id must be provided")
+        reference_price = order.price if order.price is not None else max(order.average_price or 0.0, 1.0)
+        self.risk.validate_order(order.symbol, order.side.value, order.quantity, reference_price)
+        queued_order = QueuedOrder(correlation_id, order)
+        self._queue.appendleft(queued_order)
+        self._pending[correlation_id] = order
+        self._processed.pop(correlation_id, None)
+        self._persist_state()
+
+    def pending_order_ids(self) -> Iterable[str]:
+        """Return identifiers for orders currently queued for submission."""
+
+        return [item.order.order_id for item in self._queue if item.order.order_id]
+
+    def pending_correlation_ids(self) -> Iterable[str]:
+        """Expose correlation identifiers for queued orders (for reconciliation)."""
+
+        return [item.correlation_id for item in self._queue]
 
     def outstanding(self) -> Iterable[Order]:
         return list(self._orders.values())

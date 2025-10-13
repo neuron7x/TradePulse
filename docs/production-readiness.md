@@ -12,7 +12,7 @@ TradePulse is feature-rich for research and backtesting workflows, but several c
 
 1. **Live Trading Execution**
    - Implement a resilient live execution loop that manages order lifecycle events, reconnections, and state recovery.
-   - Provide warm/cold start procedures and operational runbooks for the execution engine.
+   - Provide warm/cold start procedures and operational runbooks for the execution engine (see [`docs/runbook_live_trading.md`](runbook_live_trading.md)).
 
 2. **Exchange Integrations**
    - Deliver real exchange adapters under `interfaces/` (REST and WebSocket) with API key management, authentication retries, and rate-limit handling.

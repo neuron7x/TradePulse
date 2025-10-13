@@ -4,6 +4,7 @@ from .canary import CanaryConfig, CanaryController, CanaryDecision, MetricThresh
 from .connectors import ExecutionConnector, OrderError
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
+from .live_loop import LiveExecutionLoop, LiveLoopConfig
 from .oms import OMSConfig, OrderManagementSystem
 from .risk import IdempotentRetryExecutor, KillSwitch, LimitViolation, OrderRateExceeded, RiskLimits, RiskManager
 
@@ -22,6 +23,8 @@ __all__ = [
     "ComplianceViolation",
     "OMSConfig",
     "OrderManagementSystem",
+    "LiveExecutionLoop",
+    "LiveLoopConfig",
     "RiskLimits",
     "RiskManager",
     "KillSwitch",
