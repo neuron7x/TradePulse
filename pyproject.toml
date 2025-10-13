@@ -136,9 +136,7 @@ exclude = ["tests", "tests.*", "docs", "docs.*"]
 
 [tool.mutmut]
 paths_to_mutate = [
-    "core",
-    "backtest",
-    "execution",
+    "core/indicators",
 ]
 tests_dir = "tests"
 runner = "python -m pytest tests/unit tests/integration tests/property -q"

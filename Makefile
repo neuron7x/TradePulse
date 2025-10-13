@@ -51,7 +51,8 @@ scripts-dev-down:
 
 .PHONY: mutation-test
 mutation-test:
-	mutmut run --use-coverage
+	python -m coverage run -m pytest tests/unit tests/integration tests/property -q
+	mutmut run
 	mutmut results
 
 .PHONY: security-audit

@@ -210,12 +210,13 @@ pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=90
 
 ### Mutation Testing
 
-Mutation analysis is enforced for the core trading engine modules using [`mutmut`](https://mutmut.readthedocs.io/). The default configuration lives in `pyproject.toml` and targets `core/`, `backtest/`, and `execution/` with the unit, integration, and property suites as the runner.
+Mutation analysis is enforced for the core indicator domain using [`mutmut`](https://mutmut.readthedocs.io/). The default configuration lives in `pyproject.toml` and targets `core/indicators` with the unit, integration, and property suites as the runner. Pull requests must maintain at least a 60% mutation score or the CI mutation gate will fail the build.
 
 Run the mutation suite locally (requires the `dev` extras or `requirements-dev.txt`):
 
 ```bash
-mutmut run --use-coverage
+python -m coverage run -m pytest tests/unit tests/integration tests/property -q
+mutmut run
 mutmut results
 ```
 

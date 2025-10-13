@@ -109,3 +109,45 @@ jobs:
           name: pytest-profiling
           path: reports/profiling
           if-no-files-found: warn
+
+  mutation-gate:
+    name: Mutation coverage gate (core indicators)
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.lock
+          uv pip install -r requirements-dev.lock
+      - name: Prepare mutation artifacts directory
+        run: mkdir -p reports/mutmut
+      - name: Prime coverage data for mutmut
+        run: |
+          .venv/bin/python -m coverage run -m pytest tests/unit tests/integration tests/property -q
+      - name: Run mutation analysis (core indicators)
+        run: |
+          .venv/bin/python -m mutmut run --no-progress
+          .venv/bin/python -m mutmut results | tee reports/mutmut/results.txt
+      - name: Enforce mutation score threshold
+        run: |
+          .venv/bin/python tools/ci/check_mutation_threshold.py \
+            --threshold 60 \
+            --summary-json reports/mutmut/summary.json
+      - name: Upload mutation artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-gate-results
+          path: |
+            reports/mutmut
+            mutants
+          if-no-files-found: warn
