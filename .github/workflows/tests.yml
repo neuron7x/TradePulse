@@ -44,6 +44,7 @@ jobs:
             --html=reports/unit-integration-report.html --self-contained-html \
             --flaky-report=reports/flaky-tests-skipped.json
       - name: Publish coverage summary
+        id: coverage_summary
         run: |
           python - <<'PY'
           import os
@@ -73,6 +74,12 @@ jobs:
               with open(step_summary, "a", encoding="utf-8") as handle:
                   handle.write("\n".join(summary_lines))
 
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as handle:
+                  handle.write(f"line_rate={line_rate:.2f}\n")
+                  handle.write(f"branch_rate={branch_rate:.2f}\n")
+
           if branch_rate < 90.0:
               raise SystemExit(f"Branch coverage {branch_rate:.2f}% is below the required 90% threshold")
           PY
@@ -81,6 +88,43 @@ jobs:
           .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
             --junitxml=reports/property-tests.xml \
             --html=reports/property-tests-report.html --self-contained-html
+      - name: Summarize pytest results
+        if: always()
+        id: test_summary
+        uses: test-summary/action@v2
+        with:
+          paths: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+          show: "fail, skip, pass"
+      - name: Find existing test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        id: find_test_comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Test & Coverage Summary'
+      - name: Post test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_test_comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ### Test & Coverage Summary (Python ${{ matrix.python-version }})
+
+            | Metric | Value |
+            | --- | --- |
+            | Total tests | ${{ steps.test_summary.outputs.total }} |
+            | Passed | ${{ steps.test_summary.outputs.passed }} |
+            | Failed | ${{ steps.test_summary.outputs.failed }} |
+            | Skipped | ${{ steps.test_summary.outputs.skipped }} |
+            | Line coverage | ${{ steps.coverage_summary.outputs.line_rate || 'n/a' }}% |
+            | Branch coverage | ${{ steps.coverage_summary.outputs.branch_rate || 'n/a' }}% |
+
+            _Updated automatically for the latest workflow run._
       - name: Upload JUnit test reports
         uses: actions/upload-artifact@v4
         with:
