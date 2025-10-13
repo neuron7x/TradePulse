@@ -46,6 +46,15 @@ def test_cli_generates_templates(tmp_path: Path) -> None:
         assert destination.exists()
 
 
+def test_cli_aliases_generate_templates(tmp_path: Path) -> None:
+    runner = CliRunner()
+    for alias in ("materialize", "train", "serve"):
+        destination = tmp_path / f"{alias}.yaml"
+        result = runner.invoke(cli, [alias, "--generate-config", "--template-output", str(destination)])
+        assert result.exit_code == 0, result.output
+        assert destination.exists()
+
+
 def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     manager = ConfigTemplateManager(Path("configs/templates"))
 

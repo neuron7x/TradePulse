@@ -680,3 +680,21 @@ def report(
         version_mgr.snapshot(cfg.output_path, metadata={"sections": len(cfg.inputs)})
     _emit_report_output(cfg, report_text, output_format, command=command)
     click.echo(f"[{command}] completed sections={len(cfg.inputs)} sha256={digest}")
+
+
+# ---------------------------------------------------------------------------
+# Developer-friendly aliases
+# ---------------------------------------------------------------------------
+
+#
+# The CLI historically exposed commands named ``optimize`` and ``exec`` for the
+# parameter search and signal serving workflows respectively. The wider
+# TradePulse documentation, however, now standardises on the verbs ``train`` and
+# ``serve``. To keep backward compatibility while matching the new terminology
+# we register lightweight aliases that forward to the original commands. A
+# ``materialize`` alias is also provided for teams that prefer that verb for the
+# ingestion workflow.
+#
+cli.add_command(ingest, name="materialize")
+cli.add_command(optimize, name="train")
+cli.add_command(exec, name="serve")
