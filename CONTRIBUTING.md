@@ -172,7 +172,7 @@ bandit -r core/ backtest/ execution/
 
 # Run all checks
 make fpma-check  # Cyclomatic complexity
-scripts/lint.sh  # Full lint suite
+python -m scripts lint  # Full lint suite
 ```
 
 ### 6. Create Pull Request
@@ -488,7 +488,7 @@ docker compose down -v
 go install github.com/bufbuild/buf/cmd/buf@latest
 
 # Generate code
-scripts/gen-proto.sh
+python -m scripts gen-proto
 
 # Or manually
 buf lint

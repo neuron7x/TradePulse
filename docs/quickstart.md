@@ -383,8 +383,8 @@ pip install -r requirements-dev.lock
 
 On Linux/macOS:
 ```bash
-# Fix permissions
-chmod +x scripts/*.sh
+# Inspect available helper commands
+python -m scripts --help
 ```
 
 ### Need More Help?
