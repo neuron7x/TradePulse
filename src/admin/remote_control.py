@@ -5,7 +5,7 @@ from __future__ import annotations
 import hmac
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.audit.audit_logger import AuditLogger
 from src.risk.risk_manager import KillSwitchState, RiskManagerFacade
@@ -31,6 +31,14 @@ class KillSwitchRequest(BaseModel):
     """Request payload for activating the kill-switch."""
 
     reason: str = Field(..., min_length=3, max_length=256, description="Human readable reason.")
+
+    @field_validator("reason")
+    @classmethod
+    def _trim_and_validate_reason(cls, value: str) -> str:
+        stripped = value.strip()
+        if len(stripped) < 3:
+            raise ValueError("reason must be at least 3 characters long")
+        return stripped
 
 
 class KillSwitchResponse(BaseModel):

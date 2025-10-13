@@ -67,6 +67,18 @@ def test_kill_switch_requires_valid_token(remote_control_fixture: RemoteControlB
     assert records == []
 
 
+def test_kill_switch_rejects_whitespace_reason(remote_control_fixture: RemoteControlBundle) -> None:
+    client, risk_manager, records, _ = remote_control_fixture
+    response = client.post(
+        "/admin/kill-switch",
+        headers={"X-Admin-Token": "s3cr3t-token"},
+        json={"reason": "   \t\n"},
+    )
+    assert response.status_code == 422
+    assert not risk_manager.kill_switch.is_triggered()
+    assert records == []
+
+
 def test_kill_switch_reaffirmation_is_audited(remote_control_fixture: RemoteControlBundle) -> None:
     client, _, records, _ = remote_control_fixture
     headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "auditor"}
