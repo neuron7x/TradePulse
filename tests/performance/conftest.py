@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 import pytest
 
@@ -67,23 +67,34 @@ def benchmark_baselines() -> dict[str, float]:
     return _load_baselines()
 
 
+if TYPE_CHECKING:  # pragma: no cover - typing aid only
+    from pytest_benchmark.fixture import BenchmarkFixture
+
+
 @pytest.fixture
 def benchmark_guard(
     request: pytest.FixtureRequest,
-    benchmark: Any,
     benchmark_baselines: dict[str, float],
 ) -> Callable[..., Any]:
     """Wrap :func:`pytest_benchmark` to enforce regression budgets.
+
+    The fixture attempts to retrieve the :mod:`pytest-benchmark` integration at
+    runtime and will mark the requesting test as skipped when the plugin is not
+    installed. This avoids hard errors in developer environments that do not
+    have benchmarking dependencies available by default.
 
     Parameters
     ----------
     request:
         Current pytest request object (used to report test id).
-    benchmark:
-        Fixture provided by :mod:`pytest-benchmark`.
     benchmark_baselines:
         Mapping of benchmark keys to baseline mean runtimes in seconds.
     """
+
+    try:
+        benchmark: "BenchmarkFixture" = request.getfixturevalue("benchmark")
+    except pytest.FixtureLookupError:
+        pytest.skip("pytest-benchmark plugin is required for performance tests")
 
     def _runner(
         func: Callable[..., Any],
