@@ -1,5 +1,9 @@
 name: Tests
 
+permissions:
+  contents: read
+  pull-requests: write
+
 on:
   push:
     branches: [ main ]
@@ -98,7 +102,7 @@ jobs:
             reports/property-tests.xml
           show: "fail, skip, pass"
       - name: Find existing test summary comment
-        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
         id: find_test_comment
         uses: peter-evans/find-comment@v3
         with:
@@ -106,7 +110,7 @@ jobs:
           comment-author: 'github-actions[bot]'
           body-includes: '### Test & Coverage Summary'
       - name: Post test summary comment
-        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
