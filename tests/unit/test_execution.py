@@ -85,6 +85,26 @@ def test_risk_manager_rate_limiter_blocks_excess_orders() -> None:
     manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
 
 
+def test_risk_manager_validates_order_side() -> None:
+    manager = RiskManager(RiskLimits(max_notional=100.0, max_position=10.0))
+
+    with pytest.raises(ValueError):
+        manager.validate_order("BTC", "hold", qty=1.0, price=10.0)
+
+    manager.validate_order("BTC", "BUY", qty=1.0, price=10.0)
+
+
+def test_register_fill_validates_and_normalises_side() -> None:
+    manager = RiskManager(RiskLimits(max_notional=100.0, max_position=10.0))
+
+    manager.register_fill("BTC", "BUY", qty=2.0, price=10.0)
+    manager.register_fill("BTC", "sell", qty=2.0, price=10.0)
+    assert manager.current_position("BTC") == pytest.approx(0.0)
+
+    with pytest.raises(ValueError):
+        manager.register_fill("BTC", "invalid", qty=1.0, price=10.0)
+
+
 def test_kill_switch_blocks_all_orders() -> None:
     manager = RiskManager(RiskLimits(max_notional=100.0, max_position=10.0))
     manager.kill_switch.trigger("test")
@@ -135,6 +155,19 @@ def test_risk_manager_trips_kill_switch_after_repeated_throttling(tmp_path) -> N
 
     assert manager.kill_switch.is_triggered()
     assert "Order throttle exceeded" in manager.kill_switch.reason
+
+
+def test_risk_manager_logs_normalised_side(tmp_path) -> None:
+    clock = _TimeStub()
+    audit_path = tmp_path / "normalized_side.jsonl"
+    audit = ExecutionAuditLogger(audit_path)
+    manager = RiskManager(RiskLimits(max_notional=1_000.0, max_position=10.0), time_source=clock, audit_logger=audit)
+
+    manager.validate_order("ETH", "SELL", qty=1.0, price=100.0)
+
+    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+    assert entries
+    assert entries[-1]["side"] == "sell"
 
 
 def test_risk_manager_normalises_symbol_aliases() -> None:

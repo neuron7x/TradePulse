@@ -189,6 +189,9 @@ class RiskManager(RiskController):
         """Validate an order request without mutating the position book."""
 
         self._validate_inputs(qty, price)
+        normalized_side = side.lower()
+        if normalized_side not in {"buy", "sell"}:
+            raise ValueError("side must be either 'buy' or 'sell'")
         canonical_symbol = self._canonical_symbol(symbol)
         try:
             self._kill_switch.guard()
@@ -196,7 +199,7 @@ class RiskManager(RiskController):
             self._metrics.record_risk_validation(canonical_symbol, "kill_switch_blocked")
             self._record_risk_audit(
                 symbol=canonical_symbol,
-                side=side.lower(),
+                side=normalized_side,
                 quantity=float(qty),
                 price=float(price),
                 status="blocked",
@@ -212,7 +215,7 @@ class RiskManager(RiskController):
             self._metrics.record_risk_validation(canonical_symbol, "rate_limited")
             self._record_risk_audit(
                 symbol=canonical_symbol,
-                side=side.lower(),
+                side=normalized_side,
                 quantity=float(qty),
                 price=float(price),
                 status="rejected",
@@ -221,7 +224,7 @@ class RiskManager(RiskController):
             )
             raise
 
-        side_sign = 1.0 if side.lower() == "buy" else -1.0
+        side_sign = 1.0 if normalized_side == "buy" else -1.0
         current_position = float(self._positions.get(canonical_symbol, 0.0))
         new_position = current_position + side_sign * qty
 
@@ -243,7 +246,7 @@ class RiskManager(RiskController):
             self._metrics.record_risk_validation(canonical_symbol, "position_limit")
             self._record_risk_audit(
                 symbol=canonical_symbol,
-                side=side.lower(),
+                side=normalized_side,
                 quantity=float(qty),
                 price=float(price),
                 status="rejected",
@@ -271,7 +274,7 @@ class RiskManager(RiskController):
             self._metrics.record_risk_validation(canonical_symbol, "notional_limit")
             self._record_risk_audit(
                 symbol=canonical_symbol,
-                side=side.lower(),
+                side=normalized_side,
                 quantity=float(qty),
                 price=float(price),
                 status="rejected",
@@ -285,7 +288,7 @@ class RiskManager(RiskController):
         self._metrics.record_risk_validation(canonical_symbol, "passed")
         self._record_risk_audit(
             symbol=canonical_symbol,
-            side=side.lower(),
+            side=normalized_side,
             quantity=float(qty),
             price=float(price),
             status="passed",
@@ -303,8 +306,11 @@ class RiskManager(RiskController):
         """Update exposure after a confirmed fill."""
 
         self._validate_inputs(qty, price)
+        normalized_side = side.lower()
+        if normalized_side not in {"buy", "sell"}:
+            raise ValueError("side must be either 'buy' or 'sell'")
         canonical_symbol = self._canonical_symbol(symbol)
-        side_sign = 1.0 if side.lower() == "buy" else -1.0
+        side_sign = 1.0 if normalized_side == "buy" else -1.0
         position = float(self._positions.get(canonical_symbol, 0.0)) + side_sign * qty
         self._positions[canonical_symbol] = position
         self._last_notional[canonical_symbol] = abs(position * price)
