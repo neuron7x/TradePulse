@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import pandas as pd
 import pytest
+from pydantic import ValidationError
 
 from core.data.validation import (
     TimeSeriesValidationConfig,
@@ -93,3 +94,51 @@ def test_validate_timeseries_frame_detects_timezone_drift(
         validate_timeseries_frame(frame, base_config)
 
     assert "utc" in str(err.value).lower()
+
+
+def test_validate_timeseries_frame_rejects_non_monotonic(
+    base_config: TimeSeriesValidationConfig, valid_frame: pd.DataFrame
+) -> None:
+    frame = valid_frame.iloc[[0, 2, 1, 3]].reset_index(drop=True)
+
+    with pytest.raises(TimeSeriesValidationError) as err:
+        validate_timeseries_frame(frame, base_config)
+
+    assert "increasing" in str(err.value).lower()
+
+
+def test_timeseries_config_rejects_duplicate_value_columns() -> None:
+    with pytest.raises(ValidationError) as err:
+        TimeSeriesValidationConfig(
+            timestamp_column="timestamp",
+            value_columns=(
+                ValueColumnConfig(name="close"),
+                ValueColumnConfig(name="close"),
+            ),
+        )
+
+    assert "duplicates" in str(err.value).lower()
+
+
+def test_timeseries_config_rejects_timestamp_column_overlap() -> None:
+    with pytest.raises(ValidationError) as err:
+        TimeSeriesValidationConfig(
+            timestamp_column="timestamp",
+            value_columns=(ValueColumnConfig(name="timestamp"),),
+        )
+
+    assert "timestamp column" in str(err.value).lower()
+
+
+def test_timeseries_config_validates_timezone_identifier() -> None:
+    with pytest.raises(ValidationError) as err:
+        TimeSeriesValidationConfig(require_timezone="Invalid/Zone")
+
+    assert "unknown timezone" in str(err.value).lower()
+
+
+def test_timeseries_config_coerces_frequency_strings() -> None:
+    config = TimeSeriesValidationConfig(frequency="5min")
+
+    assert isinstance(config.frequency, pd.Timedelta)
+    assert config.frequency == pd.Timedelta(minutes=5)

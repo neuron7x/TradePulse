@@ -41,6 +41,18 @@ def test_normalize_timestamp_rejects_invalid_type() -> None:
         normalize_timestamp("2024-01-01")
 
 
+def test_normalize_timestamp_handles_market_dst_offsets() -> None:
+    ny = ZoneInfo("America/New_York")
+    before_shift = datetime(2024, 3, 8, 9, 30, tzinfo=ny)
+    after_shift = datetime(2024, 3, 11, 9, 30, tzinfo=ny)
+
+    before_normalized = normalize_timestamp(before_shift, market="NYSE")
+    after_normalized = normalize_timestamp(after_shift, market="NYSE")
+
+    assert before_normalized == datetime(2024, 3, 8, 14, 30, tzinfo=timezone.utc)
+    assert after_normalized == datetime(2024, 3, 11, 13, 30, tzinfo=timezone.utc)
+
+
 def test_convert_timestamp_changes_timezone() -> None:
     utc_dt = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
     ny_dt = convert_timestamp(utc_dt, "NYSE")
