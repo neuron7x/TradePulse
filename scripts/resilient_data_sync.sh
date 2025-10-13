@@ -23,26 +23,29 @@ INITIAL_BACKOFF=1
 MAX_BACKOFF=16
 REQUEST_TIMEOUT=30
 CIRCUIT_BREAKER_TTL=300
-RUN_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)' 2>/dev/null || uuidgen 2>/dev/null || date +%s)"
+RUN_ID="$(python3 -c 'import uuid; print(uuid.uuid4().hex)' 2> /dev/null || uuidgen 2> /dev/null || date +%s)"
 
 # shellcheck disable=SC2034  # referenced inside python logging helper
 SCRIPT_VERSION="1.0.0"
 
 require_command() {
   local cmd="$1"
-  if ! command -v "$cmd" >/dev/null 2>&1; then
+  if ! command -v "$cmd" > /dev/null 2>&1; then
     log_json "error" "missing required command" "stderr" "command=${cmd}"
     exit 42
   fi
 }
 
 log_json() {
-  local level="$1"; shift
-  local message="$1"; shift
-  local stream="${1:-stdout}"; shift
+  local level="$1"
+  shift
+  local message="$1"
+  shift
+  local stream="${1:-stdout}"
+  shift
   local ts
   ts="$(date -u +"%Y-%m-%dT%H:%M:%S.%6NZ")"
-  python3 - "$level" "$message" "$stream" "$ts" "$SCRIPT_NAME" "$RUN_ID" "$SCRIPT_VERSION" "$@" <<'PY'
+  python3 - "$level" "$message" "$stream" "$ts" "$SCRIPT_NAME" "$RUN_ID" "$SCRIPT_VERSION" "$@" << 'PY'
 import json
 import os
 import sys
@@ -69,7 +72,7 @@ PY
 }
 
 usage() {
-  cat <<USAGE
+  cat << USAGE
 Usage: ${SCRIPT_NAME} [--source-url URL] [--destination PATH] [--lock-dir DIR]
                      [--max-retries N] [--timeout SEC] [--circuit-ttl SEC]
                      [--help]
@@ -86,24 +89,38 @@ LOCK_DIR="$DEFAULT_LOCK_DIR"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --source-url)
-      SOURCE_URL="$2"; shift 2 ;;
+      SOURCE_URL="$2"
+      shift 2
+      ;;
     --destination)
-      DESTINATION="$2"; shift 2 ;;
+      DESTINATION="$2"
+      shift 2
+      ;;
     --lock-dir)
-      LOCK_DIR="$2"; shift 2 ;;
+      LOCK_DIR="$2"
+      shift 2
+      ;;
     --max-retries)
-      MAX_RETRIES="$2"; shift 2 ;;
+      MAX_RETRIES="$2"
+      shift 2
+      ;;
     --timeout)
-      REQUEST_TIMEOUT="$2"; shift 2 ;;
+      REQUEST_TIMEOUT="$2"
+      shift 2
+      ;;
     --circuit-ttl)
-      CIRCUIT_BREAKER_TTL="$2"; shift 2 ;;
-    --help|-h)
+      CIRCUIT_BREAKER_TTL="$2"
+      shift 2
+      ;;
+    --help | -h)
       usage
-      exit 0 ;;
+      exit 0
+      ;;
     *)
       log_json "error" "unknown argument" "stderr" "argument=$1"
       usage
-      exit 64 ;;
+      exit 64
+      ;;
   esac
 done
 
@@ -121,7 +138,7 @@ require_command timeout
 
 log_json "info" "validated environment" "stdout" \
   "python_version=$(python3 --version 2>&1 | tr -d '\n')" \
-  "curl_version=$(curl --version 2>/dev/null | head -n 1 | tr -d '\n')"
+  "curl_version=$(curl --version 2> /dev/null | head -n 1 | tr -d '\n')"
 
 mkdir -p "$(dirname "$DESTINATION")" "$LOCK_DIR"
 
@@ -130,7 +147,7 @@ lock_file="${LOCK_DIR}/${lock_key}.lock"
 marker_file="${LOCK_DIR}/${lock_key}.marker"
 circuit_file="${LOCK_DIR}/${lock_key}.circuit"
 
-exec {LOCK_FD}>"$lock_file"
+exec {LOCK_FD}> "$lock_file"
 if ! flock -n "$LOCK_FD"; then
   log_json "warning" "another synchronization is in progress" "stderr" \
     "lock_file=$lock_file"
@@ -158,8 +175,8 @@ trap cleanup EXIT INT TERM
 
 now=$(date +%s)
 if [[ -f "$circuit_file" ]]; then
-  circuit_open=$(stat -c %Y "$circuit_file" 2>/dev/null || echo 0)
-  if (( now - circuit_open < CIRCUIT_BREAKER_TTL )); then
+  circuit_open=$(stat -c %Y "$circuit_file" 2> /dev/null || echo 0)
+  if ((now - circuit_open < CIRCUIT_BREAKER_TTL)); then
     log_json "error" "circuit breaker open" "stderr" \
       "circuit_file=$circuit_file" \
       "seconds_until_retry=$((CIRCUIT_BREAKER_TTL - (now - circuit_open)))"
@@ -172,7 +189,7 @@ fi
 
 if [[ -f "$marker_file" && -f "$DESTINATION" ]]; then
   existing_hash="$(sha256sum "$DESTINATION" | awk '{print $1}')"
-  marker_hash="$(awk -F= '/^hash=/ {print $2}' "$marker_file" 2>/dev/null || true)"
+  marker_hash="$(awk -F= '/^hash=/ {print $2}' "$marker_file" 2> /dev/null || true)"
   if [[ "$existing_hash" == "$marker_hash" && -n "$existing_hash" ]]; then
     log_json "info" "destination already up-to-date" "stdout" \
       "destination=$DESTINATION" \
@@ -188,7 +205,7 @@ download_file() {
   local destination="$1"
   local attempt=1
   local backoff=$INITIAL_BACKOFF
-  while (( attempt <= MAX_RETRIES )); do
+  while ((attempt <= MAX_RETRIES)); do
     log_json "info" "attempting download" "stderr" \
       "attempt=$attempt" \
       "source_url=$SOURCE_URL"
@@ -200,26 +217,27 @@ download_file() {
     log_json "warning" "download failed" "stderr" \
       "attempt=$attempt" \
       "status=$status"
-    if (( attempt == MAX_RETRIES )); then
+    if ((attempt == MAX_RETRIES)); then
       log_json "error" "exhausted retries" "stderr" \
         "max_retries=$MAX_RETRIES"
       return 1
     fi
     local jitter
-    jitter="$(python3 -c 'import random; print(f"{random.uniform(0.1,0.5):.3f}")' 2>/dev/null || echo "0.2")"
+    jitter="$(python3 -c 'import random; print(f"{random.uniform(0.1,0.5):.3f}")' 2> /dev/null || echo "0.2")"
     local sleep_for
-    sleep_for=$(python3 - "$backoff" "$jitter" <<'PY'
+    sleep_for=$(
+      python3 - "$backoff" "$jitter" << 'PY'
 import sys
 backoff = float(sys.argv[1])
 jitter = float(sys.argv[2])
 print(f"{min(backoff + jitter, 60.0):.3f}")
 PY
-)
+    )
     log_json "info" "sleeping before retry" "stderr" \
       "seconds=$sleep_for"
     sleep "$sleep_for"
-    backoff=$(( backoff * 2 ))
-    if (( backoff > MAX_BACKOFF )); then
+    backoff=$((backoff * 2))
+    if ((backoff > MAX_BACKOFF)); then
       backoff=$MAX_BACKOFF
     fi
     ((attempt++))

@@ -52,9 +52,28 @@ Install dependencies (development file includes runtime stack):
 pip install -r requirements-dev.lock
 ```
 
+### Unified automation entrypoint
+
+All testing matrices and supporting tooling are exposed through the
+`scripts/automation.py` CLI. The `session` command executes the configured
+tox/nox matrices defined in `configs/script_runner.yml`:
+
+```bash
+python scripts/automation.py session --matrix default
+```
+
+- `--tool nox` or `--tool tox` forces a particular runner.
+- `--dry-run` prints the commands without executing them.
+
+Shell completions can be generated to speed up invocation:
+
+```bash
+python scripts/automation.py completion --shell bash --binary tradepulse
+```
+
 ### Running All Tests
 
-Run the complete test suite:
+Run the complete test suite directly via pytest:
 ```bash
 pytest tests/
 ```

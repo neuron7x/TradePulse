@@ -7,6 +7,28 @@ on:
     branches: [ main ]
 
 jobs:
+  formatting:
+    name: Formatters (black & shfmt)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Install formatters
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shfmt
+          uv pip install black pyyaml
+      - name: Run formatter check
+        run: python scripts/automation.py format --check
+      - name: Validate units configuration
+        run: python scripts/automation.py units
+
   tests:
     runs-on: ubuntu-latest
     strategy:

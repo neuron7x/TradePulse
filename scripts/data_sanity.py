@@ -115,7 +115,9 @@ def analyze_csv(path: Path, timestamp_column: str | None = "ts") -> CSVAnalysis:
     )
 
 
-def _format_column_nan_ratios(column_nan_ratios: dict[str, float], limit: int) -> str | None:
+def _format_column_nan_ratios(
+    column_nan_ratios: dict[str, float], limit: int
+) -> str | None:
     if not column_nan_ratios:
         return None
 
@@ -205,7 +207,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for csv_file in csv_files:
         try:
             analysis = analyze_csv(csv_file, args.timestamp_column)
-        except Exception as exc:  # pragma: no cover - defensive: pandas error message varies
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - defensive: pandas error message varies
             analyses.append(f"# File: {csv_file}\n- ERROR: {exc}")
             if args.fail_on_error:
                 exit_code = 1

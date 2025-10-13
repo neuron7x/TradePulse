@@ -1,0 +1,18 @@
+# Migration template from version 0 (implicit) to version 1
+# This migration bootstraps the schema by ensuring required keys are present.
+add:
+  matrices:
+    default:
+      description: "Standard nox session matrix for tests and linting"
+      tool: nox
+      sessions:
+        - name: tests-3.11
+          description: "Run pytest suite on Python 3.11"
+        - name: lint
+          description: "Run lint checks"
+  units:
+    conversions:
+      - from: usd
+        to: cents
+        factor: 100
+        description: "Dollar to cent conversion"

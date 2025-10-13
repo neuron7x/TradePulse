@@ -4,6 +4,8 @@
 black==25.1.0
 ruff==0.14.0
 slotscheck==0.19.1
+nox==2024.10.9
+tox==4.20.0
 
 # Type checking
 mypy==1.18.2
