@@ -131,7 +131,7 @@ def _split_by_known_quotes(symbol: str) -> Sequence[str] | None:
     for quote in _KNOWN_QUOTES:
         if symbol.endswith(quote) and len(symbol) > len(quote):
             base = symbol[: -len(quote)]
-            if base:
+            if base:  # pragma: no cover - length guard above ensures base is truthy
                 return [base, quote]
     return None
 

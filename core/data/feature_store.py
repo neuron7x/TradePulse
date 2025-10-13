@@ -86,7 +86,7 @@ class _RetentionManager:
             return None
 
         total_seconds = self._policy.ttl.total_seconds()
-        if total_seconds <= 0:
+        if total_seconds <= 0:  # pragma: no cover - RetentionPolicy enforces positive TTL
             return None
 
         return max(1, math.ceil(total_seconds))
