@@ -20,6 +20,7 @@ TradePulse is a professional algorithmic trading platform that combines advanced
 
 - [Overview](#-overview)
 - [Continuous Integration & Quality](#-continuous-integration--quality)
+- [Release Automation](#-release-automation)
 - [Quick Start](#-quick-start)
 - [Feature Highlights](#-feature-highlights)
 - [Documentation](#-documentation)
@@ -57,6 +58,37 @@ Whether you are prototyping strategies or orchestrating production trading bots,
 | [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml) | Pytest suite covering unit, integration, async, fuzz and property-based checks. |
 | [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Codecov uploads the latest coverage.xml artifact from CI for transparent coverage tracking. |
 | [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Automated secret detection, dependency auditing, and supply-chain checks. |
+
+## 📦 Release Automation
+
+TradePulse relies on [Release Drafter v6](https://github.com/release-drafter/release-drafter) to generate GitHub release drafts whenever commits land on `main`.
+
+- **Triggering** – the workflow runs on every push to `main` and can be re-run manually via `workflow_dispatch`. Use the `force-refresh` input set to `true` when you need to rebuild the draft after re-tagging or relabeling pull requests.
+- **Semantic labels** – pull requests tagged with `feature`, `bug`, or `chore` are automatically grouped into feature, fix, and maintenance sections. Additional labels `breaking`, `semver:major`, `semver:minor`, and `semver:patch` influence the semantic version that the resolver proposes.
+- **Autolabeler sync** – the Release Drafter autolabeler heuristics add semantic labels based on branch prefixes (`feature/`, `hotfix/`) and pull-request titles that start with `feat`, `fix`, or `chore`. Adjust these rules inside `.github/release-drafter.yml` if your workflow conventions change.
+- **Token permissions** – the workflow operates with the minimal permissions needed: `contents: write` and `pull-requests: write`. No `pull_request_target` triggers are used, so there are no security warnings about elevated contexts.
+- **Caching & metrics** – the workflow fetches the full git history (tags included) so version resolution has access to previous releases. The summary posted to the GitHub run contains start/finish timestamps, total processed pull requests, and the generated draft URL for quick validation.
+
+> 🔄 **Dry run tip:** Create a throwaway tag (for example `git tag -a v0.0.0-test -m "Release drafter dry run" && git push origin v0.0.0-test`) and dispatch the workflow with `force-refresh=true` to validate the output without affecting production releases. Delete the tag afterwards (`git push origin :refs/tags/v0.0.0-test`).
+
+### Example draft body
+
+```
+## 🚀 Highlights
+- New GPU-accelerated portfolio optimizer @octo-quants (#432)
+- Fix execution gateway retries @qa-team (#433)
+
+## 🔖 Release metadata
+- Release: v2.2.0
+- Previous tag: v2.1.3
+- Next semantic target: v2.1.4 / v2.2.0 / v3.0.0
+
+## 🙌 Contributors
+- @octo-quants
+- @qa-team
+```
+
+The generated release notes are subsequently copied into the curated [`CHANGELOG.md`](CHANGELOG.md) after validation.
 
 Additional badges above surface Python support, static analysis (ruff, mypy), and observability integrations (Prometheus). For deeper insight into release readiness, review [`reports/`](reports/) for CI health, security posture, and technical debt snapshots.
 

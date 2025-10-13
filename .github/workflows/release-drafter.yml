@@ -5,6 +5,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      force-refresh:
+        description: 'Rebuild the draft release even if nothing changed'
+        required: false
+        default: 'false'
 
 permissions:
   contents: write
@@ -23,42 +28,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 1
+          fetch-depth: 0
 
-      - name: Validate Release Drafter inputs
-        id: validate
+      - name: Capture workflow start time
+        id: started
         shell: bash
-        run: |
-          set -euo pipefail
-          config_dir=".github"
-          config_name="release-drafter.yml"
-          config_path="$config_dir/$config_name"
-          action_dir=".github/actions/release-drafter-retry"
-          if [[ ! -f "$config_path" ]]; then
-            echo "::error::Release Drafter configuration '$config_path' was not found." >&2
-            exit 1
-          fi
-          if [[ ! -f "$action_dir/action.yml" && ! -f "$action_dir/action.yaml" && ! -f "$action_dir/Dockerfile" ]]; then
-            echo "::error::Local action definition was not found in '$action_dir'." >&2
-            exit 1
-          fi
-          echo "config-name=$config_name" >> "$GITHUB_OUTPUT"
-          echo "action-dir=$action_dir" >> "$GITHUB_OUTPUT"
-          echo "Using config file '$config_name' in '$config_dir' with action located in '$action_dir'."
+        run: echo "started-at=$(date --iso-8601=seconds)" >> "$GITHUB_OUTPUT"
 
       - name: Update draft release notes
-        uses: ./.github/actions/release-drafter-retry
+        id: release_drafter
+        uses: release-drafter/release-drafter@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          config-name: ${{ steps.validate.outputs.config-name }}
+          config-name: release-drafter.yml
+          disable-autolabeler: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Summarize Release Drafter run
         if: always()
         shell: bash
         run: |
+          finish_ts="$(date --iso-8601=seconds)"
           {
             echo "### Release Drafter Summary"
             echo "- Event: ${{ github.event_name }}"
             echo "- Ref: ${{ github.ref }}"
             echo "- Outcome: ${{ job.status }}"
+            echo "- Started: ${{ steps.started.outputs.started-at }}"
+            echo "- Finished: ${finish_ts}"
+            echo "- Draft URL: ${{ steps.release_drafter.outputs.html_url || 'n/a' }}"
+            echo "- Metrics:"
+            echo "  - Run duration (s): ${{ steps.release_drafter.outputs.run_duration_seconds || 'n/a' }}"
+            echo "  - Total changes processed: ${{ steps.release_drafter.outputs.prs_total || 'n/a' }}"
           } >> "$GITHUB_STEP_SUMMARY"
