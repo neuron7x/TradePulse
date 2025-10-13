@@ -62,7 +62,7 @@ def _render_config(manager: ConfigTemplateManager, command: str, destination: Pa
     manager.render(command, destination)
     import yaml
 
-    return yaml.safe_load(destination.read_text())
+    return yaml.safe_load(destination.read_text(encoding="utf-8"))
 
 
 def _run_and_assert(command: str, args: list[str], snapshot_name: str, tmp_path: Path) -> None:
@@ -74,7 +74,7 @@ def _run_and_assert(command: str, args: list[str], snapshot_name: str, tmp_path:
     payload = "STDOUT+STDERR:\n" + combined
 
     snapshot_path = SNAPSHOT_DIR / f"{snapshot_name}.snap"
-    expected = snapshot_path.read_text()
+    expected = snapshot_path.read_text(encoding="utf-8")
     assert payload == expected
 
 
