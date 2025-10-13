@@ -6,6 +6,7 @@ from dataclasses import replace
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from analytics.signals import (
     FeaturePipelineConfig,
@@ -71,6 +72,28 @@ def test_feature_pipeline_generates_expected_columns() -> None:
     assert features.isna().sum().max() > 0
 
 
+def test_feature_pipeline_float_precision_consistency() -> None:
+    frame_64 = _sample_market_frame(160)
+    frame_32 = frame_64.astype(np.float32)
+    cfg = FeaturePipelineConfig(technical_windows=(5, 12), microstructure_window=30)
+    pipeline = SignalFeaturePipeline(cfg)
+
+    features_64 = pipeline.transform(frame_64)
+    features_32 = pipeline.transform(frame_32)
+
+    common_columns = [col for col in features_64.columns if col in features_32.columns]
+    features_64 = features_64[common_columns]
+    features_32 = features_32[common_columns]
+
+    mask = features_64.notna() & features_32.notna()
+    assert mask.to_numpy().any(), "There should be overlapping finite observations"
+
+    stacked_64 = features_64.where(mask).stack()
+    stacked_32 = features_32.where(mask).stack()
+    np.testing.assert_allclose(stacked_64.values, stacked_32.values, rtol=5e-4, atol=1e-6)
+    assert not np.isinf(features_32.to_numpy(dtype=float)).any(), "No overflow should occur in float32 path"
+
+
 def test_leakage_gate_alignment() -> None:
     frame = _sample_market_frame(60)
     pipeline = SignalFeaturePipeline(FeaturePipelineConfig(technical_windows=(3,)))
@@ -83,6 +106,26 @@ def test_leakage_gate_alignment() -> None:
     assert len(gated_features) > 0
     # the gating operation should discard at least the first `lag` observations
     assert all(idx >= features.index[gate.lag] for idx in gated_features.index)
+
+
+def test_leakage_gate_special_value_handling() -> None:
+    index = pd.RangeIndex(start=0, stop=3)
+    features = pd.DataFrame(
+        {
+            "a": [1.0, np.inf, -np.inf],
+            "b": [0.5, np.nan, 2.0],
+        },
+        index=index,
+    )
+    target = pd.Series([0.1, np.inf, -0.3], index=index)
+    gate = LeakageGate(lag=0, dropna=False)
+
+    cleaned_features, cleaned_target = gate.apply(features, target)
+
+    assert np.isnan(cleaned_features.loc[1, "a"])
+    assert np.isnan(cleaned_features.loc[2, "a"])
+    assert np.isnan(cleaned_target.loc[1])
+    assert cleaned_target.loc[2] == target.loc[2]
 
 
 def test_model_selector_walk_forward_runs() -> None:
@@ -101,3 +144,46 @@ def test_model_selector_walk_forward_runs() -> None:
     assert not report.regression_report.empty
     # Ensure regression report has the same number of rows as evaluated splits
     assert len(report.regression_report) == len(report.split_details)
+
+
+@pytest.mark.parametrize(
+    "window, expected_non_nan",
+    [
+        (1, 0),
+        (5, 6),
+        (10, 1),
+        (50, 0),
+    ],
+)
+def test_microstructure_window_edge_cases(window: int, expected_non_nan: int) -> None:
+    frame = _sample_market_frame(10)
+    cfg = FeaturePipelineConfig(technical_windows=(3,), microstructure_window=window)
+    pipeline = SignalFeaturePipeline(cfg)
+    features = pipeline.transform(frame)
+
+    kyles_col = f"kyles_lambda_{window}"
+    hasbrouck_col = f"hasbrouck_{window}"
+
+    assert kyles_col in features
+    assert hasbrouck_col in features
+
+    assert features[kyles_col].notna().sum() == expected_non_nan
+    assert features[hasbrouck_col].notna().sum() == expected_non_nan
+
+
+def test_feature_pipeline_handles_empty_frame() -> None:
+    frame = pd.DataFrame(
+        {
+            "close": pd.Series(dtype=float),
+            "high": pd.Series(dtype=float),
+            "low": pd.Series(dtype=float),
+            "volume": pd.Series(dtype=float),
+            "bid_volume": pd.Series(dtype=float),
+            "ask_volume": pd.Series(dtype=float),
+            "signed_volume": pd.Series(dtype=float),
+        }
+    )
+    pipeline = SignalFeaturePipeline(FeaturePipelineConfig(technical_windows=(3,), microstructure_window=4))
+    features = pipeline.transform(frame)
+
+    assert features.empty
