@@ -3,8 +3,9 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import replace
-from typing import Dict, Iterable, List, Mapping
+from typing import Deque, Dict, Iterable, List, Mapping
 
 from domain import Order
 
@@ -13,6 +14,10 @@ from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecifica
 
 class OrderError(RuntimeError):
     """Raised when a connector fails to process an order."""
+
+
+class TransientOrderError(OrderError):
+    """Recoverable connector failure that should be retried."""
 
 
 class ExecutionConnector:
@@ -27,7 +32,7 @@ class ExecutionConnector:
     def disconnect(self) -> None:
         """Disconnect from the venue."""
 
-    def place_order(self, order: Order) -> Order:
+    def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:
         raise NotImplementedError
 
     def cancel_order(self, order_id: str) -> bool:
@@ -52,18 +57,45 @@ class SimulatedExchangeConnector(ExecutionConnector):
         sandbox: bool = True,
         symbol_map: Mapping[str, str] | None = None,
         specifications: Mapping[str, SymbolSpecification] | None = None,
+        failure_plan: Iterable[Exception | str] | None = None,
     ) -> None:
         super().__init__(sandbox=sandbox)
         self.normalizer = SymbolNormalizer(symbol_map, specifications)
         self._orders: Dict[str, Order] = {}
         self._next_id = 1
+        self._idempotency_cache: Dict[str, Order] = {}
+        self._failures: Deque[Exception | str] = deque(failure_plan or [])
 
     def _generate_id(self) -> str:
         order_id = f"{self.__class__.__name__}-{self._next_id:08d}"
         self._next_id += 1
         return order_id
 
-    def place_order(self, order: Order) -> Order:
+    def _maybe_raise_failure(self) -> None:
+        if not self._failures:
+            return
+        outcome = self._failures.popleft()
+        if isinstance(outcome, Exception):
+            raise outcome
+        mapping = {
+            "timeout": TimeoutError("simulated timeout"),
+            "network": TransientOrderError("simulated network interruption"),
+            "429": TransientOrderError("HTTP 429: rate limited"),
+        }
+        if outcome in mapping:
+            raise mapping[outcome]
+        raise ValueError(f"Unknown failure token: {outcome}")
+
+    def schedule_failures(self, *failures: Exception | str) -> None:
+        """Queue failures to be raised on subsequent submissions."""
+
+        self._failures.extend(failures)
+
+    def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:
+        if idempotency_key is not None and idempotency_key in self._idempotency_cache:
+            return self._idempotency_cache[idempotency_key]
+
+        self._maybe_raise_failure()
         quantity = self.normalizer.round_quantity(order.symbol, order.quantity)
         price = order.price
         if price is not None:
@@ -76,6 +108,8 @@ class SimulatedExchangeConnector(ExecutionConnector):
         order_id = self._generate_id()
         normalized_order.mark_submitted(order_id)
         self._orders[order_id] = normalized_order
+        if idempotency_key is not None:
+            self._idempotency_cache[idempotency_key] = normalized_order
         return normalized_order
 
     def cancel_order(self, order_id: str) -> bool:
@@ -103,43 +137,64 @@ class SimulatedExchangeConnector(ExecutionConnector):
 
 
 class BinanceConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True) -> None:
+    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
         specs = {
             "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.0001, min_notional=10, step_size=0.0001, tick_size=0.1),
             "ETHUSDT": SymbolSpecification("ETHUSDT", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.01),
         }
-        super().__init__(sandbox=sandbox, symbol_map={"BTCUSDT": "BTCUSDT"}, specifications=specs)
+        super().__init__(
+            sandbox=sandbox,
+            symbol_map={"BTCUSDT": "BTCUSDT"},
+            specifications=specs,
+            failure_plan=failure_plan,
+        )
 
 
 class BybitConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True) -> None:
+    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
         specs = {
             "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.5),
         }
-        super().__init__(sandbox=sandbox, symbol_map={"BTCUSDT": "BTCUSDT"}, specifications=specs)
+        super().__init__(
+            sandbox=sandbox,
+            symbol_map={"BTCUSDT": "BTCUSDT"},
+            specifications=specs,
+            failure_plan=failure_plan,
+        )
 
 
 class KrakenConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True) -> None:
+    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
         symbol_map = {"BTCUSD": "XBTUSD"}
         specs = {
             "XBTUSD": SymbolSpecification("XBTUSD", min_qty=0.0001, min_notional=5, step_size=0.0001, tick_size=0.5),
         }
-        super().__init__(sandbox=sandbox, symbol_map=symbol_map, specifications=specs)
+        super().__init__(
+            sandbox=sandbox,
+            symbol_map=symbol_map,
+            specifications=specs,
+            failure_plan=failure_plan,
+        )
 
 
 class CoinbaseConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True) -> None:
+    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
         symbol_map = {"BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD"}
         specs = {
             "BTC-USD": SymbolSpecification("BTC-USD", min_qty=0.0001, min_notional=10, step_size=0.0001, tick_size=0.01),
             "ETH-USD": SymbolSpecification("ETH-USD", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.01),
         }
-        super().__init__(sandbox=sandbox, symbol_map=symbol_map, specifications=specs)
+        super().__init__(
+            sandbox=sandbox,
+            symbol_map=symbol_map,
+            specifications=specs,
+            failure_plan=failure_plan,
+        )
 
 
 __all__ = [
     "OrderError",
+    "TransientOrderError",
     "ExecutionConnector",
     "SimulatedExchangeConnector",
     "BinanceConnector",
