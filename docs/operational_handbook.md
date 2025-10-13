@@ -18,6 +18,10 @@ teams can reach production readiness without tribal knowledge.
   [`reports/release_readiness.md`](../reports/release_readiness.md) alongside the
   production cutover template
   [`reports/prod_cutover_readiness_checklist.md`](../reports/prod_cutover_readiness_checklist.md).
+- **Operational alignment** – The consolidated control tower in
+  [`docs/operational_readiness_runbooks.md`](operational_readiness_runbooks.md)
+  maps approvals, start/stop scripts, SLA monitors, and archival checklists so
+  live sessions stay audit-grade.
   These artefacts ensure cutovers include go/no-go evidence, telemetry sign-off,
   and rollback criteria.
 - **On-call routine** – The escalation policy, error budget tracking, and SLO

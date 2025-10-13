@@ -15,6 +15,9 @@ minimise ambiguity during critical operations.
    `#trading-ops`.
 4. **Risk envelope** – Ensure guardrails in `configs/risk/limits.yaml` reflect
    the approved exposure (per-instrument notional, leverage caps, kill thresholds).
+5. **Control tower sign-off** – Confirm every item in
+   [`docs/operational_readiness_runbooks.md`](operational_readiness_runbooks.md#1-pre-launch-control-checklist)
+   is checked with evidence attached to the deployment ticket.
 
 ## 2. Launch Procedure
 
@@ -31,7 +34,7 @@ minimise ambiguity during critical operations.
 
 **Go/No-Go Criteria**
 
-- Telemetry dashboards (`observability/dashboards/live.yaml`) show healthy order
+- Telemetry dashboards (`observability/dashboards/tradepulse-overview.json`) show healthy order
   acknowledgements and no queue backlog.
 - Risk service confirms effective limits and kill-switch wiring via `risk/live/status`.
 - Governance topic contains a signed change event with matching digest.
