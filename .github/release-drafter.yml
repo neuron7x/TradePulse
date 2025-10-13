@@ -11,4 +11,23 @@ categories:
     labels:
       - 'chore'
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+template: |
+  ## 🚀 Highlights
+
+  $CHANGES
+
+  ## 🙌 Contributors
+
+  $CONTRIBUTORS
 no-changes-template: 'No changes in this release.'
+version-resolver:
+  major:
+    labels:
+      - 'semver:major'
+  minor:
+    labels:
+      - 'semver:minor'
+  patch:
+    labels:
+      - 'semver:patch'
+  default: patch

@@ -20,6 +20,7 @@ runs:
       uses: release-drafter/release-drafter@v6
       with:
         config-name: ${{ inputs.config-name }}
+        dry-run: ${{ env.ACT != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
     - name: Wait before retry #1
@@ -33,6 +34,7 @@ runs:
       uses: release-drafter/release-drafter@v6
       with:
         config-name: ${{ inputs.config-name }}
+        dry-run: ${{ env.ACT != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
     - name: Wait before retry #2
@@ -45,6 +47,7 @@ runs:
       uses: release-drafter/release-drafter@v6
       with:
         config-name: ${{ inputs.config-name }}
+        dry-run: ${{ env.ACT != '' }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
     - name: Fail after retries

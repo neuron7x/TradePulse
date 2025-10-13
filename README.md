@@ -58,6 +58,10 @@ Whether you are prototyping strategies or orchestrating production trading bots,
 | [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Codecov uploads the latest coverage.xml artifact from CI for transparent coverage tracking. |
 | [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Automated secret detection, dependency auditing, and supply-chain checks. |
 
+### 🧾 Release Automation
+
+TradePulse використовує [Release Drafter](https://github.com/release-drafter/release-drafter) для формування драфтів релізів. Шаблон тіла релізу складається з розділу з ключовими оновленнями та блоку зі списком авторів, що допомагає переглядати зміни ще до публікації тега. Категоризація PR за мітками (`feature`, `bug`, `chore`, `semver:*`) керує відповідними секціями нотаток і автоматичним підбором версії. Щоб згенерувати оновлений драфт вручну, запустіть workflow **Release Drafter** через дію `workflow_dispatch` у GitHub Actions.
+
 Additional badges above surface Python support, static analysis (ruff, mypy), and observability integrations (Prometheus). For deeper insight into release readiness, review [`reports/`](reports/) for CI health, security posture, and technical debt snapshots.
 
 ---
