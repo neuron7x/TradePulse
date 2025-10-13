@@ -419,6 +419,8 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
                 continue
             self._rotation_attempted = False
             self._backoff.reset()
+            if not response.is_success:
+                response.raise_for_status()
             return response
         response.raise_for_status()
         return response

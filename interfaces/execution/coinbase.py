@@ -82,7 +82,10 @@ class CoinbaseExecutionConnector(AuthenticatedRESTExecutionConnector):
         creds = dict(self.credentials)
         timestamp = str(int(time.time()))
         request_path = path if path.startswith("/") else f"/{path.lstrip('/')}"
-        payload = json.dumps(body or {}, separators=(",", ":"))
+        if body is None:
+            payload = ""
+        else:
+            payload = json.dumps(body, separators=(",", ":"))
         message = f"{timestamp}{method.upper()}{request_path}{payload}"
         digest = hmac.new(creds["API_SECRET"].encode(), message.encode(), hashlib.sha256).digest()
         signature = base64.b64encode(digest).decode()
