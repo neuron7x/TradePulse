@@ -24,6 +24,8 @@ from backtest.transaction_costs import (
     FixedSlippage,
     FixedSpread,
     PerUnitCommission,
+    SquareRootSlippage,
+    VolumeProportionalSlippage,
 )
 
 
@@ -146,6 +148,49 @@ def test_simulated_execution_partial_fill() -> None:
     assert math.isclose(fill.quantity, 0.5)
     assert math.isclose(fill.slippage, 0.0)
     assert math.isclose(fill.spread_cost, 0.0)
+
+
+def test_simulated_execution_applies_fixed_slippage_model() -> None:
+    cost_model = CompositeTransactionCostModel(slippage_model=FixedSlippage(0.05))
+    handler = SimulatedExecutionHandler(
+        OrderBookConfig(spread_bps=0.0, depth_profile=(10.0,), infinite_depth=True),
+        SlippageConfig(),
+        fee_per_unit=0.0,
+        transaction_cost_model=cost_model,
+    )
+    handler.on_market_event(MarketEvent(symbol="TEST", price=100.0, step=0))
+    fill = handler.execute(OrderEvent(symbol="TEST", quantity=1.0, step=0), current_step=0)
+    assert math.isclose(fill.price, 100.05)
+    assert math.isclose(fill.slippage, 0.05)
+
+
+def test_simulated_execution_applies_volume_slippage_model() -> None:
+    cost_model = CompositeTransactionCostModel(slippage_model=VolumeProportionalSlippage(0.02))
+    handler = SimulatedExecutionHandler(
+        OrderBookConfig(spread_bps=0.0, depth_profile=(10.0,), infinite_depth=True),
+        SlippageConfig(),
+        fee_per_unit=0.0,
+        transaction_cost_model=cost_model,
+    )
+    handler.on_market_event(MarketEvent(symbol="TEST", price=100.0, step=0))
+    fill = handler.execute(OrderEvent(symbol="TEST", quantity=2.0, step=0), current_step=0)
+    assert math.isclose(fill.price, 100.04)
+    assert math.isclose(fill.slippage, 0.08)
+
+
+def test_simulated_execution_applies_square_root_slippage_model() -> None:
+    cost_model = CompositeTransactionCostModel(slippage_model=SquareRootSlippage(a=0.001, b=0.01))
+    handler = SimulatedExecutionHandler(
+        OrderBookConfig(spread_bps=0.0, depth_profile=(10.0,), infinite_depth=True),
+        SlippageConfig(),
+        fee_per_unit=0.0,
+        transaction_cost_model=cost_model,
+    )
+    handler.on_market_event(MarketEvent(symbol="TEST", price=100.0, step=0))
+    fill = handler.execute(OrderEvent(symbol="TEST", quantity=4.0, step=0), current_step=0)
+    expected_adjustment = 100.0 * (0.001 + 0.01 * math.sqrt(4.0))
+    assert math.isclose(fill.price, 100.0 + expected_adjustment)
+    assert math.isclose(fill.slippage, expected_adjustment * 4.0)
 
 
 class _BuyOnceStrategy(Strategy):

@@ -124,3 +124,45 @@ def test_fok_requires_full_liquidity(engine):
     assert order.status == OrderStatus.CANCELLED
     assert math.isclose(order.filled_qty, 0.0)
     assert not order.executions
+
+
+def test_ioc_partial_fill_cancels_remaining(engine):
+    engine.latency_model = lambda order: 0
+    engine.add_passive_liquidity("BTC-USD", OrderSide.SELL, price=50_000, qty=3.0, timestamp=0)
+
+    order = Order(
+        id="o-1",
+        symbol="BTC-USD",
+        side=OrderSide.BUY,
+        qty=5.0,
+        timestamp=0,
+        order_type=OrderType.IOC,
+        price=50_000,
+    )
+
+    engine.submit_order(order)
+    engine.process_until(0)
+
+    assert order.status == OrderStatus.PARTIALLY_FILLED
+    assert math.isclose(order.filled_qty, 3.0)
+    assert math.isclose(sum(exec.qty for exec in order.executions), 3.0)
+
+
+def test_market_order_without_liquidity_is_cancelled(engine):
+    engine.latency_model = lambda order: 0
+
+    order = Order(
+        id="o-1",
+        symbol="ETH-USD",
+        side=OrderSide.BUY,
+        qty=2.0,
+        timestamp=0,
+        order_type=OrderType.MARKET,
+    )
+
+    engine.submit_order(order)
+    engine.process_until(0)
+
+    assert order.status == OrderStatus.CANCELLED
+    assert math.isclose(order.filled_qty, 0.0)
+    assert not order.executions

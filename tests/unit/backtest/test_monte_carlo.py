@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
@@ -45,3 +47,26 @@ def test_evaluate_scenarios_produces_reports() -> None:
         assert "alpha" in payload and "information_ratio" in payload
         assert payload["turnover"] is None
         assert payload["beta"] is None or isinstance(payload["beta"], float)
+
+
+def test_monte_carlo_regime_shifts_are_reproducible() -> None:
+    prices = np.linspace(80.0, 120.0, num=40)
+    config = MonteCarloConfig(
+        n_scenarios=4,
+        volatility_scale=(0.5, 1.5),
+        lag_range=(1, 3),
+        dropout_probability=0.25,
+        random_seed=99,
+    )
+
+    first = generate_monte_carlo_scenarios(prices, config=config)
+    second = generate_monte_carlo_scenarios(prices, config=config)
+
+    for scenario_a, scenario_b in zip(first, second):
+        assert scenario_a.lag == scenario_b.lag
+        assert math.isclose(scenario_a.volatility_scale, scenario_b.volatility_scale)
+        assert np.allclose(scenario_a.prices, scenario_b.prices)
+        assert np.allclose(scenario_a.returns, scenario_b.returns)
+        assert math.isclose(scenario_a.dropout_ratio, scenario_b.dropout_ratio)
+        assert 0.0 <= scenario_a.dropout_ratio <= 1.0
+        assert config.volatility_scale[0] <= scenario_a.volatility_scale <= config.volatility_scale[1]

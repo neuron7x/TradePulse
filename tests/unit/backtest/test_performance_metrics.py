@@ -35,6 +35,34 @@ def test_compute_performance_metrics_basic() -> None:
     assert report.expected_shortfall is not None
 
 
+def test_compute_performance_metrics_matches_manual_values() -> None:
+    equity_curve = np.array([100.0, 105.0, 95.0, 110.0, 108.0], dtype=float)
+    pnl = equity_curve - np.concatenate(([100.0], equity_curve[:-1]))
+    position_changes = np.array([0.4, -0.6, 0.5, -0.2], dtype=float)
+    benchmark = np.array([0.0, 0.025, -0.015, 0.02, -0.005], dtype=float)
+
+    report = compute_performance_metrics(
+        equity_curve=equity_curve,
+        pnl=pnl,
+        position_changes=position_changes,
+        initial_capital=100.0,
+        periods_per_year=4,
+        benchmark_returns=benchmark,
+    )
+
+    assert report.sharpe_ratio == pytest.approx(0.4037231085, rel=1e-9)
+    assert report.sortino_ratio == pytest.approx(0.6935584313, rel=1e-9)
+    assert report.cagr == pytest.approx(0.06350369806, rel=1e-9)
+    assert report.max_drawdown == pytest.approx(-10.0, rel=1e-9)
+    assert report.expected_shortfall == pytest.approx(-0.09523809523, rel=1e-9)
+    assert report.turnover == pytest.approx(1.7, rel=1e-9)
+    assert report.hit_ratio == pytest.approx(0.5, rel=1e-9)
+    assert report.beta == pytest.approx(4.74347925149, rel=1e-9)
+    assert report.alpha == pytest.approx(-0.01928972629, rel=1e-9)
+    assert report.tracking_error == pytest.approx(0.07950867954, rel=1e-9)
+    assert report.information_ratio == pytest.approx(0.3495207005, rel=1e-9)
+
+
 def test_export_performance_report(tmp_path: Path) -> None:
     report = PerformanceReport(
         sharpe_ratio=1.25,
