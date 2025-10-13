@@ -3,10 +3,10 @@
 # === FPM-A (Fractal Project Method) integration ===
 .PHONY: fpma-graph fpma-check lock build-package publish-package clean-dist
 fpma-graph:
-	python3 tools/fpma_runner.py graph
+        python -m scripts fpma graph
 
 fpma-check:
-	python3 tools/fpma_runner.py check
+        python -m scripts fpma check
 
 .PHONY: lock
 lock:
@@ -30,8 +30,24 @@ clean-dist:
 
 .PHONY: generate
 generate:
-	buf generate
-	PYTHONPATH=. python tools/schema/generate_event_types.py
+        buf generate
+        PYTHONPATH=. python tools/schema/generate_event_types.py
+
+.PHONY: scripts-lint scripts-test scripts-gen-proto scripts-dev-up scripts-dev-down
+scripts-lint:
+        python -m scripts lint
+
+scripts-test:
+        python -m scripts test
+
+scripts-gen-proto:
+        python -m scripts gen-proto
+
+scripts-dev-up:
+        python -m scripts dev-up
+
+scripts-dev-down:
+        python -m scripts dev-down
 
 .PHONY: mutation-test
 mutation-test:

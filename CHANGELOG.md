@@ -31,7 +31,7 @@
 ## [2.1.1] - 2025-10-05
 ### Added
 - Інтегровано професійні проектні артефакти: `.gitattributes`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `CHANGELOG.md`, `CODEOWNERS`.
-- Додано `scripts/`: `gen-proto.sh`, `lint.sh`, `test.sh`, `fpma.sh`, `dev-up.sh`, `dev-down.sh`.
+- Додано Python-пакет `scripts` із уніфікованим CLI (`python -m scripts`).
 
 ### Security
 - Уніфікація ліній закінчення файлів через `.gitattributes`.

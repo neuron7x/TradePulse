@@ -34,7 +34,7 @@ This document converts the proposed enhancements into concrete, actionable steps
    - _Success metric_: Onboarding instructions reference Make targets only.
 
 3. **One-Click Onboarding Script**
-   - Provide `scripts/onboard.sh` that installs dependencies, initializes env vars, seeds sample data, and runs smoke tests.
+   - Provide a Python-based onboarding command (e.g. `python -m scripts onboard`) that installs dependencies, initializes env vars, seeds sample data, and runs smoke tests.
    - Document usage in `CONTRIBUTING.md`.
    - _Success metric_: New hires report setup time under 15 minutes.
 
