@@ -16,6 +16,10 @@ __all__ = [
 class ComplianceViolation(NormalizationError):
     """Raised when an order violates venue-level minimums."""
 
+    def __init__(self, message: str, *, report: "ComplianceReport" | None = None) -> None:
+        super().__init__(message)
+        self.report = report
+
 
 @dataclass(slots=True, frozen=True)
 class ComplianceReport:
@@ -31,6 +35,19 @@ class ComplianceReport:
 
     def is_clean(self) -> bool:
         return not self.violations
+
+    def to_dict(self) -> dict:
+        """Serialize the report to a plain dictionary."""
+
+        return {
+            "symbol": self.symbol,
+            "requested_quantity": self.requested_quantity,
+            "requested_price": self.requested_price,
+            "normalized_quantity": self.normalized_quantity,
+            "normalized_price": self.normalized_price,
+            "violations": list(self.violations),
+            "blocked": self.blocked,
+        }
 
 
 class ComplianceMonitor:
@@ -48,15 +65,15 @@ class ComplianceMonitor:
         ) if self._auto_round else price
 
         violations: list[str] = []
+        violation_exc: NormalizationError | None = None
         try:
             self._normalizer.validate(symbol, normalized_qty, normalized_price)
         except NormalizationError as exc:
             violations.append(str(exc))
-            if self._strict:
-                raise ComplianceViolation(str(exc)) from exc
+            violation_exc = exc
 
         blocked = bool(violations) and self._strict
-        return ComplianceReport(
+        report = ComplianceReport(
             symbol=symbol,
             requested_quantity=float(quantity),
             requested_price=None if price is None else float(price),
@@ -65,3 +82,6 @@ class ComplianceMonitor:
             violations=tuple(violations),
             blocked=blocked,
         )
+        if violation_exc is not None and self._strict:
+            raise ComplianceViolation(str(violation_exc), report=report) from violation_exc
+        return report

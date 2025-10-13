@@ -7,12 +7,16 @@ from datetime import timedelta
 
 import pytest
 
+import json
+
 from domain import Order, OrderSide, OrderType
 from execution.algorithms import POVAlgorithm, TWAPAlgorithm, VWAPAlgorithm, aggregate_fills
 from execution.connectors import BinanceConnector, OrderError
+from execution.compliance import ComplianceMonitor, ComplianceViolation
 from execution.normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from execution.oms import OMSConfig, OrderManagementSystem
 from execution.risk import RiskLimits, RiskManager
+from execution.audit import ExecutionAuditLogger
 
 
 @pytest.fixture()
@@ -62,6 +66,76 @@ def test_oms_register_fill_updates_risk(tmp_path, risk_manager: RiskManager) -> 
     updated = oms.register_fill(placed.order_id, 1.0, 25_100)
     assert updated.status.name == "FILLED"
     assert risk_manager.current_position("BTCUSDT") == pytest.approx(2.0)
+
+
+def test_oms_compliance_blocking_triggers_audit(tmp_path) -> None:
+    state_path = tmp_path / "compliance_state.json"
+    audit_path = tmp_path / "compliance_audit.jsonl"
+    audit = ExecutionAuditLogger(audit_path)
+    specs = {
+        "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1)
+    }
+    normalizer = SymbolNormalizer(specifications=specs)
+    compliance = ComplianceMonitor(normalizer, strict=True)
+    risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit)
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(
+        connector,
+        risk,
+        config,
+        compliance_monitor=compliance,
+        audit_logger=audit,
+    )
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.001, price=20_000, order_type=OrderType.LIMIT)
+
+    with pytest.raises(ComplianceViolation):
+        oms.submit(order, correlation_id="compliance-block")
+
+    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+    compliance_events = [entry for entry in entries if entry.get("event") == "compliance_check"]
+    assert compliance_events
+    last_event = compliance_events[-1]
+    assert last_event["status"] == "blocked"
+    assert last_event["report"]["violations"]
+
+
+def test_oms_audit_records_successful_flow(tmp_path) -> None:
+    state_path = tmp_path / "audit_state.json"
+    audit_path = tmp_path / "audit_success.jsonl"
+    audit = ExecutionAuditLogger(audit_path)
+    specs = {
+        "ETHUSDT": SymbolSpecification("ETHUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1)
+    }
+    normalizer = SymbolNormalizer(specifications=specs)
+    compliance = ComplianceMonitor(normalizer, strict=True)
+    risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit)
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(
+        connector,
+        risk,
+        config,
+        compliance_monitor=compliance,
+        audit_logger=audit,
+    )
+
+    order = Order(symbol="ETHUSDT", side=OrderSide.BUY, quantity=0.05, price=2_000, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="audit-pass")
+
+    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+    compliance_event = next(entry for entry in entries if entry.get("event") == "compliance_check")
+    risk_event = next(
+        entry
+        for entry in entries
+        if entry.get("event") == "risk_validation" and entry.get("status") == "passed"
+    )
+
+    assert compliance_event["status"] == "passed"
+    assert not compliance_event["report"]["blocked"]
+    assert risk_event["symbol"].replace("/", "") == "ETHUSDT"
+    assert risk_event["status"] == "passed"
 
 
 def test_execution_algorithms_split_quantities() -> None:

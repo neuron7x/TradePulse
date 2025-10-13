@@ -15,6 +15,8 @@ from domain import Order, OrderStatus
 from interfaces.execution import RiskController
 
 from core.utils.metrics import get_metrics_collector
+from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
+from .audit import ExecutionAuditLogger, get_execution_audit_logger
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
@@ -54,10 +56,14 @@ class OrderManagementSystem:
         connector: ExecutionConnector,
         risk_controller: RiskController,
         config: OMSConfig,
+        *,
+        compliance_monitor: ComplianceMonitor | None = None,
+        audit_logger: ExecutionAuditLogger | None = None,
     ) -> None:
         self.connector = connector
         self.risk = risk_controller
         self.config = config
+        self._compliance = compliance_monitor
         self._queue: Deque[QueuedOrder] = deque()
         self._orders: MutableMapping[str, Order] = {}
         self._processed: Dict[str, str] = {}
@@ -65,6 +71,7 @@ class OrderManagementSystem:
         self._metrics = get_metrics_collector()
         self._ack_timestamps: Dict[str, datetime] = {}
         self._pending: Dict[str, Order] = {}
+        self._audit = audit_logger or get_execution_audit_logger()
         self._load_state()
 
     # ------------------------------------------------------------------
@@ -161,6 +168,30 @@ class OrderManagementSystem:
         if correlation_id in self._pending:
             return self._pending[correlation_id]
 
+        if self._compliance is not None:
+            report = None
+            try:
+                report = self._compliance.check(order.symbol, order.quantity, order.price)
+            except ComplianceViolation as exc:
+                report = exc.report
+                self._metrics.record_compliance_check(
+                    order.symbol,
+                    "blocked",
+                    () if report is None else report.violations,
+                )
+                self._emit_compliance_audit(order, correlation_id, report, str(exc))
+                raise
+            status = "passed" if report is None or report.is_clean() else "warning"
+            if report is not None:
+                self._metrics.record_compliance_check(
+                    order.symbol,
+                    "blocked" if report.blocked else status,
+                    report.violations,
+                )
+                self._emit_compliance_audit(order, correlation_id, report, None)
+                if report.blocked:
+                    raise ComplianceViolation("Compliance check blocked order", report=report)
+
         reference_price = order.price if order.price is not None else max(order.average_price or 0.0, 1.0)
         self.risk.validate_order(order.symbol, order.side.value, order.quantity, reference_price)
 
@@ -169,6 +200,36 @@ class OrderManagementSystem:
         self._pending[correlation_id] = order
         self._persist_state()
         return order
+
+    def _emit_compliance_audit(
+        self,
+        order: Order,
+        correlation_id: str,
+        report: ComplianceReport | None,
+        error: str | None,
+    ) -> None:
+        payload = {
+            "event": "compliance_check",
+            "symbol": order.symbol,
+            "side": order.side.value,
+            "quantity": float(order.quantity),
+            "price": None if order.price is None else float(order.price),
+            "correlation_id": correlation_id,
+            "error": error,
+        }
+        if report is not None:
+            payload["report"] = report.to_dict()
+            if report.blocked:
+                status = "blocked"
+            elif report.is_clean():
+                status = "passed"
+            else:
+                status = "warning"
+        else:
+            payload["report"] = None
+            status = "blocked" if error else "passed"
+        payload["status"] = status
+        self._audit.emit(payload)
 
     def process_next(self) -> Order:
         if not self._queue:
