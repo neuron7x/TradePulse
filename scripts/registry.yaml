@@ -1,0 +1,117 @@
+version: 1
+scripts:
+  - name: data_sanity
+    description: "Quality checks for CSV files in data pipelines."
+    category: data-quality
+    command:
+      - python
+      - scripts/data_sanity.py
+    python_dependencies:
+      - pandas
+    parameters:
+      - name: paths
+        description: "CSV files or directories to inspect."
+      - name: --pattern
+        description: "Glob-style pattern for recursive searches."
+      - name: --timestamp-column
+        description: "Column name used for timestamp gap statistics."
+      - name: --max-column-details
+        description: "Number of column-level NaN ratios to display."
+      - name: --fail-on-error
+        description: "Return a non-zero status if parsing fails."
+    container_image: ghcr.io/tradepulse/scripts:data-quality
+    estimated_runtime_seconds: 45
+    estimated_cost_usd: 0.05
+    tags:
+      - csv
+      - monitoring
+    input_schemas:
+      - kind: pandera
+        target: scripts.schemas:get_data_sanity_input_schema
+        description: "Expected structure for CSV inspection DataFrames."
+    output_artifacts:
+      - name: quality_report
+        path_template: reports/data_sanity/{date}/report.txt
+        description: "Plain text summary of the analysed CSV dataset."
+
+  - name: gen_synth_amm_data
+    description: "Generate synthetic AMM signals for tutorials and demos."
+    category: education
+    command:
+      - python
+      - scripts/gen_synth_amm_data.py
+    python_dependencies:
+      - numpy
+    parameters:
+      - name: --n
+        description: "Number of rows to generate (default 5000)."
+      - name: --seed
+        description: "Seed for the random number generator."
+    container_image: ghcr.io/tradepulse/scripts:tutorial
+    tags:
+      - tutorial
+      - sample-data
+    output_artifacts:
+      - name: amm_synth_csv
+        path_template: /mnt/data/amm_synth.csv
+        description: "Synthetic AMM time series exported as CSV."
+        schema:
+          kind: jsonschema
+          target: schemas/scripts/amm_synth_output.schema.json
+          description: "Column expectations for generated AMM data."
+
+  - name: resilient_data_sync
+    description: "Synchronise external datasets with retry and safety rails."
+    category: operations
+    command:
+      - bash
+      - scripts/resilient_data_sync.sh
+    parameters:
+      - name: --source
+        description: "Source identifier or URL to ingest from."
+        required: true
+      - name: --target
+        description: "Destination storage bucket or folder."
+        required: true
+      - name: --batch-size
+        description: "Chunk size to use when streaming records."
+      - name: --dry-run
+        description: "Preview operations without mutating state."
+    container_image: ghcr.io/tradepulse/scripts:sync
+    estimated_runtime_seconds: 300
+    estimated_cost_usd: 2.5
+    requires_confirmation: true
+    tags:
+      - production
+      - io
+    input_schemas:
+      - kind: jsonschema
+        target: schemas/scripts/resilient_sync_manifest.schema.json
+        description: "Expected manifest format for sync batches."
+    output_artifacts:
+      - name: sync_manifest
+        path_template: reports/sync/{timestamp}/manifest.json
+        description: "Record of files transferred during the synchronisation."
+
+  - name: tutorial_sample_data
+    description: "Guide new contributors through generating demo datasets."
+    category: education
+    command:
+      - python
+      - scripts/tutorial_sample_data.py
+    python_dependencies:
+      - pandas
+      - numpy
+    parameters:
+      - name: --output
+        description: "Destination directory for generated tutorial artefacts."
+      - name: --format
+        description: "Output format to materialise (csv or parquet)."
+    container_image: ghcr.io/tradepulse/scripts:tutorial
+    tags:
+      - tutorial
+      - onboarding
+    output_artifacts:
+      - name: tutorial_manifest
+        path_template: reports/tutorial/{timestamp}/manifest.json
+        description: "Manifest describing generated tutorial artefacts."

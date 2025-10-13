@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Synthetic AMM time series output",
+  "type": "object",
+  "required": ["columns", "row_count"],
+  "properties": {
+    "columns": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["x", "R", "kappa", "H"]
+      },
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "row_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "path": {
+      "type": "string"
+    }
+  }
+}
