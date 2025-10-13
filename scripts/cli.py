@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 from typing import Sequence
 
 from scripts.commands import CommandError
 from scripts.commands import base as command_base
 from scripts.runtime import (
-    apply_environment,
     configure_deterministic_runtime,
     configure_logging,
     parse_env_file,
@@ -70,7 +70,7 @@ def _load_environment(env_file: Path | None) -> None:
             continue
         env = parse_env_file(candidate)
         if env:
-            apply_environment(env.variables)
+            os.environ.update(env.variables)
             LOGGER.debug("Loaded environment overrides from %s", candidate)
             break
 
