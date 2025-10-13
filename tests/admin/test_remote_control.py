@@ -81,3 +81,19 @@ def test_kill_switch_reaffirmation_is_audited(remote_control_fixture: RemoteCont
     assert reaffirmation.event_type == "kill_switch_reaffirmed"
     assert reaffirmation.details["already_engaged"] is True
     assert reaffirmation.details["reason"] == "still engaged"
+
+
+def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() -> None:
+    risk_manager = RiskManager(RiskLimits())
+    facade = RiskManagerFacade(risk_manager)
+
+    initial_state = facade.engage_kill_switch("manual intervention required")
+    assert initial_state.engaged is True
+    assert initial_state.already_engaged is False
+    assert initial_state.reason == "manual intervention required"
+
+    reaffirmed = facade.engage_kill_switch("")
+    assert reaffirmed.engaged is True
+    assert reaffirmed.already_engaged is True
+    assert reaffirmed.reason == "manual intervention required"
+    assert risk_manager.kill_switch.reason == "manual intervention required"
