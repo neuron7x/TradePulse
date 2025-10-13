@@ -143,6 +143,16 @@ tests_dir = "tests"
 runner = "python -m pytest tests/unit tests/integration tests/property -q"
 use_coverage = true
 
+[tool.coverage.run]
+branch = true
+parallel = true
+source = ["core", "backtest", "execution"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = false
+
 [tool.ruff]
 line-length = 100
 select = ["E", "F", "W", "I"]

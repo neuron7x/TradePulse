@@ -59,14 +59,14 @@ Run the complete test suite:
 pytest tests/
 ```
 
-Run with coverage report:
+Run with branch coverage report:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=term-missing
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing
 ```
 
 Generate HTML coverage report:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=html
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=html
 # Open htmlcov/index.html in browser
 ```
 
@@ -163,11 +163,11 @@ Tests run automatically on every push and pull request via GitHub Actions.
 The testing automation is split across two workflows:
 
 - `.github/workflows/tests.yml` (per push / PR)
-  1. **Unit & Integration Tests**: Executed with coverage gates.
+  1. **Unit & Integration Tests**: Executed with branch coverage gates (line ≥ 90%, branch ≥ 90%).
   2. **Property-Based Tests**: Run with Hypothesis statistics enabled.
   3. **Fuzz Tests**: Replay deterministic fuzz corpora.
-  4. **Coverage Report**: Generated and uploaded to CI artifacts.
-  5. **Coverage Threshold**: Build fails if coverage `< 90%`.
+  4. **Coverage Report**: Generated and uploaded to CI artifacts, plus Codecov uploads and GitHub step summaries.
+  5. **Flaky Quarantine**: A dedicated job re-runs `@pytest.mark.flaky` tests with retries and publishes a manifest without blocking the main pipeline.
 - **`heavy-math.yml` (per PR, nightly)**
   1. Executes the heavy-math suites defined in `configs/quality/heavy_math_jobs.yaml`.
   2. Enforces CPU/memory quotas via workflow dispatch inputs.
@@ -185,18 +185,34 @@ The testing automation is split across two workflows:
 
 ### Coverage Enforcement
 
-The CI enforces coverage thresholds using `pytest-cov`:
+The CI enforces both line and branch coverage thresholds using `pytest-cov`:
 
 ```bash
 pytest --cov=core --cov=backtest --cov=execution \
+       --cov-branch \
        --cov-report=term-missing \
        --cov-fail-under=90
 ```
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-fail-under=90
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-fail-under=90
 ```
+
+Additionally, the CI workflow parses `coverage.xml` and fails early if total branch coverage drops below 90%.
+
+### Flaky Test Quarantine
+
+Mark unstable scenarios with `@pytest.mark.flaky`. The quarantine job in CI and local helpers allow you to exercise them without
+penalising the main coverage gates:
+
+```bash
+pytest tests/ -m flaky --reruns=2 --reruns-delay=2 \
+  --flaky-report=reports/flaky-tests.json
+```
+
+The `--flaky-report` flag writes a JSON manifest describing reruns, outcomes, and marker metadata, making it easy to monitor
+behaviour over time.
 
 ### Mutation Testing
 
