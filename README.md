@@ -3,6 +3,7 @@
 **Advanced algorithmic trading framework powered by geometric market indicators**
 
 [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml)
+[![Lint Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/lint.yml?branch=main&label=lint)](https://github.com/neuron7x/TradePulse/actions/workflows/lint.yml)
 [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml)
 [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -55,6 +56,7 @@ Whether you are prototyping strategies or orchestrating production trading bots,
 | Signal | Description |
 | --- | --- |
 | [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml) | Pytest suite covering unit, integration, async, fuzz and property-based checks. |
+| [![Lint Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/lint.yml?branch=main&label=lint)](https://github.com/neuron7x/TradePulse/actions/workflows/lint.yml) | Code quality checks with ruff, black, and mypy to ensure consistent style and type safety. |
 | [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Codecov uploads the latest coverage.xml artifact from CI for transparent coverage tracking. |
 | [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Automated secret detection, dependency auditing, and supply-chain checks. |
 

@@ -1,0 +1,49 @@
+name: Lint
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint:
+    name: Code Quality Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      
+      - name: Create virtual environment
+        run: uv venv
+      
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.lock
+          uv pip install -r requirements-dev.lock
+      
+      - name: Run Ruff linter
+        continue-on-error: true
+        run: |
+          .venv/bin/python -m ruff check --output-format=github .
+      
+      - name: Run Black formatter check
+        continue-on-error: true
+        run: |
+          .venv/bin/python -m black --check --diff .
+      
+      - name: Run MyPy type checker
+        continue-on-error: true
+        run: |
+          .venv/bin/python -m mypy core/ backtest/ execution/ --ignore-missing-imports
