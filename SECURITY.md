@@ -149,9 +149,20 @@ def process_price(price):
 pip install -U -r requirements.lock
 
 # Check for known vulnerabilities
-pip-audit
 
-# Or use safety
+```bash
+make security-audit
+```
+
+The helper script wraps `pip-audit` with consistent flags, emits a human-readable summary,
+and optionally writes a JSON report (see `python scripts/dependency_audit.py --help`). Use
+`--include-dev` to cover development tooling as well.
+
+```bash
+# Direct invocation if you prefer to call pip-audit yourself
+pip-audit -r requirements.txt --no-deps
+
+# Or use safety as a secondary check
 safety check
 ```
 
