@@ -41,10 +41,14 @@ def test_kyles_lambda_returns_zero_for_degenerate_volume() -> None:
 def test_hasbrouck_information_impulse_handles_signed_root() -> None:
     returns = [0.05, -0.02, 0.03]
     signed_volume = [9.0, 0.0, -16.0]
-    transformed = np.sign(signed_volume) * np.sqrt(np.abs(signed_volume))
+    signed_volume = np.asarray(signed_volume, dtype=float)
+    centered_volume = signed_volume - np.mean(signed_volume)
+    transformed = np.sign(centered_volume) * np.sqrt(np.abs(centered_volume))
     transformed = transformed - np.mean(transformed)
-    centered_returns = np.asarray(returns) - np.mean(returns)
-    expected = float(np.dot(transformed, centered_returns) / np.dot(transformed, transformed))
+    centered_returns = np.asarray(returns, dtype=float) - np.mean(returns)
+    transformed_norm = np.linalg.norm(transformed)
+    returns_norm = np.linalg.norm(centered_returns)
+    expected = float(np.dot(transformed, centered_returns) / (transformed_norm * returns_norm))
     assert hasbrouck_information_impulse(returns, signed_volume) == pytest.approx(expected)
 
 

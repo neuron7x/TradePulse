@@ -2,6 +2,7 @@
 """Transformation invariants for microstructure metrics."""
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 try:
@@ -12,12 +13,42 @@ except ImportError:  # pragma: no cover - optional dependency
 from core.metrics.microstructure import hasbrouck_information_impulse, kyles_lambda, queue_imbalance
 
 
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_hasbrouck_transformation_invariants(seed: int) -> None:
+    """Regression example showing Hasbrouck invariance for random draws."""
+
+    rng = np.random.default_rng(seed)
+    returns = rng.normal(size=128)
+    signed_volume = rng.normal(size=128)
+
+    base = hasbrouck_information_impulse(returns, signed_volume)
+
+    shifted = hasbrouck_information_impulse(returns + 5.0, signed_volume - 3.0)
+    assert shifted == pytest.approx(base, rel=1e-9, abs=1e-9)
+
+    scaled = hasbrouck_information_impulse(returns * 2.5, signed_volume * 4.0)
+    assert scaled == pytest.approx(base, rel=1e-9, abs=1e-9)
+
+
 finite_floats = st.floats(
     min_value=-1_000.0,
     max_value=1_000.0,
     allow_nan=False,
     allow_infinity=False,
 )
+
+_EPS = 1e-12
+
+
+def _centered(values: list[float] | tuple[float, ...]) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    return arr - np.mean(arr)
+
+
+def _centered_signed_sqrt(values: list[float] | tuple[float, ...]) -> np.ndarray:
+    arr = np.asarray(values, dtype=float)
+    transformed = np.sign(arr) * np.sqrt(np.abs(arr))
+    return transformed - np.mean(transformed)
 
 
 @st.composite
@@ -68,6 +99,7 @@ def test_kyles_lambda_transformation_invariants(
     returns, volume = paired
     assume(any(v != volume[0] for v in volume[1:]))
     assume(any(r != returns[0] for r in returns[1:]))
+    assume(np.linalg.norm(_centered(volume)) > _EPS)
 
     base = kyles_lambda(returns, volume)
     shifted = kyles_lambda([r + shift_r for r in returns], [q + shift_q for q in volume])
@@ -92,11 +124,13 @@ def test_hasbrouck_expected_transform_behaviour(
     scale_r: float,
     scale_q: float,
 ) -> None:
-    """Hasbrouck impulse respects centring, scaling and sign expectations."""
+    """Hasbrouck impulse is invariant to affine rescaling of inputs."""
 
     returns, volume = paired
     assume(any(v != volume[0] for v in volume[1:]))
     assume(any(r != returns[0] for r in returns[1:]))
+    assume(np.linalg.norm(_centered(returns)) > _EPS)
+    assume(np.linalg.norm(_centered_signed_sqrt(volume)) > _EPS)
 
     base = hasbrouck_information_impulse(returns, volume)
 
@@ -104,17 +138,24 @@ def test_hasbrouck_expected_transform_behaviour(
         [r + shift_r for r in returns],
         volume,
     )
+    assume(np.linalg.norm(_centered([r + shift_r for r in returns])) > _EPS)
+
     scaled_returns = hasbrouck_information_impulse(
         [scale_r * r for r in returns],
         volume,
     )
+    assume(np.linalg.norm(_centered([scale_r * r for r in returns])) > _EPS)
+
     scaled_volume = hasbrouck_information_impulse(
         returns,
         [scale_q * q for q in volume],
     )
+    assume(
+        np.linalg.norm(_centered_signed_sqrt([scale_q * q for q in volume])) > _EPS
+    )
     flipped = hasbrouck_information_impulse([-r for r in returns], [-q for q in volume])
 
     assert shifted_returns == pytest.approx(base, rel=1e-9, abs=1e-9)
-    assert scaled_returns == pytest.approx(base * scale_r, rel=1e-9, abs=1e-9)
-    assert scaled_volume == pytest.approx(base / (scale_q**0.5), rel=1e-9, abs=1e-9)
+    assert scaled_returns == pytest.approx(base, rel=1e-9, abs=1e-9)
+    assert scaled_volume == pytest.approx(base, rel=1e-9, abs=1e-9)
     assert flipped == pytest.approx(base, rel=1e-9, abs=1e-9)
