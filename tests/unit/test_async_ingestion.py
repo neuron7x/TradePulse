@@ -172,16 +172,46 @@ class TestMergeStreams:
         async def empty_stream():
             return
             yield  # Make it a generator
-            
+
         stream1 = self.generate_ticks("BTC", 2)
         stream2 = empty_stream()
-        
+
         ticks = []
         async for tick in merge_streams(stream1, stream2):
             ticks.append(tick)
-            
+
         assert len(ticks) == 2
         assert all(tick.symbol == "BTC" for tick in ticks)
+
+    @pytest.mark.asyncio
+    async def test_merge_streams_handles_failures(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Failed streams should be logged and skipped while others continue."""
+
+        async def flaky_stream():
+            yield Ticker.create(
+                symbol="FLAKY",
+                venue="TEST",
+                price=101.0,
+                timestamp=datetime.fromtimestamp(0, tz=timezone.utc),
+                volume=1_000,
+            )
+            raise ConnectionError("network down")
+
+        stream_ok = self.generate_ticks("BTC", 3, delay_ms=1)
+
+        caplog.set_level("WARNING")
+        collected: list[Ticker] = []
+
+        async for tick in merge_streams(flaky_stream(), stream_ok):
+            collected.append(tick)
+
+        symbols = [tick.symbol for tick in collected]
+        assert symbols.count("BTC") == 3
+        assert "FLAKY" in symbols
+        assert any(
+            getattr(record, "extra_fields", {}).get("error") == "network down"
+            for record in caplog.records
+        )
 
 
 class TestAsyncWebSocketStream:
