@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 try:
-    from hypothesis import given, strategies as st
+    from hypothesis import given, settings, strategies as st
 except ImportError:  # pragma: no cover - optional dependency
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
