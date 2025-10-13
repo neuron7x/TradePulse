@@ -11,6 +11,7 @@ if not hasattr(_np, "float_"):
 from .catalog import normalize_symbol, normalize_venue
 from .feature_catalog import CatalogEntry, FeatureCatalog
 from .feature_store import FeatureStoreIntegrityError, IntegrityReport, OnlineFeatureStore
+from .checkpoint_store import JsonCheckpointStore
 from .materialization import (
     Checkpoint,
     CheckpointStore,
@@ -77,6 +78,7 @@ __all__ = [
     "FeatureCatalog",
     "FeatureStoreIntegrityError",
     "IntegrityReport",
+    "JsonCheckpointStore",
     "OnlineFeatureStore",
     "Checkpoint",
     "CheckpointStore",

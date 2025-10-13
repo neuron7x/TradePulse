@@ -1,0 +1,20 @@
+name: sample_materialize_job
+description: Example materialization configuration
+tags:
+  - materialize
+metadata:
+  owner: data-team
+source:
+  kind: csv
+  path: data/features/online_payload.csv
+feature_view: features.demo
+store_root: data/online
+checkpoint_path: data/checkpoints/materialize.json
+microbatch_size: 500
+dedup_keys:
+  - entity_id
+  - ts
+catalog:
+  path: data/feature_catalog.json
+versioning:
+  backend: none

@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 from typing import Dict, Any
 
+import numpy as np
 import pandas as pd
 import pytest
 import yaml
@@ -39,7 +40,16 @@ def _write_yaml(path: Path, data: Dict[str, Any]) -> None:
 
 def test_cli_generates_templates(tmp_path: Path) -> None:
     runner = CliRunner()
-    for command in ("ingest", "backtest", "optimize", "exec", "report"):
+    for command in (
+        "ingest",
+        "materialize",
+        "backtest",
+        "train",
+        "optimize",
+        "exec",
+        "serve",
+        "report",
+    ):
         destination = tmp_path / f"{command}.yaml"
         result = runner.invoke(cli, [command, "--generate-config", "--template-output", str(destination)])
         assert result.exit_code == 0, result.output
@@ -53,6 +63,8 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     repo_path = tmp_path / "repo"
     repo_path.mkdir()
 
+    runner = CliRunner()
+
     # Ingest
     ingest_cfg_path = tmp_path / "ingest.yaml"
     manager.render("ingest", ingest_cfg_path)
@@ -64,11 +76,40 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     ingest_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
     _write_yaml(ingest_cfg_path, ingest_cfg)
 
-    runner = CliRunner()
     result = runner.invoke(cli, ["ingest", "--config", str(ingest_cfg_path)])
     assert result.exit_code == 0, result.output
     assert ingest_destination.exists()
     assert (ingest_destination.with_suffix(".csv.version.json")).exists()
+
+    # Materialize
+    materialize_cfg_path = tmp_path / "materialize.yaml"
+    manager.render("materialize", materialize_cfg_path)
+    materialize_cfg = _load_yaml(materialize_cfg_path)
+    materialize_payload = pd.DataFrame(
+        {
+            "entity_id": ["asset-1"] * 6,
+            "ts": pd.date_range("2024-01-01", periods=6, freq="h"),
+            "feature": np.linspace(0.0, 1.0, 6),
+        }
+    )
+    materialize_source = tmp_path / "materialize.csv"
+    materialize_payload.to_csv(materialize_source, index=False)
+    materialize_cfg["source"]["path"] = str(materialize_source)
+    store_root = tmp_path / "online_store"
+    materialize_cfg["store_root"] = str(store_root)
+    materialize_cfg["checkpoint_path"] = str(tmp_path / "materialize_checkpoints.json")
+    materialize_cfg["feature_view"] = "features.demo"
+    materialize_cfg["catalog"] = {"path": str(catalog_path)}
+    materialize_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
+    _write_yaml(materialize_cfg_path, materialize_cfg)
+
+    result = runner.invoke(cli, ["materialize", "--config", str(materialize_cfg_path)])
+    assert result.exit_code == 0, result.output
+    safe_name = materialize_cfg["feature_view"].replace("/", "__").replace(".", "__")
+    candidates = list(Path(materialize_cfg["store_root"]).glob(f"{safe_name}.*"))
+    assert candidates, "materialize command did not create a persisted artifact"
+    materialized_path = candidates[0]
+    assert materialized_path.exists()
 
     # Backtest
     backtest_cfg_path = tmp_path / "backtest.yaml"
@@ -118,12 +159,60 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     assert optimize_payload["best_params"] is not None
     assert optimize_payload["trials"]
 
+    # Train
+    train_cfg_path = tmp_path / "train.yaml"
+    manager.render("train", train_cfg_path)
+    train_cfg = _load_yaml(train_cfg_path)
+    train_source = tmp_path / "train.csv"
+    price_frame = pd.read_csv(sample_prices)
+    train_frame = pd.DataFrame(
+        {
+            "signal": price_frame["price"].pct_change().fillna(0.0),
+            "reward": price_frame["price"].diff().fillna(0.0),
+            "kappa": np.linspace(0.0, 1.0, len(price_frame)),
+        }
+    )
+    train_frame.to_csv(train_source, index=False)
+    train_cfg["data"]["path"] = str(train_source)
+    train_results = tmp_path / "train.json"
+    train_cfg["results_path"] = str(train_results)
+    train_cfg["catalog"] = {"path": str(catalog_path)}
+    train_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
+    _write_yaml(train_cfg_path, train_cfg)
+
+    result = runner.invoke(cli, ["train", "--config", str(train_cfg_path)])
+    assert result.exit_code == 0, result.output
+    train_payload = json.loads(train_results.read_text())
+    assert train_payload["best_params"]
+    assert train_payload["records"] == len(train_frame)
+
+    # Serve
+    serve_cfg_path = tmp_path / "serve.yaml"
+    manager.render("serve", serve_cfg_path)
+    serve_cfg = _load_yaml(serve_cfg_path)
+    serve_cfg["data"]["path"] = str(sample_prices)
+    serve_results = tmp_path / "serve.json"
+    serve_cfg["results_path"] = str(serve_results)
+    serve_cfg["catalog"] = {"path": str(catalog_path)}
+    serve_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
+    _write_yaml(serve_cfg_path, serve_cfg)
+
+    result = runner.invoke(cli, ["serve", "--config", str(serve_cfg_path)])
+    assert result.exit_code == 0, result.output
+    serve_payload = json.loads(serve_results.read_text())
+    assert "latest_signal" in serve_payload
+
     # Report
     report_cfg_path = tmp_path / "report.yaml"
     manager.render("report", report_cfg_path)
     report_cfg = _load_yaml(report_cfg_path)
     report_output = tmp_path / "report.md"
-    report_cfg["inputs"] = [str(backtest_results), str(exec_results)]
+    report_cfg["inputs"] = [
+        str(backtest_results),
+        str(exec_results),
+        str(train_results),
+        str(serve_results),
+    ]
     report_cfg["output_path"] = str(report_output)
     report_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
     _write_yaml(report_cfg_path, report_cfg)
@@ -136,7 +225,7 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     assert "exec" in lower_text
 
     catalog = json.loads(catalog_path.read_text())
-    assert len(catalog["artifacts"]) >= 3
+    assert len(catalog["artifacts"]) >= 6
 
 
 def test_backtest_outputs_jsonl(tmp_path: Path, sample_prices: Path) -> None:

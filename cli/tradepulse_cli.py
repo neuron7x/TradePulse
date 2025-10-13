@@ -1,4 +1,4 @@
-"""TradePulse CLI exposing ingest/backtest/optimize/exec/report workflows."""
+"""TradePulse CLI exposing ingest/materialize/backtest/train/serve/report workflows."""
 
 from __future__ import annotations
 
@@ -9,9 +9,10 @@ import io
 import json
 import sys
 import time
+from dataclasses import asdict
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple, Type
 
 import click
 import numpy as np
@@ -27,13 +28,21 @@ from core.config.cli_models import (
     BacktestConfig,
     ExecConfig,
     IngestConfig,
+    MaterializeConfig,
     OptimizeConfig,
     ReportConfig,
+    ServeConfig,
     StrategyConfig,
+    TrainConfig,
 )
 from core.config.template_manager import ConfigTemplateManager
+from core.data.checkpoint_store import JsonCheckpointStore
 from core.data.feature_catalog import FeatureCatalog
+from core.data.feature_store import OnlineFeatureStore
+from core.data.materialization import StreamMaterializer
 from core.data.versioning import DataVersionManager
+from core.neuro.calibration import CalibConfig, calibrate_random
+from core.neuro.amm import AdaptiveMarketMind, AMMConfig
 from core.reporting import generate_markdown_report, render_markdown_to_html, render_markdown_to_pdf
 
 DEFAULT_TEMPLATES_DIR = Path("configs/templates")
@@ -134,19 +143,7 @@ def _load_prices(cfg: IngestConfig | BacktestConfig | ExecConfig) -> pd.DataFram
         data_cfg = getattr(cfg, "data", None)
     if data_cfg is None:
         raise ConfigError("Configuration does not define a data source")
-    if data_cfg.kind not in {"csv", "parquet"}:
-        raise ConfigError(f"Unsupported data source '{data_cfg.kind}'")
-    if not Path(data_cfg.path).exists():
-        raise ArtifactError(f"Data source {data_cfg.path} does not exist")
-    if data_cfg.kind == "csv":
-        frame = pd.read_csv(data_cfg.path)
-    else:
-        try:
-            frame = read_dataframe(Path(data_cfg.path), allow_json_fallback=False)
-        except MissingParquetDependencyError as exc:
-            raise ArtifactError(
-                "Parquet sources require either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
-            ) from exc
+    frame = _read_source_frame(data_cfg)
     if data_cfg.timestamp_field not in frame.columns:
         raise ConfigError("Timestamp column missing from data source")
     if data_cfg.value_field not in frame.columns:
@@ -191,6 +188,36 @@ def _write_json(destination: Path, payload: Dict[str, Any], *, command: str) -> 
 def _write_text(destination: Path, text: str, *, command: str) -> str:
     digest, _ = _write_bytes(destination, text.encode("utf-8"), command=command)
     return digest
+
+
+def _read_source_frame(source_cfg: Any, *, allow_json_fallback: bool = False) -> pd.DataFrame:
+    if not hasattr(source_cfg, "kind") or not hasattr(source_cfg, "path"):
+        raise ConfigError("Source configuration must define 'kind' and 'path'")
+    if source_cfg.kind not in {"csv", "parquet"}:
+        raise ConfigError(f"Unsupported data source '{source_cfg.kind}'")
+    path = Path(source_cfg.path)
+    if not path.exists():
+        raise ArtifactError(f"Data source {path} does not exist")
+    if source_cfg.kind == "csv":
+        frame = pd.read_csv(path)
+    else:
+        try:
+            frame = read_dataframe(path, allow_json_fallback=allow_json_fallback)
+        except MissingParquetDependencyError as exc:
+            raise ArtifactError(
+                "Parquet sources require either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
+    return frame
+
+
+def _resolve_feature_artifact_path(store_root: Path, feature_view: str) -> Path:
+    safe_name = feature_view.replace("/", "__").replace(".", "__")
+    base = Path(store_root) / safe_name
+    for suffix in (".parquet", ".json"):
+        candidate = base.with_suffix(suffix)
+        if candidate.exists():
+            return candidate
+    raise ArtifactError(f"No persisted artifact found for feature view '{feature_view}' at {base}.*")
 
 
 @click.group()
@@ -276,6 +303,85 @@ def ingest(
     click.echo(f"[{command}] completed records={record_count} dest={cfg.destination} sha256={digest}")
 
 
+@cli.command()
+@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to materialize YAML config.")
+@click.option("--generate-config", is_flag=True, help="Write the default materialize config template.")
+@click.option(
+    "--template-output",
+    type=click.Path(path_type=Path),
+    help="Destination for generated template.",
+)
+@click.option(
+    "--output-format",
+    "--output",
+    type=click.Choice(["table", "jsonl", "parquet"]),
+    help="Render results in the requested format in addition to the persisted artifact.",
+)
+@click.pass_context
+def materialize(
+    ctx: click.Context,
+    config: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+    output_format: str | None,
+) -> None:
+    """Materialise features into the online feature store."""
+
+    command = "materialize"
+    manager = _get_manager(ctx)
+    if generate_config:
+        if template_output is None:
+            raise click.UsageError("--template-output must be provided when generating a template")
+        manager.render("materialize", template_output)
+        click.echo(f"[{command}] template written to {template_output}")
+        return
+    if config is None:
+        raise click.UsageError("--config is required when not generating a template")
+
+    with step_logger(command, "load config"):
+        cfg = manager.load_config(config, MaterializeConfig)
+    with step_logger(command, "load payload"):
+        frame = _read_source_frame(cfg.source, allow_json_fallback=True)
+    with step_logger(command, "materialize stream"):
+        store = OnlineFeatureStore(cfg.store_root)
+        try:
+            checkpoint_store = JsonCheckpointStore(cfg.checkpoint_path)
+        except ValueError as exc:
+            raise ArtifactError(str(exc)) from exc
+
+        materializer = StreamMaterializer(
+            lambda feature_view, batch: store.sync(feature_view, batch, mode="append", validate=True),
+            checkpoint_store,
+            microbatch_size=cfg.microbatch_size,
+            dedup_keys=tuple(cfg.dedup_keys),
+            backfill_loader=lambda feature_view: store.load(feature_view),
+        )
+        materializer.materialize(cfg.feature_view, frame)
+        artifact_path = _resolve_feature_artifact_path(cfg.store_root, cfg.feature_view)
+        digest = _existing_digest(artifact_path)
+        if digest is None:
+            raise ArtifactError(f"Failed to persist artifact for feature view '{cfg.feature_view}'")
+        stored_frame = store.load(cfg.feature_view)
+        row_count = int(stored_frame.shape[0])
+    with step_logger(command, "register catalog"):
+        catalog = FeatureCatalog(cfg.catalog)
+        entry = catalog.register(
+            cfg.name,
+            artifact_path,
+            config=cfg,
+            lineage=[str(cfg.source.path)],
+            metadata=cfg.metadata,
+        )
+        click.echo(f"[{command}] • catalog checksum={entry.checksum}")
+    with step_logger(command, "snapshot version"):
+        version_mgr = DataVersionManager(cfg.versioning)
+        version_mgr.snapshot(artifact_path, metadata={"rows": row_count})
+    _emit_materialize_output(cfg, row_count, artifact_path, output_format, command=command)
+    click.echo(
+        f"[{command}] completed feature_view={cfg.feature_view} rows={row_count} artifact={artifact_path} sha256={digest}"
+    )
+
+
 def _run_backtest(cfg: BacktestConfig) -> Dict[str, Any]:
     frame = _load_prices(cfg)
     prices = frame[cfg.data.value_field].to_numpy(dtype=float)
@@ -324,6 +430,42 @@ def _emit_backtest_output(
             }
         )
         parquet_path = cfg.results_path.with_suffix(".parquet")
+        _write_frame(frame, parquet_path, command=command)
+        return
+    raise ConfigError(f"Unsupported output format '{output_format}'")
+
+
+def _emit_materialize_output(
+    cfg: MaterializeConfig,
+    row_count: int,
+    artifact_path: Path,
+    output_format: str | None,
+    *,
+    command: str,
+) -> None:
+    if output_format is None:
+        return
+    if output_format == "table":
+        click.echo("metric | value")
+        click.echo("------ | -----")
+        click.echo(f"feature_view | {cfg.feature_view}")
+        click.echo(f"rows | {row_count}")
+        click.echo(f"artifact | {artifact_path}")
+        return
+    if output_format == "jsonl":
+        click.echo(json.dumps({"metric": "feature_view", "value": cfg.feature_view}))
+        click.echo(json.dumps({"metric": "rows", "value": row_count}))
+        click.echo(json.dumps({"metric": "artifact", "value": str(artifact_path)}))
+        return
+    if output_format == "parquet":
+        frame = pd.DataFrame(
+            [
+                {"metric": "feature_view", "value": cfg.feature_view},
+                {"metric": "rows", "value": row_count},
+                {"metric": "artifact", "value": str(artifact_path)},
+            ]
+        )
+        parquet_path = artifact_path.with_suffix(".summary.parquet")
         _write_frame(frame, parquet_path, command=command)
         return
     raise ConfigError(f"Unsupported output format '{output_format}'")
@@ -498,7 +640,150 @@ def optimize(
     click.echo(f"[{command}] completed trials={len(trials)} best_score={best_score} sha256={digest}")
 
 
-def _emit_exec_output(
+@cli.command()
+@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to train YAML config.")
+@click.option("--generate-config", is_flag=True, help="Write the default train config template.")
+@click.option(
+    "--template-output",
+    type=click.Path(path_type=Path),
+    help="Destination for generated template.",
+)
+@click.option(
+    "--output-format",
+    "--output",
+    type=click.Choice(["table", "jsonl", "parquet"]),
+    help="Render results in the requested format in addition to the persisted artifact.",
+)
+@click.pass_context
+def train(
+    ctx: click.Context,
+    config: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+    output_format: str | None,
+) -> None:
+    """Calibrate the Adaptive Market Mind model on historical data."""
+
+    command = "train"
+    manager = _get_manager(ctx)
+    if generate_config:
+        if template_output is None:
+            raise click.UsageError("--template-output must be provided when generating a template")
+        manager.render("train", template_output)
+        click.echo(f"[{command}] template written to {template_output}")
+        return
+    if config is None:
+        raise click.UsageError("--config is required when not generating a template")
+
+    with step_logger(command, "load config"):
+        cfg = manager.load_config(config, TrainConfig)
+    with step_logger(command, "load dataset"):
+        frame = _read_source_frame(cfg.data, allow_json_fallback=True)
+        required = {cfg.data.signal_field, cfg.data.reward_field, cfg.data.kappa_field}
+        missing = required - set(frame.columns)
+        if missing:
+            raise ConfigError(f"Training dataset missing columns: {sorted(missing)}")
+        if frame.empty:
+            raise ConfigError("Training dataset must contain at least one row")
+        signal = frame[cfg.data.signal_field].to_numpy(dtype=float)
+        reward = frame[cfg.data.reward_field].to_numpy(dtype=float)
+        kappa = frame[cfg.data.kappa_field].to_numpy(dtype=float)
+    with step_logger(command, "calibrate model"):
+        calib_cfg = CalibConfig(**cfg.calibration.model_dump())
+        best = calibrate_random(signal, reward, kappa, calib_cfg)
+        score = _evaluate_calibration(best, signal, reward, kappa)
+        result = {
+            "best_params": asdict(best),
+            "score": score,
+            "records": int(frame.shape[0]),
+            "trials": cfg.calibration.iters,
+        }
+    with step_logger(command, "persist results"):
+        digest = _write_json(cfg.results_path, result, command=command)
+    with step_logger(command, "register catalog"):
+        catalog = FeatureCatalog(cfg.catalog)
+        entry = catalog.register(
+            cfg.name,
+            cfg.results_path,
+            config=cfg,
+            lineage=[str(cfg.data.path)],
+            metadata=cfg.metadata,
+        )
+        click.echo(f"[{command}] • catalog checksum={entry.checksum}")
+    with step_logger(command, "snapshot version"):
+        version_mgr = DataVersionManager(cfg.versioning)
+        version_mgr.snapshot(cfg.results_path, metadata={"score": score, "records": int(frame.shape[0])})
+    _emit_train_output(cfg, result, output_format, command=command)
+    click.echo(f"[{command}] completed score={score} trials={cfg.calibration.iters} sha256={digest}")
+
+
+def _evaluate_calibration(
+    cfg: AMMConfig,
+    signal: np.ndarray,
+    reward: np.ndarray,
+    kappa: np.ndarray,
+) -> float:
+    if signal.size == 0:
+        return 0.0
+    amm = AdaptiveMarketMind(cfg)
+    pulses = np.zeros(signal.size, dtype=float)
+    precision = np.zeros(signal.size, dtype=float)
+    errors = np.zeros(signal.size, dtype=float)
+    for idx in range(signal.size):
+        output = amm.update(float(signal[idx]), float(reward[idx]), float(kappa[idx]))
+        pulses[idx] = float(output["amm_pulse"])
+        precision[idx] = float(output["amm_precision"])
+        errors[idx] = abs(float(output["pe"]))
+    try:
+        corr = float(np.corrcoef(errors, pulses)[0, 1])
+    except (FloatingPointError, ValueError):  # pragma: no cover - defensive
+        corr = 0.0
+    avg_precision = float(np.mean(np.clip(precision, 0.01, 100.0))) if precision.size else 0.0
+    score = corr * avg_precision
+    if np.isnan(score):
+        return 0.0
+    return score
+
+
+def _emit_train_output(
+    cfg: TrainConfig,
+    result: Dict[str, Any],
+    output_format: str | None,
+    *,
+    command: str,
+) -> None:
+    if output_format is None:
+        return
+    if output_format == "table":
+        click.echo("metric | value")
+        click.echo("------ | -----")
+        click.echo(f"score | {result['score']}")
+        click.echo(f"records | {result['records']}")
+        click.echo(f"trials | {result['trials']}")
+        for key, value in result["best_params"].items():
+            click.echo(f"param:{key} | {value}")
+        return
+    if output_format == "jsonl":
+        click.echo(json.dumps({"metric": "score", "value": result["score"]}))
+        click.echo(json.dumps({"metric": "records", "value": result["records"]}))
+        click.echo(json.dumps({"metric": "trials", "value": result["trials"]}))
+        click.echo(json.dumps({"metric": "best_params", "value": result["best_params"]}))
+        return
+    if output_format == "parquet":
+        rows = [
+            {"metric": "score", "value": result["score"]},
+            {"metric": "records", "value": result["records"]},
+            {"metric": "trials", "value": result["trials"]},
+        ]
+        rows.extend({"metric": f"param:{key}", "value": value} for key, value in result["best_params"].items())
+        frame = pd.DataFrame(rows)
+        parquet_path = cfg.results_path.with_suffix(".parquet")
+        _write_frame(frame, parquet_path, command=command)
+        return
+    raise ConfigError(f"Unsupported output format '{output_format}'")
+
+
+def _emit_signal_output(
     cfg: ExecConfig,
     result: Dict[str, Any],
     signals: np.ndarray,
@@ -526,6 +811,59 @@ def _emit_exec_output(
     raise ConfigError(f"Unsupported output format '{output_format}'")
 
 
+def _run_signal_command(
+    ctx: click.Context,
+    *,
+    command: str,
+    template_name: str,
+    config_path: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+    output_format: str | None,
+    config_model: Type[ExecConfig],
+) -> None:
+    manager = _get_manager(ctx)
+    if generate_config:
+        if template_output is None:
+            raise click.UsageError("--template-output must be provided when generating a template")
+        manager.render(template_name, template_output)
+        click.echo(f"[{command}] template written to {template_output}")
+        return
+    if config_path is None:
+        raise click.UsageError("--config is required when not generating a template")
+
+    with step_logger(command, "load config"):
+        cfg = manager.load_config(config_path, config_model)
+    with step_logger(command, "load data"):
+        frame = _load_prices(cfg)
+        prices = frame[cfg.data.value_field].to_numpy(dtype=float)
+    with step_logger(command, "evaluate strategy"):
+        strategy = _resolve_strategy(cfg.strategy)
+        signals = strategy(prices)
+    if signals.size == 0:
+        raise ComputeError("Strategy must emit at least one signal")
+
+    latest = float(signals[-1])
+    result = {"latest_signal": latest, "count": int(signals.size)}
+    with step_logger(command, "persist results"):
+        digest = _write_json(cfg.results_path, result, command=command)
+    with step_logger(command, "register catalog"):
+        catalog = FeatureCatalog(cfg.catalog)
+        entry = catalog.register(
+            cfg.name,
+            cfg.results_path,
+            config=cfg,
+            lineage=[str(cfg.data.path)],
+            metadata=cfg.metadata,
+        )
+        click.echo(f"[{command}] • catalog checksum={entry.checksum}")
+    with step_logger(command, "snapshot version"):
+        version_mgr = DataVersionManager(cfg.versioning)
+        version_mgr.snapshot(cfg.results_path, metadata=result)
+    _emit_signal_output(cfg, result, signals, output_format, command=command)
+    click.echo(f"[{command}] completed latest_signal={latest} sha256={digest}")
+
+
 @cli.command()
 @click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to exec YAML config.")
 @click.option("--generate-config", is_flag=True, help="Write the default exec config template.")
@@ -550,44 +888,52 @@ def exec(  # noqa: A001
 ) -> None:
     """Evaluate the latest signal and persist it to disk."""
 
-    command = "exec"
-    manager = _get_manager(ctx)
-    if generate_config:
-        if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
-        manager.render("exec", template_output)
-        click.echo(f"[{command}] template written to {template_output}")
-        return
-    if config is None:
-        raise click.UsageError("--config is required when not generating a template")
+    _run_signal_command(
+        ctx,
+        command="exec",
+        template_name="exec",
+        config_path=config,
+        generate_config=generate_config,
+        template_output=template_output,
+        output_format=output_format,
+        config_model=ExecConfig,
+    )
 
-    with step_logger(command, "load config"):
-        cfg = manager.load_config(config, ExecConfig)
-    with step_logger(command, "load data"):
-        frame = _load_prices(cfg)
-        prices = frame[cfg.data.value_field].to_numpy(dtype=float)
-    with step_logger(command, "evaluate strategy"):
-        strategy = _resolve_strategy(cfg.strategy)
-        signals = strategy(prices)
-    latest = float(signals[-1])
-    result = {"latest_signal": latest, "count": int(signals.size)}
-    with step_logger(command, "persist results"):
-        digest = _write_json(cfg.results_path, result, command=command)
-    with step_logger(command, "register catalog"):
-        catalog = FeatureCatalog(cfg.catalog)
-        entry = catalog.register(
-            cfg.name,
-            cfg.results_path,
-            config=cfg,
-            lineage=[str(cfg.data.path)],
-            metadata=cfg.metadata,
-        )
-        click.echo(f"[{command}] • catalog checksum={entry.checksum}")
-    with step_logger(command, "snapshot version"):
-        version_mgr = DataVersionManager(cfg.versioning)
-        version_mgr.snapshot(cfg.results_path, metadata=result)
-    _emit_exec_output(cfg, result, signals, output_format, command=command)
-    click.echo(f"[{command}] completed latest_signal={latest} sha256={digest}")
+
+@cli.command()
+@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to serve YAML config.")
+@click.option("--generate-config", is_flag=True, help="Write the default serve config template.")
+@click.option(
+    "--template-output",
+    type=click.Path(path_type=Path),
+    help="Destination for generated template.",
+)
+@click.option(
+    "--output-format",
+    "--output",
+    type=click.Choice(["table", "jsonl", "parquet"]),
+    help="Render results in the requested format in addition to the persisted artifact.",
+)
+@click.pass_context
+def serve(
+    ctx: click.Context,
+    config: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+    output_format: str | None,
+) -> None:
+    """Produce the latest trading signal for downstream consumers."""
+
+    _run_signal_command(
+        ctx,
+        command="serve",
+        template_name="serve",
+        config_path=config,
+        generate_config=generate_config,
+        template_output=template_output,
+        output_format=output_format,
+        config_model=ServeConfig,
+    )
 
 
 def _emit_report_output(

@@ -1,0 +1,27 @@
+name: sample_train_job
+description: Example training configuration
+tags:
+  - train
+metadata:
+  owner: research
+data:
+  kind: csv
+  path: data/training/signals.csv
+  signal_field: signal
+  reward_field: reward
+  kappa_field: kappa
+results_path: reports/train.json
+calibration:
+  iters: 200
+  seed: 7
+  ema_span: [8, 96]
+  vol_lambda: [0.86, 0.98]
+  alpha: [0.2, 5.0]
+  beta: [0.1, 2.0]
+  lambda_sync: [0.2, 1.2]
+  eta_ricci: [0.1, 1.0]
+  rho: [0.01, 0.12]
+catalog:
+  path: data/feature_catalog.json
+versioning:
+  backend: none

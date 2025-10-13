@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Literal, Optional
+from typing import Any, Dict, Iterable, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -12,9 +12,12 @@ __all__ = [
     "DataSourceConfig",
     "ExecutionConfig",
     "IngestConfig",
+    "MaterializeConfig",
     "OptimizeConfig",
     "ReportConfig",
+    "ServeConfig",
     "StrategyConfig",
+    "TrainConfig",
     "TradePulseBaseConfig",
     "VersioningConfig",
 ]
@@ -50,6 +53,21 @@ class DataSourceConfig(BaseModel):
     value_field: str = "price"
 
 
+class FrameSourceConfig(BaseModel):
+    """Simplified frame source for commands that only require raw tabular data."""
+
+    kind: Literal["csv", "parquet"] = "csv"
+    path: Path
+
+
+class TrainDataConfig(FrameSourceConfig):
+    """Dataset description for the ``train`` command."""
+
+    signal_field: str = "signal"
+    reward_field: str = "reward"
+    kappa_field: str = "kappa"
+
+
 class StrategyConfig(BaseModel):
     """Describes a callable that returns trading signals."""
 
@@ -79,6 +97,27 @@ class IngestConfig(TradePulseBaseConfig):
     destination: Path
     catalog: CatalogConfig = Field(default_factory=CatalogConfig)
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)
+
+
+class MaterializeConfig(TradePulseBaseConfig):
+    """Configuration for streaming feature materialisation."""
+
+    source: FrameSourceConfig
+    feature_view: str
+    store_root: Path = Field(default=Path("data/online"))
+    checkpoint_path: Path = Field(default=Path("data/checkpoints/materialize.json"))
+    microbatch_size: int = 500
+    dedup_keys: List[str] = Field(default_factory=lambda: ["entity_id", "ts"])
+    catalog: CatalogConfig = Field(default_factory=CatalogConfig)
+    versioning: VersioningConfig = Field(default_factory=VersioningConfig)
+
+    @model_validator(mode="after")
+    def _validate_materialize(self) -> "MaterializeConfig":
+        if self.microbatch_size <= 0:
+            raise ValueError("microbatch_size must be positive")
+        if not self.dedup_keys:
+            raise ValueError("dedup_keys cannot be empty")
+        return self
 
 
 class ExecutionConfig(BaseModel):
@@ -124,6 +163,12 @@ class ExecConfig(TradePulseBaseConfig):
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)
 
 
+class ServeConfig(ExecConfig):
+    """Configuration for publishing the latest signal via ``serve``."""
+
+    results_path: Path = Field(default=Path("reports/serve.json"))
+
+
 class ReportConfig(TradePulseBaseConfig):
     """Configuration for aggregating CLI outputs into a report."""
 
@@ -132,4 +177,34 @@ class ReportConfig(TradePulseBaseConfig):
     html_output_path: Path | None = None
     pdf_output_path: Path | None = None
     template: Optional[Path] = None
+    versioning: VersioningConfig = Field(default_factory=VersioningConfig)
+
+
+class CalibrationSearchConfig(BaseModel):
+    """Hyperparameter search ranges for Adaptive Market Mind calibration."""
+
+    iters: int = 200
+    seed: int = 7
+    ema_span: Tuple[int, int] = (8, 96)
+    vol_lambda: Tuple[float, float] = (0.86, 0.98)
+    alpha: Tuple[float, float] = (0.2, 5.0)
+    beta: Tuple[float, float] = (0.1, 2.0)
+    lambda_sync: Tuple[float, float] = (0.2, 1.2)
+    eta_ricci: Tuple[float, float] = (0.1, 1.0)
+    rho: Tuple[float, float] = (0.01, 0.12)
+
+    @model_validator(mode="after")
+    def _validate_ranges(self) -> "CalibrationSearchConfig":
+        if self.iters < 0:
+            raise ValueError("iters must be non-negative")
+        return self
+
+
+class TrainConfig(TradePulseBaseConfig):
+    """Configuration for calibrating an Adaptive Market Mind."""
+
+    data: TrainDataConfig
+    results_path: Path = Field(default=Path("reports/train.json"))
+    calibration: CalibrationSearchConfig = Field(default_factory=CalibrationSearchConfig)
+    catalog: CatalogConfig = Field(default_factory=CatalogConfig)
     versioning: VersioningConfig = Field(default_factory=VersioningConfig)
