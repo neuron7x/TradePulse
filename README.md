@@ -335,6 +335,13 @@ TradePulse takes security seriously. Please see [SECURITY.md](SECURITY.md) for:
 - Dependency management
 - Security tooling and scanning
 
+### Remote Control API Hardening
+
+- `/admin/kill-switch` now enforces HMAC-protected tokens, role-based authorization via `X-Admin-Roles`, and mandatory idempotency keys.
+- Sliding-window rate limiting, exponential retry backoff, and per-request correlation IDs ensure abuse resistance without sacrificing reliability.
+- Structured audit events, Prometheus counters, and optional OpenTelemetry spans are emitted for every activation for end-to-end traceability.
+- See [docs/admin_remote_control.md](docs/admin_remote_control.md) for required headers, observability hooks, and the rollback runbook.
+
 ---
 
 ## 📈 Monitoring
