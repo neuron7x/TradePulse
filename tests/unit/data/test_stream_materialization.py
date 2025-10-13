@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC
+import time
 
 import pandas as pd
 import pytest
@@ -186,3 +187,70 @@ def test_checkpoint_add_does_not_mutate_original() -> None:
     assert checkpoint is not updated
     assert checkpoint.checkpoint_ids == frozenset({"one"})
     assert updated.checkpoint_ids == frozenset({"one", "two"})
+
+
+def test_materializer_recovers_from_partial_write(stream_payload: pd.DataFrame) -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    persisted_batches: list[pd.DataFrame] = []
+    failure_injected = {"active": True}
+
+    def writer(_name: str, frame: pd.DataFrame) -> None:
+        persisted_batches.append(frame.copy())
+        if failure_injected["active"]:
+            failure_injected["active"] = False
+            raise ConnectionError("simulated database outage")
+
+    def load_persisted(_name: str) -> pd.DataFrame:
+        if not persisted_batches:
+            return pd.DataFrame(columns=stream_payload.columns)
+        return pd.concat(persisted_batches, ignore_index=True)
+
+    materializer = StreamMaterializer(
+        writer,
+        checkpoint_store,
+        microbatch_size=2,
+        backfill_loader=load_persisted,
+    )
+
+    with pytest.raises(ConnectionError):
+        materializer.materialize("features.demo", stream_payload)
+
+    assert checkpoint_store.load("features.demo") is None
+
+    materializer.materialize("features.demo", stream_payload)
+
+    assert len(persisted_batches) == 2
+    combined = pd.concat(persisted_batches, ignore_index=True)
+    deduped = (
+        combined.sort_values(by=["entity_id", "ts"], kind="mergesort")
+        .drop_duplicates(["entity_id", "ts"], keep="last")
+        .reset_index(drop=True)
+    )
+    expected = (
+        stream_payload.sort_values(by=["entity_id", "ts"], kind="mergesort")
+        .drop_duplicates(["entity_id", "ts"], keep="last")
+        .reset_index(drop=True)
+    )
+    pd.testing.assert_frame_equal(deduped, expected)
+
+    checkpoint = checkpoint_store.load("features.demo")
+    assert checkpoint is not None
+    assert len(checkpoint.checkpoint_ids) == 2
+
+
+def test_materializer_handles_slow_writer(monkeypatch: pytest.MonkeyPatch, stream_payload: pd.DataFrame) -> None:
+    checkpoint_store = InMemoryCheckpointStore()
+    writes: list[pd.DataFrame] = []
+    sleep_calls: list[float] = []
+
+    monkeypatch.setattr(time, "sleep", lambda seconds: sleep_calls.append(seconds))
+
+    def writer(_name: str, frame: pd.DataFrame) -> None:
+        time.sleep(0.01)
+        writes.append(frame.copy())
+
+    materializer = StreamMaterializer(writer, checkpoint_store, microbatch_size=2)
+    materializer.materialize("features.demo", stream_payload)
+
+    assert len(writes) == 2
+    assert sleep_calls == [0.01, 0.01]

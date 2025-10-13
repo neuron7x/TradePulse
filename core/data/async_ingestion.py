@@ -244,37 +244,48 @@ class AsyncWebSocketStream:
         
 
 async def merge_streams(*streams: AsyncIterator[Ticker]) -> AsyncIterator[Ticker]:
-    """Merge multiple async tick streams into one.
-    
+    """Merge multiple async tick streams into one resilient iterator.
+
     Args:
         *streams: Variable number of async iterators
-        
+
     Yields:
-        Ticks from all streams in arrival order
+        Ticks from all streams in arrival order, skipping streams that fail.
     """
     from typing import Any
-    pending_tasks: Dict[Any, AsyncIterator[Ticker]] = {
-        asyncio.create_task(anext(stream)): stream  # type: ignore[arg-type]
-        for stream in streams
-    }
-    
+
+    pending_tasks: dict[Any, AsyncIterator[Ticker]] = {}
+
+    for stream in streams:
+        task = asyncio.create_task(anext(stream))  # type: ignore[arg-type]
+        pending_tasks[task] = stream
+
     while pending_tasks:
-        done, pending = await asyncio.wait(
+        done, _ = await asyncio.wait(
             pending_tasks.keys(),
-            return_when=asyncio.FIRST_COMPLETED
+            return_when=asyncio.FIRST_COMPLETED,
         )
-        
+
         for task in done:
             stream = pending_tasks.pop(task)
+
             try:
                 tick = task.result()
-                yield tick
-                
-                # Schedule next read from this stream
-                pending_tasks[asyncio.create_task(anext(stream))] = stream  # type: ignore[arg-type]
             except StopAsyncIteration:
-                # Stream exhausted, don't reschedule
-                pass
+                # Stream exhausted, do not reschedule.
+                continue
+            except Exception as exc:
+                logger.warning(
+                    "Async stream terminated with error",
+                    stream=getattr(stream, "symbol", None),
+                    error=str(exc),
+                )
+                continue
+
+            yield tick
+
+            next_task = asyncio.create_task(anext(stream))  # type: ignore[arg-type]
+            pending_tasks[next_task] = stream
 
 
 __all__ = [
