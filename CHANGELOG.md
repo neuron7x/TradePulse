@@ -6,6 +6,10 @@
 
 <!-- towncrier release notes start -->
 
+## [Unreleased]
+### Changed
+- Hardened Release Drafter automation (v6 workflow, semantic version resolver, metrics summary).
+
 ## [2.1.3] - 2025-10-05
 ### Added
 - Новий конвеєр **CI/CD**: `ci.yml` (матриці лінтів/тестів, concurrency, кеші), `pre-commit.yml`, `auto-merge.yml`, `sbom-scan.yml`, `publish-image.yml` (cosign), `data-sanity.yml`.
