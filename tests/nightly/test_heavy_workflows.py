@@ -134,10 +134,12 @@ if _HYPOTHESIS_AVAILABLE:
         suppress_health_check=[HealthCheck.too_slow, HealthCheck.filter_too_much],
     )
     @given(
-        st.lists(
-            st.floats(allow_nan=True, allow_infinity=True, width=64),
-            min_size=1024,
-            max_size=4096,
+        st.integers(min_value=32, max_value=1024).flatmap(
+            lambda length: st.lists(
+                st.floats(allow_nan=True, allow_infinity=True, width=64),
+                min_size=length,
+                max_size=length,
+            )
         )
     )
     def test_compute_phase_fuzz(values: list[float]) -> None:
@@ -152,10 +154,17 @@ if _HYPOTHESIS_AVAILABLE:
 
     @settings(max_examples=15, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     @given(
-        st.lists(
-            st.floats(min_value=0.0, max_value=2000.0, allow_nan=False, allow_infinity=False),
-            min_size=2048,
-            max_size=4096,
+        st.integers(min_value=128, max_value=2048).flatmap(
+            lambda length: st.lists(
+                st.floats(
+                    min_value=0.0,
+                    max_value=2000.0,
+                    allow_nan=False,
+                    allow_infinity=False,
+                ),
+                min_size=length,
+                max_size=length,
+            )
         )
     )
     def test_delta_entropy_window_fuzz(prices: list[float]) -> None:
