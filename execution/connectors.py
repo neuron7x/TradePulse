@@ -11,6 +11,12 @@ from domain import Order
 
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 
+try:  # pragma: no cover - optional import for live connectors
+    from execution.adapters import BinanceRESTConnector, CoinbaseRESTConnector
+except Exception:  # pragma: no cover - adapters may not be available in minimal installs
+    BinanceRESTConnector = None  # type: ignore[assignment]
+    CoinbaseRESTConnector = None  # type: ignore[assignment]
+
 
 class OrderError(RuntimeError):
     """Raised when a connector fails to process an order."""
@@ -201,4 +207,6 @@ __all__ = [
     "BybitConnector",
     "KrakenConnector",
     "CoinbaseConnector",
+    "BinanceRESTConnector",
+    "CoinbaseRESTConnector",
 ]
