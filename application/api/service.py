@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -238,6 +237,8 @@ def create_app(
     rate_limiter: AsyncLimiter | None = None,
     cache: TTLCache | None = None,
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
+    admin_token: str | None = None,
+    audit_secret: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies."""
 
@@ -246,19 +247,24 @@ def create_app(
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
 
-    admin_token = os.environ.get("TRADEPULSE_ADMIN_TOKEN")
-    audit_secret = os.environ.get("TRADEPULSE_AUDIT_SECRET")
-    if not admin_token or not audit_secret:
-        logging.getLogger(__name__).warning(
-            "Administrative remote control configured with development defaults; set "
-            "TRADEPULSE_ADMIN_TOKEN and TRADEPULSE_AUDIT_SECRET for production.",
+    resolved_admin_token = admin_token or os.environ.get("TRADEPULSE_ADMIN_TOKEN")
+    resolved_audit_secret = audit_secret or os.environ.get("TRADEPULSE_AUDIT_SECRET")
+    missing = []
+    if not resolved_admin_token:
+        missing.append("TRADEPULSE_ADMIN_TOKEN")
+    if not resolved_audit_secret:
+        missing.append("TRADEPULSE_AUDIT_SECRET")
+    if missing:
+        joined = ", ".join(missing)
+        raise RuntimeError(
+            "Missing required secret(s): {}. Provide them via create_app parameters or environment variables.".format(
+                joined
+            )
         )
-        admin_token = admin_token or "dev-admin-token"
-        audit_secret = audit_secret or "dev-audit-secret"
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
-    audit_logger = AuditLogger(secret=audit_secret)
-    authenticator = TokenAuthenticator(token=admin_token)
+    audit_logger = AuditLogger(secret=resolved_audit_secret)
+    authenticator = TokenAuthenticator(token=resolved_admin_token)
 
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period

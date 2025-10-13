@@ -1,10 +1,31 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
+
 from application.api.service import create_app
+
+
+@pytest.fixture()
+def configured_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
+    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
+    return create_app(admin_token="unit-admin-token", audit_secret="unit-audit-secret")
+
+
+def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
+    with pytest.raises(RuntimeError, match="TRADEPULSE_ADMIN_TOKEN"):
+        create_app()
 
 
 def _build_payload() -> dict:
@@ -30,8 +51,8 @@ def _build_payload() -> dict:
     return {"symbol": "TEST-USD", "bars": bars}
 
 
-def test_feature_endpoint_computes_latest_vector() -> None:
-    app = create_app()
+def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> None:
+    app = configured_app
     client = TestClient(app)
 
     payload = _build_payload()
@@ -49,8 +70,8 @@ def test_feature_endpoint_computes_latest_vector() -> None:
     assert cached_response.json() == body
 
 
-def test_prediction_endpoint_returns_signal() -> None:
-    app = create_app()
+def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
+    app = configured_app
     client = TestClient(app)
 
     payload = _build_payload()
