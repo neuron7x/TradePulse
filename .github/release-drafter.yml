@@ -12,3 +12,27 @@ categories:
       - 'chore'
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 no-changes-template: 'No changes in this release.'
+template: |
+  ## 🚀 Summary
+
+  $CHANGES
+
+  ## 🙌 Contributors
+
+  $CONTRIBUTORS
+
+  ## 📦 Full Changelog
+
+  [Compare changes](https://github.com/$OWNER/$REPOSITORY/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION)
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'feature'
+  patch:
+    labels:
+      - 'bug'
+      - 'chore'
+  default: patch

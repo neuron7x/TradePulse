@@ -60,6 +60,11 @@ Whether you are prototyping strategies or orchestrating production trading bots,
 
 Additional badges above surface Python support, static analysis (ruff, mypy), and observability integrations (Prometheus). For deeper insight into release readiness, review [`reports/`](reports/) for CI health, security posture, and technical debt snapshots.
 
+### Release Automation
+
+- **Release Drafter** keeps a rolling draft release using the custom template defined in [`.github/release-drafter.yml`](.github/release-drafter.yml). The generated notes now include a summary section, contributor roll-up, and a direct link to the GitHub compare view for the resolved version.
+- Trigger the workflow manually from the **Release Drafter** action in GitHub (`workflow_dispatch`) or by pushing to `main`; it will update the draft release in place.
+
 ---
 
 ## 🚀 Quick Start
