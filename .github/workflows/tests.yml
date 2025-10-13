@@ -178,11 +178,18 @@ jobs:
           mkdir -p reports
       - name: Run quarantined flaky tests
         run: |
+          set -o pipefail
           .venv/bin/python -m pytest tests/ -m flaky \
             --reruns=2 --reruns-delay=2 \
             --junitxml=reports/flaky-tests.xml \
             --html=reports/flaky-tests-report.html --self-contained-html \
             --flaky-report=reports/flaky-tests.json
+          status=$?
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected for 'flaky' marker; treating as success."
+            exit 0
+          fi
+          exit "$status"
       - name: Upload flaky test artifacts
         if: always()
         uses: actions/upload-artifact@v4
