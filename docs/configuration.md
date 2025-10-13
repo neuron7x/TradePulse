@@ -99,6 +99,23 @@ For teams operating with HashiCorp Vault or a similar secrets manager, export
 layer will automatically call the registered resolver, refresh credentials after
 rotation, and propagate updates to active HTTP/WebSocket sessions.
 
+### Binance order type mapping
+
+The Binance execution connector supports the following order types. TradePulse maps the
+domain enum to Binance's REST API keywords transparently so strategies can stay
+venue-agnostic.
+
+| TradePulse order type | Binance REST `type` |
+|-----------------------|---------------------|
+| `market`              | `MARKET`            |
+| `limit`               | `LIMIT`, `LIMIT_MAKER` |
+| `stop`                | `STOP_LOSS`, `STOP_MARKET` |
+| `stop_limit`          | `STOP_LOSS_LIMIT`, `STOP_LIMIT` |
+
+Stop orders require a `stop_price`, while stop-limit orders require both `price` and
+`stop_price`. The connector validates these inputs on submission and preserves the logical
+order type when reconciling orders fetched from Binance.
+
 Example `.env` snippet:
 
 ```dotenv

@@ -264,6 +264,39 @@ class BinanceExecutionConnector(AuthenticatedRESTExecutionConnector):
         }
         return mapping.get(order_type, "MARKET")
 
+    @staticmethod
+    def _from_binance_order_type(
+        order_type: str | None,
+        *,
+        has_price: bool,
+        has_stop: bool,
+    ) -> OrderType:
+        if order_type is None:
+            if has_stop and has_price:
+                return OrderType.STOP_LIMIT
+            if has_stop:
+                return OrderType.STOP
+            return OrderType.LIMIT if has_price else OrderType.MARKET
+
+        normalized = order_type.lower()
+        mapping = {
+            "market": OrderType.MARKET,
+            "limit": OrderType.LIMIT,
+            "limit_maker": OrderType.LIMIT,
+            "stop": OrderType.STOP,
+            "stop_loss": OrderType.STOP,
+            "stop_market": OrderType.STOP,
+            "stop_loss_limit": OrderType.STOP_LIMIT,
+            "stop_limit": OrderType.STOP_LIMIT,
+        }
+        if normalized in mapping:
+            return mapping[normalized]
+        if has_stop and has_price:
+            return OrderType.STOP_LIMIT
+        if has_stop:
+            return OrderType.STOP
+        return OrderType.LIMIT if has_price else OrderType.MARKET
+
     def _to_order(self, template: Order, payload: Mapping[str, Any]) -> Order:
         order = replace(template)
         order_id = payload.get("orderId") or payload.get("i")
@@ -298,13 +331,27 @@ class BinanceExecutionConnector(AuthenticatedRESTExecutionConnector):
         quantity = float(quantity_raw)
         if quantity <= 0:
             raise OrderError("Binance order quantity must be positive")
-        price = payload.get("price") or payload.get("p")
+        price_raw = payload.get("price") or payload.get("p")
+        price = float(price_raw) if price_raw else None
+        if price is not None and price <= 0:
+            price = None
+        stop_price_raw = payload.get("stopPrice") or payload.get("sp")
+        stop_price = float(stop_price_raw) if stop_price_raw else None
+        if stop_price is not None and stop_price <= 0:
+            stop_price = None
+        order_type_raw = payload.get("type") or payload.get("o")
+        order_type = self._from_binance_order_type(
+            order_type_raw,
+            has_price=price is not None,
+            has_stop=stop_price is not None,
+        )
         base_order = Order(
             symbol=symbol,
             side=side.lower(),
             quantity=quantity,
-            price=float(price) if price else None,
-            order_type=OrderType.LIMIT if price else OrderType.MARKET,
+            price=price,
+            order_type=order_type,
+            stop_price=stop_price,
         )
         order_id = payload.get("orderId") or payload.get("i")
         if order_id:
