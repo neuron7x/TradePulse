@@ -1,72 +1,14 @@
 name-template: 'v$RESOLVED_VERSION'
 tag-template: 'v$RESOLVED_VERSION'
-change-template: '- $TITLE ([#${NUMBER}](${URL}))'
-no-changes-template: '- No user-facing changes in this release.'
-
-version-resolver:
-  major:
-    labels:
-      - breaking
-      - major
-  minor:
-    labels:
-      - enhancement
-      - feature
-      - minor
-  patch:
-    labels:
-      - bug
-      - bugfix
-      - patch
-      - ci
-      - docs
-      - tests
-  default: patch
-
 categories:
   - title: '🚀 Features'
     labels:
-      - feature
-      - enhancement
+      - 'feature'
   - title: '🐛 Fixes'
     labels:
-      - bug
-      - bugfix
-      - regression
-  - title: '⚡ Performance'
-    labels:
-      - performance
-      - perf
+      - 'bug'
   - title: '🧹 Maintenance'
     labels:
-      - maintenance
-      - refactor
-      - chore
-  - title: '📝 Documentation'
-    labels:
-      - docs
-  - title: '✅ Tests'
-    labels:
-      - tests
-  - title: '🤖 CI'
-    labels:
-      - ci
-      - github-actions
-  - title: '📦 Build'
-    labels:
-      - build
-  - title: '🔐 Security'
-    labels:
-      - security
-
-exclude-labels:
-  - skip-changelog
-
-template: |
-  ## What's Changed
-
-  $CHANGES
-
-  ## Contributors
-
-  $CONTRIBUTORS
+      - 'chore'
+change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
+no-changes-template: 'No changes in this release.'
