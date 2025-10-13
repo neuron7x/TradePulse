@@ -48,7 +48,15 @@ def kyles_lambda(returns: Sequence[float], signed_volume: Sequence[float]) -> fl
 
 
 def hasbrouck_information_impulse(returns: Sequence[float], signed_volume: Sequence[float]) -> float:
-    """Estimate Hasbrouck's information content using signed square-root volume."""
+    """Estimate Hasbrouck's information content using signed square-root volume.
+
+    The statistic is effectively the correlation between centered returns and the
+    signed square-root of volume.  Normalizing by the Euclidean norms of both
+    series makes the measure invariant to affine transformations (shifts and
+    rescaling) of the input data, which is desirable for downstream property
+    tests that compare relative information content rather than absolute
+    magnitudes.
+    """
 
     r = np.asarray(list(returns), dtype=float)
     q = np.asarray(list(signed_volume), dtype=float)
@@ -57,13 +65,15 @@ def hasbrouck_information_impulse(returns: Sequence[float], signed_volume: Seque
     q = q[mask]
     if r.size == 0 or q.size == 0:
         return 0.0
+    q = q - np.mean(q)
     transformed = np.sign(q) * np.sqrt(np.abs(q))
     transformed = transformed - np.mean(transformed)
     r = r - np.mean(r)
-    denom = np.dot(transformed, transformed)
-    if denom <= 0.0:
+    norm_transformed = float(np.linalg.norm(transformed))
+    norm_returns = float(np.linalg.norm(r))
+    if norm_transformed == 0.0 or norm_returns == 0.0:
         return 0.0
-    return float(np.dot(transformed, r) / denom)
+    return float(np.dot(transformed, r) / (norm_transformed * norm_returns))
 
 
 @dataclass(slots=True)
