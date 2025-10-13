@@ -29,6 +29,9 @@ def test_compute_performance_metrics_basic() -> None:
     )
 
     assert math.isfinite(report.sharpe_ratio)
+    assert report.probabilistic_sharpe_ratio is not None
+    assert report.sharpe_p_value is not None
+    assert report.certainty_equivalent is not None
     assert report.max_drawdown == -4.0
     assert pytest.approx(report.turnover, rel=1e-9) == float(np.sum(np.abs(position_changes)))
     assert pytest.approx(report.hit_ratio, rel=1e-9) == 2.0 / 3.0
@@ -61,6 +64,9 @@ def test_compute_performance_metrics_matches_manual_values() -> None:
     assert report.alpha == pytest.approx(-0.01928972629, rel=1e-9)
     assert report.tracking_error == pytest.approx(0.07950867954, rel=1e-9)
     assert report.information_ratio == pytest.approx(0.3495207005, rel=1e-9)
+    assert report.probabilistic_sharpe_ratio == pytest.approx(0.6621069372, rel=1e-9)
+    assert report.sharpe_p_value == pytest.approx(0.67510846551, rel=1e-9)
+    assert report.certainty_equivalent == pytest.approx(0.05933283515, rel=1e-9)
 
 
 def test_export_performance_report(tmp_path: Path) -> None:
@@ -80,6 +86,9 @@ def test_export_performance_report(tmp_path: Path) -> None:
     assert payload["strategy"] == "My Strategy!"
     assert pytest.approx(payload["performance"]["sharpe_ratio"], rel=1e-9) == 1.25
     assert payload["performance"]["sortino_ratio"] is None
+    assert "probabilistic_sharpe_ratio" in payload["performance"]
+    assert "sharpe_p_value" in payload["performance"]
+    assert "certainty_equivalent" in payload["performance"]
 
 
 def test_factor_statistics() -> None:
@@ -104,3 +113,5 @@ def test_factor_statistics() -> None:
     assert report.tracking_error == pytest.approx(0.0565685, rel=1e-6)
     assert report.information_ratio is not None
     assert report.information_ratio == pytest.approx(0.25, rel=1e-6)
+    assert report.probabilistic_sharpe_ratio is not None
+    assert report.sharpe_p_value is not None
