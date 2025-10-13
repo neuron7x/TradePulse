@@ -16,6 +16,7 @@ This module performs two responsibilities:
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import pathlib
 import sys
@@ -23,6 +24,73 @@ import types
 import warnings
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable
+
+
+class _FlakyTracker:
+    """Collect execution metadata for tests marked as flaky."""
+
+    def __init__(self, report_path: str | None) -> None:
+        self._report_path = pathlib.Path(report_path).resolve() if report_path else None
+        self._records: dict[str, dict[str, object]] = {}
+
+    def register(self, item: pytest.Item) -> None:
+        if item.nodeid in self._records:
+            return
+        marker = item.get_closest_marker("flaky")
+        marker_payload: dict[str, object] | None = None
+        if marker is not None:
+            marker_payload = {
+                "args": list(marker.args),
+                "kwargs": marker.kwargs,
+            }
+        self._records[item.nodeid] = {
+            "nodeid": item.nodeid,
+            "location": {
+                "path": str(pathlib.Path(item.location[0]).as_posix()),
+                "line": item.location[1],
+                "name": item.location[2],
+            },
+            "attempts": 0,
+            "outcome": "deselected",
+            "first_failure": None,
+            "marker": marker_payload,
+        }
+
+    def record_call(self, item: pytest.Item, call: pytest.CallInfo[object]) -> None:
+        record = self._records.get(item.nodeid)
+        if record is None:
+            return
+        record["attempts"] = int(record.get("attempts", 0)) + 1
+        record["outcome"] = call.outcome
+        if call.excinfo is not None and record.get("first_failure") is None:
+            record["first_failure"] = call.excinfo.exconly()
+
+    def write_report(self) -> None:
+        if self._report_path is None:
+            return
+        if not self._records:
+            # Ensure the directory exists even when no flaky tests ran so the
+            # workflow can still upload an empty manifest.
+            self._report_path.parent.mkdir(parents=True, exist_ok=True)
+            self._report_path.write_text("[]\n", encoding="utf-8")
+            return
+        payload: list[dict[str, object]] = []
+        for nodeid in sorted(self._records):
+            record = self._records[nodeid]
+            attempts = int(record.get("attempts", 0))
+            payload.append(
+                {
+                    "nodeid": record["nodeid"],
+                    "location": record["location"],
+                    "attempts": attempts,
+                    "reruns": max(attempts - 1, 0),
+                    "outcome": record["outcome"],
+                    "first_failure": record.get("first_failure"),
+                    "marker": record["marker"],
+                }
+            )
+        self._report_path.parent.mkdir(parents=True, exist_ok=True)
+        self._report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 try:
     from zoneinfo import ZoneInfo
@@ -179,9 +247,17 @@ def pytest_addoption(parser):  # type: ignore[override]
         import pytest_cov.plugin  # noqa: F401  # type: ignore[attr-defined]
     except Exception:
         _register_noop_cov_options(parser)
+    parser.addoption(
+        "--flaky-report",
+        action="store",
+        default=None,
+        help="Write a JSON manifest detailing reruns for tests marked as flaky.",
+    )
 
 
 def pytest_configure(config):  # type: ignore[override]
+    if not hasattr(config, "_tradepulse_flaky_tracker"):
+        config._tradepulse_flaky_tracker = _FlakyTracker(config.getoption("flaky_report"))
     if config.pluginmanager.hasplugin("pytest_cov"):
         return
     cov_targets = config.getoption("tradepulse_cov", default=None)
@@ -219,3 +295,29 @@ def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
             asyncio.set_event_loop(None)
             loop.close()
     return True
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    tracker = getattr(config, "_tradepulse_flaky_tracker", None)
+    if tracker is None:
+        return
+    for item in items:
+        if item.get_closest_marker("flaky") is not None:
+            tracker.register(item)
+
+
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[object]
+) -> None:  # type: ignore[override]
+    if call.when != "call":
+        return
+    tracker = getattr(item.config, "_tradepulse_flaky_tracker", None)
+    if tracker is None or item.get_closest_marker("flaky") is None:
+        return
+    tracker.record_call(item, call)
+
+
+def pytest_sessionfinish(session: pytest.Session, exitstatus: int) -> None:  # type: ignore[override]
+    tracker = getattr(session.config, "_tradepulse_flaky_tracker", None)
+    if tracker is not None:
+        tracker.write_report()

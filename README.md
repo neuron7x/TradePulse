@@ -248,8 +248,9 @@ TradePulse relies on an extensive pytest testbed covering unit, integration, pro
 # Run all tests
 pytest tests/
 
-# Run with coverage and HTML report
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html
+# Run with branch coverage and HTML report
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch \
+  --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html
 
 # Skip slow tests during development
 pytest tests/ -m "not slow"
@@ -259,6 +260,10 @@ pytest tests/property/
 
 # Run only integration tests
 pytest tests/integration/
+
+# Run quarantined flaky tests with automatic reruns
+pytest tests/ -m flaky --reruns=2 --reruns-delay=2 \
+  --flaky-report=reports/flaky-tests.json
 ```
 
 Refer to [TESTING.md](TESTING.md) and [TESTING_SUMMARY.md](TESTING_SUMMARY.md) for deeper insights into coverage targets, fixtures, and workflow integration.

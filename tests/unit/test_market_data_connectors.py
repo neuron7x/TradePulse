@@ -49,6 +49,20 @@ class DummyAdapter(IngestionAdapter):
         return None
 
 
+class FlakyAdapter(DummyAdapter):
+    def __init__(self, *, stream_items: List[Any] | None = None) -> None:
+        super().__init__(stream_items=stream_items, stream_error=RuntimeError("boom"))
+        self._failures = 0
+
+    async def stream(self, **kwargs: Any) -> AsyncIterator[Any]:  # pragma: no cover - exercised in tests
+        self.stream_calls += 1
+        if self._failures < 1:
+            self._failures += 1
+            raise self.stream_error  # type: ignore[misc]
+        for item in self.stream_items:
+            yield item
+
+
 def _make_tick(symbol: str = "BTCUSDT", venue: str = "BINANCE") -> PriceTick:
     return PriceTick(
         metadata=MarketMetadata(symbol=symbol, venue=venue, instrument_type=InstrumentType.SPOT),
@@ -90,6 +104,29 @@ async def test_streaming_errors_are_routed_to_dead_letter_queue() -> None:
     assert len(dlq_items) == 1
     assert dlq_items[0].context == "stream"
     assert "object" in dlq_items[0].error
+
+
+@pytest.mark.asyncio
+async def test_streaming_retry_applies_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: list[int] = []
+
+    async def _fake_sleep(delay: int) -> None:
+        recorded.append(delay)
+
+    monkeypatch.setattr("core.data.connectors.market.asyncio.sleep", _fake_sleep)
+
+    tick = _make_tick()
+    adapter = FlakyAdapter(stream_items=[tick])
+    connector = BinanceMarketDataConnector(adapter=adapter)
+
+    events = []
+    async for event in connector.stream_ticks(symbol="BTCUSDT"):
+        events.append(event)
+        break
+
+    assert events and events[0].symbol == tick.symbol
+    assert adapter.stream_calls >= 2
+    assert recorded == [2]
 
 
 def test_dead_letter_queue_eviction_and_serialisation() -> None:
