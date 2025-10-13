@@ -3,6 +3,17 @@
 Quality gates prevent regressions from entering `main` by enforcing measurable
 criteria across testing, performance, and reliability domains.
 
+## Developer Pre-Commit Stack
+
+- **Ruff, Black, MyPy, Slotscheck** – Install the pre-commit suite defined in
+  [`.pre-commit-config.yaml`](../.pre-commit-config.yaml) to lint, format, type
+  check, and verify `__slots__` coverage before pushing. The configuration pins
+  `slotscheck==0.19.1`, ensuring that object layouts stay compact and that
+  inheritance hierarchies remain compatible with slots-enabled classes.
+- **Installation** – Run `pre-commit install` after syncing
+  [`requirements-dev.txt`](../requirements-dev.txt) so all hooks execute locally
+  on staged files. CI runs the same hooks to maintain parity.
+
 ## Pull Request Blocking Rules
 
 1. **Code Coverage** – PRs fail if overall coverage drops by more than 0.5% or
@@ -55,6 +66,19 @@ criteria across testing, performance, and reliability domains.
   into the Quality dashboard.
 - Error budget consumption from `docs/reliability.md` is overlaid with gate
   statuses so leadership can prioritise fixes versus feature work.
+
+## Break-Glass Workflow
+
+- **Triggering** – When a production rollback or hotfix must bypass gates,
+  engineers raise an emergency ticket and open a "break-glass" PR tagged with
+  `needs-postmortem` that documents the justification and temporary scope.
+- **Execution** – The PR follows the reduced checklist stored in
+  [`reports/prod_cutover_readiness_checklist.md`](../reports/prod_cutover_readiness_checklist.md)
+  to capture validation evidence even while bypassing normal automation.
+- **Post-mortem** – Within 48 hours, the owning team files a retrospective and
+  links it from the relevant runbook (for example
+  [`docs/runbook_data_incident.md`](runbook_data_incident.md)). Follow-up actions
+  enter the governance backlog described in [`docs/governance.md`](governance.md).
 
 Quality gates shift enforcement left: developers receive immediate feedback in
 PRs, nightly automation provides early detection, and governance artifacts keep

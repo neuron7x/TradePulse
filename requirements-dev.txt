@@ -3,6 +3,7 @@
 # Formatters & linters
 black==25.1.0
 ruff==0.14.0
+slotscheck==0.19.1
 
 # Type checking
 mypy==1.18.2

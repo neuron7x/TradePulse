@@ -68,6 +68,19 @@ focused document so contributors can quickly find the details they need.
 
 ---
 
+## Operational Excellence
+
+- Consult the [Operational Excellence Handbook](operational_handbook.md) for a
+  single index of runbooks, performance budgets, data lake procedures, and
+  governance guardrails.
+- Enforce automation and exception handling with the
+  [Quality Gates and Automated Governance guide](quality_gates.md).
+- Rehearse incident response with the dedicated
+  [Incident Playbooks](incident_playbooks.md) and runbooks for data integrity
+  and live-trading operations.
+
+---
+
 ## Contribution Workflow
 
 - Adhere to the testing instructions in [`TESTING.md`](../TESTING.md) and the

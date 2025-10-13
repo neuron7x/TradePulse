@@ -245,6 +245,27 @@ timings exceed 5% of the stored baseline. Persist baseline stats under
 `tests/performance/baselines/` and update them intentionally when optimisations
 land.
 
+### Regression Automation with `asv` and `pytest-benchmark`
+
+1. **Author benchmark suites** – Keep deterministic harnesses in `bench/` and
+   mirror the entry points inside `tests/performance/` so that the same kernels
+   can be invoked under `pytest --benchmark-only`.
+2. **Capture baselines** – Run `pytest tests/performance --benchmark-save=baseline`
+   on a clean workstation. Store the resulting JSON under
+   `tests/performance/baselines/` and commit alongside the change.
+3. **Integrate ASV** – Initialise an Airspeed Velocity project with
+   `asv quickstart` and point `asv.conf.json` at the `bench/` scripts. Pin the
+   `project_url` to the TradePulse repository and enable the `virtualenv`
+   builder so CI can reproduce runs on tagged commits.
+4. **Gate regressions** – Configure CI to execute `pytest --benchmark-compare=baseline`
+   and `asv run --quick` on each PR, failing if median runtime drifts by more
+   than ±10%. Update the tolerance based on the budgets agreed in
+   [`docs/quality_gates.md`](quality_gates.md).
+5. **Publish flamegraphs** – `.github/workflows/tests.yml` already archives
+   profiling traces from `pytest-profiling`. Enhance the workflow with
+   `py-spy record --flame` so each regression run includes a flamegraph for
+   automatic upload to the build artifacts.
+
 ## Chunked Processing
 
 ### Entropy with Chunking
