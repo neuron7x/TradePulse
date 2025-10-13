@@ -83,32 +83,38 @@ def test_kyles_lambda_transformation_invariants(
 @given(
     paired=paired_series(),
     shift_r=st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False),
-    shift_q=st.floats(min_value=-10.0, max_value=10.0, allow_nan=False, allow_infinity=False),
-    scale=st.floats(min_value=0.1, max_value=50.0, allow_nan=False, allow_infinity=False),
+    scale_r=st.floats(min_value=0.1, max_value=50.0, allow_nan=False, allow_infinity=False),
+    scale_q=st.floats(min_value=0.1, max_value=50.0, allow_nan=False, allow_infinity=False),
 )
-def test_hasbrouck_transformation_invariants(
+def test_hasbrouck_expected_transform_behaviour(
     paired: tuple[list[float], list[float]],
     shift_r: float,
-    shift_q: float,
-    scale: float,
+    scale_r: float,
+    scale_q: float,
 ) -> None:
-    """Hasbrouck impulse metric shares the same invariants as Kyle's lambda."""
+    """Hasbrouck impulse respects centring, scaling and sign expectations."""
 
     returns, volume = paired
     assume(any(v != volume[0] for v in volume[1:]))
     assume(any(r != returns[0] for r in returns[1:]))
 
     base = hasbrouck_information_impulse(returns, volume)
-    shifted = hasbrouck_information_impulse(
+
+    shifted_returns = hasbrouck_information_impulse(
         [r + shift_r for r in returns],
-        [q + shift_q for q in volume],
+        volume,
     )
-    scaled = hasbrouck_information_impulse(
-        [scale * r for r in returns],
-        [scale * q for q in volume],
+    scaled_returns = hasbrouck_information_impulse(
+        [scale_r * r for r in returns],
+        volume,
+    )
+    scaled_volume = hasbrouck_information_impulse(
+        returns,
+        [scale_q * q for q in volume],
     )
     flipped = hasbrouck_information_impulse([-r for r in returns], [-q for q in volume])
 
-    assert shifted == pytest.approx(base, rel=1e-9, abs=1e-9)
-    assert scaled == pytest.approx(base, rel=1e-9, abs=1e-9)
+    assert shifted_returns == pytest.approx(base, rel=1e-9, abs=1e-9)
+    assert scaled_returns == pytest.approx(base * scale_r, rel=1e-9, abs=1e-9)
+    assert scaled_volume == pytest.approx(base / (scale_q**0.5), rel=1e-9, abs=1e-9)
     assert flipped == pytest.approx(base, rel=1e-9, abs=1e-9)
