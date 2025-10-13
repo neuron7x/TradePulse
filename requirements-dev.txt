@@ -13,7 +13,7 @@ pytest-cov==6.0.0
 pytest-asyncio==0.25.2
 hypothesis==6.140.3
 pytest-html==4.1.1
-pytest-xdist==3.6.1
+pytest-xdist==3.8.0
 pytest-profiling==1.7.0; python_version < "3.13"
 mutmut==3.3.1
 click>=8.1.7
