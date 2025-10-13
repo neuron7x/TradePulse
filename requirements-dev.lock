@@ -103,6 +103,7 @@ prometheus-client==0.23.1
 propcache==0.4.1
 protobuf==5.29.5
 psutil==7.1.0
+py-cpuinfo==9.0.0
 py-serializable==2.1.0
 py-spy==0.4.1
 pycares==4.11.0
@@ -117,6 +118,7 @@ pyparsing==3.2.5
 pyproject-hooks==1.2.0
 pytest==8.4.2
 pytest-asyncio==0.25.2
+pytest-benchmark==4.0.0
 pytest-cov==6.0.0
 pytest-html==4.1.1
 pytest-metadata==3.1.1

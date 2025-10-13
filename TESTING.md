@@ -102,6 +102,16 @@ pytest tests/e2e/
 pytest -m arm tests/performance/test_indicator_portability.py
 ```
 
+**Performance regression benchmarks (fail on budget overruns):**
+```bash
+pytest tests/performance/test_indicator_benchmarks.py --benchmark-enable
+```
+
+**Memory pressure guardrails for large indicator windows:**
+```bash
+pytest tests/performance/test_memory_regression.py
+```
+
 **Heavy-math validation gate:**
 ```bash
 pytest -m heavy_math tests/unit/config/test_heavy_math_jobs.py
