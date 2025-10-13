@@ -83,6 +83,36 @@ The same syntax works inside a `.env` file located in the working directory. Whe
 values inside `.env` override the YAML baseline but remain below live environment variables
 and CLI overrides.
 
+### Exchange connector credentials
+
+Live trading connectors read their API secrets from dedicated environment variables that
+mirror each venue's naming. The Binance and Coinbase adapters expect the following keys:
+
+| Venue    | Required variables                                    | Optional variables |
+|----------|--------------------------------------------------------|--------------------|
+| Binance  | `BINANCE_API_KEY`, `BINANCE_API_SECRET`                | –                  |
+| Coinbase | `COINBASE_API_KEY`, `COINBASE_API_SECRET`              | `COINBASE_API_PASSPHRASE` |
+
+Set these variables directly in the process environment or define them in a `.env` file.
+For teams operating with HashiCorp Vault or a similar secrets manager, export
+`BINANCE_VAULT_PATH` / `COINBASE_VAULT_PATH` to point at the Vault mount. The execution
+layer will automatically call the registered resolver, refresh credentials after
+rotation, and propagate updates to active HTTP/WebSocket sessions.
+
+Example `.env` snippet:
+
+```dotenv
+BINANCE_API_KEY=live_key_here
+BINANCE_API_SECRET=live_secret_here
+COINBASE_API_KEY=coinbase_key_here
+COINBASE_API_SECRET=coinbase_secret_here
+COINBASE_API_PASSPHRASE=optional_passphrase
+```
+
+Sample configuration overlays that map symbols, rate limits, and risk tolerances for each
+venue are available under `configs/exchanges/`. Copy the relevant file, adjust the
+notional limits, and load it alongside your primary strategy settings.
+
 ## Programmatic access
 
 Python modules should use `load_kuramoto_ricci_config` to obtain a fully merged

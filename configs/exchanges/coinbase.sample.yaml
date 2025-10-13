@@ -1,0 +1,23 @@
+# Sample Coinbase Advanced Trade execution configuration overlay.
+execution:
+  venues:
+    coinbase:
+      enabled: false
+      sandbox: true
+      symbols:
+        - BTC-USD
+        - ETH-USD
+      credentials:
+        api_key_env: COINBASE_API_KEY
+        api_secret_env: COINBASE_API_SECRET
+        api_passphrase_env: COINBASE_API_PASSPHRASE
+        vault_path_env: COINBASE_VAULT_PATH
+      rate_limits:
+        max_orders_per_second: 5
+        max_orders_per_minute: 150
+      risk:
+        max_notional_usd: 15000
+        max_position_usd: 30000
+      websocket:
+        heartbeat_interval_sec: 20
+        reconnect_jitter_sec: 0.5

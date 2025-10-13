@@ -1,0 +1,22 @@
+# Sample Binance execution configuration overlay.
+execution:
+  venues:
+    binance:
+      enabled: true
+      sandbox: true  # Set to false for production trading
+      symbols:
+        - BTCUSDT
+        - ETHUSDT
+      credentials:
+        api_key_env: BINANCE_API_KEY
+        api_secret_env: BINANCE_API_SECRET
+        vault_path_env: BINANCE_VAULT_PATH
+      rate_limits:
+        max_orders_per_second: 10
+        max_orders_per_minute: 600
+      risk:
+        max_notional_usd: 25000
+        max_position_usd: 50000
+      websocket:
+        heartbeat_interval_sec: 30
+        reconnect_jitter_sec: 0.5
