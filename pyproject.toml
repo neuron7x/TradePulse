@@ -98,6 +98,9 @@ gpu = [
     "cupy>=13.0.0",
 ]
 
+[project.scripts]
+tradepulse-sync = "scripts.resilient_data_sync:main"
+
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }
 readme = { file = "README.md", content-type = "text/markdown" }
