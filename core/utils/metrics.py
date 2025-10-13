@@ -11,7 +11,7 @@ import multiprocessing
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, Optional
+from typing import Any, Dict, Iterable, Iterator, Optional
 
 try:  # pragma: no cover - exercised indirectly in environments without numpy
     import numpy as np
@@ -197,6 +197,34 @@ class MetricsCollector:
             "tradepulse_order_ack_latency_quantiles_seconds",
             "Latency between order submission and broker acknowledgement",
             ["exchange", "symbol", "quantile"],
+            registry=registry,
+        )
+
+        self.risk_validation_total = Counter(
+            "tradepulse_risk_validations_total",
+            "Total risk validation outcomes",
+            ["symbol", "outcome"],
+            registry=registry,
+        )
+
+        self.kill_switch_triggers_total = Counter(
+            "tradepulse_kill_switch_triggers_total",
+            "Kill switch triggers grouped by reason",
+            ["reason"],
+            registry=registry,
+        )
+
+        self.compliance_checks_total = Counter(
+            "tradepulse_compliance_checks_total",
+            "Compliance check outcomes",
+            ["symbol", "status"],
+            registry=registry,
+        )
+
+        self.compliance_violations_total = Counter(
+            "tradepulse_compliance_violations_total",
+            "Compliance violations by type",
+            ["symbol", "violation_type"],
             registry=registry,
         )
 
@@ -688,6 +716,40 @@ class MetricsCollector:
 
         payload = generate_latest(self.registry) if self.registry else generate_latest()
         return payload.decode("utf-8")
+
+    def record_risk_validation(self, symbol: str, outcome: str) -> None:
+        """Record the result of a risk validation."""
+
+        if not self._enabled:
+            return
+        self.risk_validation_total.labels(symbol=symbol, outcome=outcome).inc()
+
+    def record_kill_switch_trigger(self, reason: str) -> None:
+        """Record a kill switch trigger occurrence."""
+
+        if not self._enabled:
+            return
+        self.kill_switch_triggers_total.labels(reason=reason).inc()
+
+    def record_compliance_check(
+        self,
+        symbol: str,
+        status: str,
+        violations: Iterable[str] | None = None,
+    ) -> None:
+        """Record the outcome of a compliance check."""
+
+        if not self._enabled:
+            return
+
+        self.compliance_checks_total.labels(symbol=symbol, status=status).inc()
+        if not violations:
+            return
+        for violation in violations:
+            self.compliance_violations_total.labels(
+                symbol=symbol,
+                violation_type=str(violation),
+            ).inc()
 
 
 # Global metrics collector instance

@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from domain import Order, OrderType
@@ -14,6 +16,7 @@ from execution.risk import (
     RiskError,
     portfolio_heat,
 )
+from execution.audit import ExecutionAuditLogger
 
 
 def test_order_defaults_to_market_type() -> None:
@@ -87,6 +90,51 @@ def test_kill_switch_blocks_all_orders() -> None:
     manager.kill_switch.trigger("test")
     with pytest.raises(RiskError):
         manager.validate_order("BTC", "buy", qty=1.0, price=10.0)
+
+
+def test_risk_manager_trips_kill_switch_on_severe_violation(tmp_path) -> None:
+    clock = _TimeStub()
+    audit_path = tmp_path / "audit.jsonl"
+    audit = ExecutionAuditLogger(audit_path)
+    limits = RiskLimits(
+        max_notional=100.0,
+        max_position=5.0,
+        kill_switch_limit_multiplier=1.1,
+    )
+    manager = RiskManager(limits, time_source=clock, audit_logger=audit)
+
+    with pytest.raises(LimitViolation):
+        manager.validate_order("BTC", "buy", qty=6.0, price=10.0)
+
+    assert manager.kill_switch.is_triggered()
+    assert "Position cap exceeded" in manager.kill_switch.reason
+
+    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+    kill_events = [entry for entry in entries if entry.get("event") == "kill_switch_triggered"]
+    assert kill_events and kill_events[0]["violation_type"] == "position_limit"
+
+
+def test_risk_manager_trips_kill_switch_after_repeated_throttling(tmp_path) -> None:
+    clock = _TimeStub()
+    audit_path = tmp_path / "rate_audit.jsonl"
+    audit = ExecutionAuditLogger(audit_path)
+    limits = RiskLimits(
+        max_notional=1_000.0,
+        max_position=100.0,
+        max_orders_per_interval=1,
+        interval_seconds=5.0,
+        kill_switch_rate_limit_threshold=2,
+    )
+    manager = RiskManager(limits, time_source=clock, audit_logger=audit)
+
+    manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
+    with pytest.raises(OrderRateExceeded):
+        manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
+    with pytest.raises(OrderRateExceeded):
+        manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
+
+    assert manager.kill_switch.is_triggered()
+    assert "Order throttle exceeded" in manager.kill_switch.reason
 
 
 def test_risk_manager_normalises_symbol_aliases() -> None:
