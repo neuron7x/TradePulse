@@ -124,12 +124,15 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
         return nx.Graph()
     p = p[mask]
     base = p[0]
-    levels = np.round((p - base) / (base * delta)).astype(int)
+    scale = float(abs(base))
+    if not np.isfinite(scale) or scale == 0.0:
+        scale = 1.0
+    levels = np.round((p - base) / (scale * delta)).astype(int)
     G = nx.Graph()
     for i, lv in enumerate(levels):
         G.add_node(int(lv))
         if i > 0:
-            weight = float(abs(prices[i] - prices[i - 1])) + 1.0
+            weight = float(abs(p[i] - p[i - 1])) + 1.0
             G.add_edge(int(levels[i - 1]), int(lv), weight=weight)
     return G
 
