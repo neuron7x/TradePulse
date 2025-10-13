@@ -5,6 +5,7 @@ from .connectors import ExecutionConnector, OrderError
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .oms import OMSConfig, OrderManagementSystem
+from .live_loop import LiveExecutionLoop, LiveLoopConfig
 from .risk import IdempotentRetryExecutor, KillSwitch, LimitViolation, OrderRateExceeded, RiskLimits, RiskManager
 
 __all__ = [
@@ -22,6 +23,8 @@ __all__ = [
     "ComplianceViolation",
     "OMSConfig",
     "OrderManagementSystem",
+    "LiveLoopConfig",
+    "LiveExecutionLoop",
     "RiskLimits",
     "RiskManager",
     "KillSwitch",
