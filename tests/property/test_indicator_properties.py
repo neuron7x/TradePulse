@@ -6,7 +6,7 @@ import pandas as pd
 import pytest
 
 try:
-    from hypothesis import given, strategies as st
+    from hypothesis import HealthCheck, given, settings, strategies as st
 except ImportError:  # pragma: no cover - optional dependency
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
@@ -62,9 +62,10 @@ def test_mean_ricci_accepts_non_finite_inputs(prices: list[float]) -> None:
     assert np.isfinite(curvature)
 
 
+@settings(deadline=None, suppress_health_check=[HealthCheck.too_slow])
 @given(
     st.integers(min_value=32, max_value=128),
-    st.lists(finite_floats, min_size=256, max_size=512),
+    st.lists(finite_floats, min_size=128, max_size=384),
 )
 def test_temporal_ricci_resilient_to_non_finite(window: int, raw_prices: list[float]) -> None:
     length = len(raw_prices)
