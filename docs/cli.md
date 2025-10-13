@@ -4,6 +4,9 @@ The TradePulse CLI orchestrates ingestion, backtesting, optimisation, execution,
 and reporting pipelines. This reference covers the developer-experience
 improvements added for deterministic runs and improved shell ergonomics.
 
+For a command-by-command breakdown generated directly from `tradepulse-cli --help`,
+see the auto-generated [TradePulse CLI Command Reference](tradepulse_cli_reference.md).
+
 ## Global Improvements
 
 - **Typed exit codes** – configuration errors exit with code `2`, artifact
