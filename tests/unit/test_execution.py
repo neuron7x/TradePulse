@@ -85,6 +85,23 @@ def test_risk_manager_rate_limiter_blocks_excess_orders() -> None:
     manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
 
 
+def test_risk_manager_does_not_accumulate_submissions_when_throttling_disabled() -> None:
+    clock = _TimeStub()
+    limits = RiskLimits(
+        max_notional=1_000_000.0,
+        max_position=1_000_000.0,
+        max_orders_per_interval=0,
+        interval_seconds=1.0,
+    )
+    manager = RiskManager(limits, time_source=clock)
+
+    for _ in range(256):
+        manager.validate_order("BTC", "buy", qty=1.0, price=10.0)
+        clock.advance(0.1)
+
+    assert len(manager._submissions) == 0
+
+
 def test_kill_switch_blocks_all_orders() -> None:
     manager = RiskManager(RiskLimits(max_notional=100.0, max_position=10.0))
     manager.kill_switch.trigger("test")

@@ -280,7 +280,10 @@ class RiskManager(RiskController):
             )
             raise LimitViolation(reason)
 
-        self._submissions.append(now)
+        if self.limits.max_orders_per_interval > 0:
+            self._submissions.append(now)
+        else:
+            self._submissions.clear()
         self._limit_violation_streak = 0
         self._metrics.record_risk_validation(canonical_symbol, "passed")
         self._record_risk_audit(
