@@ -16,8 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Update draft release notes
-        uses: release-drafter/release-drafter@v6
+        uses: ./.github/actions/release-drafter-retry
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           config-name: release-drafter.yml
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
