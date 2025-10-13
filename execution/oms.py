@@ -6,12 +6,12 @@ from __future__ import annotations
 import json
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Dict, Iterable, MutableMapping
 
-from domain import Order
+from domain import Order, OrderStatus
 from interfaces.execution import RiskController
 
 from core.utils.metrics import get_metrics_collector
@@ -61,6 +61,7 @@ class OrderManagementSystem:
         self._queue: Deque[QueuedOrder] = deque()
         self._orders: MutableMapping[str, Order] = {}
         self._processed: Dict[str, str] = {}
+        self._correlations: Dict[str, str] = {}
         self._metrics = get_metrics_collector()
         self._ack_timestamps: Dict[str, datetime] = {}
         self._pending: Dict[str, Order] = {}
@@ -81,6 +82,7 @@ class OrderManagementSystem:
                 for item in self._queue
             ],
             "processed": self._processed,
+            "correlations": self._correlations,
         }
 
     def _persist_state(self) -> None:
@@ -110,6 +112,7 @@ class OrderManagementSystem:
             for item in payload.get("queue", [])
         )
         self._processed = {str(k): str(v) for k, v in payload.get("processed", {}).items()}
+        self._correlations = {str(k): str(v) for k, v in payload.get("correlations", {}).items()}
         self._pending = {item.correlation_id: item.order for item in self._queue}
 
     # ------------------------------------------------------------------
@@ -209,6 +212,7 @@ class OrderManagementSystem:
             raise RuntimeError("Connector returned order without ID")
         self._orders[submitted.order_id] = submitted
         self._processed[item.correlation_id] = submitted.order_id
+        self._correlations[submitted.order_id] = item.correlation_id
         if self._metrics.enabled:
             exchange = getattr(self.connector, "name", self.connector.__class__.__name__.lower())
             self._metrics.record_order_ack_latency(exchange, submitted.symbol, max(0.0, ack_latency))
@@ -274,7 +278,51 @@ class OrderManagementSystem:
         self._processed.clear()
         self._ack_timestamps.clear()
         self._pending.clear()
+        self._correlations.clear()
         self._load_state()
+
+    # ------------------------------------------------------------------
+    # Recovery helpers
+    def correlation_for(self, order_id: str) -> str | None:
+        """Return the correlation ID originally associated with *order_id*."""
+
+        return self._correlations.get(order_id)
+
+    def adopt_open_order(self, order: Order, *, correlation_id: str | None = None) -> None:
+        """Adopt an externally recovered order into the OMS state."""
+
+        if order.order_id is None:
+            raise ValueError("order must have an order_id to be adopted")
+        correlation = correlation_id or f"recovered-{order.order_id}"
+        self._orders[order.order_id] = order
+        self._processed[correlation] = order.order_id
+        self._correlations[order.order_id] = correlation
+        self._persist_state()
+
+    def requeue_order(self, order_id: str, *, correlation_id: str | None = None) -> str:
+        """Re-enqueue an order whose venue state was lost or invalidated."""
+
+        if order_id not in self._orders:
+            raise LookupError(f"Unknown order_id: {order_id}")
+        original = self._orders.pop(order_id)
+        correlation = correlation_id or self._correlations.pop(order_id, None)
+        if correlation is None:
+            correlation = f"requeue-{order_id}"
+        self._processed.pop(correlation, None)
+        resubmittable = replace(
+            original,
+            order_id=None,
+            status=OrderStatus.PENDING,
+            filled_quantity=0.0,
+            average_price=None,
+            rejection_reason=None,
+        )
+        queued = QueuedOrder(correlation, resubmittable)
+        self._queue.appendleft(queued)
+        self._pending[correlation] = resubmittable
+        self._ack_timestamps.pop(order_id, None)
+        self._persist_state()
+        return correlation
 
     def outstanding(self) -> Iterable[Order]:
         return list(self._orders.values())

@@ -1,0 +1,130 @@
+# SPDX-License-Identifier: MIT
+"""Integration tests for the live execution loop orchestrator."""
+
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import pytest
+
+from domain import Order, OrderSide, OrderType
+from execution.connectors import BinanceConnector
+from execution.live_loop import LiveExecutionLoop, LiveLoopConfig
+from execution.risk import RiskLimits, RiskManager
+
+
+class RecoveryConnector(BinanceConnector):
+    def __init__(self) -> None:
+        super().__init__()
+        self.connected = False
+        self.placements = 0
+
+    def connect(self, credentials=None) -> None:  # type: ignore[override]
+        self.connected = True
+
+    def disconnect(self) -> None:  # type: ignore[override]
+        self.connected = False
+
+    def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:  # type: ignore[override]
+        self.placements += 1
+        return super().place_order(order, idempotency_key=idempotency_key)
+
+    def drop_order(self, order_id: str) -> None:
+        self._orders.pop(order_id, None)
+
+
+class FlakyConnector(BinanceConnector):
+    def __init__(self) -> None:
+        super().__init__()
+        self._failures_remaining = 1
+        self.reconnects = 0
+
+    def connect(self, credentials=None) -> None:  # type: ignore[override]
+        self.reconnects += 1
+
+    def get_positions(self):  # type: ignore[override]
+        if self._failures_remaining > 0:
+            self._failures_remaining -= 1
+            raise ConnectionError("simulated heartbeat disconnect")
+        return super().get_positions()
+
+
+@pytest.fixture()
+def live_loop_config(tmp_path: Path) -> LiveLoopConfig:
+    return LiveLoopConfig(
+        state_dir=tmp_path / "state",
+        submission_interval=0.05,
+        fill_poll_interval=0.05,
+        heartbeat_interval=0.1,
+        max_backoff=0.2,
+    )
+
+
+def test_live_loop_recovers_and_requeues_orders(live_loop_config: LiveLoopConfig) -> None:
+    connector = RecoveryConnector()
+    risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
+    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+
+    loop.start(cold_start=True)
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.2, price=20_000, order_type=OrderType.LIMIT)
+    loop.submit_order("binance", order, correlation_id="ord-1")
+
+    order_id: str | None = None
+    for _ in range(50):
+        pending = [o for o in loop._contexts["binance"].oms.outstanding() if o.order_id]
+        if pending:
+            order_id = pending[0].order_id
+            break
+        time.sleep(0.05)
+    assert order_id is not None
+
+    loop.shutdown()
+
+    assert connector.placements == 1
+    connector.drop_order(order_id)
+    stray = connector.place_order(
+        Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.1, price=20_100, order_type=OrderType.LIMIT)
+    )
+
+    restart_risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
+    loop_restart = LiveExecutionLoop({"binance": connector}, restart_risk, config=live_loop_config)
+    loop_restart.start(cold_start=False)
+
+    for _ in range(50):
+        if connector.placements >= 2:
+            break
+        time.sleep(0.05)
+    assert connector.placements >= 2
+
+    adopted_ids = [o.order_id for o in loop_restart._contexts["binance"].oms.outstanding() if o.order_id]
+    assert stray.order_id in adopted_ids
+
+    loop_restart.shutdown()
+
+
+def test_live_loop_emits_reconnect_on_heartbeat_failure(live_loop_config: LiveLoopConfig) -> None:
+    connector = FlakyConnector()
+    risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
+    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+
+    reconnect_events: list[tuple[str, int]] = []
+
+    def on_reconnect(venue: str, attempt: int, delay: float, exc: Exception | None) -> None:
+        reconnect_events.append((venue, attempt))
+
+    loop.on_reconnect.connect(on_reconnect)
+    loop.start(cold_start=True)
+
+    for _ in range(50):
+        if reconnect_events:
+            break
+        time.sleep(0.05)
+
+    loop.shutdown()
+
+    assert reconnect_events, "Expected at least one reconnect event to be emitted"
+    venue, attempt = reconnect_events[0]
+    assert venue == "binance"
+    assert attempt >= 1
+    assert connector.reconnects >= 1

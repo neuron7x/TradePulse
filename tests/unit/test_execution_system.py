@@ -222,6 +222,31 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
     assert any(o.order_id == placed.order_id for o in oms.outstanding())
 
 
+def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "recovery_state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    original = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.5, price=21_500, order_type=OrderType.LIMIT)
+    oms.submit(original, correlation_id="recover-1")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    correlation = oms.requeue_order(placed.order_id)
+    assert correlation in {"recover-1"} or correlation.startswith("requeue-")
+    replacement = oms.process_next()
+    assert replacement.order_id is not None
+    assert replacement.status.name == "OPEN"
+
+    adopted = connector.place_order(
+        Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.25, price=21_600, order_type=OrderType.LIMIT)
+    )
+    oms.adopt_open_order(adopted, correlation_id="adopt-1")
+    assert oms.correlation_for(adopted.order_id) == "adopt-1"
+    assert any(order.order_id == adopted.order_id for order in oms.outstanding())
+
+
 def test_oms_retries_transient_failures(tmp_path, risk_manager: RiskManager) -> None:
     state_path = tmp_path / "retry_state.json"
     config = OMSConfig(state_path=state_path, max_retries=3)
