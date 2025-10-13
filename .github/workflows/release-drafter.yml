@@ -10,13 +10,53 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: release-drafter-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   update:
     name: Update release draft
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Validate Release Drafter inputs
+        id: validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          config_path=".github/release-drafter.yml"
+          action_dir=".github/actions/release-drafter-retry"
+          if [[ ! -f "$config_path" ]]; then
+            echo "::error::Release Drafter configuration '$config_path' was not found." >&2
+            exit 1
+          fi
+          if [[ ! -f "$action_dir/action.yml" && ! -f "$action_dir/action.yaml" && ! -f "$action_dir/Dockerfile" ]]; then
+            echo "::error::Local action definition was not found in '$action_dir'." >&2
+            exit 1
+          fi
+          echo "config-path=$config_path" >> "$GITHUB_OUTPUT"
+          echo "action-dir=$action_dir" >> "$GITHUB_OUTPUT"
+          echo "Using config file at '$config_path' with action located in '$action_dir'."
+
       - name: Update draft release notes
         uses: ./.github/actions/release-drafter-retry
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          config-name: release-drafter.yml
+          config-name: ${{ steps.validate.outputs.config-path }}
+
+      - name: Summarize Release Drafter run
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Release Drafter Summary"
+            echo "- Event: ${{ github.event_name }}"
+            echo "- Ref: ${{ github.ref }}"
+            echo "- Outcome: ${{ job.status }}"
+          } >> "$GITHUB_STEP_SUMMARY"
