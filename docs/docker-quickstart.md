@@ -377,7 +377,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 docker compose exec tradepulse pytest tests/
 
 # Run with coverage
-docker compose exec tradepulse pytest tests/ --cov=core --cov-report=html
+docker compose exec tradepulse pytest tests/ --cov=core --cov=analytics --cov-report=html
 
 # Run specific test
 docker compose exec tradepulse pytest tests/unit/test_indicators.py

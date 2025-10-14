@@ -158,7 +158,7 @@ pip-audit --desc
 ### Test Suite
 ```bash
 pytest tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
-  --cov=core --cov=backtest --cov=execution \
+  --cov=core --cov=backtest --cov=execution --cov=analytics \
   --cov-fail-under=90
 # ✅ 139 passed, 91.02% coverage
 ```

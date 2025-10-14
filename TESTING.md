@@ -72,7 +72,7 @@ pytest tests/
 
 Run with branch coverage report:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-report=term-missing
 ```
 
 ### Makefile Shortcuts
@@ -82,12 +82,12 @@ The Makefile exposes convenience targets that wrap the most common pytest invoca
 | Target | Description | Underlying command |
 | --- | --- | --- |
 | `make test:fast` | Fast feedback loop that skips heavyweight suites | `pytest tests/ -m "not slow and not heavy_math and not nightly"` |
-| `make test:all` | Full coverage-enabled suite matching CI defaults | `pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing` |
+| `make test:all` | Full coverage-enabled suite matching CI defaults | `pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-report=term-missing` |
 | `make test:heavy` | Executes the slow, heavy math, and nightly gates | `pytest tests/ -m "slow or heavy_math or nightly"` |
 
 Generate HTML coverage report:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=html
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-report=html
 # Open htmlcov/index.html in browser
 ```
 
@@ -276,7 +276,7 @@ All commands automatically consume the env/secret files referenced by the profil
 The CI enforces both line and branch coverage thresholds using `pytest-cov`:
 
 ```bash
-pytest --cov=core --cov=backtest --cov=execution \
+pytest --cov=core --cov=backtest --cov=execution --cov=analytics \
        --cov-branch \
        --cov-report=term-missing \
        --cov-fail-under=90
@@ -284,7 +284,7 @@ pytest --cov=core --cov=backtest --cov=execution \
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-fail-under=90
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-fail-under=90
 ```
 
 Additionally, the CI workflow parses `coverage.xml` and fails early if total branch coverage drops below 90%.

@@ -65,7 +65,7 @@ test\:fast:
 
 .PHONY: test\:all
 test\:all:
-	pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing
+	pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-report=term-missing
 
 .PHONY: test\:heavy
 test\:heavy:

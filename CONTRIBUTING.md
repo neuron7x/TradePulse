@@ -147,7 +147,7 @@ tests/fuzz/
 pytest tests/
 
 # Run with coverage
-pytest tests/ --cov=core --cov=backtest --cov=execution
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics
 ```
 
 See [TESTING.md](TESTING.md) for detailed testing guidelines.

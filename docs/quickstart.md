@@ -295,7 +295,7 @@ Now that you're up and running, explore:
 2. Set up your IDE
 3. Run the full test suite:
    ```bash
-   pytest tests/ --cov=core --cov=backtest --cov=execution
+   pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics
    ```
 4. Explore the codebase
 
