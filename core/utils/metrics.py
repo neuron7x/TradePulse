@@ -214,6 +214,19 @@ class MetricsCollector:
             registry=registry,
         )
 
+        self.admin_remote_control_requests_total = Counter(
+            "tradepulse_admin_remote_control_requests_total",
+            "Administrative remote control authentication attempts by outcome",
+            ["outcome"],
+            registry=registry,
+        )
+
+        self.admin_remote_control_throttle_seconds = Histogram(
+            "tradepulse_admin_remote_control_throttle_seconds",
+            "Observed wait duration before remote control requests may be retried",
+            registry=registry,
+        )
+
         self.compliance_checks_total = Counter(
             "tradepulse_compliance_checks_total",
             "Compliance check outcomes",
@@ -730,6 +743,20 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.kill_switch_triggers_total.labels(reason=reason).inc()
+
+    def record_admin_remote_control_attempt(self, outcome: str) -> None:
+        """Record the outcome of an administrative remote control attempt."""
+
+        if not self._enabled:
+            return
+        self.admin_remote_control_requests_total.labels(outcome=outcome).inc()
+
+    def observe_admin_remote_control_throttle(self, retry_after_seconds: float) -> None:
+        """Record the backoff duration communicated to a throttled admin request."""
+
+        if not self._enabled:
+            return
+        self.admin_remote_control_throttle_seconds.observe(retry_after_seconds)
 
     def record_compliance_check(
         self,

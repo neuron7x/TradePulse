@@ -8,7 +8,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from execution.risk import RiskLimits, RiskManager
-from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from src.admin.remote_control import (
+    AdminAccessPolicyConfig,
+    RateLimitSettings,
+    TokenAuthenticator,
+    create_remote_control_router,
+)
 from src.audit.audit_logger import AuditLogger, AuditRecord
 from src.risk.risk_manager import KillSwitchState, RiskManagerFacade
 
@@ -128,6 +133,88 @@ def test_kill_switch_reaffirmation_is_audited(remote_control_fixture: RemoteCont
     assert reaffirmation.event_type == "kill_switch_reaffirmed"
     assert reaffirmation.details["already_engaged"] is True
     assert reaffirmation.details["reason"] == "still engaged"
+
+
+def test_kill_switch_rate_limits_are_audited() -> None:
+    records: list[AuditRecord] = []
+    audit_logger = AuditLogger(
+        secret="unit-test-secret",
+        sink=records.append,
+        clock=lambda: datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+    risk_manager = RiskManager(RiskLimits())
+    facade = RiskManagerFacade(risk_manager)
+    authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
+    policy_config = AdminAccessPolicyConfig(
+        subject_rate_limit=RateLimitSettings(max_attempts=1, window_seconds=3600),
+        ip_rate_limit=RateLimitSettings(max_attempts=5, window_seconds=60),
+    )
+    app = FastAPI()
+    app.include_router(
+        create_remote_control_router(
+            facade,
+            audit_logger,
+            authenticator,
+            access_policy_config=policy_config,
+        )
+    )
+    client = TestClient(app)
+    try:
+        headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "subject-a"}
+        first = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+        assert first.status_code == 200
+        throttled = client.post("/admin/kill-switch", headers=headers, json={"reason": "retry"})
+        assert throttled.status_code == 429
+        assert "Retry-After" in throttled.headers
+    finally:
+        client.close()
+
+    assert len(records) == 2
+    assert records[1].event_type == "kill_switch_rate_limited"
+    assert records[1].details["subject_retry_after"] > 0
+    assert records[1].details["ip_retry_after"] >= 0
+
+
+def test_kill_switch_enforces_cidr_allow_list() -> None:
+    records: list[AuditRecord] = []
+    audit_logger = AuditLogger(
+        secret="unit-test-secret",
+        sink=records.append,
+        clock=lambda: datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+    risk_manager = RiskManager(RiskLimits())
+    facade = RiskManagerFacade(risk_manager)
+    authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
+    policy_config = AdminAccessPolicyConfig(
+        allow_cidrs=("10.0.0.0/8",),
+        subject_rate_limit=RateLimitSettings(max_attempts=5, window_seconds=60),
+        ip_rate_limit=RateLimitSettings(max_attempts=5, window_seconds=60),
+    )
+    app = FastAPI()
+    app.include_router(
+        create_remote_control_router(
+            facade,
+            audit_logger,
+            authenticator,
+            access_policy_config=policy_config,
+        )
+    )
+    client = TestClient(app)
+    try:
+        headers = {
+            "X-Admin-Token": "s3cr3t-token",
+            "X-Admin-Subject": "forbidden",
+            "X-Forwarded-For": "203.0.113.42",
+        }
+        denied = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+        assert denied.status_code == 403
+    finally:
+        client.close()
+
+    assert records
+    assert records[0].event_type == "kill_switch_access_denied"
+    assert records[0].details["allowed_cidrs"] == ["10.0.0.0/8"]
+    assert not risk_manager.kill_switch.is_triggered()
 
 
 def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() -> None:

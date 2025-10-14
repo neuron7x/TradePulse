@@ -23,7 +23,12 @@ from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipel
 from application.trading import signal_to_dto
 from execution.risk import RiskLimits, RiskManager
 from domain import Signal, SignalAction
-from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from src.admin.remote_control import (
+    AdminAccessPolicyConfig,
+    RateLimitSettings,
+    TokenAuthenticator,
+    create_remote_control_router,
+)
 from src.audit.audit_logger import AuditLogger
 from src.risk.risk_manager import RiskManagerFacade
 
@@ -239,6 +244,7 @@ def create_app(
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
     admin_token: str | None = None,
     audit_secret: str | None = None,
+    admin_access_config: AdminAccessPolicyConfig | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies."""
 
@@ -262,9 +268,38 @@ def create_app(
             )
         )
 
+    def _parse_rate_limit_env(name: str, default: RateLimitSettings) -> RateLimitSettings:
+        value = os.environ.get(name)
+        if not value:
+            return default
+        try:
+            return RateLimitSettings.parse(value)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid {name} specification: {exc}") from exc
+
+    def _parse_allow_list_env(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+        value = os.environ.get(name)
+        if not value:
+            return default
+        entries = [entry.strip() for entry in value.split(",") if entry.strip()]
+        return tuple(entries)
+
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
     audit_logger = AuditLogger(secret=resolved_audit_secret)
     authenticator = TokenAuthenticator(token=resolved_admin_token)
+
+    default_policy = AdminAccessPolicyConfig()
+    resolved_admin_policy = admin_access_config or AdminAccessPolicyConfig(
+        allow_cidrs=_parse_allow_list_env(
+            "TRADEPULSE_ADMIN_ALLOW_LIST", default_policy.allow_cidrs
+        ),
+        subject_rate_limit=_parse_rate_limit_env(
+            "TRADEPULSE_ADMIN_SUBJECT_RATE_LIMIT", default_policy.subject_rate_limit
+        ),
+        ip_rate_limit=_parse_rate_limit_env(
+            "TRADEPULSE_ADMIN_IP_RATE_LIMIT", default_policy.ip_rate_limit
+        ),
+    )
 
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period
@@ -300,7 +335,14 @@ def create_app(
         allow_headers=["*"]
     )
 
-    app.include_router(create_remote_control_router(risk_manager_facade, audit_logger, authenticator))
+    app.include_router(
+        create_remote_control_router(
+            risk_manager_facade,
+            audit_logger,
+            authenticator,
+            access_policy_config=resolved_admin_policy,
+        )
+    )
     app.state.risk_manager = risk_manager_facade.risk_manager
     app.state.audit_logger = audit_logger
 
