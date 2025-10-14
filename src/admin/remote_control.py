@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-import ipaddress
+import asyncio
 import hmac
+import ipaddress
+from collections import deque
+from typing import Deque
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -16,6 +19,7 @@ __all__ = [
     "KillSwitchRequest",
     "KillSwitchResponse",
     "TokenAuthenticator",
+    "AdminRateLimiter",
     "create_remote_control_router",
 ]
 
@@ -92,6 +96,36 @@ class TokenAuthenticator:
         return AdminIdentity(subject=subject)
 
 
+class AdminRateLimiter:
+    """Track administrative attempts and raise when limits are exceeded."""
+
+    def __init__(self, *, max_attempts: int = 5, interval_seconds: float = 60.0) -> None:
+        if max_attempts <= 0:
+            raise ValueError("max_attempts must be positive")
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be positive")
+        self._max_attempts = max_attempts
+        self._interval = float(interval_seconds)
+        self._records: dict[str, Deque[float]] = {}
+        self._lock = asyncio.Lock()
+
+    async def check(self, identifier: str) -> None:
+        """Register an attempt for *identifier* and enforce rate limits."""
+
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        async with self._lock:
+            bucket = self._records.setdefault(identifier, deque())
+            while bucket and now - bucket[0] >= self._interval:
+                bucket.popleft()
+            if len(bucket) >= self._max_attempts:
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many administrative requests from this source",
+                )
+            bucket.append(now)
+
+
 def _resolve_ip(request: Request) -> str:
     """Return the originating IP address for the request."""
 
@@ -148,6 +182,8 @@ def create_remote_control_router(
     risk_manager: RiskManagerFacade,
     audit_logger: AuditLogger,
     authenticator: TokenAuthenticator,
+    *,
+    rate_limiter: AdminRateLimiter | None = None,
 ) -> APIRouter:
     """Create a router exposing secure administrative endpoints."""
 
@@ -163,6 +199,12 @@ def create_remote_control_router(
     def get_audit_logger() -> AuditLogger:
         return audit_logger
 
+    limiter = rate_limiter or AdminRateLimiter()
+
+    async def enforce_admin_rate_limit(request: Request) -> None:
+        identifier = _resolve_ip(request)
+        await limiter.check(identifier)
+
     @router.post(
         "/kill-switch",
         response_model=KillSwitchResponse,
@@ -172,6 +214,7 @@ def create_remote_control_router(
     async def engage_kill_switch(
         payload: KillSwitchRequest,
         request: Request,
+        _: None = Depends(enforce_admin_rate_limit),
         identity: AdminIdentity = Depends(authenticator),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
@@ -201,6 +244,7 @@ def create_remote_control_router(
     )
     async def read_kill_switch_state(
         request: Request,
+        _: None = Depends(enforce_admin_rate_limit),
         identity: AdminIdentity = Depends(authenticator),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
@@ -229,6 +273,7 @@ def create_remote_control_router(
     )
     async def reset_kill_switch(
         request: Request,
+        _: None = Depends(enforce_admin_rate_limit),
         identity: AdminIdentity = Depends(authenticator),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
