@@ -65,7 +65,16 @@ def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> Non
     body = response.json()
     assert body["symbol"] == "TEST-USD"
     assert "features" in body
-    assert body["features"].get("macd") is not None
+    features = body["features"]
+    for column in [
+        "macd",
+        "macd_signal",
+        "macd_histogram",
+        "macd_ema_fast",
+        "macd_ema_slow",
+    ]:
+        assert column in features, f"Expected {column} in feature payload"
+        assert features[column] is not None
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")

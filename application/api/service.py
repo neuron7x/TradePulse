@@ -185,7 +185,29 @@ class OnlineSignalForecaster:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
             )
-        latest = features.iloc[-1].dropna()
+
+        latest_row = features.iloc[-1]
+
+        required_macd_columns = ("macd", "macd_signal", "macd_histogram")
+        missing_columns = [col for col in required_macd_columns if col not in latest_row.index]
+        if missing_columns:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing MACD features: {', '.join(sorted(missing_columns))}",
+            )
+
+        invalid_columns = [
+            col
+            for col in required_macd_columns
+            if pd.isna(latest_row[col]) or not np.isfinite(float(latest_row[col]))
+        ]
+        if invalid_columns:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unavailable MACD features: {', '.join(sorted(invalid_columns))}",
+            )
+
+        latest = latest_row.dropna()
         if latest.empty:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -197,11 +219,9 @@ class OnlineSignalForecaster:
         self, symbol: str, latest: pd.Series, horizon_seconds: int
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
-        macd = float(latest.get("macd", 0.0))
-        macd_signal_line = float(latest.get("macd_signal", macd))
-        macd_histogram = float(
-            latest.get("macd_histogram", macd - macd_signal_line)
-        )
+        macd = float(latest["macd"])
+        macd_signal_line = float(latest["macd_signal"])
+        macd_histogram = float(latest["macd_histogram"])
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
