@@ -68,6 +68,8 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "signed_volume_ema",
     }
     assert expected.issubset(features.columns)
+    # MACD should now be available from the first observation
+    assert not features["macd"].isna().iloc[0]
     # ensure leakage control ready: there should be NaNs at start because of rolling windows
     assert features.isna().sum().max() > 0
 
