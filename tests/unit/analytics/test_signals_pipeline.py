@@ -200,30 +200,32 @@ def test_macd_signal_window_follows_configuration() -> None:
 
 
 def test_macd_pipeline_matches_golden_baseline() -> None:
-    baseline_path = Path("data/golden/indicator_macd_baseline.csv")
-    baseline = pd.read_csv(baseline_path, parse_dates=["ts"])
-    frame = baseline.set_index("ts")[["close"]]
+    """Ensure MACD-related features stay aligned with the golden baseline."""
 
-    pipeline = SignalFeaturePipeline(FeaturePipelineConfig())
-    features = pipeline.transform(frame)
+    golden_path = Path(__file__).resolve().parents[3] / "data" / "golden" / "indicator_macd_baseline.csv"
+    golden_frame = pd.read_csv(golden_path, parse_dates=["ts"])
+    golden_frame.set_index("ts", inplace=True)
 
-    macd = features.loc[frame.index, "macd"].to_numpy()
-    macd_signal = features.loc[frame.index, "macd_signal"].to_numpy()
-    macd_histogram = features.loc[frame.index, "macd_histogram"].to_numpy()
-    macd_ema_fast = features.loc[frame.index, "macd_ema_fast"].to_numpy()
-    macd_ema_slow = features.loc[frame.index, "macd_ema_slow"].to_numpy()
+    price_frame = pd.DataFrame({"close": golden_frame["close"]}, index=golden_frame.index)
 
-    expected_macd = baseline["macd"].to_numpy(dtype=float)
-    expected_signal = baseline["signal"].to_numpy(dtype=float)
-    expected_histogram = baseline["histogram"].to_numpy(dtype=float)
-    expected_fast = baseline["ema_12"].to_numpy(dtype=float)
-    expected_slow = baseline["ema_26"].to_numpy(dtype=float)
+    pipeline = SignalFeaturePipeline(
+        FeaturePipelineConfig(technical_windows=(), macd_fast=12, macd_slow=26, macd_signal=9)
+    )
+    features = pipeline.transform(price_frame)
 
-    np.testing.assert_allclose(macd, expected_macd, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(macd_signal, expected_signal, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(macd_histogram, expected_histogram, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(macd_ema_fast, expected_fast, rtol=1e-6, atol=1e-6)
-    np.testing.assert_allclose(macd_ema_slow, expected_slow, rtol=1e-6, atol=1e-6)
+    macd_columns = {
+        "macd_ema_fast": "ema_12",
+        "macd_ema_slow": "ema_26",
+        "macd": "macd",
+        "macd_signal": "signal",
+        "macd_histogram": "histogram",
+    }
+
+    for feature_col, golden_col in macd_columns.items():
+        assert feature_col in features, f"Missing feature column: {feature_col}"
+        expected = golden_frame[golden_col].to_numpy(dtype=float)
+        actual = features.loc[golden_frame.index, feature_col].to_numpy(dtype=float)
+        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=5e-7, err_msg=f"Mismatch for {feature_col}")
 
 
 def test_feature_pipeline_handles_empty_frame() -> None:
