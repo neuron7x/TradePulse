@@ -1,5 +1,26 @@
 const DEFAULT_METRIC = 'sharpe';
 
+const RISKY_LEADING_CHAR_PATTERN = /^[=+\-@]/;
+const MARKDOWN_META_CHAR_PATTERN = /([\\`*_{}\[\]()#+!|>])/g;
+
+export function sanitizeReportValue(value) {
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  let text = String(value);
+
+  if (RISKY_LEADING_CHAR_PATTERN.test(text)) {
+    text = `'${text}`;
+  }
+
+  if (text.length === 0) {
+    return text;
+  }
+
+  return text.replace(MARKDOWN_META_CHAR_PATTERN, '\\$1');
+}
+
 export function createStrategyConfigurator(strategies = []) {
   const state = new Map();
   strategies.forEach((strategy) => {
@@ -100,9 +121,11 @@ export function exportReport(summary, options = {}) {
       rows.push(['id', 'strategy', 'score'].join(','));
       payload.ranking.forEach((entry) => {
         rows.push([
-          entry.id,
-          entry.strategy,
-          Number.isFinite(entry.score) ? entry.score.toFixed(precision) : '',
+          sanitizeReportValue(entry.id),
+          sanitizeReportValue(entry.strategy),
+          sanitizeReportValue(
+            Number.isFinite(entry.score) ? entry.score.toFixed(precision) : '',
+          ),
         ].join(','));
       });
     }
@@ -113,7 +136,9 @@ export function exportReport(summary, options = {}) {
     const lines = ['| Strategy | Score |', '| --- | --- |'];
     (payload.ranking || []).forEach((entry) => {
       const score = Number.isFinite(entry.score) ? entry.score.toFixed(precision) : 'n/a';
-      lines.push(`| ${entry.strategy} | ${score} |`);
+      lines.push(
+        `| ${sanitizeReportValue(entry.strategy)} | ${sanitizeReportValue(score)} |`,
+      );
     });
     return lines.join('\n');
   }

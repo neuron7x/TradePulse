@@ -47,6 +47,38 @@ const csvReport = exportReport(comparison, { format: 'csv', precision: 2 });
 assert.ok(csvReport.includes('trend'));
 assert.ok(csvReport.includes('1.50'));
 
+const injectionSummary = {
+  ranking: [
+    {
+      id: '=HYPERLINK("http://example.com","click")',
+      strategy: '=trend|bold*',
+      score: 2.5,
+    },
+  ],
+};
+const protectedCsv = exportReport(injectionSummary, { format: 'csv', precision: 1 });
+assert.ok(
+  protectedCsv.includes("'=HYPERLINK\\("),
+  'CSV export should neutralise formula injection attempts by prefixing risky values',
+);
+assert.ok(
+  protectedCsv.includes("'=trend\\|bold\\*"),
+  'CSV export should escape Markdown meta characters',
+);
+
+const protectedMarkdown = exportReport(injectionSummary, {
+  format: 'markdown',
+  precision: 1,
+});
+assert.ok(
+  protectedMarkdown.includes("'=trend\\|bold\\*"),
+  'Markdown export should escape Markdown meta characters while keeping content readable',
+);
+assert.ok(
+  protectedMarkdown.includes('2.5'),
+  'Markdown export should include neutralised numeric score',
+);
+
 const state = new DashboardState({ strategies: configurator.list(), backtests });
 state.updateStrategy('mean_revert', { zScore: 2.0 });
 state.addBacktest({ metadata: { id: 'bt-3', strategy: 'volatility' }, metrics: { sharpe: 2.1 } });
