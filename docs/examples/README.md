@@ -165,34 +165,47 @@ print(f"Stop Loss: ${stop_loss_price:.2f}")
 print(f"Risk Amount: ${balance * risk_per_trade:.2f}")
 ```
 
-### 6. Strategy Optimization
+### 6. Strategy Selection with Bandits
+
+TradePulse provides classic multi-armed bandit algorithms to manage simple
+strategy selection loops. The example below shows how to use the
+`EpsilonGreedy` policy to explore available strategies and reinforce the one
+that yields the highest reward.
 
 ```python
-from core.agent.strategy import Strategy
-from core.agent.bandits import GeneticOptimizer
+from core.agent.bandits import EpsilonGreedy
 import numpy as np
+import pandas as pd
 
-# Define parameter space
-param_space = {
-    'window': (10, 100),
-    'threshold': (0.5, 0.9),
-    'risk': (0.01, 0.05)
+df = pd.read_csv('sample.csv')
+prices = df['close'].to_numpy()
+
+# Candidate strategies that output a position (+1 long, -1 short, 0 flat)
+STRATEGIES = {
+    "trend_following": lambda window, prices: np.sign(
+        np.mean(prices[-window:]) - np.mean(prices[-2 * window:])
+    ),
+    "mean_reversion": lambda window, prices: -np.sign(
+        prices[-1] - np.mean(prices[-window:])
+    ),
 }
 
-# Optimize
-optimizer = GeneticOptimizer(
-    population_size=50,
-    generations=20,
-    mutation_rate=0.1
-)
+def backtest_once(strategy_name: str, prices: np.ndarray) -> float:
+    """Return a mock reward from executing the strategy on recent data."""
+    window = 20
+    position = STRATEGIES[strategy_name](window, prices)
+    returns = np.diff(prices)[-window:]
+    return float(position * np.mean(returns))
 
-best_params = optimizer.optimize(
-    prices=prices,
-    param_space=param_space,
-    fitness_func=lambda p, params: backtest_strategy(p, params)
-)
+# Initialize bandit with available strategies (arms)
+bandit = EpsilonGreedy(list(STRATEGIES.keys()), epsilon=0.1)
 
-print(f"Best Parameters: {best_params}")
+for _ in range(100):
+    arm = bandit.select()
+    reward = backtest_once(arm, prices)
+    bandit.update(arm, reward)
+
+print("Estimated action values:", bandit.Q)
 ```
 
 ### 7. Metrics Calculation
