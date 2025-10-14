@@ -63,6 +63,23 @@ def test_kill_switch_endpoint_engages_kill_switch(
     assert audit_logger.verify(record)
 
 
+def test_kill_switch_endpoint_uses_default_subject(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
+    client, risk_manager, records, audit_logger = remote_control_fixture
+    response = client.post(
+        "/admin/kill-switch",
+        headers={"X-Admin-Token": "s3cr3t-token"},
+        json={"reason": "manual intervention"},
+    )
+    assert response.status_code == 200
+    assert risk_manager.kill_switch.is_triggered()
+    assert len(records) == 1
+    record = records[0]
+    assert record.actor == "unit-admin"
+    assert audit_logger.verify(record)
+
+
 def test_kill_switch_endpoint_reflects_facade_state() -> None:
     class StubFacade:
         def __init__(self) -> None:
