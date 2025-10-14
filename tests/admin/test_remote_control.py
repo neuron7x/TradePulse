@@ -144,3 +144,27 @@ def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() 
     assert reaffirmed.already_engaged is True
     assert reaffirmed.reason == "manual intervention required"
     assert risk_manager.kill_switch.reason == "manual intervention required"
+
+
+def test_kill_switch_prefers_forwarded_for_header(remote_control_fixture: RemoteControlBundle) -> None:
+    client, _, records, _ = remote_control_fixture
+    headers = {
+        "X-Admin-Token": "s3cr3t-token",
+        "X-Admin-Subject": "auditor",
+        "X-Forwarded-For": "203.0.113.10:443, 10.0.0.1",
+    }
+    response = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+    assert response.status_code == 200
+    assert records[0].ip_address == "203.0.113.10"
+
+
+def test_kill_switch_falls_back_to_real_ip(remote_control_fixture: RemoteControlBundle) -> None:
+    client, _, records, _ = remote_control_fixture
+    headers = {
+        "X-Admin-Token": "s3cr3t-token",
+        "X-Real-IP": "2001:db8::1%eth0",
+        "X-Forwarded-For": "invalid-entry",
+    }
+    response = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+    assert response.status_code == 200
+    assert records[0].ip_address == "2001:db8::1"
