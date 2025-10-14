@@ -185,7 +185,21 @@ class OnlineSignalForecaster:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
             )
-        latest = features.iloc[-1].dropna()
+        latest_row = features.iloc[-1]
+        required_macd_fields = ("macd", "macd_signal", "macd_histogram")
+        missing_macd_fields = [
+            field
+            for field in required_macd_fields
+            if field not in latest_row or pd.isna(latest_row[field])
+        ]
+        if missing_macd_fields:
+            joined = ", ".join(sorted(missing_macd_fields))
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing required MACD feature(s): {joined}",
+            )
+
+        latest = latest_row.dropna()
         if latest.empty:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

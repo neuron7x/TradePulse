@@ -63,6 +63,27 @@ class TestLatestFeatureVector:
 
         assert excinfo.value.status_code == 422
 
+    def test_missing_macd_components_raise_unprocessable_entity(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": 0.1,
+                    "macd_histogram": 0.05,
+                    "rsi": 55.0,
+                    "return_1": 0.002,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.latest_feature_vector(features)
+
+        assert excinfo.value.status_code == 422
+        assert "macd_signal" in excinfo.value.detail
+
     def test_valid_row_returns_clean_series(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
     ) -> None:
@@ -70,6 +91,8 @@ class TestLatestFeatureVector:
             [
                 {
                     "macd": 0.1,
+                    "macd_signal": 0.08,
+                    "macd_histogram": 0.02,
                     "rsi": 53.0,
                     "return_1": 0.005,
                     "queue_imbalance": 0.2,
