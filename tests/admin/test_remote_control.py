@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Iterator
 from datetime import datetime, timezone
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from execution.risk import RiskLimits, RiskManager
@@ -190,6 +191,22 @@ def test_admin_rate_limiter_blocks_excessive_attempts() -> None:
         assert len(records) == 1
     finally:
         client.close()
+
+
+@pytest.mark.asyncio
+async def test_admin_rate_limiter_allows_after_interval() -> None:
+    limiter = AdminRateLimiter(max_attempts=1, interval_seconds=0.05)
+
+    await limiter.check("127.0.0.1")
+
+    with pytest.raises(HTTPException) as excinfo:
+        await limiter.check("127.0.0.1")
+
+    assert excinfo.value.status_code == 429
+
+    await asyncio.sleep(0.05 + 0.01)
+
+    await limiter.check("127.0.0.1")
 
 
 def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() -> None:
