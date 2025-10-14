@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from execution.risk import RiskLimits, RiskManager
 from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
 from src.audit.audit_logger import AuditLogger, AuditRecord
-from src.risk.risk_manager import RiskManagerFacade
+from src.risk.risk_manager import KillSwitchState, RiskManagerFacade
 
 RemoteControlBundle = tuple[TestClient, RiskManager, list[AuditRecord], AuditLogger]
 
@@ -53,6 +53,41 @@ def test_kill_switch_endpoint_engages_kill_switch(remote_control_fixture: Remote
     assert record.details["reason"] == "manual intervention"
     assert record.actor == "root"
     assert audit_logger.verify(record)
+
+
+def test_kill_switch_endpoint_reflects_facade_state() -> None:
+    class StubFacade:
+        def __init__(self) -> None:
+            self.reasons: list[str] = []
+
+        def engage_kill_switch(self, reason: str) -> KillSwitchState:
+            self.reasons.append(reason)
+            return KillSwitchState(engaged=False, reason=reason, already_engaged=False)
+
+    records: list[AuditRecord] = []
+    audit_logger = AuditLogger(
+        secret="unit-test-secret",
+        sink=records.append,
+        clock=lambda: datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+    facade = StubFacade()
+    authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
+    app = FastAPI()
+    app.include_router(create_remote_control_router(facade, audit_logger, authenticator))
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/admin/kill-switch",
+            headers={"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "ops"},
+            json={"reason": "scheduled maintenance"},
+        )
+    finally:
+        client.close()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kill_switch_engaged"] is False
+    assert body["reason"] == "scheduled maintenance"
+    assert facade.reasons == ["scheduled maintenance"]
 
 
 def test_kill_switch_requires_valid_token(remote_control_fixture: RemoteControlBundle) -> None:

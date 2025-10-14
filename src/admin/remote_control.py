@@ -137,7 +137,7 @@ def create_remote_control_router(
         status_message = "already-engaged" if state.already_engaged else "engaged"
         return KillSwitchResponse(
             status=status_message,
-            kill_switch_engaged=True,
+            kill_switch_engaged=state.engaged,
             reason=state.reason,
             already_engaged=state.already_engaged,
         )
