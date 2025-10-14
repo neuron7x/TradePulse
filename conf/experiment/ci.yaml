@@ -1,5 +1,6 @@
 name: ci
-db_uri: "sqlite:///ci.db"
+database:
+  uri: sqlite:///ci.db
 debug: false
 log_level: INFO
 random_seed: 1337

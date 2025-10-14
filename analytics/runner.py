@@ -19,6 +19,15 @@ import pandas as pd
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
+from configs.secrets import default_secret_loader
+from configs.settings import (
+    ExperimentSettings,
+    load_experiment_settings,
+    register_structured_configs,
+)
+
+register_structured_configs()
+
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
@@ -85,13 +94,34 @@ def _current_git_sha(cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def collect_run_metadata(run_dir: Path, original_cwd: Path, cfg: DictConfig) -> RunMetadata:
+def _extract_experiment_section(
+    settings: ExperimentSettings | DictConfig,
+) -> ExperimentSettings | DictConfig:
+    """Return the experiment configuration for both typed and raw inputs."""
+
+    if isinstance(settings, ExperimentSettings):
+        return settings
+
+    experiment_cfg = settings.get("experiment")
+    if experiment_cfg is not None:
+        return experiment_cfg
+    return settings
+
+
+def collect_run_metadata(
+    run_dir: Path, original_cwd: Path, settings: ExperimentSettings | DictConfig
+) -> RunMetadata:
     """Collect metadata that allows reproducing the current experiment run."""
 
     timestamp = datetime.now(timezone.utc).isoformat()
     git_sha = _current_git_sha(original_cwd)
-    environment = str(cfg.experiment.name)
-    seed = int(cfg.experiment.random_seed)
+    experiment_cfg = _extract_experiment_section(settings)
+    if isinstance(experiment_cfg, ExperimentSettings):
+        environment = experiment_cfg.name
+        seed = int(experiment_cfg.random_seed)
+    else:
+        environment = str(experiment_cfg.get("name", "")) or "default"
+        seed = int(experiment_cfg.get("random_seed", 0))
     return RunMetadata(
         run_dir=run_dir,
         original_cwd=original_cwd,
@@ -113,30 +143,47 @@ def _write_metadata(metadata: RunMetadata) -> None:
     metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
+def run_pipeline(settings: ExperimentSettings | DictConfig) -> dict[str, Any]:
     """Execute the analytics pipeline using configuration parameters."""
 
     logger = logging.getLogger("tradepulse.experiment")
-    data_cfg = cfg.experiment.data
-    analytics_cfg = cfg.experiment.analytics
+    experiment_cfg = _extract_experiment_section(settings)
 
-    data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
+    if isinstance(experiment_cfg, ExperimentSettings):
+        data_cfg = experiment_cfg.data
+        analytics_cfg = experiment_cfg.analytics
+        data_path_value = data_cfg.price_csv
+        price_column = str(data_cfg.price_column)
+        window = int(analytics_cfg.window)
+        bins = int(analytics_cfg.bins)
+        delta = float(analytics_cfg.delta)
+    else:
+        data_cfg = experiment_cfg.get("data")
+        analytics_cfg = experiment_cfg.get("analytics")
+        if data_cfg is None or analytics_cfg is None:
+            raise ValueError("experiment configuration must define 'data' and 'analytics' sections")
+
+        data_path_value = data_cfg.get("price_csv")
+        price_column = str(data_cfg.get("price_column", "price"))
+        window = int(analytics_cfg.get("window", 256))
+        bins = int(analytics_cfg.get("bins", 48))
+        delta = float(analytics_cfg.get("delta", 0.005))
+
+    if data_path_value is None:
+        raise ValueError("experiment configuration must set data.price_csv")
+
+    data_path = Path(to_absolute_path(str(data_path_value)))
     if not data_path.exists():
         logger.warning("Data file %s does not exist; analytics step skipped.", data_path)
         return {"status": "missing-data", "path": str(data_path)}
 
     df = pd.read_csv(data_path)
-    price_column = str(data_cfg.price_column)
     if price_column not in df.columns:
         raise ValueError(
             f"Price column '{price_column}' not found in dataset columns {list(df.columns)}"
         )
 
     prices = df[price_column].to_numpy()
-    window = int(analytics_cfg.window)
-    bins = int(analytics_cfg.bins)
-    delta = float(analytics_cfg.delta)
-
     if len(prices) < window:
         raise ValueError(
             f"Not enough price observations ({len(prices)}) for window size {window}."
@@ -169,17 +216,28 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
 def main(cfg: DictConfig) -> None:
     """Hydra entrypoint that orchestrates experiment execution."""
 
-    configure_logging(str(cfg.experiment.log_level))
-    set_random_seeds(int(cfg.experiment.random_seed))
+    secret_loader = default_secret_loader()
+    experiment_settings = load_experiment_settings(cfg, secret_loader=secret_loader)
+
+    configure_logging(experiment_settings.log_level)
+    set_random_seeds(int(experiment_settings.random_seed))
     apply_reproducibility_settings(cfg)
 
     run_dir = Path.cwd()
     original_cwd = Path(get_original_cwd())
-    metadata = collect_run_metadata(run_dir, original_cwd, cfg)
+    metadata = collect_run_metadata(run_dir, original_cwd, experiment_settings)
 
-    logging.getLogger(__name__).info("Running with configuration:\n%s", OmegaConf.to_yaml(cfg))
+    sanitized = experiment_settings.model_dump(mode="json")
+    if "database" in sanitized:
+        sanitized_database = dict(sanitized["database"])
+        sanitized_database["uri"] = "<redacted>"
+        sanitized_database.pop("password", None)
+        sanitized["database"] = sanitized_database
+    logging.getLogger(__name__).info(
+        "Running with configuration:\n%s", json.dumps(sanitized, indent=2)
+    )
 
-    results = run_pipeline(cfg)
+    results = run_pipeline(experiment_settings)
     _write_metadata(metadata)
 
     results_path = run_dir / "pipeline_results.json"
