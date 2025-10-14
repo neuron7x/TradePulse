@@ -1,15 +1,29 @@
 # SPDX-License-Identifier: MIT
+"""Execution risk controls with kill-switch governance and telemetry hooks.
+
+This module houses the reference :class:`RiskManager` used by the live trading
+runner (see ``docs/runbook_live_trading.md``) and the risk, signals, and
+observability blueprint in ``docs/risk_ml_observability.md``. It enforces
+position/notional limits, order-rate throttles, and a kill-switch escalation
+mechanism aligned with the governance expectations formalised in
+``docs/documentation_governance.md`` and ``docs/monitoring.md``.
+
+The implementation depends on catalog normalisation utilities, execution audit
+logging, and metrics collectors to ensure every decision is observable and
+attributable—an explicit requirement in ``docs/quality_gates.md``.
+"""
+
 from __future__ import annotations
+
 import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Mapping, MutableMapping
 
-from interfaces.execution import PortfolioRiskAnalyzer, RiskController
-
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
+from interfaces.execution import PortfolioRiskAnalyzer, RiskController
 
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 
@@ -186,7 +200,37 @@ class RiskManager(RiskController):
         )
 
     def validate_order(self, symbol: str, side: str, qty: float, price: float) -> None:
-        """Validate an order request without mutating the position book."""
+        """Apply risk checks before admitting an order to the execution stack.
+
+        Args:
+            symbol: External instrument identifier; normalised via
+                :func:`core.data.catalog.normalize_symbol`.
+            side: Case-insensitive trade direction (``"buy"`` or ``"sell"``).
+            qty: Order quantity expressed in base units. Must be non-negative.
+            price: Reference price used for notional calculations. Must be
+                strictly positive.
+
+        Raises:
+            ValueError: If ``qty`` or ``price`` fall outside allowable ranges.
+            RiskError: When the kill-switch is already engaged.
+            OrderRateExceeded: If the rate limiter blocks the submission.
+            LimitViolation: When position or notional caps would be breached.
+
+        Examples:
+            >>> limits = RiskLimits(max_notional=10_000, max_position=5)
+            >>> manager = RiskManager(limits)
+            >>> manager.validate_order("BTC-USD", "buy", 1, 25_000.0)
+            Traceback (most recent call last):
+            ...
+            LimitViolation: Notional cap exceeded for BTC-USD: 25000.0 > 10000.0
+
+        Notes:
+            - Successful validation appends the submission timestamp for rate-limit
+              accounting and emits telemetry via :mod:`execution.audit`.
+            - Consecutive limit or throttle violations trigger the kill-switch when
+              thresholds in :class:`RiskLimits` are met, matching the operational
+              response plan in ``docs/admin_remote_control.md``.
+        """
 
         self._validate_inputs(qty, price)
         canonical_symbol = self._canonical_symbol(symbol)
@@ -234,7 +278,10 @@ class RiskManager(RiskController):
             severe = abs(new_position) > (
                 self.limits.max_position * self.limits.kill_switch_limit_multiplier
             )
-            if severe or self._limit_violation_streak >= self.limits.kill_switch_violation_threshold:
+            if severe or (
+                self._limit_violation_streak
+                >= self.limits.kill_switch_violation_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=canonical_symbol,
@@ -262,7 +309,10 @@ class RiskManager(RiskController):
             severe = projected_notional > (
                 self.limits.max_notional * self.limits.kill_switch_limit_multiplier
             )
-            if severe or self._limit_violation_streak >= self.limits.kill_switch_violation_threshold:
+            if severe or (
+                self._limit_violation_streak
+                >= self.limits.kill_switch_violation_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=canonical_symbol,

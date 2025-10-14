@@ -1,4 +1,22 @@
 # SPDX-License-Identifier: MIT
+"""Kuramoto phase-synchrony indicators for oscillatory market structure analysis.
+
+The functions in this module translate raw price trajectories into phase
+representations using the analytic-signal (Hilbert transform) construction and
+then summarise ensemble coherence through the Kuramoto order parameter. These
+metrics are central to TradePulse's *collective behaviour* signal cluster, which
+assesses whether assets are moving in lockstep or diverging. The implementation
+mirrors the mathematical discussion in `docs/indicators.md` and ties into the
+monitoring hooks outlined in `docs/quality_gates.md`, ensuring features expose
+metrics that downstream telemetry can trace.
+
+Key dependencies include NumPy for vectorised operations, optional SciPy
+accelerations for Hilbert transforms, and the metrics/logging helpers from
+``core.utils`` for governance-compliant observability. GPU support is available
+via CuPy when installed. The module also defines feature wrappers consumed by
+the feature pipeline described in `docs/performance.md`.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -7,9 +25,9 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.logging import get_logger
 from ..utils.metrics import get_metrics_collector
+from .base import BaseFeature, FeatureResult
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
@@ -37,18 +55,40 @@ def compute_phase(
     use_float32: bool = False,
     out: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Compute instantaneous phase via Hilbert transform.
+    """Compute the instantaneous phase of a univariate signal.
 
-    If SciPy unavailable, fall back to angle of analytic signal via FFT trick.
+    The routine derives the analytic signal ``z(t) = x(t) + i ℋ{x}(t)`` via
+    either SciPy's Hilbert transform or a NumPy FFT fallback. The instantaneous
+    phase is ``θ(t) = arg(z(t))`` with range ``[-π, π]``. This is the starting
+    point for Kuramoto-style synchrony metrics
+    documented in ``docs/indicators.md`` and cross-checked in the feature QA flow
+    defined by ``docs/quality_gates.md``.
 
     Args:
-        x: 1D array of samples.
-        use_float32: Use float32 precision to reduce memory usage (default: False)
-        out: Optional output array to avoid allocating a new buffer. Must match the
-            input shape and requested dtype.
+        x: One-dimensional array of samples representing the price or oscillator
+            trajectory. Non-finite values are replaced with zeros to align with
+            the data-cleansing guidance in ``docs/runbook_data_incident.md``.
+        use_float32: When ``True``, perform calculations in ``float32`` to
+            reduce memory pressure for large windows.
+        out: Optional preallocated output array. The buffer must match the input
+            shape and target dtype; otherwise a :class:`ValueError` is raised.
 
     Returns:
-        phases in radians in [-pi, pi].
+        ``np.ndarray`` containing the phase angle of each sample in radians.
+
+    Raises:
+        ValueError: If ``x`` is not one-dimensional or ``out`` has incompatible
+            shape/dtype.
+
+    Examples:
+        >>> series = np.array([0.0, 1.0, 0.0, -1.0])
+        >>> np.round(compute_phase(series), 2)
+        array([0.  , 1.57, 3.14, -1.57])
+
+    Notes:
+        Constant or near-constant inputs lead to ill-defined Hilbert transforms.
+        This implementation returns zeros in that case, mirroring the safeguard
+        described in the indicator governance notes.
     """
     context_manager = (
         _logger.operation("compute_phase", data_size=len(x), use_float32=use_float32)
@@ -70,7 +110,11 @@ def compute_phase(
         if not np.all(np.isfinite(x)):
             x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
         hilbert_module = getattr(hilbert, "__module__", "") if hilbert is not None else ""
-        use_scipy_fastpath = _scipy_fft is not None and hilbert is not None and hilbert_module.startswith("scipy.")
+        use_scipy_fastpath = (
+            _scipy_fft is not None
+            and hilbert is not None
+            and hilbert_module.startswith("scipy.")
+        )
         if use_scipy_fastpath:
             n = x.size
             if n == 0:
@@ -116,14 +160,34 @@ def compute_phase(
         return phases.astype(dtype, copy=False)
 
 def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
-    """Kuramoto order parameter R = |mean(exp(iθ))| for a set of phases.
+    """Evaluate the Kuramoto order parameter.
+
+    The order parameter measures synchrony as ``R = |(1/N) ∑_j e^{i θ_j}|``.
+    Values close to ``1`` indicate phase alignment, while values
+    near ``0`` signal desynchronisation. In TradePulse this statistic feeds the
+    market regime dashboards discussed in ``docs/monitoring.md`` and the
+    theoretical overview in ``docs/indicators.md``.
 
     Args:
-        phases: array of shape ``(N,)`` or ``(N, T)``. If 1D, compute for one time
-            slice; if 2D, compute per-column over ``N`` oscillators.
+        phases: Array of shape ``(N,)`` (single snapshot) or ``(N, T)`` (matrix of
+            ``T`` snapshots across ``N`` oscillators). Complex inputs are projected
+            onto their phase angles.
 
     Returns:
-        ``float`` if 1D else ``np.ndarray`` of shape ``(T,)``.
+        ``float`` for one-dimensional input or an array of length ``T`` for
+        two-dimensional input.
+
+    Raises:
+        ValueError: If ``phases`` is scalar or has more than two dimensions.
+
+    Examples:
+        >>> theta = np.linspace(0.0, np.pi, 4)
+        >>> float(kuramoto_order(theta))
+        0.9003163161571061
+
+    Notes:
+        Non-finite values are ignored in the vector aggregation, matching the
+        resilience requirements from ``docs/runbook_data_incident.md``.
     """
 
     phases_arr = np.asarray(phases)
@@ -188,10 +252,34 @@ def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     return clipped
 
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
-    """Compute Kuramoto R across multiple synchronized assets (same length).
-    Each series is transformed to phase, then R over assets for the last time step.
+    """Aggregate cross-asset synchrony at the most recent timestamp.
+
+    Each series is converted to its instantaneous phase before evaluating the
+    Kuramoto order parameter over the terminal observation. Use this helper when
+    constructing composite indicators as outlined in ``docs/indicators.md``.
+
+    Args:
+        series_list: Iterable of equally sampled price arrays.
+
+    Returns:
+        Kuramoto order parameter for the latest synchronised observation.
+
+    Raises:
+        ValueError: If any series is empty or of mismatched length.
     """
-    phases = [compute_phase(s) for s in series_list]
+    sequences = [np.asarray(series, dtype=float) for series in series_list]
+    if not sequences:
+        raise ValueError("series_list must contain at least one sequence")
+
+    first_length = sequences[0].shape[0]
+    if first_length == 0:
+        raise ValueError("series must not be empty")
+
+    for series in sequences[1:]:
+        if series.shape[0] != first_length:
+            raise ValueError("all series must have the same length")
+
+    phases = [compute_phase(s) for s in sequences]
     last_phases = np.array([p[-1] for p in phases])
     return kuramoto_order(last_phases)
 
@@ -204,7 +292,7 @@ except Exception:
 
 def compute_phase_gpu(x):
     """GPU phase via CuPy Hilbert transform if CuPy is available; else falls back.
-    
+
     This function properly handles CuPy imports and memory transfers, ensuring
     correct GPU utilization when CuPy is available.
     """
@@ -212,7 +300,7 @@ def compute_phase_gpu(x):
         if cp is None:
             _logger.info("CuPy not available, falling back to CPU compute_phase")
             return compute_phase(np.asarray(x))
-        
+
         try:
             # Use float32 for GPU efficiency
             x_gpu = cp.asarray(x, dtype=cp.float32)
@@ -239,7 +327,7 @@ class KuramotoOrderFeature(BaseFeature):
 
     def __init__(self, *, use_float32: bool = False, name: str | None = None) -> None:
         """Initialize Kuramoto order parameter feature.
-        
+
         Args:
             use_float32: Use float32 precision for memory efficiency (default: False)
             name: Optional custom name (default: "kuramoto_order")
@@ -249,11 +337,11 @@ class KuramotoOrderFeature(BaseFeature):
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Kuramoto order parameter.
-        
+
         Args:
             data: 1D or 2D array of phases or time series
             **_: Additional keyword arguments (ignored)
-            
+
         Returns:
             FeatureResult containing Kuramoto order parameter and metadata
         """
