@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
+from pandas.api.types import infer_dtype, is_datetime64_any_dtype
 
 __all__ = [
     "MissingParquetDependencyError",
@@ -271,10 +272,7 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
             if index_path.exists():
                 index_frame = _json_backend().read_fn(index_path)
                 for column in index_frame.columns:
-                    try:
-                        index_frame[column] = pd.to_datetime(index_frame[column])
-                    except (TypeError, ValueError):  # pragma: no cover - heterogeneous index
-                        continue
+                    index_frame[column] = _maybe_parse_datetime_index_column(index_frame[column])
                 names_path = path.with_suffix(".index.names.json")
                 index_names: list[str | None] | None = None
                 if names_path.exists():
@@ -329,3 +327,34 @@ def dataframe_to_parquet_bytes(frame: pd.DataFrame, *, index: bool = False) -> b
             "The selected backend does not support parquet serialization to bytes."
         )
     return backend.to_bytes_fn(frame, index)
+
+
+def _maybe_parse_datetime_index_column(series: pd.Series) -> pd.Series:
+    """Return ``series`` parsed as datetime when values look datetime-like."""
+
+    if is_datetime64_any_dtype(series):
+        return series
+
+    non_na = series[series.notna()]
+    if non_na.empty:
+        return series
+
+    # Only attempt to parse if the non-null values are string-like.
+    if not all(isinstance(value, str) for value in non_na):
+        return series
+
+    inferred = infer_dtype(non_na, skipna=True)
+    if inferred not in {"string", "unicode", "datetime", "datetime64", "date"}:
+        return series
+
+    if all(value.isdigit() for value in non_na):
+        return series
+
+    parsed = pd.to_datetime(non_na, errors="coerce")
+    if parsed.isna().any():
+        return series
+
+    result = series.copy()
+    result.loc[non_na.index] = parsed
+    return result
+
