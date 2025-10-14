@@ -34,5 +34,9 @@ Thumbs.db
 .env
 .env.local
 apps/web/node_modules/
+apps/web/.next/
+apps/web/playwright-report/
+apps/web/test-results/
+apps/web/playwright/.cache/
 rust/target/
 rust/**/target/

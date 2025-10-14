@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "security:audit-scripts": "node scripts/audit-external-scripts.cjs"
+    "security:audit-scripts": "node scripts/audit-external-scripts.cjs",
+    "test:playwright": "playwright test --config=playwright.config.ts"
   },
   "dependencies": {
     "next": "14.2.5",
@@ -14,9 +15,11 @@
     "react-dom": "18.2.0"
   },
   "devDependencies": {
-    "typescript": "^5.5.4",
+    "@axe-core/playwright": "^4.10.2",
+    "@playwright/test": "^1.49.0",
     "@types/node": "^20.14.9",
     "@types/react": "^18.2.79",
-    "@types/react-dom": "^18.2.25"
+    "@types/react-dom": "^18.2.25",
+    "typescript": "^5.5.4"
   }
 }

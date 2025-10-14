@@ -14,6 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field
 __all__ = ["AuditLogger", "AuditRecord", "AuditSink"]
 
 
+_REDACTED_VALUE = "[REDACTED]"
+_SENSITIVE_KEYWORDS = ("token", "secret", "password", "key", "credential")
+
+
 def _ensure_utc(timestamp: datetime) -> datetime:
     """Return a timezone-aware timestamp in UTC."""
 
@@ -31,6 +35,26 @@ def _canonical_json(payload: Mapping[str, Any]) -> str:
         separators=(",", ":"),
         default=lambda value: value.isoformat() if isinstance(value, datetime) else value,
     )
+
+
+def _is_sensitive_key(key: str) -> bool:
+    lowered = key.lower()
+    return any(keyword in lowered for keyword in _SENSITIVE_KEYWORDS)
+
+
+def _redact_sensitive_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of *payload* with sensitive keys redacted for logging."""
+
+    def _redact(value: Any, *, parent_key: str | None = None) -> Any:
+        if isinstance(value, Mapping):
+            return {inner_key: _redact(inner_value, parent_key=inner_key) for inner_key, inner_value in value.items()}
+        if isinstance(value, list):
+            return [_redact(item, parent_key=parent_key) for item in value]
+        if parent_key is not None and _is_sensitive_key(parent_key):
+            return _REDACTED_VALUE
+        return value
+
+    return _redact(dict(payload))  # type: ignore[arg-type]
 
 
 class AuditRecord(BaseModel):
@@ -102,7 +126,7 @@ class AuditLogger:
         }
         signature = self._sign(payload)
         record = AuditRecord(**payload, signature=signature)
-        self._logger.info("audit.event", extra={"audit": record.model_dump()})
+        self._log_record(record)
         if self._sink is not None:
             self._sink(record)
         return record
@@ -119,3 +143,8 @@ class AuditLogger:
         }
         expected = self._sign(payload)
         return hmac.compare_digest(expected, record.signature)
+
+    def _log_record(self, record: AuditRecord) -> None:
+        audit_payload = record.model_dump()
+        audit_payload["details"] = _redact_sensitive_payload(audit_payload["details"])
+        self._logger.info("audit.event", extra={"audit": audit_payload})

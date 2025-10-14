@@ -3,8 +3,11 @@
 - [ ] Link related issues, follow-up tasks, or design docs.
 
 # Testing
-- [ ] `pytest`
-- [ ] Additional domain-specific checks (backtests, linters, etc.).
+- [ ] `pytest` (unit, integration, property, fuzz, contracts, security)
+- [ ] Data quality gates (`pytest tests/data` or `python scripts/data_sanity.py ...`)
+- [ ] Contract compatibility (`pytest tests/contracts`)
+- [ ] Security scans (Bandit, secret-leak detection)
+- [ ] UI smoke & accessibility (Playwright + aXe)
 
 # Quality Checklist
 - [ ] Documentation updated or confirmed not required.

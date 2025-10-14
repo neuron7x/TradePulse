@@ -42,6 +42,9 @@ jobs:
       run: |
         bandit -r core/ backtest/ execution/ -f json -o bandit-report.json || true
         bandit -r core/ backtest/ execution/ -ll
+    - name: Run Bandit on test utilities
+      run: |
+        bandit -r tests/utils tests/scripts -ll
     
     - name: Upload Bandit report
       if: always()
