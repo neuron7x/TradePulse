@@ -37,7 +37,10 @@ teams can reach production readiness without tribal knowledge.
   [`docs/runbook_data_incident.md`](runbook_data_incident.md).
 - **Indicator MACD baseline** – `data/golden/indicator_macd_baseline.csv`
   provides a five-row canonical dataset with pre-computed MACD components so
-  regressions can compare indicator outputs deterministically.
+  regressions can compare indicator outputs deterministically. The defaults
+  `(12, 26, 9)` mirror `FeaturePipelineConfig`'s `macd_fast`, `macd_slow`, and
+  `macd_signal` parameters to keep regression harnesses aligned with the live
+  feature pipeline.
 - **Quality gates** – Enforce code, test, and performance standards by adopting
   the gating catalogue in [`docs/quality_gates.md`](quality_gates.md), which
   pairs coverage, regression budgets, and break-glass expectations with CI
