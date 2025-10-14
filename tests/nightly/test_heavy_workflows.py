@@ -152,7 +152,11 @@ if _HYPOTHESIS_AVAILABLE:
         assert np.all(np.isfinite(finite_phases))
 
 
-    @settings(max_examples=15, deadline=None, suppress_health_check=[HealthCheck.too_slow])
+    @settings(
+        max_examples=15,
+        deadline=None,
+        suppress_health_check=[HealthCheck.too_slow, HealthCheck.data_too_large],
+    )
     @given(
         st.integers(min_value=128, max_value=2048).flatmap(
             lambda length: st.lists(

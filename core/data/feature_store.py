@@ -9,6 +9,7 @@ import hashlib
 import hmac
 import math
 from io import BytesIO
+import shutil
 import sqlite3
 from pathlib import Path
 from typing import Any, Callable, Literal, Protocol
@@ -456,6 +457,8 @@ class OnlineFeatureStore:
 
         path = self._resolve_path(feature_view)
         purge_dataframe_artifacts(path)
+        legacy_base = self._root / feature_view
+        purge_dataframe_artifacts(legacy_base)
 
     def load(self, feature_view: str) -> pd.DataFrame:
         """Load the persisted dataframe for ``feature_view``."""
@@ -481,7 +484,7 @@ class OnlineFeatureStore:
 
         if mode == "overwrite":
             self.purge(feature_view)
-            stored = self._write_frame(path, offline_frame)
+            stored = self._write_frame(feature_view, path, offline_frame)
             report = self._build_report(feature_view, offline_frame, stored)
         else:
             existing = self.load(feature_view)
@@ -494,7 +497,7 @@ class OnlineFeatureStore:
                     )
                 offline_frame = offline_frame[existing.columns]
             stored = self._append_frames(existing, offline_frame)
-            self._write_frame(path, stored)
+            self._write_frame(feature_view, path, stored)
             delta_rows = offline_frame.shape[0]
             if delta_rows:
                 online_delta = stored.tail(delta_rows).reset_index(drop=True)
@@ -522,9 +525,23 @@ class OnlineFeatureStore:
         )
         return combined
 
-    def _write_frame(self, path: Path, frame: pd.DataFrame) -> pd.DataFrame:
+    def _write_frame(self, feature_view: str, path: Path, frame: pd.DataFrame) -> pd.DataFrame:
         prepared = frame.reset_index(drop=True)
-        write_dataframe(prepared, path, index=False, allow_json_fallback=True)
+        written = write_dataframe(prepared, path, index=False, allow_json_fallback=True)
+
+        legacy_base = self._root / feature_view
+        legacy_target = legacy_base.with_suffix(written.suffix)
+        if legacy_target != written:
+            legacy_target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(written, legacy_target)
+            index_path = written.with_suffix(".index.json")
+            if index_path.exists():
+                legacy_index = legacy_target.with_suffix(".index.json")
+                shutil.copy2(index_path, legacy_index)
+            names_path = written.with_suffix(".index.names.json")
+            if names_path.exists():
+                legacy_names = legacy_target.with_suffix(".index.names.json")
+                shutil.copy2(names_path, legacy_names)
         return prepared
 
     @staticmethod
