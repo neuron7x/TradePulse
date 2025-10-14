@@ -78,6 +78,18 @@ def test_scan_directory_detects_dotenv_files(tmp_path_factory: pytest.TempPathFa
         encoding="utf-8",
     )
 
+    dotenv_local = workspace / ".env.local"
+    dotenv_local.write_text(
+        f"{PASSWORD_LABEL}='{GENERIC_SECRET_VALUE}'\n",
+        encoding="utf-8",
+    )
+
+    dotenv_production = workspace / ".env.production"
+    dotenv_production.write_text(
+        f"{GENERIC_SECRET_VALUE}='{GENERIC_SECRET_VALUE}'\n",
+        encoding="utf-8",
+    )
+
     ignored_file = workspace / "notes.txt"
     ignored_file.write_text(
         f"{PASSWORD_LABEL}='{GENERIC_SECRET_VALUE}'\n",
@@ -88,6 +100,8 @@ def test_scan_directory_detects_dotenv_files(tmp_path_factory: pytest.TempPathFa
     results = detector.scan_directory(workspace)
 
     assert ".env" in results
+    assert ".env.local" in results
+    assert ".env.production" in results
     assert "notes.txt" not in results
 
 
