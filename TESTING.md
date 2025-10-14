@@ -64,6 +64,16 @@ Run with branch coverage report:
 pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing
 ```
 
+### Makefile Shortcuts
+
+The Makefile exposes convenience targets that wrap the most common pytest invocations. Use them to keep local runs aligned with CI expectations:
+
+| Target | Description | Underlying command |
+| --- | --- | --- |
+| `make test:fast` | Fast feedback loop that skips heavyweight suites | `pytest tests/ -m "not slow and not heavy_math and not nightly"` |
+| `make test:all` | Full coverage-enabled suite matching CI defaults | `pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing` |
+| `make test:heavy` | Executes the slow, heavy math, and nightly gates | `pytest tests/ -m "slow or heavy_math or nightly"` |
+
 Generate HTML coverage report:
 ```bash
 pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=html
