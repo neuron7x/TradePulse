@@ -59,8 +59,15 @@ class RiskManagerFacade:
         """Reset the kill-switch state and return the new snapshot."""
 
         kill_switch = self._risk_manager.kill_switch
-        kill_switch.reset()
-        return KillSwitchState(engaged=False, reason="", already_engaged=False)
+        was_engaged = kill_switch.is_triggered()
+        previous_reason = kill_switch.reason
+        if was_engaged:
+            kill_switch.reset()
+        return KillSwitchState(
+            engaged=kill_switch.is_triggered(),
+            reason=previous_reason if was_engaged else kill_switch.reason,
+            already_engaged=was_engaged,
+        )
 
     def kill_switch_state(self) -> KillSwitchState:
         """Return the current kill-switch status."""
