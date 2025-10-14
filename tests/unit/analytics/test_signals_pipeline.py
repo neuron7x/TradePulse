@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -42,6 +43,41 @@ def _sample_market_frame(rows: int = 300) -> pd.DataFrame:
         index=index,
     )
     return frame
+
+
+def test_feature_pipeline_matches_macd_baseline() -> None:
+    baseline_path = Path("data/golden/indicator_macd_baseline.csv")
+    baseline = pd.read_csv(baseline_path, parse_dates=["ts"]).set_index("ts")
+
+    cfg = FeaturePipelineConfig(
+        price_col="close",
+        technical_windows=(12, 26),
+        macd_fast=12,
+        macd_slow=26,
+        macd_signal=9,
+    )
+    pipeline = SignalFeaturePipeline(cfg)
+    features = pipeline.transform(baseline[["close"]])
+
+    actual = features.loc[baseline.index, [
+        "ema_12",
+        "ema_26",
+        "macd",
+        "macd_signal",
+        "macd_histogram",
+    ]]
+    actual = actual.rename(
+        columns={"macd_signal": "signal", "macd_histogram": "histogram"}
+    )
+
+    expected = baseline[["ema_12", "ema_26", "macd", "signal", "histogram"]]
+
+    np.testing.assert_allclose(
+        actual.to_numpy(dtype=float),
+        expected.to_numpy(dtype=float),
+        rtol=1e-6,
+        atol=5e-7,
+    )
 
 
 def test_feature_pipeline_generates_expected_columns() -> None:
