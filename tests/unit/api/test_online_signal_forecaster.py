@@ -92,11 +92,13 @@ class TestDeriveSignal:
             (
                 pd.Series(
                     {
-                        "macd": 1.2,
-                        "rsi": 68.0,
-                        "return_1": 0.03,
-                        "queue_imbalance": 0.8,
-                        "volatility_20": 0.05,
+                        "macd": -0.35,
+                        "macd_signal": -0.8,
+                        "macd_histogram": 0.28,
+                        "rsi": 58.0,
+                        "return_1": 0.018,
+                        "queue_imbalance": 0.45,
+                        "volatility_20": 0.02,
                     }
                 ),
                 SignalAction.BUY,
@@ -104,11 +106,13 @@ class TestDeriveSignal:
             (
                 pd.Series(
                     {
-                        "macd": -1.5,
-                        "rsi": 28.0,
-                        "return_1": -0.04,
-                        "queue_imbalance": -0.7,
-                        "volatility_20": 0.03,
+                        "macd": 0.4,
+                        "macd_signal": 0.85,
+                        "macd_histogram": -0.33,
+                        "rsi": 32.0,
+                        "return_1": -0.02,
+                        "queue_imbalance": -0.5,
+                        "volatility_20": 0.04,
                     }
                 ),
                 SignalAction.SELL,
@@ -116,11 +120,13 @@ class TestDeriveSignal:
             (
                 pd.Series(
                     {
-                        "macd": 0.02,
-                        "rsi": 49.0,
-                        "return_1": 0.0005,
-                        "queue_imbalance": 0.01,
-                        "volatility_20": 0.02,
+                        "macd": 0.01,
+                        "macd_signal": -0.02,
+                        "macd_histogram": 0.015,
+                        "rsi": 50.0,
+                        "return_1": 0.0008,
+                        "queue_imbalance": 0.02,
+                        "volatility_20": 0.025,
                     }
                 ),
                 SignalAction.HOLD,
@@ -153,7 +159,9 @@ class TestDeriveSignal:
         features = pd.DataFrame(
             [
                 {
-                    "macd": 0.5,
+                    "macd": 0.52,
+                    "macd_signal": 0.2,
+                    "macd_histogram": 0.24,
                     "rsi": 62.0,
                     "return_1": 0.015,
                     "queue_imbalance": 0.4,

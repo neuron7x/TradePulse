@@ -198,16 +198,31 @@ class OnlineSignalForecaster:
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
         macd = float(latest.get("macd", 0.0))
+        macd_signal = float(latest.get("macd_signal", macd))
+        macd_histogram = float(latest.get("macd_histogram", macd - macd_signal))
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
         queue_imbalance = float(latest.get("queue_imbalance", 0.0))
 
+        macd_trend = np.tanh(macd * 1.5)
+        macd_alignment = np.tanh((macd - macd_signal) * 3.0)
+        histogram_strength = np.tanh(macd_histogram * 4.0)
+
+        convergence_bias = 0.0
+        if macd < 0.0 <= macd_histogram:
+            convergence_bias = min(1.0, abs(macd_histogram) * 5.0)
+        elif macd > 0.0 >= macd_histogram:
+            convergence_bias = -min(1.0, abs(macd_histogram) * 5.0)
+
         score = 0.0
-        score += np.tanh(macd) * 0.4
-        score += ((rsi - 50.0) / 50.0) * 0.3
-        score += np.tanh(ret_1 * 100.0) * 0.2
-        score += np.tanh(queue_imbalance) * 0.1
+        score += macd_trend * 0.25
+        score += macd_alignment * 0.25
+        score += histogram_strength * 0.2
+        score += convergence_bias * 0.1
+        score += ((rsi - 50.0) / 50.0) * 0.1
+        score += np.tanh(ret_1 * 80.0) * 0.05
+        score += np.tanh(queue_imbalance) * 0.05
         score -= abs(volatility_20) * 0.05
 
         threshold = 0.15
@@ -224,7 +239,8 @@ class OnlineSignalForecaster:
             action=action,
             confidence=confidence,
             rationale=(
-                "Composite heuristic based on MACD, RSI, return momentum and book imbalance"
+                "Composite heuristic weighting MACD trend/signal alignment, histogram strength,"
+                " RSI, short-term momentum and book imbalance"
             ),
             metadata={
                 "score": score,

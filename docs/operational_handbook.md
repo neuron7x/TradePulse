@@ -38,6 +38,12 @@ teams can reach production readiness without tribal knowledge.
 - **Indicator MACD baseline** – `data/golden/indicator_macd_baseline.csv`
   provides a five-row canonical dataset with pre-computed MACD components so
   regressions can compare indicator outputs deterministically.
+- **Online signal scoring** – The live heuristic now blends raw MACD momentum,
+  MACD-versus-signal alignment, and histogram amplitude before layering in RSI,
+  short-horizon returns, and order book imbalance. Operators should expect
+  bullish convergence boosts when MACD is still negative but the histogram flips
+  positive (and the inverse for bearish set-ups), allowing the control plane to
+  flag imminent crossovers without fully committing to trend following.
 - **Quality gates** – Enforce code, test, and performance standards by adopting
   the gating catalogue in [`docs/quality_gates.md`](quality_gates.md), which
   pairs coverage, regression budgets, and break-glass expectations with CI
