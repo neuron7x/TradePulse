@@ -40,7 +40,32 @@ jobs:
           cibuildwheel --output-dir wheelhouse
 
       - name: List built wheels
-        run: ls -lh wheelhouse
+        shell: python
+        run: |
+          import math
+          from pathlib import Path
+
+          wheel_dir = Path("wheelhouse")
+          if not wheel_dir.exists():
+            raise SystemExit("wheelhouse directory not found")
+
+          def _format_size(size: int) -> str:
+            units = ["B", "KB", "MB", "GB", "TB"]
+            if size <= 0:
+              return "0 B"
+            unit_index = min(int(math.log(size, 1024)), len(units) - 1)
+            value = size / (1024 ** unit_index)
+            if unit_index == 0:
+              return f"{size} {units[unit_index]}"
+            return f"{value:.2f} {units[unit_index]}"
+
+          wheels = sorted(wheel_dir.glob("*.whl"))
+          if not wheels:
+            raise SystemExit("no wheel files found in wheelhouse")
+
+          for wheel in wheels:
+            size = wheel.stat().st_size
+            print(f"{wheel.name}\t{_format_size(size)}")
 
       - name: Verify Linux wheels with auditwheel
         if: runner.os == 'Linux'
