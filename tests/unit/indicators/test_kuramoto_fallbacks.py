@@ -21,7 +21,9 @@ def restore_hilbert(monkeypatch: pytest.MonkeyPatch) -> Callable[[], None]:
     return restore
 
 
-def test_compute_phase_fft_fallback(monkeypatch: pytest.MonkeyPatch, restore_hilbert: Callable[[], None]) -> None:
+def test_compute_phase_fft_fallback(
+    monkeypatch: pytest.MonkeyPatch, restore_hilbert: Callable[[], None]
+) -> None:
     """The FFT-based fallback should be exercised when SciPy is unavailable."""
 
     original_fft = np.fft.fft
@@ -55,7 +57,9 @@ def test_compute_phase_fft_fallback(monkeypatch: pytest.MonkeyPatch, restore_hil
     assert np.max(np.abs(phases)) <= math.pi
 
 
-def test_compute_phase_normalises_non_finite_values(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compute_phase_normalises_non_finite_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Non-finite input should be sanitised before phase computation."""
 
     monkeypatch.setattr(kuramoto, "hilbert", None, raising=False)
@@ -75,7 +79,9 @@ def test_compute_phase_normalises_non_finite_values(monkeypatch: pytest.MonkeyPa
         ),
     ],
 )
-def test_kuramoto_order_handles_nan_and_multidimensional(phases: np.ndarray, expected) -> None:
+def test_kuramoto_order_handles_nan_and_multidimensional(
+    phases: np.ndarray, expected
+) -> None:
     value = kuramoto.kuramoto_order(phases)
     if isinstance(expected, np.ndarray):
         np.testing.assert_allclose(value, expected)
@@ -129,7 +135,9 @@ def test_compute_phase_gpu_with_mocked_cupy(monkeypatch: pytest.MonkeyPatch) -> 
     assert phases.shape == samples.shape
 
 
-def test_compute_phase_gpu_fallback_on_gpu_error(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_compute_phase_gpu_fallback_on_gpu_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class BrokenFFT:
         @staticmethod
         def fft(values: np.ndarray) -> np.ndarray:
@@ -154,7 +162,9 @@ def test_compute_phase_gpu_fallback_on_gpu_error(monkeypatch: pytest.MonkeyPatch
     assert phases.shape == series.shape
 
 
-def test_multi_asset_kuramoto_feature_collects_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_multi_asset_kuramoto_feature_collects_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(kuramoto, "hilbert", None, raising=False)
     feature = kuramoto.MultiAssetKuramotoFeature()
     base = np.sin(np.linspace(0, 2 * np.pi, 32, endpoint=False))
@@ -164,7 +174,9 @@ def test_multi_asset_kuramoto_feature_collects_metadata(monkeypatch: pytest.Monk
     assert 0.0 <= value.value <= 1.0
 
 
-def test_kuramoto_order_feature_float32_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_kuramoto_order_feature_float32_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(kuramoto, "hilbert", None, raising=False)
     feature = kuramoto.KuramotoOrderFeature(use_float32=True)
     signal = np.sin(np.linspace(0, 2 * np.pi, 32, endpoint=False))

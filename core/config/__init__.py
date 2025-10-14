@@ -13,7 +13,6 @@ from .cli_models import (
     TradePulseBaseConfig,
     VersioningConfig,
 )
-from .template_manager import ConfigTemplateManager
 from .kuramoto_ricci import (
     CompositeConfig,
     CompositeSignals,
@@ -30,6 +29,7 @@ from .kuramoto_ricci import (
     load_kuramoto_ricci_config,
     parse_cli_overrides,
 )
+from .template_manager import ConfigTemplateManager
 
 __all__ = [
     "BacktestConfig",

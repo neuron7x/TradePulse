@@ -59,7 +59,11 @@ def base_frame() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "entity_id": ["a", "a", "b"],
-            "ts": [ts - pd.Timedelta(hours=2), ts - pd.Timedelta(minutes=30), ts - pd.Timedelta(minutes=5)],
+            "ts": [
+                ts - pd.Timedelta(hours=2),
+                ts - pd.Timedelta(minutes=30),
+                ts - pd.Timedelta(minutes=5),
+            ],
             "value": [1.0, 2.0, 3.0],
         }
     )
@@ -68,7 +72,9 @@ def base_frame() -> pd.DataFrame:
 def test_redis_ttl_retention(base_frame: pd.DataFrame) -> None:
     clock = _MutableClock(pd.Timestamp("2024-01-01 00:00:00", tz=UTC))
     policy = RetentionPolicy(ttl=pd.Timedelta(hours=1))
-    store = RedisOnlineFeatureStore(client=_DictClient(), retention_policy=policy, clock=clock.now)
+    store = RedisOnlineFeatureStore(
+        client=_DictClient(), retention_policy=policy, clock=clock.now
+    )
 
     store.sync("demo.fv", base_frame, mode="overwrite", validate=False)
     stored = store.load("demo.fv")
@@ -108,7 +114,9 @@ def test_offline_validator_detects_mismatch(tmp_path, base_frame: pd.DataFrame) 
 
     # Drop the latest row to trigger an integrity failure.
     online_payload = base_frame.iloc[:-1]
-    loader = lambda _name: online_payload
+
+    def loader(_name: str) -> pd.DataFrame:
+        return online_payload
 
     validator = OfflineStoreValidator(
         "demo.fv",
@@ -122,7 +130,9 @@ def test_offline_validator_detects_mismatch(tmp_path, base_frame: pd.DataFrame) 
         validator.run()
 
 
-def test_offline_validator_respects_interval(tmp_path, base_frame: pd.DataFrame) -> None:
+def test_offline_validator_respects_interval(
+    tmp_path, base_frame: pd.DataFrame
+) -> None:
     offline_path = tmp_path / "delta"
     write_dataframe(base_frame, offline_path, allow_json_fallback=True)
     source = DeltaLakeSource(offline_path)
@@ -145,7 +155,9 @@ def test_offline_validator_respects_interval(tmp_path, base_frame: pd.DataFrame)
     assert validator.should_run() is True
 
 
-def test_offline_validator_numeric_type_equivalence(tmp_path, base_frame: pd.DataFrame) -> None:
+def test_offline_validator_numeric_type_equivalence(
+    tmp_path, base_frame: pd.DataFrame
+) -> None:
     offline_path = tmp_path / "delta"
     offline_payload = base_frame.copy()
     offline_payload.loc[:, "value"] = offline_payload["value"].astype("Int64")
@@ -173,7 +185,8 @@ def test_retention_policy_validation() -> None:
 
 def test_ttl_requires_timestamp_column() -> None:
     store = RedisOnlineFeatureStore(
-        client=_DictClient(), retention_policy=RetentionPolicy(ttl=pd.Timedelta(minutes=5))
+        client=_DictClient(),
+        retention_policy=RetentionPolicy(ttl=pd.Timedelta(minutes=5)),
     )
     payload = pd.DataFrame({"entity_id": ["a"], "value": [1.0]})
 
@@ -311,4 +324,3 @@ def test_canonicalize_sorts_and_stabilises_rows() -> None:
     canonical = OnlineFeatureStore._canonicalize(frame)
     assert list(canonical.columns) == ["a", "b"]
     assert canonical.iloc[0].to_dict() == {"a": 1, "b": 2}
-

@@ -1,14 +1,14 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import math
+from datetime import UTC
+from decimal import Decimal
 from fractions import Fraction
 from pathlib import Path
 
-import math
 import pandas as pd
 import pytest
-from decimal import Decimal
-from datetime import UTC
 
 from core.data.feature_store import (
     DeltaLakeSource,
@@ -20,10 +20,10 @@ from core.data.feature_store import (
     RedisOnlineFeatureStore,
     RetentionPolicy,
     SQLiteOnlineFeatureStore,
-    _RetentionManager,
     _format_numeric_value,
+    _RetentionManager,
 )
-from core.utils.dataframe_io import read_dataframe, write_dataframe
+from core.utils.dataframe_io import write_dataframe
 
 
 class _SetWithTTLClient:
@@ -34,7 +34,9 @@ class _SetWithTTLClient:
     def get(self, key: str):  # pragma: no cover - simple delegation
         return self.payloads.get(key)
 
-    def set(self, key: str, value: bytes) -> None:  # pragma: no cover - defensive fallback
+    def set(
+        self, key: str, value: bytes
+    ) -> None:  # pragma: no cover - defensive fallback
         self.payloads[key] = value
 
     def delete(self, key: str) -> None:  # pragma: no cover - defensive fallback
@@ -147,7 +149,9 @@ def test_redis_sync_orders_columns_for_append(sample_frame: pd.DataFrame) -> Non
     assert report.offline_rows == reordered.shape[0]
 
 
-def test_redis_sync_empty_append_returns_empty_delta(sample_frame: pd.DataFrame) -> None:
+def test_redis_sync_empty_append_returns_empty_delta(
+    sample_frame: pd.DataFrame,
+) -> None:
     store = RedisOnlineFeatureStore()
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     empty = sample_frame.iloc[0:0]
@@ -172,11 +176,16 @@ def test_redis_load_applies_retention_and_persists() -> None:
     client = _TrackingClient()
     clock = _TestClock(pd.Timestamp("2024-01-01T01:00:00", tz=UTC))
     policy = RetentionPolicy(ttl=pd.Timedelta(minutes=10))
-    store = RedisOnlineFeatureStore(client=client, retention_policy=policy, clock=clock.now)
+    store = RedisOnlineFeatureStore(
+        client=client, retention_policy=policy, clock=clock.now
+    )
     frame = pd.DataFrame(
         {
             "entity_id": ["a", "b"],
-            "ts": [clock.now() - pd.Timedelta(minutes=15), clock.now() - pd.Timedelta(minutes=5)],
+            "ts": [
+                clock.now() - pd.Timedelta(minutes=15),
+                clock.now() - pd.Timedelta(minutes=5),
+            ],
             "value": [1.0, 2.0],
         }
     )
@@ -255,7 +264,9 @@ def test_normalize_for_hash_handles_categorical(tmp_path: Path) -> None:
     assert list(normalized["category"]) == ["one", "two"]
 
 
-def test_online_store_append_concatenates_and_validates(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_append_concatenates_and_validates(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     additional = sample_frame.copy()
@@ -265,7 +276,9 @@ def test_online_store_append_concatenates_and_validates(tmp_path: Path, sample_f
     assert report.hash_differs is False
 
 
-def test_online_store_append_without_existing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_append_without_existing(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     report = store.sync("demo.view", sample_frame, mode="append", validate=False)
     assert report.offline_rows == sample_frame.shape[0]
@@ -283,20 +296,28 @@ def test_online_store_canonicalize_with_no_columns() -> None:
     assert canonical.empty
 
 
-def test_online_store_sync_rejects_mismatched_columns(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_sync_rejects_mismatched_columns(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     with pytest.raises(ValueError):
-        store.sync("demo.view", sample_frame.assign(extra=1), mode="append", validate=False)
+        store.sync(
+            "demo.view", sample_frame.assign(extra=1), mode="append", validate=False
+        )
 
 
-def test_online_store_sync_rejects_invalid_mode(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_sync_rejects_invalid_mode(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     with pytest.raises(ValueError, match="mode"):
         store.sync("demo.view", sample_frame, mode="invalid", validate=False)  # type: ignore[arg-type]
 
 
-def test_online_store_append_empty_delta(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_append_empty_delta(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     empty = sample_frame.iloc[0:0]
@@ -304,7 +325,9 @@ def test_online_store_append_empty_delta(tmp_path: Path, sample_frame: pd.DataFr
     assert report.online_rows == 0
 
 
-def test_online_store_purge_removes_artifacts(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_online_store_purge_removes_artifacts(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = OnlineFeatureStore(tmp_path)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     assert store.load("demo.view").empty is False
@@ -312,7 +335,9 @@ def test_online_store_purge_removes_artifacts(tmp_path: Path, sample_frame: pd.D
     assert store.load("demo.view").empty
 
 
-def test_sqlite_store_purge_and_missing_load(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_sqlite_store_purge_and_missing_load(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
     assert store.load("missing").empty
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
@@ -320,14 +345,19 @@ def test_sqlite_store_purge_and_missing_load(tmp_path: Path, sample_frame: pd.Da
     assert store.load("demo.view").empty
 
 
-def test_sqlite_load_reapplies_retention_and_persists(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_sqlite_load_reapplies_retention_and_persists(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     clock = _TestClock(pd.Timestamp("2024-01-01T12:00:00", tz=UTC))
     policy = RetentionPolicy(ttl=pd.Timedelta(minutes=30))
     store = SQLiteOnlineFeatureStore(
         tmp_path / "retained.db", retention_policy=policy, clock=clock.now
     )
     historical = sample_frame.copy()
-    historical.loc[:, "ts"] = [clock.now() - pd.Timedelta(hours=1), clock.now() - pd.Timedelta(minutes=10)]
+    historical.loc[:, "ts"] = [
+        clock.now() - pd.Timedelta(hours=1),
+        clock.now() - pd.Timedelta(minutes=10),
+    ]
     store.sync("demo.view", historical, mode="overwrite", validate=False)
 
     recorded: list[pd.DataFrame] = []
@@ -343,13 +373,17 @@ def test_sqlite_load_reapplies_retention_and_persists(tmp_path: Path, sample_fra
     assert recorded and recorded[0].empty
 
 
-def test_sqlite_sync_rejects_invalid_mode(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_sqlite_sync_rejects_invalid_mode(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
     with pytest.raises(ValueError, match="mode"):
         store.sync("demo.view", sample_frame, mode="invalid", validate=False)  # type: ignore[arg-type]
 
 
-def test_sqlite_append_without_existing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_sqlite_append_without_existing(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
     report = store.sync("demo.view", sample_frame, mode="append", validate=False)
     assert report.offline_rows == sample_frame.shape[0]
@@ -363,7 +397,9 @@ def test_sqlite_append_empty_delta(tmp_path: Path, sample_frame: pd.DataFrame) -
     assert report.online_rows == 0
 
 
-def test_offline_validator_non_enforcing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_offline_validator_non_enforcing(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     offline_path = tmp_path / "offline"
     write_dataframe(sample_frame, offline_path, allow_json_fallback=True)
     validator = OfflineStoreValidator(
@@ -377,7 +413,9 @@ def test_offline_validator_non_enforcing(tmp_path: Path, sample_frame: pd.DataFr
     assert report.hash_differs is False
 
 
-def test_offline_validator_rejects_non_positive_interval(sample_frame: pd.DataFrame) -> None:
+def test_offline_validator_rejects_non_positive_interval(
+    sample_frame: pd.DataFrame,
+) -> None:
     source = _FrameSource(sample_frame)
     with pytest.raises(ValueError, match="interval"):
         OfflineStoreValidator(
@@ -388,7 +426,9 @@ def test_offline_validator_rejects_non_positive_interval(sample_frame: pd.DataFr
         )
 
 
-def test_delta_and_iceberg_sources_roundtrip(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_delta_and_iceberg_sources_roundtrip(
+    tmp_path: Path, sample_frame: pd.DataFrame
+) -> None:
     delta_path = tmp_path / "delta"
     iceberg_path = tmp_path / "iceberg"
     write_dataframe(sample_frame, delta_path, allow_json_fallback=True)
@@ -412,5 +452,3 @@ def test_delta_and_iceberg_sources_roundtrip(tmp_path: Path, sample_frame: pd.Da
     assert iceberg_frame["entity_id"].tolist() == expected["entity_id"].tolist()
     assert delta_frame["value"].tolist() == expected["value"].tolist()
     assert iceberg_frame["value"].tolist() == expected["value"].tolist()
-
-

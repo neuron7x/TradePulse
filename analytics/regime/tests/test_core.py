@@ -6,7 +6,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from analytics.regime.src.core import main
+from analytics.regime.src.core import main  # noqa: E402
+
 
 def test_add():
-    assert main.add(2,3)==5
+    assert main.add(2, 3) == 5

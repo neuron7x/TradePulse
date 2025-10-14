@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import pandas as pd
 
-from core.data.quality_control import QualityReport, quarantine_anomalies, validate_and_quarantine
+from core.data.quality_control import (
+    QualityReport,
+    quarantine_anomalies,
+    validate_and_quarantine,
+)
 from core.data.validation import TimeSeriesValidationConfig, ValueColumnConfig
 
 
@@ -36,4 +40,3 @@ def test_validate_and_quarantine_integrates_schema():
     assert isinstance(report, QualityReport)
     assert set(report.clean.columns) >= {"timestamp", "close"}
     assert not report.quarantined.empty
-

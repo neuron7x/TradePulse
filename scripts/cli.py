@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import argparse
 import logging
 from pathlib import Path
@@ -46,7 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    from scripts.commands import dev, fpma, lint, live, proto, test as test_cmd
+    from scripts.commands import dev, fpma, lint, live, proto
+    from scripts.commands import test as test_cmd
 
     dev.build_parser(subparsers)
     lint.build_parser(subparsers)

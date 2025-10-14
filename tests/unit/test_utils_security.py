@@ -11,7 +11,9 @@ GENERIC_SECRET_VALUE = "".join(("s", "u", "p", "e", "r", "s", "e", "c", "r", "e"
 IGNORED_SECRET_VALUE = "".join(("h", "u", "n", "t", "e", "r", str(2)))
 
 
-def test_secret_detector_identifies_api_keys(tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_secret_detector_identifies_api_keys(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     workspace = tmp_path_factory.mktemp("security")
     target = workspace / "config.py"
     api_key_value = "".join(("abc", "def", "1234567890"))
@@ -27,7 +29,9 @@ def test_secret_detector_identifies_api_keys(tmp_path_factory: pytest.TempPathFa
     assert "********" in masked
 
 
-def test_secret_detector_respects_ignore_patterns(tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_secret_detector_respects_ignore_patterns(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     workspace = tmp_path_factory.mktemp("security-ignore")
     node_modules = workspace / "node_modules"
     node_modules.mkdir()
@@ -41,7 +45,9 @@ def test_secret_detector_respects_ignore_patterns(tmp_path_factory: pytest.TempP
     assert detector.scan_file(ignored) == []
 
 
-def test_secret_detector_does_not_ignore_non_test_prefixes(tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_secret_detector_does_not_ignore_non_test_prefixes(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     workspace = tmp_path_factory.mktemp("security-latest")
     target = workspace / "latest_config.py"
     target.write_text(
@@ -56,7 +62,9 @@ def test_secret_detector_does_not_ignore_non_test_prefixes(tmp_path_factory: pyt
     assert any(secret_type == PASSWORD_LABEL for secret_type, _, _ in findings)
 
 
-def test_scan_directory_filters_extensions(tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_scan_directory_filters_extensions(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> None:
     workspace = tmp_path_factory.mktemp("security-scan")
     allowed = workspace / "settings.py"
     allowed.write_text(f"{PASSWORD_LABEL}='{GENERIC_SECRET_VALUE}'\n", encoding="utf-8")
@@ -70,7 +78,9 @@ def test_scan_directory_filters_extensions(tmp_path_factory: pytest.TempPathFact
     assert "README.md" not in results
 
 
-def test_check_for_hardcoded_secrets_reports_findings(tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_for_hardcoded_secrets_reports_findings(
+    tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
     project = tmp_path_factory.mktemp("security-project")
     secret_file = project / "secrets.py"
     secret_file.write_text("github_token = 'ghp_" + "a" * 36 + "'\n", encoding="utf-8")
@@ -83,7 +93,9 @@ def test_check_for_hardcoded_secrets_reports_findings(tmp_path_factory: pytest.T
     assert "********" in captured.out
 
 
-def test_check_for_hardcoded_secrets_returns_false_when_clean(tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_for_hardcoded_secrets_returns_false_when_clean(
+    tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]
+) -> None:
     clean_project = tmp_path_factory.mktemp("security-clean")
 
     found = check_for_hardcoded_secrets(str(clean_project))

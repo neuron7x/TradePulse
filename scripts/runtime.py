@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 from ._runtime_core import (
     DEFAULT_LOCALE,
     DEFAULT_SEED,

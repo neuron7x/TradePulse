@@ -200,4 +200,3 @@ def normalize_symbol(symbol: str, *, instrument_type_hint: object | None = None)
     base = components[0]
     quote = components[1] if len(components) > 1 else ""
     return "/".join([comp for comp in [base, quote] if comp])
-

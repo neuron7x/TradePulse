@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import signal
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait

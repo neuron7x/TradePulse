@@ -26,8 +26,7 @@ else:
     load_dotenv()
 
 
-from execution.connectors import ExecutionConnector, OrderError, TransientOrderError
-
+from execution.connectors import ExecutionConnector
 
 VaultResolver = Callable[[str], Mapping[str, str]]
 RotationHook = Callable[[Mapping[str, str]], None]

@@ -1,14 +1,14 @@
 """Structured configuration for Kuramoto–Ricci composite workflows."""
+
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-import json
-
-import yaml
 import pydantic
+import yaml
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -22,9 +22,14 @@ from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict, SettingsError
 from pydantic_settings.sources import PydanticBaseSettingsSource
 
+from core.indicators.multiscale_kuramoto import TimeFrame
+
 AliasChoices = getattr(pydantic, "AliasChoices", None)
 
-if AliasChoices is None:  # pragma: no cover - exercised implicitly via configuration parsing
+if (
+    AliasChoices is None
+):  # pragma: no cover - exercised implicitly via configuration parsing
+
     class AliasChoices(tuple):
         """Lightweight stand-in for :mod:`pydantic`'s ``AliasChoices`` helper."""
 
@@ -41,7 +46,6 @@ if AliasChoices is None:  # pragma: no cover - exercised implicitly via configur
             joined = ", ".join(self)
             return f"AliasChoices({joined})"
 
-from core.indicators.multiscale_kuramoto import TimeFrame
 
 DEFAULT_CONFIG_PATH = Path("configs/kuramoto_ricci_composite.yaml")
 
@@ -93,7 +97,9 @@ def _coerce_timeframes_payload(value: Any) -> Sequence[Any] | tuple[TimeFrame, .
     raise TypeError("kuramoto.timeframes must be a sequence")
 
 
-def _ensure_timeframes_non_empty_payload(timeframes: Sequence[TimeFrame] | None) -> None:
+def _ensure_timeframes_non_empty_payload(
+    timeframes: Sequence[TimeFrame] | None,
+) -> None:
     if not timeframes:
         raise ValueError("kuramoto.timeframes cannot be empty")
 
@@ -311,7 +317,9 @@ class KuramotoRicciIntegrationConfig(BaseModel):
     composite: CompositeConfig = Field(default_factory=CompositeConfig)
 
     @classmethod
-    def from_mapping(cls, data: Mapping[str, Any] | None) -> "KuramotoRicciIntegrationConfig":
+    def from_mapping(
+        cls, data: Mapping[str, Any] | None
+    ) -> "KuramotoRicciIntegrationConfig":
         try:
             return cls.model_validate(data or {})
         except ValidationError as exc:  # pragma: no cover - error propagation
@@ -356,7 +364,9 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
         self._env_source = env_source
         self._dotenv_source = dotenv_source
 
-    def __call__(self, settings_cls: type[BaseSettings] | None = None) -> dict[str, Any]:
+    def __call__(
+        self, settings_cls: type[BaseSettings] | None = None
+    ) -> dict[str, Any]:
         if settings_cls is not None:
             self.settings_cls = settings_cls
         config_path = self._resolve_path()
@@ -369,12 +379,18 @@ class YamlSettingsSource(PydanticBaseSettingsSource):
         try:
             payload = yaml.safe_load(text) or {}
         except yaml.YAMLError as exc:  # pragma: no cover - YAML parser errors
-            raise SettingsError(f"failed to parse YAML configuration at {config_path}: {exc}") from exc
+            raise SettingsError(
+                f"failed to parse YAML configuration at {config_path}: {exc}"
+            ) from exc
         if not isinstance(payload, Mapping):
-            raise SettingsError(f"configuration file {config_path} must define a mapping")
+            raise SettingsError(
+                f"configuration file {config_path} must define a mapping"
+            )
         return dict(payload)
 
-    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
         return None, field_name, False
 
     def _resolve_path(self) -> Path | None:
@@ -431,7 +447,9 @@ class TradePulseSettings(BaseSettings):
         dotenv_settings: PydanticBaseSettingsSource,
         file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
-        yaml_source = YamlSettingsSource(settings_cls, init_settings, env_settings, dotenv_settings)
+        yaml_source = YamlSettingsSource(
+            settings_cls, init_settings, env_settings, dotenv_settings
+        )
         return (
             init_settings,
             env_settings,

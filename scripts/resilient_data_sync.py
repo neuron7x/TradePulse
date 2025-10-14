@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import argparse
 import json
 import sys
@@ -13,9 +12,9 @@ from typing import Iterable
 from urllib.parse import urlparse
 
 from scripts.runtime import (
+    EXIT_CODES,
     ArtifactManager,
     ChecksumMismatchError,
-    EXIT_CODES,
     ProgressBar,
     create_artifact_manager,
     create_resilient_session,

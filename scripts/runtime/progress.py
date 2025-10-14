@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import sys
 import time
 from dataclasses import dataclass, field

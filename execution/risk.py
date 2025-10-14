@@ -1,15 +1,15 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
 import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, Mapping, MutableMapping
 
-from interfaces.execution import PortfolioRiskAnalyzer, RiskController
-
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
+from interfaces.execution import PortfolioRiskAnalyzer, RiskController
 
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 
@@ -75,7 +75,9 @@ class KillSwitch:
 
     def guard(self) -> None:
         if self._triggered:
-            raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
+            raise RiskError(
+                f"Kill-switch engaged: {self._reason or 'unspecified reason'}"
+            )
 
 
 class RiskManager(RiskController):
@@ -111,10 +113,11 @@ class RiskManager(RiskController):
             self._submissions.popleft()
         if len(self._submissions) >= self.limits.max_orders_per_interval:
             self._throttle_violation_streak += 1
-            reason = (
-                f"Order throttle exceeded: {len(self._submissions)} submissions in {window}s"
-            )
-            if self._throttle_violation_streak >= self.limits.kill_switch_rate_limit_threshold:
+            reason = f"Order throttle exceeded: {len(self._submissions)} submissions in {window}s"
+            if (
+                self._throttle_violation_streak
+                >= self.limits.kill_switch_rate_limit_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=symbol,
@@ -193,7 +196,9 @@ class RiskManager(RiskController):
         try:
             self._kill_switch.guard()
         except RiskError as exc:
-            self._metrics.record_risk_validation(canonical_symbol, "kill_switch_blocked")
+            self._metrics.record_risk_validation(
+                canonical_symbol, "kill_switch_blocked"
+            )
             self._record_risk_audit(
                 symbol=canonical_symbol,
                 side=side.lower(),
@@ -234,7 +239,11 @@ class RiskManager(RiskController):
             severe = abs(new_position) > (
                 self.limits.max_position * self.limits.kill_switch_limit_multiplier
             )
-            if severe or self._limit_violation_streak >= self.limits.kill_switch_violation_threshold:
+            if (
+                severe
+                or self._limit_violation_streak
+                >= self.limits.kill_switch_violation_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=canonical_symbol,
@@ -262,7 +271,11 @@ class RiskManager(RiskController):
             severe = projected_notional > (
                 self.limits.max_notional * self.limits.kill_switch_limit_multiplier
             )
-            if severe or self._limit_violation_streak >= self.limits.kill_switch_violation_threshold:
+            if (
+                severe
+                or self._limit_violation_streak
+                >= self.limits.kill_switch_violation_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=canonical_symbol,
@@ -356,7 +369,9 @@ class IdempotentRetryExecutor:
                         time.sleep(delay)
         if last_error is not None:
             raise last_error
-        raise RuntimeError("IdempotentRetryExecutor terminated without executing the callable")
+        raise RuntimeError(
+            "IdempotentRetryExecutor terminated without executing the callable"
+        )
 
 
 class DefaultPortfolioRiskAnalyzer(PortfolioRiskAnalyzer):

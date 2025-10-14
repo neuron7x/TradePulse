@@ -8,6 +8,12 @@ from .cache import (
     hash_input_data,
     make_fingerprint,
 )
+from .hierarchical_features import (
+    FeatureBufferCache,
+    HierarchicalFeatureResult,
+    TimeFrameSpec,
+    compute_hierarchical_features,
+)
 from .kuramoto import (
     KuramotoOrderFeature,
     MultiAssetKuramotoFeature,
@@ -16,13 +22,11 @@ from .kuramoto import (
     kuramoto_order,
     multi_asset_kuramoto,
 )
-from .hierarchical_features import (
-    FeatureBufferCache,
-    HierarchicalFeatureResult,
-    TimeFrameSpec,
-    compute_hierarchical_features,
+from .kuramoto_ricci_composite import (
+    KuramotoRicciComposite,
+    MarketPhase,
+    TradePulseCompositeEngine,
 )
-from .pipeline import IndicatorPipeline, PipelineResult
 from .multiscale_kuramoto import (
     KuramotoResult,
     MultiScaleKuramoto,
@@ -31,11 +35,7 @@ from .multiscale_kuramoto import (
     TimeFrame,
     WaveletWindowSelector,
 )
-from .kuramoto_ricci_composite import (
-    KuramotoRicciComposite,
-    MarketPhase,
-    TradePulseCompositeEngine,
-)
+from .pipeline import IndicatorPipeline, PipelineResult
 from .temporal_ricci import TemporalRicciAnalyzer
 
 __all__ = [

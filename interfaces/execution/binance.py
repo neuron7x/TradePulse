@@ -19,7 +19,6 @@ from .common import (
     HMACSigner,
 )
 
-
 _STATUS_MAP = {
     "NEW": OrderStatus.OPEN,
     "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,

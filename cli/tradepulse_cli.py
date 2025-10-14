@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import importlib
 import itertools
-import io
 import json
 import sys
 import time
@@ -16,12 +15,6 @@ from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple
 import click
 import numpy as np
 import pandas as pd
-
-from core.utils.dataframe_io import (
-    MissingParquetDependencyError,
-    dataframe_to_parquet_bytes,
-    read_dataframe,
-)
 
 from core.config.cli_models import (
     BacktestConfig,
@@ -34,7 +27,16 @@ from core.config.cli_models import (
 from core.config.template_manager import ConfigTemplateManager
 from core.data.feature_catalog import FeatureCatalog
 from core.data.versioning import DataVersionManager
-from core.reporting import generate_markdown_report, render_markdown_to_html, render_markdown_to_pdf
+from core.reporting import (
+    generate_markdown_report,
+    render_markdown_to_html,
+    render_markdown_to_pdf,
+)
+from core.utils.dataframe_io import (
+    MissingParquetDependencyError,
+    dataframe_to_parquet_bytes,
+    read_dataframe,
+)
 
 DEFAULT_TEMPLATES_DIR = Path("configs/templates")
 
@@ -84,7 +86,9 @@ def _existing_digest(path: Path) -> str | None:
     return _hash_bytes(path.read_bytes())
 
 
-def _write_bytes(destination: Path, payload: bytes, *, command: str) -> Tuple[str, bool]:
+def _write_bytes(
+    destination: Path, payload: bytes, *, command: str
+) -> Tuple[str, bool]:
     existing = _existing_digest(destination)
     digest = _hash_bytes(payload)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +159,9 @@ def _load_prices(cfg: IngestConfig | BacktestConfig | ExecConfig) -> pd.DataFram
     return frame
 
 
-def _resolve_strategy(strategy_cfg: StrategyConfig) -> Callable[[np.ndarray], np.ndarray]:
+def _resolve_strategy(
+    strategy_cfg: StrategyConfig,
+) -> Callable[[np.ndarray], np.ndarray]:
     fn = _load_callable(strategy_cfg.entrypoint)
 
     def _wrapped(prices: np.ndarray) -> np.ndarray:
@@ -165,7 +171,9 @@ def _resolve_strategy(strategy_cfg: StrategyConfig) -> Callable[[np.ndarray], np
     return _wrapped
 
 
-def _write_frame(frame: pd.DataFrame, destination: Path, *, command: str = "cli") -> str:
+def _write_frame(
+    frame: pd.DataFrame, destination: Path, *, command: str = "cli"
+) -> str:
     suffix = destination.suffix.lower()
     if suffix in {".csv", ""}:
         payload = frame.to_csv(index=False).encode("utf-8")
@@ -226,8 +234,14 @@ def completion(shell: str) -> None:
 
 
 @cli.command()
-@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to ingest YAML config.")
-@click.option("--generate-config", is_flag=True, help="Write the default ingest config template.")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to ingest YAML config.",
+)
+@click.option(
+    "--generate-config", is_flag=True, help="Write the default ingest config template."
+)
 @click.option(
     "--template-output",
     type=click.Path(path_type=Path),
@@ -246,7 +260,9 @@ def ingest(
     manager = _get_manager(ctx)
     if generate_config:
         if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
         manager.render("ingest", template_output)
         click.echo(f"[{command}] template written to {template_output}")
         return
@@ -273,7 +289,11 @@ def ingest(
     with step_logger(command, "snapshot version"):
         version_mgr = DataVersionManager(cfg.versioning)
         version_mgr.snapshot(cfg.destination, metadata={"records": record_count})
-    click.echo(f"[{command}] completed records={record_count} dest={cfg.destination} sha256={digest}")
+    message = (
+        f"[{command}] completed records={record_count} dest={cfg.destination} "
+        f"sha256={digest}"
+    )
+    click.echo(message)
 
 
 def _run_backtest(cfg: BacktestConfig) -> Dict[str, Any]:
@@ -330,8 +350,16 @@ def _emit_backtest_output(
 
 
 @cli.command()
-@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to backtest YAML config.")
-@click.option("--generate-config", is_flag=True, help="Write the default backtest config template.")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to backtest YAML config.",
+)
+@click.option(
+    "--generate-config",
+    is_flag=True,
+    help="Write the default backtest config template.",
+)
 @click.option(
     "--template-output",
     type=click.Path(path_type=Path),
@@ -357,7 +385,9 @@ def backtest(
     manager = _get_manager(ctx)
     if generate_config:
         if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
         manager.render("backtest", template_output)
         click.echo(f"[{command}] template written to {template_output}")
         return
@@ -384,7 +414,9 @@ def backtest(
         version_mgr = DataVersionManager(cfg.versioning)
         version_mgr.snapshot(cfg.results_path, metadata=result["stats"])
     _emit_backtest_output(cfg, result, output_format, command=command)
-    click.echo(f"[{command}] completed stats={json.dumps(result['stats'], sort_keys=True)} sha256={digest}")
+    stats_json = json.dumps(result["stats"], sort_keys=True)
+    message = f"[{command}] completed stats={stats_json} sha256={digest}"
+    click.echo(message)
 
 
 def _iterate_grid(search_space: Dict[str, Iterable[Any]]) -> Iterable[Dict[str, Any]]:
@@ -418,7 +450,9 @@ def _emit_optimize_output(
     if output_format == "jsonl":
         click.echo(json.dumps({"metric": "best_score", "value": payload["best_score"]}))
         if payload["best_params"]:
-            click.echo(json.dumps({"metric": "best_params", "value": payload["best_params"]}))
+            click.echo(
+                json.dumps({"metric": "best_params", "value": payload["best_params"]})
+            )
         for trial in payload["trials"]:
             click.echo(json.dumps({"metric": "trial", "value": trial}))
         return
@@ -431,8 +465,16 @@ def _emit_optimize_output(
 
 
 @cli.command()
-@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to optimization YAML config.")
-@click.option("--generate-config", is_flag=True, help="Write the default optimize config template.")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to optimization YAML config.",
+)
+@click.option(
+    "--generate-config",
+    is_flag=True,
+    help="Write the default optimize config template.",
+)
 @click.option(
     "--template-output",
     type=click.Path(path_type=Path),
@@ -458,7 +500,9 @@ def optimize(
     manager = _get_manager(ctx)
     if generate_config:
         if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
         manager.render("optimize", template_output)
         click.echo(f"[{command}] template written to {template_output}")
         return
@@ -467,7 +511,11 @@ def optimize(
 
     with step_logger(command, "load config"):
         cfg = manager.load_config(config, OptimizeConfig)
-    backtest_cfg = BacktestConfig.model_validate(cfg.metadata.get("backtest")) if "backtest" in cfg.metadata else None
+    backtest_cfg = (
+        BacktestConfig.model_validate(cfg.metadata.get("backtest"))
+        if "backtest" in cfg.metadata
+        else None
+    )
     if backtest_cfg is None:
         raise ConfigError("Optimize config requires embedded backtest metadata")
 
@@ -483,7 +531,9 @@ def optimize(
             trial_result = _run_backtest(trial_cfg)
             returns = np.asarray(trial_result["returns"], dtype=float)
             score = float(objective_fn(returns))
-            trials.append({"params": params, "score": score, "stats": trial_result["stats"]})
+            trials.append(
+                {"params": params, "score": score, "stats": trial_result["stats"]}
+            )
             if score > best_score:
                 best_score = score
                 best_params = params
@@ -495,7 +545,11 @@ def optimize(
         version_mgr = DataVersionManager(cfg.versioning)
         version_mgr.snapshot(cfg.results_path, metadata={"trials": len(trials)})
     _emit_optimize_output(cfg, payload, output_format, command=command)
-    click.echo(f"[{command}] completed trials={len(trials)} best_score={best_score} sha256={digest}")
+    message = (
+        f"[{command}] completed trials={len(trials)} best_score={best_score} "
+        f"sha256={digest}"
+    )
+    click.echo(message)
 
 
 def _emit_exec_output(
@@ -527,8 +581,14 @@ def _emit_exec_output(
 
 
 @cli.command()
-@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to exec YAML config.")
-@click.option("--generate-config", is_flag=True, help="Write the default exec config template.")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to exec YAML config.",
+)
+@click.option(
+    "--generate-config", is_flag=True, help="Write the default exec config template."
+)
 @click.option(
     "--template-output",
     type=click.Path(path_type=Path),
@@ -554,7 +614,9 @@ def exec(  # noqa: A001
     manager = _get_manager(ctx)
     if generate_config:
         if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
         manager.render("exec", template_output)
         click.echo(f"[{command}] template written to {template_output}")
         return
@@ -587,7 +649,8 @@ def exec(  # noqa: A001
         version_mgr = DataVersionManager(cfg.versioning)
         version_mgr.snapshot(cfg.results_path, metadata=result)
     _emit_exec_output(cfg, result, signals, output_format, command=command)
-    click.echo(f"[{command}] completed latest_signal={latest} sha256={digest}")
+    message = f"[{command}] completed latest_signal={latest} sha256={digest}"
+    click.echo(message)
 
 
 def _emit_report_output(
@@ -609,10 +672,17 @@ def _emit_report_output(
     if output_format == "jsonl":
         for idx, path in enumerate(cfg.inputs, start=1):
             click.echo(json.dumps({"section": idx, "source": str(path)}))
-        click.echo(json.dumps({"metric": "line_count", "value": len(report_text.splitlines())}))
+        click.echo(
+            json.dumps({"metric": "line_count", "value": len(report_text.splitlines())})
+        )
         return
     if output_format == "parquet":
-        frame = pd.DataFrame({"section": range(1, len(cfg.inputs) + 1), "source": [str(p) for p in cfg.inputs]})
+        frame = pd.DataFrame(
+            {
+                "section": range(1, len(cfg.inputs) + 1),
+                "source": [str(p) for p in cfg.inputs],
+            }
+        )
         parquet_path = cfg.output_path.with_suffix(".parquet")
         _write_frame(frame, parquet_path, command=command)
         return
@@ -620,8 +690,14 @@ def _emit_report_output(
 
 
 @cli.command()
-@click.option("--config", type=click.Path(exists=True, path_type=Path), help="Path to report YAML config.")
-@click.option("--generate-config", is_flag=True, help="Write the default report config template.")
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to report YAML config.",
+)
+@click.option(
+    "--generate-config", is_flag=True, help="Write the default report config template."
+)
 @click.option(
     "--template-output",
     type=click.Path(path_type=Path),
@@ -647,7 +723,9 @@ def report(
     manager = _get_manager(ctx)
     if generate_config:
         if template_output is None:
-            raise click.UsageError("--template-output must be provided when generating a template")
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
         manager.render("report", template_output)
         click.echo(f"[{command}] template written to {template_output}")
         return
@@ -679,7 +757,8 @@ def report(
         version_mgr = DataVersionManager(cfg.versioning)
         version_mgr.snapshot(cfg.output_path, metadata={"sections": len(cfg.inputs)})
     _emit_report_output(cfg, report_text, output_format, command=command)
-    click.echo(f"[{command}] completed sections={len(cfg.inputs)} sha256={digest}")
+    message = f"[{command}] completed sections={len(cfg.inputs)} sha256={digest}"
+    click.echo(message)
 
 
 # ---------------------------------------------------------------------------

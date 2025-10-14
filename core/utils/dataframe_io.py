@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import io
 import importlib
+import io
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -139,7 +139,11 @@ def _select_backend(require_parquet: bool, allow_json_fallback: bool) -> _Backen
     for backend in _available_backends():
         if backend.suffix == _PARQUET_SUFFIX:
             return backend
-        if allow_json_fallback and backend.suffix == _JSON_SUFFIX and not require_parquet:
+        if (
+            allow_json_fallback
+            and backend.suffix == _JSON_SUFFIX
+            and not require_parquet
+        ):
             return backend
     raise MissingParquetDependencyError(
         "No parquet backend available. Install 'tradepulse[feature_store]' for pyarrow support or install polars."
@@ -166,7 +170,9 @@ def write_dataframe(
     """Serialize ``frame`` to ``destination`` using the first available backend."""
 
     base, explicit_suffix = _normalize_destination(destination)
-    require_parquet = destination.suffix.lower() == _PARQUET_SUFFIX if explicit_suffix else False
+    require_parquet = (
+        destination.suffix.lower() == _PARQUET_SUFFIX if explicit_suffix else False
+    )
     backend = _select_backend(require_parquet, allow_json_fallback)
     target = base.with_suffix(backend.suffix)
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -187,7 +193,10 @@ def _drop_polars_index_columns(frame: pd.DataFrame, index_frame: pd.DataFrame) -
     if index_frame.empty:
         return
 
-    index_series = [index_frame.iloc[:, i].reset_index(drop=True) for i in range(index_frame.shape[1])]
+    index_series = [
+        index_frame.iloc[:, i].reset_index(drop=True)
+        for i in range(index_frame.shape[1])
+    ]
     matched_levels: set[int] = set()
     drop_labels: list[str] = []
 
@@ -202,7 +211,9 @@ def _drop_polars_index_columns(frame: pd.DataFrame, index_frame: pd.DataFrame) -
     # Fall back to positional matching for legacy payloads where the column
     # names differ (e.g. ``level_0`` vs ``0`` for unnamed indexes).
     if len(matched_levels) < len(index_series):
-        remaining_levels = [idx for idx in range(len(index_series)) if idx not in matched_levels]
+        remaining_levels = [
+            idx for idx in range(len(index_series)) if idx not in matched_levels
+        ]
         for position, column in enumerate(frame.columns):
             if not remaining_levels or position >= len(index_series):
                 break
@@ -244,7 +255,9 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
                     column = index_frame.columns[0]
                     frame.index = pd.Index(index_frame.iloc[:, 0], name=column)
                 else:
-                    frame.index = pd.MultiIndex.from_frame(index_frame, names=list(index_frame.columns))
+                    frame.index = pd.MultiIndex.from_frame(
+                        index_frame, names=list(index_frame.columns)
+                    )
                 if backend_name == "polars":
                     _drop_polars_index_columns(frame, index_frame)
             return frame

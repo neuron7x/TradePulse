@@ -17,8 +17,12 @@ class _ConstantFeature(BaseFeature):
         super().__init__(name="constant")
         self._value = value
 
-    def transform(self, data, **kwargs):  # noqa: ANN001 - interface defined by BaseFeature
-        return FeatureResult(name=self.name, value=self._value, metadata={"data_id": id(data)})
+    def transform(
+        self, data, **kwargs
+    ):  # noqa: ANN001 - interface defined by BaseFeature
+        return FeatureResult(
+            name=self.name, value=self._value, metadata={"data_id": id(data)}
+        )
 
 
 def test_feature_transform_with_metrics(monkeypatch):
@@ -34,7 +38,9 @@ def test_feature_transform_with_metrics(monkeypatch):
             recorded.append((feature_name, value))
 
     monkeypatch.setattr(base_module, "get_metrics_collector", lambda: DummyMetrics())
-    monkeypatch.setattr(base_module, "pipeline_span", lambda *_args, **_kwargs: contextlib.nullcontext())
+    monkeypatch.setattr(
+        base_module, "pipeline_span", lambda *_args, **_kwargs: contextlib.nullcontext()
+    )
 
     feature = _ConstantFeature(42.5)
     result = feature.transform_with_metrics(np.ones(3), feature_type="test")

@@ -22,12 +22,18 @@ class DummyTimer:
 @pytest.mark.asyncio
 async def test_on_tick_publishes_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
     ports: list[int] = []
-    monkeypatch.setattr("execution.amm_runner.start_http_server", lambda port: ports.append(port))
+    monkeypatch.setattr(
+        "execution.amm_runner.start_http_server", lambda port: ports.append(port)
+    )
     timer = DummyTimer()
-    monkeypatch.setattr("execution.amm_runner.timed_update", lambda *args, **kwargs: timer)
+    monkeypatch.setattr(
+        "execution.amm_runner.timed_update", lambda *args, **kwargs: timer
+    )
     calls: list[tuple] = []
 
-    def fake_publish(symbol: str, tf: str, out: dict, k: float, theta: float, q_hi: float | None) -> None:
+    def fake_publish(
+        symbol: str, tf: str, out: dict, k: float, theta: float, q_hi: float | None
+    ) -> None:
         calls.append((symbol, tf, out, k, theta, q_hi))
 
     monkeypatch.setattr("execution.amm_runner.publish_metrics", fake_publish)
@@ -46,8 +52,12 @@ async def test_on_tick_publishes_metrics(monkeypatch: pytest.MonkeyPatch) -> Non
 @pytest.mark.asyncio
 async def test_run_stream_yields_each_tick(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("execution.amm_runner.start_http_server", lambda port: None)
-    monkeypatch.setattr("execution.amm_runner.timed_update", lambda *args, **kwargs: DummyTimer())
-    monkeypatch.setattr("execution.amm_runner.publish_metrics", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "execution.amm_runner.timed_update", lambda *args, **kwargs: DummyTimer()
+    )
+    monkeypatch.setattr(
+        "execution.amm_runner.publish_metrics", lambda *args, **kwargs: None
+    )
 
     runner = AMMRunner("ETH-USD", "5m")
 

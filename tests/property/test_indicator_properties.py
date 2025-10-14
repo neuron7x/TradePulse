@@ -6,14 +6,14 @@ import pandas as pd
 import pytest
 
 try:
-    from hypothesis import HealthCheck, given, settings, strategies as st
+    from hypothesis import HealthCheck, given, settings
+    from hypothesis import strategies as st
 except ImportError:  # pragma: no cover - optional dependency
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
 from core.indicators.kuramoto import kuramoto_order, multi_asset_kuramoto
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.indicators.temporal_ricci import TemporalRicciAnalyzer
-
 
 finite_floats = st.floats(
     allow_nan=True,
@@ -67,14 +67,18 @@ def test_mean_ricci_accepts_non_finite_inputs(prices: list[float]) -> None:
     st.integers(min_value=32, max_value=128),
     st.lists(finite_floats, min_size=128, max_size=384),
 )
-def test_temporal_ricci_resilient_to_non_finite(window: int, raw_prices: list[float]) -> None:
+def test_temporal_ricci_resilient_to_non_finite(
+    window: int, raw_prices: list[float]
+) -> None:
     length = len(raw_prices)
     index = pd.date_range("2023-01-01", periods=length, freq="T")
     prices = np.asarray(raw_prices, dtype=float)
     volumes = np.linspace(1.0, 2.0, length)
     df = pd.DataFrame({"close": prices, "volume": volumes}, index=index)
     window = min(window, length)
-    analyzer = TemporalRicciAnalyzer(window_size=window, n_snapshots=4, retain_history=False)
+    analyzer = TemporalRicciAnalyzer(
+        window_size=window, n_snapshots=4, retain_history=False
+    )
     result = analyzer.analyze(df)
     assert np.isfinite(result.temporal_curvature)
     assert np.isfinite(result.structural_stability)

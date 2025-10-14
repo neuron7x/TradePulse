@@ -9,14 +9,13 @@ an existing block (or nested block) without bespoke glue code.
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
 from collections.abc import Iterable, Mapping, MutableSequence, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Callable, Literal
-
-import asyncio
 
 from core.utils.metrics import get_metrics_collector
 from observability.tracing import pipeline_span
@@ -45,20 +44,24 @@ class BaseFeature(ABC):
     @abstractmethod
     def transform(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
         """Produce a feature result from raw input."""
-        
-    def transform_with_metrics(self, data: FeatureInput, **kwargs: Any) -> FeatureResult:
+
+    def transform_with_metrics(
+        self, data: FeatureInput, **kwargs: Any
+    ) -> FeatureResult:
         """Transform with automatic metrics collection."""
         metrics = get_metrics_collector()
         feature_type = kwargs.get("feature_type", "generic")
-        
-        with pipeline_span("features.transform", feature_name=self.name, feature_type=feature_type):
+
+        with pipeline_span(
+            "features.transform", feature_name=self.name, feature_type=feature_type
+        ):
             with metrics.measure_feature_transform(self.name, feature_type):
                 result = self.transform(data, **kwargs)
-            
+
         # Record the feature value if it's numeric
         if isinstance(result.value, (int, float)):
             metrics.record_feature_value(self.name, float(result.value))
-            
+
         return result
 
 
@@ -168,7 +171,10 @@ def _run_block_thread(
         return asyncio.run(_runner())
     except RuntimeError as exc:
         message = str(exc)
-        if "event loop is running" not in message and "cannot be called from a running event loop" not in message:
+        if (
+            "event loop is running" not in message
+            and "cannot be called from a running event loop" not in message
+        ):
             raise
         new_loop = asyncio.new_event_loop()
         try:
@@ -179,7 +185,9 @@ def _run_block_thread(
             new_loop.close()
 
 
-def _process_transform(feature: BaseFeature, data: FeatureInput, kwargs: Mapping[str, Any]) -> FeatureResult:
+def _process_transform(
+    feature: BaseFeature, data: FeatureInput, kwargs: Mapping[str, Any]
+) -> FeatureResult:
     """Execute ``feature.transform`` in a child process.
 
     The helper is module-level to ensure it is picklable for ``fork`` as well
@@ -216,4 +224,3 @@ __all__ = [
     "FunctionalFeature",
     "FeatureResult",
 ]
-

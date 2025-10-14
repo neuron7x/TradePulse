@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import math
 
-import numpy as np
-import pytest
-
 from core.neuro.sizing import SizerConfig, position_size, precision_weight, pulse_weight
 
 

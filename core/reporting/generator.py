@@ -1,4 +1,5 @@
 """Assemble markdown reports from a collection of artifacts."""
+
 from __future__ import annotations
 
 from pathlib import Path

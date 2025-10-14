@@ -3,6 +3,7 @@ from __future__ import annotations
 import bisect
 import math
 
+
 class P2Quantile:
     """Deterministic streaming quantile via incremental insertion."""
 

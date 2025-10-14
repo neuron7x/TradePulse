@@ -6,7 +6,8 @@ import pandas as pd
 import pytest
 
 try:
-    from hypothesis import given, settings, strategies as st
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
     from hypothesis.extra.numpy import arrays
 except Exception:  # pragma: no cover - optional dependency
     HYPOTHESIS_AVAILABLE = False
@@ -82,6 +83,7 @@ class TestMultiScaleKuramoto:
             result = analyzer.analyze(df)
             assert 0.0 <= result.consensus_R <= 1.0
             assert not np.isnan(result.consensus_R)
+
     else:  # pragma: no cover - executed when Hypothesis missing
 
         def test_kuramoto_robustness(self) -> None:  # type: ignore[override]
@@ -135,7 +137,9 @@ class TestTemporalRicci:
 
 class TestCompositeIndicator:
     def test_phase_detection_strong_emergent(self) -> None:
-        composite = KuramotoRicciComposite(R_strong_emergent=0.8, ricci_negative_threshold=-0.3)
+        composite = KuramotoRicciComposite(
+            R_strong_emergent=0.8, ricci_negative_threshold=-0.3
+        )
         phase = composite._determine_phase(
             R=0.85,
             temporal_ricci=-0.25,
@@ -253,10 +257,14 @@ class TestCompositeEngine:
         engine.analyze_market(df)
         engine.analyze_market(df)  # retry with identical payload should not duplicate
 
-        extended_index = df.index.append(pd.Index([df.index[-1] + pd.Timedelta(minutes=1)]))
+        extended_index = df.index.append(
+            pd.Index([df.index[-1] + pd.Timedelta(minutes=1)])
+        )
         extended_prices = np.append(prices, prices[-1] + 0.1)
         extended_volumes = np.append(volumes, volumes[-1])
-        df_extended = pd.DataFrame({"close": extended_prices, "volume": extended_volumes}, index=extended_index)
+        df_extended = pd.DataFrame(
+            {"close": extended_prices, "volume": extended_volumes}, index=extended_index
+        )
 
         engine.analyze_market(df_extended)
 
@@ -275,18 +283,20 @@ if HYPOTHESIS_AVAILABLE:
         rng = np.random.default_rng(draw(st.integers(min_value=0, max_value=10_000)))
         return 100 + np.cumsum(rng.normal(0, volatility, n_points))
 
-
     class TestPropertyBased:
         @settings(max_examples=5, deadline=None)
         @given(series=_synthetic_series())
         def test_engine_handles_various_volatilities(self, series: np.ndarray) -> None:
             dates = pd.date_range("2024-01-01", periods=len(series), freq="1min")
-            df = pd.DataFrame({"close": series, "volume": np.full(len(series), 1000.0)}, index=dates)
+            df = pd.DataFrame(
+                {"close": series, "volume": np.full(len(series), 1000.0)}, index=dates
+            )
 
             engine = TradePulseCompositeEngine()
             signal = engine.analyze_market(df)
             assert signal.phase in MarketPhase
             assert not np.isnan(signal.confidence)
+
 else:  # pragma: no cover - Hypothesis not available
 
     class TestPropertyBased:  # type: ignore[no-redef]

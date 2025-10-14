@@ -1,10 +1,9 @@
 # SPDX-License-Identifier: MIT
-import streamlit as st
 import pandas as pd
-import numpy as np
+import streamlit as st
+
+from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
-from core.indicators.entropy import entropy, delta_entropy
-from core.indicators.hurst import hurst_exponent
 
 st.title("TradePulse — Real-time Indicators")
 uploaded = st.file_uploader("Upload CSV with columns: ts, price, volume", type=["csv"])

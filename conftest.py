@@ -25,6 +25,10 @@ import warnings
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Iterable
 
+import pytest
+
+from tests.tolerances import THREAD_BOUND_ENV_VARS
+
 
 class _FlakyTracker:
     """Collect execution metadata for tests marked as flaky."""
@@ -90,16 +94,14 @@ class _FlakyTracker:
                 }
             )
         self._report_path.parent.mkdir(parents=True, exist_ok=True)
-        self._report_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        serialized = json.dumps(payload, indent=2, sort_keys=True) + "\n"
+        self._report_path.write_text(serialized, encoding="utf-8")
+
 
 try:
     from zoneinfo import ZoneInfo
 except ImportError:  # pragma: no cover - Python <3.9 fallback
     from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
-
-import pytest
-
-from tests.tolerances import THREAD_BOUND_ENV_VARS
 
 for _env_key, _env_value in THREAD_BOUND_ENV_VARS.items():
     os.environ.setdefault(_env_key, _env_value)
@@ -109,7 +111,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
-if "exchange_calendars" not in sys.modules:  # pragma: no cover - optional dependency shim
+if (
+    "exchange_calendars" not in sys.modules
+):  # pragma: no cover - optional dependency shim
     stub = types.ModuleType("exchange_calendars")
 
     class _BaseCalendar:
@@ -171,7 +175,6 @@ if "exchange_calendars" not in sys.modules:  # pragma: no cover - optional depen
             except Exception:  # pragma: no cover - fallback to list
                 return minutes
 
-
     class _AlwaysOpenCalendar(_BaseCalendar):
         def __init__(self) -> None:
             super().__init__("UTC", time(0, 0), time(23, 59, 59), tuple())
@@ -182,7 +185,9 @@ if "exchange_calendars" not in sys.modules:  # pragma: no cover - optional depen
             return True
 
     class _AlwaysOpenNamespace:
-        AlwaysOpenCalendar = _AlwaysOpenCalendar  # noqa: N803 - match third-party naming
+        AlwaysOpenCalendar = (
+            _AlwaysOpenCalendar  # noqa: N803 - match third-party naming
+        )
 
     class _ErrorsNamespace:
         class InvalidCalendarName(Exception):
@@ -197,8 +202,16 @@ if "exchange_calendars" not in sys.modules:  # pragma: no cover - optional depen
             (5, 6),
             holidays=(date(2024, 7, 4),),
         ),
-        "XNAS": _BaseCalendar("America/New_York", time(9, 30), time(16, 0), (5, 6), holidays=(date(2024, 7, 4),)),
-        "CMES": _BaseCalendar("America/Chicago", time(17, 0), time(16, 0), (5,), holidays=()),
+        "XNAS": _BaseCalendar(
+            "America/New_York",
+            time(9, 30),
+            time(16, 0),
+            (5, 6),
+            holidays=(date(2024, 7, 4),),
+        ),
+        "CMES": _BaseCalendar(
+            "America/Chicago", time(17, 0), time(16, 0), (5,), holidays=()
+        ),
     }
 
     def _get_calendar(name: str):  # noqa: D401 - mimic API signature
@@ -223,7 +236,15 @@ def _register_noop_cov_options(parser: "pytest.Parser") -> None:
 
     group = parser.getgroup("cov", "coverage reporting")
     options: Iterable[tuple[str, dict[str, object]]] = (
-        ("--cov", {"action": "append", "dest": "tradepulse_cov", "metavar": "PATH", "default": []}),
+        (
+            "--cov",
+            {
+                "action": "append",
+                "dest": "tradepulse_cov",
+                "metavar": "PATH",
+                "default": [],
+            },
+        ),
         (
             "--cov-report",
             {
@@ -257,7 +278,9 @@ def pytest_addoption(parser):  # type: ignore[override]
 
 def pytest_configure(config):  # type: ignore[override]
     if not hasattr(config, "_tradepulse_flaky_tracker"):
-        config._tradepulse_flaky_tracker = _FlakyTracker(config.getoption("flaky_report"))
+        config._tradepulse_flaky_tracker = _FlakyTracker(
+            config.getoption("flaky_report")
+        )
     if config.pluginmanager.hasplugin("pytest_cov"):
         return
     cov_targets = config.getoption("tradepulse_cov", default=None)
@@ -286,7 +309,9 @@ def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
     loop = asyncio.new_event_loop()
     try:
         asyncio.set_event_loop(loop)
-        kwargs = {arg: pyfuncitem.funcargs[arg] for arg in pyfuncitem._fixtureinfo.argnames}
+        kwargs = {
+            arg: pyfuncitem.funcargs[arg] for arg in pyfuncitem._fixtureinfo.argnames
+        }
         loop.run_until_complete(testfunction(**kwargs))
     finally:
         try:
@@ -297,7 +322,9 @@ def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
     return True
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     tracker = getattr(config, "_tradepulse_flaky_tracker", None)
     if tracker is None:
         return

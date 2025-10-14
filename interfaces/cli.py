@@ -12,8 +12,6 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from observability.tracing import activate_traceparent, current_traceparent, get_tracer
-
 from backtest.engine import walk_forward
 from core.data.ingestion import DataIngestor
 from core.indicators.entropy import delta_entropy, entropy
@@ -21,6 +19,8 @@ from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
+from observability.tracing import activate_traceparent, current_traceparent, get_tracer
+
 
 def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
     """Return -1/0/1 based on composite transition signal and simple thresholds."""
@@ -140,7 +140,6 @@ def cmd_backtest(args):
     df = pd.read_csv(args.csv)
     prices = df[args.price_col].to_numpy()
     sig = signal_from_indicators(prices, window=args.window)
-    from backtest.engine import walk_forward
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
     out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
     print(json.dumps(_enrich_with_trace(out), indent=2))

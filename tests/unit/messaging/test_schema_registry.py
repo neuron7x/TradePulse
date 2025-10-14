@@ -40,7 +40,9 @@ def test_backward_compatibility_violation_detected(tmp_path: Path) -> None:
     tick_v2_path.parent.mkdir(parents=True, exist_ok=True)
     with tick_v1_path.open("r", encoding="utf-8") as handle:
         schema = json.load(handle)
-    schema["fields"] = [field for field in schema["fields"] if field["name"] != "symbol"]
+    schema["fields"] = [
+        field for field in schema["fields"] if field["name"] != "symbol"
+    ]
     with tick_v2_path.open("w", encoding="utf-8") as handle:
         json.dump(schema, handle)
 
@@ -71,7 +73,9 @@ def test_forward_compatibility_allows_nullable_fields(tmp_path: Path) -> None:
 
     with tick_v1_path.open("r", encoding="utf-8") as handle:
         schema = json.load(handle)
-    schema["fields"].append({"name": "new_nullable", "type": ["null", "string"], "default": None})
+    schema["fields"].append(
+        {"name": "new_nullable", "type": ["null", "string"], "default": None}
+    )
     with tick_v2_path.open("w", encoding="utf-8") as handle:
         json.dump(schema, handle)
 
@@ -95,7 +99,10 @@ def test_helper_normalises_complex_types() -> None:
         "type": "record",
         "name": "Parent",
         "fields": [
-            {"name": "child", "type": {"type": "record", "name": "Nested", "fields": []}},
+            {
+                "name": "child",
+                "type": {"type": "record", "name": "Nested", "fields": []},
+            },
         ],
     }
     enum_type = {"type": "enum", "name": "Direction", "symbols": ["BUY", "SELL"]}
@@ -109,10 +116,12 @@ def test_helper_normalises_complex_types() -> None:
     assert _normalise_avro_type(map_type) == ("map", ("int",))
     assert _normalise_avro_type(fixed_type) == ("fixed", "Hash", 32)
 
-    schema = {"fields": [
-        {"name": "optional", "type": ["null", "string"]},
-        {"name": "required", "type": "double"},
-    ]}
+    schema = {
+        "fields": [
+            {"name": "optional", "type": ["null", "string"]},
+            {"name": "required", "type": "double"},
+        ]
+    }
     index = _field_name_index(schema)
     assert set(index.keys()) == {"optional", "required"}
     assert _is_nullable(index["optional"]) is True

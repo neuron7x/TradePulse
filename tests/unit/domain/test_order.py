@@ -9,7 +9,13 @@ def test_order_rejects_invalid_quantity() -> None:
 
 
 def test_order_fill_progression() -> None:
-    order = Order(symbol="BTCUSD", side=OrderSide.BUY, quantity=2.0, order_type=OrderType.LIMIT, price=100.0)
+    order = Order(
+        symbol="BTCUSD",
+        side=OrderSide.BUY,
+        quantity=2.0,
+        order_type=OrderType.LIMIT,
+        price=100.0,
+    )
     order.mark_submitted("abc")
     assert order.status == OrderStatus.OPEN
 

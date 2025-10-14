@@ -13,7 +13,9 @@ from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecifica
 
 try:  # pragma: no cover - optional import for live connectors
     from execution.adapters import BinanceRESTConnector, CoinbaseRESTConnector
-except Exception:  # pragma: no cover - adapters may not be available in minimal installs
+except (
+    Exception
+):  # pragma: no cover - adapters may not be available in minimal installs
     BinanceRESTConnector = None  # type: ignore[assignment]
     CoinbaseRESTConnector = None  # type: ignore[assignment]
 
@@ -143,10 +145,27 @@ class SimulatedExchangeConnector(ExecutionConnector):
 
 
 class BinanceConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: bool = True,
+        failure_plan: Iterable[Exception | str] | None = None,
+    ) -> None:
         specs = {
-            "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.0001, min_notional=10, step_size=0.0001, tick_size=0.1),
-            "ETHUSDT": SymbolSpecification("ETHUSDT", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.01),
+            "BTCUSDT": SymbolSpecification(
+                "BTCUSDT",
+                min_qty=0.0001,
+                min_notional=10,
+                step_size=0.0001,
+                tick_size=0.1,
+            ),
+            "ETHUSDT": SymbolSpecification(
+                "ETHUSDT",
+                min_qty=0.001,
+                min_notional=5,
+                step_size=0.001,
+                tick_size=0.01,
+            ),
         }
         super().__init__(
             sandbox=sandbox,
@@ -157,9 +176,16 @@ class BinanceConnector(SimulatedExchangeConnector):
 
 
 class BybitConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: bool = True,
+        failure_plan: Iterable[Exception | str] | None = None,
+    ) -> None:
         specs = {
-            "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.5),
+            "BTCUSDT": SymbolSpecification(
+                "BTCUSDT", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.5
+            ),
         }
         super().__init__(
             sandbox=sandbox,
@@ -170,10 +196,21 @@ class BybitConnector(SimulatedExchangeConnector):
 
 
 class KrakenConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: bool = True,
+        failure_plan: Iterable[Exception | str] | None = None,
+    ) -> None:
         symbol_map = {"BTCUSD": "XBTUSD"}
         specs = {
-            "XBTUSD": SymbolSpecification("XBTUSD", min_qty=0.0001, min_notional=5, step_size=0.0001, tick_size=0.5),
+            "XBTUSD": SymbolSpecification(
+                "XBTUSD",
+                min_qty=0.0001,
+                min_notional=5,
+                step_size=0.0001,
+                tick_size=0.5,
+            ),
         }
         super().__init__(
             sandbox=sandbox,
@@ -184,11 +221,28 @@ class KrakenConnector(SimulatedExchangeConnector):
 
 
 class CoinbaseConnector(SimulatedExchangeConnector):
-    def __init__(self, *, sandbox: bool = True, failure_plan: Iterable[Exception | str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        sandbox: bool = True,
+        failure_plan: Iterable[Exception | str] | None = None,
+    ) -> None:
         symbol_map = {"BTCUSD": "BTC-USD", "ETHUSD": "ETH-USD"}
         specs = {
-            "BTC-USD": SymbolSpecification("BTC-USD", min_qty=0.0001, min_notional=10, step_size=0.0001, tick_size=0.01),
-            "ETH-USD": SymbolSpecification("ETH-USD", min_qty=0.001, min_notional=5, step_size=0.001, tick_size=0.01),
+            "BTC-USD": SymbolSpecification(
+                "BTC-USD",
+                min_qty=0.0001,
+                min_notional=10,
+                step_size=0.0001,
+                tick_size=0.01,
+            ),
+            "ETH-USD": SymbolSpecification(
+                "ETH-USD",
+                min_qty=0.001,
+                min_notional=5,
+                step_size=0.001,
+                tick_size=0.01,
+            ),
         }
         super().__init__(
             sandbox=sandbox,

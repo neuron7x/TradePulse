@@ -1,7 +1,9 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
-import time, collections
-from typing import Deque, Callable
+
+import collections
+from typing import Deque
+
 
 class RollingBuffer:
     def __init__(self, size: int):

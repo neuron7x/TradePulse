@@ -5,7 +5,12 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from core.indicators.base import BaseFeature, FeatureBlock, FeatureResult, FunctionalFeature
+from core.indicators.base import (
+    BaseFeature,
+    FeatureBlock,
+    FeatureResult,
+    FunctionalFeature,
+)
 
 
 class DoubleFeature(BaseFeature):
@@ -22,7 +27,9 @@ class IncrementFeature(BaseFeature):
         self.increment = increment
 
     def transform(self, data, **kwargs):
-        return FeatureResult(name=self.name, value=float(data) + self.increment, metadata={})
+        return FeatureResult(
+            name=self.name, value=float(data) + self.increment, metadata={}
+        )
 
 
 def test_base_feature_callable_contract() -> None:
@@ -41,7 +48,9 @@ def test_feature_block_executes_all_features() -> None:
 
 
 def test_functional_feature_wraps_callable() -> None:
-    func_feature = FunctionalFeature(lambda x: np.sum(x), name="sum", metadata={"kind": "agg"})
+    func_feature = FunctionalFeature(
+        lambda x: np.sum(x), name="sum", metadata={"kind": "agg"}
+    )
     result = func_feature.transform(np.array([1, 2, 3]))
     assert result.value == 6
     assert result.metadata["kind"] == "agg"

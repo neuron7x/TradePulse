@@ -2,16 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, Literal
-import warnings
-import logging
 
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.logging import get_logger
 from ..utils.metrics import get_metrics_collector
+from .base import BaseFeature, FeatureResult
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
@@ -22,9 +22,11 @@ def _log_debug_enabled() -> bool:
     check = getattr(base_logger, "isEnabledFor", None)
     return bool(check and check(logging.DEBUG))
 
+
 try:
     import networkx as nx
 except Exception:  # pragma: no cover - fallback for lightweight environments
+
     class _SimpleGraph:
         def __init__(self) -> None:
             self._adj: dict[int, dict[int, float]] = {}
@@ -46,10 +48,14 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def neighbors(self, node: int) -> Iterable[int]:
             return tuple(self._adj.get(int(node), ()))
 
-        def degree(self, node: int | None = None, weight: str | None = None) -> Iterable[tuple[int, float]] | float:
+        def degree(
+            self, node: int | None = None, weight: str | None = None
+        ) -> Iterable[tuple[int, float]] | float:
             if node is None:
                 if weight:
-                    return tuple((n, sum(neigh.values())) for n, neigh in self._adj.items())
+                    return tuple(
+                        (n, sum(neigh.values())) for n, neigh in self._adj.items()
+                    )
                 return tuple((n, len(neigh)) for n, neigh in self._adj.items())
             neigh = self._adj.get(int(node), {})
             return sum(neigh.values()) if weight else len(neigh)
@@ -60,7 +66,9 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def number_of_edges(self) -> int:
             return sum(len(neigh) for neigh in self._adj.values()) // 2
 
-        def edges(self, data: bool = False) -> Iterable[tuple[int, int] | tuple[int, int, dict[str, float]]]:
+        def edges(
+            self, data: bool = False
+        ) -> Iterable[tuple[int, int] | tuple[int, int, dict[str, float]]]:
             seen: set[tuple[int, int]] = set()
             for u, neigh in self._adj.items():
                 for v in neigh:
@@ -78,7 +86,9 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def number_of_nodes(self) -> int:
             return len(self._adj)
 
-        def shortest_path_length(self, source: int, target: int, weight: str | None = None) -> float:
+        def shortest_path_length(
+            self, source: int, target: int, weight: str | None = None
+        ) -> float:
             import heapq
 
             if source == target:
@@ -99,7 +109,9 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
                         heapq.heappush(heap, (nd, neigh))
             return float("inf")
 
-        def get_edge_data(self, u: int, v: int, default: dict[str, float] | None = None) -> dict[str, float] | None:
+        def get_edge_data(
+            self, u: int, v: int, default: dict[str, float] | None = None
+        ) -> dict[str, float] | None:
             weight = self._adj.get(int(u), {}).get(int(v))
             if weight is None:
                 return default
@@ -136,6 +148,7 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
             G.add_edge(int(levels[i - 1]), int(lv), weight=weight)
     return G
 
+
 def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     """Return degree-weighted distribution over neighbors within radius."""
     neigh = [n for n in G.neighbors(node)]
@@ -154,6 +167,7 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
         return np.full(len(neigh), 1.0 / len(neigh))
     return w_arr / total
 
+
 def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     """Ollivier–Ricci curvature κ(x,y) = 1 - W1(μ_x, μ_y)/d(x,y) for unweighted graphs."""
     if not G.has_edge(x, y):  # pragma: no cover - caller ensures edge exists
@@ -162,8 +176,8 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     mu_y = local_distribution(G, y)
     # for simple comparison, map distributions to common support by padding
     m = max(len(mu_x), len(mu_y))
-    a = np.pad(mu_x, (0, m-len(mu_x)))
-    b = np.pad(mu_y, (0, m-len(mu_y)))
+    a = np.pad(mu_x, (0, m - len(mu_x)))
+    b = np.pad(mu_y, (0, m - len(mu_y)))
     d_xy = _shortest_path_length_safe(G, x, y)
     if not np.isfinite(d_xy) or d_xy <= 0:
         return 0.0
@@ -200,6 +214,7 @@ def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
         except Exception:
             return float("inf")
 
+
 def mean_ricci(
     G: nx.Graph,
     *,
@@ -209,14 +224,14 @@ def mean_ricci(
     max_workers: int | None = None,
 ) -> float:
     """Compute mean Ollivier-Ricci curvature over all edges.
-    
+
     Args:
         G: NetworkX graph
         chunk_size: Process edges in chunks for large graphs (default: None, no chunking)
         use_float32: Use float32 precision for computations (default: False)
         parallel: Parallel execution mode (``"async"`` uses asyncio thread pools)
         max_workers: Optional limit for the async worker pool
-        
+
     Returns:
         Mean Ricci curvature across all edges
     """
@@ -230,21 +245,21 @@ def mean_ricci(
     ):
         if G.number_of_edges() == 0:
             return 0.0
-        
+
         edges = list(G.edges())
-        
+
         # Chunked processing for large graphs
         if chunk_size is not None and len(edges) > chunk_size:
             dtype = np.float32 if use_float32 else float
             curvatures = []
 
             for i in range(0, len(edges), chunk_size):
-                chunk_edges = edges[i:i + chunk_size]
+                chunk_edges = edges[i : i + chunk_size]
                 chunk_curv = [ricci_curvature_edge(G, u, v) for u, v in chunk_edges]
                 curvatures.extend(chunk_curv)
-            
+
             return float(np.mean(np.array(curvatures, dtype=dtype)))
-        
+
         # Standard processing
         if parallel == "async":
             curv = _run_ricci_async(G, edges, max_workers)
@@ -259,7 +274,10 @@ def mean_ricci(
             return 0.0
         return float(np.mean(arr))
 
-def _run_ricci_async(G: nx.Graph, edges: list[tuple[int, int]], max_workers: int | None) -> list[float]:
+
+def _run_ricci_async(
+    G: nx.Graph, edges: list[tuple[int, int]], max_workers: int | None
+) -> list[float]:
     async def _runner() -> list[float]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None
@@ -291,10 +309,14 @@ def _run_ricci_async(G: nx.Graph, edges: list[tuple[int, int]], max_workers: int
 
 def _w1_fallback(a, b):
     import numpy as _np
+
     # normalize
-    a = _np.asarray(a, dtype=float); b = _np.asarray(b, dtype=float)
-    a = a / (a.sum() + 1e-12); b = b / (b.sum() + 1e-12)
-    cdfa = _np.cumsum(a); cdfb = _np.cumsum(b)
+    a = _np.asarray(a, dtype=float)
+    b = _np.asarray(b, dtype=float)
+    a = a / (a.sum() + 1e-12)
+    b = b / (b.sum() + 1e-12)
+    cdfa = _np.cumsum(a)
+    cdfb = _np.cumsum(b)
     return float(_np.abs(cdfa - cdfb).sum()) / len(a)
 
 
@@ -358,7 +380,6 @@ class MeanRicciFeature(BaseFeature):
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
-
 __all__ = [
     "build_price_graph",
     "local_distribution",
@@ -366,4 +387,3 @@ __all__ = [
     "mean_ricci",
     "MeanRicciFeature",
 ]
-

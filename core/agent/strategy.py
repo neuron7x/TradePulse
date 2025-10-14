@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
+
 import math
 import time
 from dataclasses import dataclass, field
@@ -9,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from observability.tracing import pipeline_span
+
 
 @dataclass
 class Strategy:
@@ -46,7 +48,9 @@ class Strategy:
 
         self.validate_params()
 
-        def _update_diagnostics(equity_curve: np.ndarray, positions: np.ndarray) -> None:
+        def _update_diagnostics(
+            equity_curve: np.ndarray, positions: np.ndarray
+        ) -> None:
             if equity_curve.size == 0:
                 self.params["last_equity_curve"] = []
                 self.params["max_drawdown"] = 0.0
@@ -56,8 +60,12 @@ class Strategy:
             peak = np.maximum.accumulate(np.concatenate([[0.0], equity_curve]))[1:]
             drawdown = equity_curve - peak
             self.params["last_equity_curve"] = equity_curve.tolist()
-            self.params["max_drawdown"] = float(drawdown.min()) if drawdown.size else 0.0
-            self.params["trades"] = int(np.count_nonzero(np.diff(positions))) if positions.size else 0
+            self.params["max_drawdown"] = (
+                float(drawdown.min()) if drawdown.size else 0.0
+            )
+            self.params["trades"] = (
+                int(np.count_nonzero(np.diff(positions))) if positions.size else 0
+            )
 
         with pipeline_span("signals.simulate_performance", strategy=self.name) as span:
             if data is None:
@@ -66,10 +74,12 @@ class Strategy:
                 series = _to_price_series(data)
 
             if span is not None:
-                span.set_attributes({
-                    "series.length": int(series.size),
-                    "series.has_index": isinstance(series.index, pd.DatetimeIndex),
-                })
+                span.set_attributes(
+                    {
+                        "series.length": int(series.size),
+                        "series.has_index": isinstance(series.index, pd.DatetimeIndex),
+                    }
+                )
 
             series = series.astype(float)
             if isinstance(series.index, pd.DatetimeIndex):
@@ -77,7 +87,9 @@ class Strategy:
             series = series.replace([np.inf, -np.inf], np.nan)
             if series.isna().all():
                 self.score = 0.0
-                _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+                _update_diagnostics(
+                    np.array([], dtype=float), np.array([], dtype=float)
+                )
                 return self.score
             series = series.ffill().bfill()
 
@@ -85,7 +97,9 @@ class Strategy:
             returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
             if returns.empty:
                 self.score = 0.0
-                _update_diagnostics(np.array([], dtype=float), np.array([], dtype=float))
+                _update_diagnostics(
+                    np.array([], dtype=float), np.array([], dtype=float)
+                )
                 return self.score
 
             lookback = int(self.params.get("lookback", 20))
@@ -102,7 +116,13 @@ class Strategy:
                 )
             effective_lookback = max(1, min(lookback, len(returns)))
 
-            rolling_mean = returns.rolling(window=effective_lookback, min_periods=effective_lookback).mean().fillna(0.0)
+            rolling_mean = (
+                returns.rolling(
+                    window=effective_lookback, min_periods=effective_lookback
+                )
+                .mean()
+                .fillna(0.0)
+            )
             rolling_vol = (
                 returns.rolling(window=effective_lookback, min_periods=1)
                 .std(ddof=0)
@@ -111,8 +131,12 @@ class Strategy:
                 .bfill()
                 .fillna(1e-6)
             )
-            zscore = (rolling_mean / rolling_vol).replace([np.inf, -np.inf], 0.0).fillna(0.0)
-            signal = np.where(zscore > threshold, -1.0, np.where(zscore < -threshold, 1.0, 0.0))
+            zscore = (
+                (rolling_mean / rolling_vol).replace([np.inf, -np.inf], 0.0).fillna(0.0)
+            )
+            signal = np.where(
+                zscore > threshold, -1.0, np.where(zscore < -threshold, 1.0, 0.0)
+            )
             if signal.size:
                 position = np.concatenate(([0.0], signal[:-1])) * risk_budget
             else:
@@ -138,6 +162,7 @@ class Strategy:
                 )
             return self.score
 
+
 @dataclass
 class PiAgent:
     strategy: Strategy
@@ -154,10 +179,17 @@ class PiAgent:
         kappa = market_state.get("kappa_mean", 0.0)
         transition = market_state.get("transition_score", 0.0)
         hard_trigger = R > 0.75 and dH < 0 and kappa < 0
-        score = 0.6 * max(R - 0.7, 0.0) + 0.25 * max(-dH, 0.0) + 0.15 * max(-kappa, 0.0) + 0.2 * transition
+        score = (
+            0.6 * max(R - 0.7, 0.0)
+            + 0.25 * max(-dH, 0.0)
+            + 0.15 * max(-kappa, 0.0)
+            + 0.2 * transition
+        )
         self._instability_score = 0.7 * self._instability_score + 0.3 * score
         threshold = self.strategy.params.get("instability_threshold", 0.2)
-        triggered = (hard_trigger or self._instability_score > threshold) and self._cooldown == 0
+        triggered = (
+            hard_trigger or self._instability_score > threshold
+        ) and self._cooldown == 0
         if triggered:
             self._cooldown = 3
         elif self._cooldown > 0:
@@ -177,7 +209,9 @@ class PiAgent:
         action = "hold"
         if self.detect_instability(market_state):
             action = "enter"
-        elif market_state.get("phase_reversal", False) and self._instability_score < (self.strategy.params.get("instability_threshold", 0.2) - self.hysteresis):
+        elif market_state.get("phase_reversal", False) and self._instability_score < (
+            self.strategy.params.get("instability_threshold", 0.2) - self.hysteresis
+        ):
             action = "exit"
         return action
 

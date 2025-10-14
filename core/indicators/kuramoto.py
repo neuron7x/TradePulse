@@ -7,9 +7,9 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.logging import get_logger
 from ..utils.metrics import get_metrics_collector
+from .base import BaseFeature, FeatureResult
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
@@ -20,8 +20,10 @@ def _log_debug_enabled() -> bool:
     checker = getattr(base_logger, "isEnabledFor", None)
     return bool(checker and checker(logging.DEBUG))
 
+
 try:
     from scipy import fft as _scipy_fft  # type: ignore
+
     _scipy_fft.set_workers(1)  # pragma: no cover - optional tuning
 except Exception:  # fallback if SciPy not installed
     _scipy_fft = None  # type: ignore[assignment]
@@ -30,6 +32,7 @@ try:
     from scipy.signal import hilbert
 except Exception:  # fallback if SciPy not installed
     hilbert = None
+
 
 def compute_phase(
     x: np.ndarray,
@@ -69,8 +72,14 @@ def compute_phase(
             raise ValueError("compute_phase expects 1D array")
         if not np.all(np.isfinite(x)):
             x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        hilbert_module = getattr(hilbert, "__module__", "") if hilbert is not None else ""
-        use_scipy_fastpath = _scipy_fft is not None and hilbert is not None and hilbert_module.startswith("scipy.")
+        hilbert_module = (
+            getattr(hilbert, "__module__", "") if hilbert is not None else ""
+        )
+        use_scipy_fastpath = (
+            _scipy_fft is not None
+            and hilbert is not None
+            and hilbert_module.startswith("scipy.")
+        )
         if use_scipy_fastpath:
             n = x.size
             if n == 0:
@@ -114,6 +123,7 @@ def compute_phase(
             return target
         phases = np.arctan2(imag, real)
         return phases.astype(dtype, copy=False)
+
 
 def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     """Kuramoto order parameter R = |mean(exp(iθ))| for a set of phases.
@@ -187,6 +197,7 @@ def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     clipped[clipped < 1e-8] = 0.0
     return clipped
 
+
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Compute Kuramoto R across multiple synchronized assets (same length).
     Each series is transformed to phase, then R over assets for the last time step.
@@ -202,17 +213,20 @@ try:
 except Exception:
     cp = None
 
+
 def compute_phase_gpu(x):
     """GPU phase via CuPy Hilbert transform if CuPy is available; else falls back.
-    
+
     This function properly handles CuPy imports and memory transfers, ensuring
     correct GPU utilization when CuPy is available.
     """
-    with _logger.operation("compute_phase_gpu", data_size=len(x), has_cupy=cp is not None):
+    with _logger.operation(
+        "compute_phase_gpu", data_size=len(x), has_cupy=cp is not None
+    ):
         if cp is None:
             _logger.info("CuPy not available, falling back to CPU compute_phase")
             return compute_phase(np.asarray(x))
-        
+
         try:
             # Use float32 for GPU efficiency
             x_gpu = cp.asarray(x, dtype=cp.float32)
@@ -239,7 +253,7 @@ class KuramotoOrderFeature(BaseFeature):
 
     def __init__(self, *, use_float32: bool = False, name: str | None = None) -> None:
         """Initialize Kuramoto order parameter feature.
-        
+
         Args:
             use_float32: Use float32 precision for memory efficiency (default: False)
             name: Optional custom name (default: "kuramoto_order")
@@ -249,11 +263,11 @@ class KuramotoOrderFeature(BaseFeature):
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Kuramoto order parameter.
-        
+
         Args:
             data: 1D or 2D array of phases or time series
             **_: Additional keyword arguments (ignored)
-            
+
         Returns:
             FeatureResult containing Kuramoto order parameter and metadata
         """

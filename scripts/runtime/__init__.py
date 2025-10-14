@@ -1,6 +1,6 @@
+import sys
 from importlib import util as importlib_util
 from pathlib import Path
-import sys
 from types import ModuleType
 
 # ... (імпорт інших модулів)

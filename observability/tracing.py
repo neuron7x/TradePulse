@@ -8,17 +8,18 @@ base keeps functioning in lightweight environments.
 """
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import fnmatch
 import logging
 import os
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - optional dependency import guarded at runtime
     from opentelemetry import context as otel_context
     from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.propagate import get_global_textmap, set_global_textmap
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
@@ -28,7 +29,6 @@ try:  # pragma: no cover - optional dependency import guarded at runtime
         SamplingResult,
         TraceIdRatioBased,
     )
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.trace import Status, StatusCode
     from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 

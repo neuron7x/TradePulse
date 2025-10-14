@@ -6,17 +6,17 @@ import json
 import pytest
 
 from domain import Order, OrderType
+from execution.audit import ExecutionAuditLogger
 from execution.order import position_sizing
 from execution.risk import (
     IdempotentRetryExecutor,
     LimitViolation,
     OrderRateExceeded,
+    RiskError,
     RiskLimits,
     RiskManager,
-    RiskError,
     portfolio_heat,
 )
-from execution.audit import ExecutionAuditLogger
 
 
 def test_order_defaults_to_market_type() -> None:
@@ -57,7 +57,12 @@ class _TimeStub:
 
 def test_risk_manager_enforces_position_and_notional_caps() -> None:
     clock = _TimeStub()
-    limits = RiskLimits(max_notional=100.0, max_position=5.0, max_orders_per_interval=5, interval_seconds=1.0)
+    limits = RiskLimits(
+        max_notional=100.0,
+        max_position=5.0,
+        max_orders_per_interval=5,
+        interval_seconds=1.0,
+    )
     manager = RiskManager(limits, time_source=clock)
 
     manager.validate_order("BTC", "buy", qty=2.0, price=20.0)
@@ -73,7 +78,12 @@ def test_risk_manager_enforces_position_and_notional_caps() -> None:
 
 def test_risk_manager_rate_limiter_blocks_excess_orders() -> None:
     clock = _TimeStub()
-    limits = RiskLimits(max_notional=1_000.0, max_position=100.0, max_orders_per_interval=2, interval_seconds=1.0)
+    limits = RiskLimits(
+        max_notional=1_000.0,
+        max_position=100.0,
+        max_orders_per_interval=2,
+        interval_seconds=1.0,
+    )
     manager = RiskManager(limits, time_source=clock)
 
     manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
@@ -85,7 +95,9 @@ def test_risk_manager_rate_limiter_blocks_excess_orders() -> None:
     manager.validate_order("ETH", "buy", qty=1.0, price=10.0)
 
 
-def test_risk_manager_does_not_accumulate_submissions_when_throttling_disabled() -> None:
+def test_risk_manager_does_not_accumulate_submissions_when_throttling_disabled() -> (
+    None
+):
     clock = _TimeStub()
     limits = RiskLimits(
         max_notional=1_000_000.0,
@@ -126,8 +138,12 @@ def test_risk_manager_trips_kill_switch_on_severe_violation(tmp_path) -> None:
     assert manager.kill_switch.is_triggered()
     assert "Position cap exceeded" in manager.kill_switch.reason
 
-    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
-    kill_events = [entry for entry in entries if entry.get("event") == "kill_switch_triggered"]
+    entries = [
+        json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()
+    ]
+    kill_events = [
+        entry for entry in entries if entry.get("event") == "kill_switch_triggered"
+    ]
     assert kill_events and kill_events[0]["violation_type"] == "position_limit"
 
 

@@ -49,7 +49,9 @@ def resample_l1_to_ohlcv(
     return ohlc.dropna(how="all")
 
 
-def align_timeframes(frames: Mapping[str, pd.DataFrame], *, reference: str) -> Dict[str, pd.DataFrame]:
+def align_timeframes(
+    frames: Mapping[str, pd.DataFrame], *, reference: str
+) -> Dict[str, pd.DataFrame]:
     """Align multiple timeframes to the ``reference`` calendar."""
 
     if reference not in frames:
@@ -93,4 +95,3 @@ __all__ = [
     "resample_order_book",
     "resample_ticks_to_l1",
 ]
-

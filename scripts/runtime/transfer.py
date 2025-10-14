@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import os
 from pathlib import Path
 from typing import BinaryIO

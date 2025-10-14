@@ -9,7 +9,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Awaitable, Callable, Dict, MutableMapping, Optional
 
-from .idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore, current_timestamp
+from .idempotency import (
+    EventIdempotencyStore,
+    InMemoryEventIdempotencyStore,
+    current_timestamp,
+)
 
 
 @dataclass(frozen=True)
@@ -107,7 +111,11 @@ class EventBusConfig:
 
 
 class BaseEventBus:
-    def __init__(self, config: EventBusConfig, idempotency_store: EventIdempotencyStore | None = None) -> None:
+    def __init__(
+        self,
+        config: EventBusConfig,
+        idempotency_store: EventIdempotencyStore | None = None,
+    ) -> None:
         self._config = config
         self._idempotency = idempotency_store or InMemoryEventIdempotencyStore()
 
@@ -131,7 +139,11 @@ class BaseEventBus:
 class KafkaEventBus(BaseEventBus):
     """Kafka-backed asynchronous event bus."""
 
-    def __init__(self, config: EventBusConfig, idempotency_store: EventIdempotencyStore | None = None) -> None:
+    def __init__(
+        self,
+        config: EventBusConfig,
+        idempotency_store: EventIdempotencyStore | None = None,
+    ) -> None:
         if config.backend is not EventBusBackend.KAFKA:
             raise ValueError("KafkaEventBus requires a Kafka backend configuration")
         super().__init__(config, idempotency_store=idempotency_store)
@@ -164,8 +176,13 @@ class KafkaEventBus(BaseEventBus):
         if self._producer is None:
             raise RuntimeError("KafkaEventBus.start() must be called before publish()")
         key = envelope.partition_key.encode("utf-8")
-        headers = [(name, value.encode("utf-8")) for name, value in envelope.as_message().items()]
-        await self._producer.send_and_wait(topic.metadata.name, envelope.payload, key=key, headers=headers)
+        headers = [
+            (name, value.encode("utf-8"))
+            for name, value in envelope.as_message().items()
+        ]
+        await self._producer.send_and_wait(
+            topic.metadata.name, envelope.payload, key=key, headers=headers
+        )
 
     async def subscribe(
         self,
@@ -203,10 +220,14 @@ class KafkaEventBus(BaseEventBus):
             finally:
                 await consumer.stop()
 
-        task = asyncio.create_task(_consume(), name=f"kafka-consumer-{topic.metadata.name}")
+        task = asyncio.create_task(
+            _consume(), name=f"kafka-consumer-{topic.metadata.name}"
+        )
         self._consumer_tasks[topic.metadata.name] = task
 
-    async def _publish_retry_or_dlq(self, topic: EventTopic, envelope: EventEnvelope) -> None:
+    async def _publish_retry_or_dlq(
+        self, topic: EventTopic, envelope: EventEnvelope
+    ) -> None:
         if self._producer is None:
             return
         attempt = int(envelope.headers.get("retry-attempt", "0")) + 1
@@ -216,21 +237,29 @@ class KafkaEventBus(BaseEventBus):
                 topic.metadata.retry_topic,
                 envelope.payload,
                 key=envelope.partition_key.encode("utf-8"),
-                headers=[(k, v.encode("utf-8")) for k, v in envelope.as_message().items()],
+                headers=[
+                    (k, v.encode("utf-8")) for k, v in envelope.as_message().items()
+                ],
             )
         else:
             await self._producer.send_and_wait(
                 topic.metadata.dlq_topic,
                 envelope.payload,
                 key=envelope.partition_key.encode("utf-8"),
-                headers=[(k, v.encode("utf-8")) for k, v in envelope.as_message().items()],
+                headers=[
+                    (k, v.encode("utf-8")) for k, v in envelope.as_message().items()
+                ],
             )
 
 
 class NATSEventBus(BaseEventBus):
     """NATS JetStream backed event bus."""
 
-    def __init__(self, config: EventBusConfig, idempotency_store: EventIdempotencyStore | None = None) -> None:
+    def __init__(
+        self,
+        config: EventBusConfig,
+        idempotency_store: EventIdempotencyStore | None = None,
+    ) -> None:
         if config.backend is not EventBusBackend.NATS:
             raise ValueError("NATSEventBus requires a NATS backend configuration")
         super().__init__(config, idempotency_store=idempotency_store)
@@ -241,7 +270,10 @@ class NATSEventBus(BaseEventBus):
     async def start(self) -> None:
         import nats
 
-        self._nc = await nats.connect(self._config.nats_url or "nats://127.0.0.1:4222", name=self._config.client_id)
+        self._nc = await nats.connect(
+            self._config.nats_url or "nats://127.0.0.1:4222",
+            name=self._config.client_id,
+        )
         self._js = self._nc.jetstream()
 
     async def stop(self) -> None:
@@ -301,27 +333,41 @@ class NATSEventBus(BaseEventBus):
             try:
                 await self._js.add_stream(
                     name=topic.metadata.name.replace(".", "_"),
-                    subjects=[topic.metadata.name, topic.metadata.retry_topic, topic.metadata.dlq_topic],
+                    subjects=[
+                        topic.metadata.name,
+                        topic.metadata.retry_topic,
+                        topic.metadata.dlq_topic,
+                    ],
                 )
             except Exception:
                 # Stream likely already exists
                 pass
 
-    async def _publish_retry_or_dlq(self, topic: EventTopic, envelope: EventEnvelope) -> None:
+    async def _publish_retry_or_dlq(
+        self, topic: EventTopic, envelope: EventEnvelope
+    ) -> None:
         if not self._nc or not self._js:
             return
         attempt = int(envelope.headers.get("retry-attempt", "0")) + 1
         headers = envelope.as_message()
         headers["retry-attempt"] = str(attempt)
         if attempt <= self._config.retry_attempts:
-            await self._js.publish(topic.metadata.retry_topic, payload=envelope.payload, headers=headers)
+            await self._js.publish(
+                topic.metadata.retry_topic, payload=envelope.payload, headers=headers
+            )
         else:
-            await self._js.publish(topic.metadata.dlq_topic, payload=envelope.payload, headers=headers)
+            await self._js.publish(
+                topic.metadata.dlq_topic, payload=envelope.payload, headers=headers
+            )
 
 
 def _envelope_from_kafka_message(message) -> EventEnvelope:  # type: ignore[no-untyped-def]
     headers = {key: value.decode("utf-8") for key, value in message.headers}
-    occurred_at = datetime.fromisoformat(headers.get("occurred_at")) if "occurred_at" in headers else datetime.utcnow()
+    occurred_at = (
+        datetime.fromisoformat(headers.get("occurred_at"))
+        if "occurred_at" in headers
+        else datetime.utcnow()
+    )
     return EventEnvelope(
         event_type=headers.get("event_type", ""),
         partition_key=headers.get("partition_key", message.key.decode("utf-8")),
@@ -350,5 +396,7 @@ def _envelope_from_nats_message(message) -> EventEnvelope:  # type: ignore[no-un
         content_type=headers.get("content_type", "application/octet-stream"),
         schema_version=headers.get("schema_version", "0.0.0"),
         occurred_at=occurred_at,
-        headers={k: (v if isinstance(v, str) else json.dumps(v)) for k, v in headers.items()},
+        headers={
+            k: (v if isinstance(v, str) else json.dumps(v)) for k, v in headers.items()
+        },
     )

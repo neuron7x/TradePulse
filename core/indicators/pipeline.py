@@ -11,8 +11,8 @@ from weakref import finalize as _finalize
 
 import numpy as np
 
-from .base import BaseFeature
 from ..utils.memory import ArrayPool
+from .base import BaseFeature
 
 
 @dataclass(slots=True)
@@ -59,7 +59,9 @@ class IndicatorPipeline:
     def features(self) -> tuple[BaseFeature, ...]:
         return self._features
 
-    def _prepare_buffer(self, data: np.ndarray | Sequence[float]) -> tuple[np.ndarray, bool]:
+    def _prepare_buffer(
+        self, data: np.ndarray | Sequence[float]
+    ) -> tuple[np.ndarray, bool]:
         array = np.asarray(data)
         borrowed = False
         if array.dtype != self._dtype or not array.flags.c_contiguous:
@@ -84,7 +86,9 @@ class IndicatorPipeline:
         if cleanup is not None:
             finalizer = _finalize(buffer, cleanup)
 
-        result = PipelineResult(values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer)
+        result = PipelineResult(
+            values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer
+        )
         return result
 
 

@@ -34,7 +34,9 @@ class SessionHours:
             and isinstance(value[1], time)
         ):
             return cls(open=value[0], close=value[1])
-        raise TypeError("Session hours must be SessionHours or a (open, close) pair of time objects")
+        raise TypeError(
+            "Session hours must be SessionHours or a (open, close) pair of time objects"
+        )
 
 
 class MarketCalendar:
@@ -109,9 +111,13 @@ class MarketCalendar:
                     return close_dt
                 if search_dt >= open_dt:
                     return close_dt
-            search_dt = self._combine(search_dt.date() - timedelta(days=1), time(23, 59, 59, 999999))
+            search_dt = self._combine(
+                search_dt.date() - timedelta(days=1), time(23, 59, 59, 999999)
+            )
 
-    def sessions_between(self, start: datetime, end: datetime) -> list[tuple[datetime, datetime]]:
+    def sessions_between(
+        self, start: datetime, end: datetime
+    ) -> list[tuple[datetime, datetime]]:
         """Enumerate sessions intersecting the inclusive ``[start, end]`` window."""
 
         if end < start:

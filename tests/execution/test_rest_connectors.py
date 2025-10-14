@@ -21,7 +21,9 @@ class QueueWebSocketFactory:
     def __init__(self) -> None:
         self.queue: asyncio.Queue[str] = asyncio.Queue()
 
-    def __call__(self, url: str):  # pragma: no cover - exercised in integration behaviour
+    def __call__(
+        self, url: str
+    ):  # pragma: no cover - exercised in integration behaviour
         factory = self
 
         class _QueueWebSocket:
@@ -53,7 +55,13 @@ def ws_factory() -> QueueWebSocketFactory:
     return QueueWebSocketFactory()
 
 
-def _await_cache(connector, order_id: str, predicate: Callable[[Order], bool], *, timeout: float = 1.0) -> Order | None:
+def _await_cache(
+    connector,
+    order_id: str,
+    predicate: Callable[[Order], bool],
+    *,
+    timeout: float = 1.0,
+) -> Order | None:
     deadline = time.time() + timeout
     while time.time() < deadline:
         with connector._lock:  # type: ignore[attr-defined]
@@ -64,7 +72,9 @@ def _await_cache(connector, order_id: str, predicate: Callable[[Order], bool], *
     return None
 
 
-def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory) -> None:
+def test_binance_rest_connector_signs_and_streams(
+    monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -137,8 +147,12 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
         raise AssertionError(f"Unhandled request {request.method} {path}")
 
     transport = httpx.MockTransport(handler)
-    client = httpx.Client(base_url="https://testnet.binance.vision", transport=transport)
-    connector = BinanceRESTConnector(sandbox=True, http_client=client, ws_factory=ws_factory)
+    client = httpx.Client(
+        base_url="https://testnet.binance.vision", transport=transport
+    )
+    connector = BinanceRESTConnector(
+        sandbox=True, http_client=client, ws_factory=ws_factory
+    )
     monkeypatch.setattr("execution.adapters.binance.time.time", lambda: 1_700_000_000.0)
 
     connector.connect({"api_key": "key", "api_secret": "secret"})
@@ -183,7 +197,9 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     assert open_orders[0].order_id == "101"
 
     positions = connector.get_positions()
-    assert any(pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.5) for pos in positions)
+    assert any(
+        pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.5) for pos in positions
+    )
 
     assert connector.cancel_order("100") is True
 
@@ -191,7 +207,9 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     client.close()
 
 
-def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory) -> None:
+def test_coinbase_rest_connector_handles_auth_and_stream(
+    monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory
+) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -269,10 +287,14 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
         base_url="https://api-public.sandbox.exchange.coinbase.com/api/v3/brokerage",
         transport=transport,
     )
-    connector = CoinbaseRESTConnector(sandbox=True, http_client=client, ws_factory=ws_factory)
+    connector = CoinbaseRESTConnector(
+        sandbox=True, http_client=client, ws_factory=ws_factory
+    )
     monkeypatch.setattr("execution.adapters.coinbase.time.time", lambda: 1_700_000_000)
 
-    connector.connect({"api_key": "key", "api_secret": base64_secret("secret"), "passphrase": "pass"})
+    connector.connect(
+        {"api_key": "key", "api_secret": base64_secret("secret"), "passphrase": "pass"}
+    )
 
     order = Order(
         symbol="BTC-USD",
@@ -314,7 +336,9 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
     assert any(order.order_id == "cb-2" for order in open_orders)
 
     positions = connector.get_positions()
-    assert any(pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.4) for pos in positions)
+    assert any(
+        pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.4) for pos in positions
+    )
 
     assert connector.cancel_order("cb-1") is True
 

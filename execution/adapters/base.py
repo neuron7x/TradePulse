@@ -9,12 +9,19 @@ import logging
 import threading
 import time
 from collections import deque
-from typing import Any, AsyncContextManager, Callable, Deque, Dict, Mapping, MutableMapping
+from typing import (
+    Any,
+    AsyncContextManager,
+    Callable,
+    Deque,
+    Dict,
+    Mapping,
+    MutableMapping,
+)
 
 import httpx
 
 from domain import Order
-
 from execution.connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
@@ -93,7 +100,9 @@ class RESTWebSocketConnector(ExecutionConnector):
 
     # ------------------------------------------------------------------
     # Abstract hooks for subclasses
-    def _resolve_credentials(self, credentials: Mapping[str, str] | None) -> Mapping[str, str]:
+    def _resolve_credentials(
+        self, credentials: Mapping[str, str] | None
+    ) -> Mapping[str, str]:
         raise NotImplementedError
 
     def _sign_request(
@@ -110,10 +119,14 @@ class RESTWebSocketConnector(ExecutionConnector):
     def _order_endpoint(self) -> str:
         raise NotImplementedError
 
-    def _build_place_payload(self, order: Order, idempotency_key: str | None) -> Dict[str, Any]:
+    def _build_place_payload(
+        self, order: Order, idempotency_key: str | None
+    ) -> Dict[str, Any]:
         raise NotImplementedError
 
-    def _parse_order(self, payload: Mapping[str, Any], *, original: Order | None = None) -> Order:
+    def _parse_order(
+        self, payload: Mapping[str, Any], *, original: Order | None = None
+    ) -> Order:
         raise NotImplementedError
 
     def _cancel_endpoint(self, order_id: str) -> tuple[str, Dict[str, Any]]:
@@ -147,7 +160,9 @@ class RESTWebSocketConnector(ExecutionConnector):
             return
         resolved = self._resolve_credentials(credentials)
         if self._http_client is None:
-            self._http_client = httpx.Client(base_url=self._base_url, timeout=httpx.Timeout(10.0, read=30.0))
+            self._http_client = httpx.Client(
+                base_url=self._base_url, timeout=httpx.Timeout(10.0, read=30.0)
+            )
         self._credentials = resolved
         self._connected = True
         stream_url = self._stream_url()
@@ -201,7 +216,9 @@ class RESTWebSocketConnector(ExecutionConnector):
         if response.status_code == 429:
             raise TransientOrderError("HTTP 429: rate limited")
         if 500 <= response.status_code < 600:
-            raise TransientOrderError(f"HTTP {response.status_code}: transient server error")
+            raise TransientOrderError(
+                f"HTTP {response.status_code}: transient server error"
+            )
         if response.is_error:
             raise OrderError(f"HTTP {response.status_code}: {response.text}")
         try:
@@ -218,7 +235,9 @@ class RESTWebSocketConnector(ExecutionConnector):
         if idempotency_key and idempotency_key in self._idempotency_cache:
             return self._idempotency_cache[idempotency_key]
         payload = self._build_place_payload(order, idempotency_key)
-        response = self._request("POST", self._order_endpoint(), params=payload, signed=True)
+        response = self._request(
+            "POST", self._order_endpoint(), params=payload, signed=True
+        )
         submitted = self._parse_order(response, original=order)
         with self._lock:
             self._orders[submitted.order_id or ""] = submitted
@@ -270,7 +289,9 @@ class RESTWebSocketConnector(ExecutionConnector):
     # Streaming helpers
     def _start_stream(self, url: str) -> None:
         if self._ws_factory is None:
-            self._logger.debug("Streaming disabled because no WebSocket factory was provided")
+            self._logger.debug(
+                "Streaming disabled because no WebSocket factory was provided"
+            )
             return
         self._ws_stop.clear()
         self._ws_thread = threading.Thread(
@@ -302,11 +323,15 @@ class RESTWebSocketConnector(ExecutionConnector):
                     backoff = 1.0
                     while not self._ws_stop.is_set():
                         try:
-                            message = await asyncio.wait_for(websocket.recv(), timeout=1.0)
+                            message = await asyncio.wait_for(
+                                websocket.recv(), timeout=1.0
+                            )
                         except asyncio.TimeoutError:
                             continue
                         except Exception as exc:  # pragma: no cover - defensive
-                            self._logger.warning("WebSocket receive failed", extra={"error": str(exc)})
+                            self._logger.warning(
+                                "WebSocket receive failed", extra={"error": str(exc)}
+                            )
                             break
                         if message is None:
                             continue
@@ -321,7 +346,8 @@ class RESTWebSocketConnector(ExecutionConnector):
                 attempt += 1
                 delay = min(self._max_backoff, backoff * (2 ** max(0, attempt - 1)))
                 self._logger.warning(
-                    "WebSocket connection failed", extra={"attempt": attempt, "delay": delay, "error": str(exc)}
+                    "WebSocket connection failed",
+                    extra={"attempt": attempt, "delay": delay, "error": str(exc)},
                 )
                 try:
                     await asyncio.wait_for(asyncio.sleep(delay), timeout=delay)

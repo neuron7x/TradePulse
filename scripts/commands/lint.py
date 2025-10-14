@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import logging
 import shutil
 from argparse import _SubParsersAction

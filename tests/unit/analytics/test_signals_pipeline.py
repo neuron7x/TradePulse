@@ -90,8 +90,12 @@ def test_feature_pipeline_float_precision_consistency() -> None:
 
     stacked_64 = features_64.where(mask).stack()
     stacked_32 = features_32.where(mask).stack()
-    np.testing.assert_allclose(stacked_64.values, stacked_32.values, rtol=5e-4, atol=1e-6)
-    assert not np.isinf(features_32.to_numpy(dtype=float)).any(), "No overflow should occur in float32 path"
+    np.testing.assert_allclose(
+        stacked_64.values, stacked_32.values, rtol=5e-4, atol=1e-6
+    )
+    assert not np.isinf(
+        features_32.to_numpy(dtype=float)
+    ).any(), "No overflow should occur in float32 path"
 
 
 def test_leakage_gate_alignment() -> None:
@@ -131,7 +135,9 @@ def test_leakage_gate_special_value_handling() -> None:
 def test_model_selector_walk_forward_runs() -> None:
     frame = _sample_market_frame(220)
     cfg = replace(FeaturePipelineConfig(), technical_windows=(5, 10))
-    features, target = build_supervised_learning_frame(frame, config=cfg, gate=LeakageGate(lag=0))
+    features, target = build_supervised_learning_frame(
+        frame, config=cfg, gate=LeakageGate(lag=0)
+    )
     splitter = WalkForwardSplitter(train_window=100, test_window=40, freq="h")
     candidates = [c for c in make_default_candidates() if c.name == "ols"]
     selector = SignalModelSelector(splitter, candidates=candidates)
@@ -183,7 +189,9 @@ def test_feature_pipeline_handles_empty_frame() -> None:
             "signed_volume": pd.Series(dtype=float),
         }
     )
-    pipeline = SignalFeaturePipeline(FeaturePipelineConfig(technical_windows=(3,), microstructure_window=4))
+    pipeline = SignalFeaturePipeline(
+        FeaturePipelineConfig(technical_windows=(3,), microstructure_window=4)
+    )
     features = pipeline.transform(frame)
 
     assert features.empty

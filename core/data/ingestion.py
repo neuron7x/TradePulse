@@ -12,13 +12,14 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     BinanceWS = None  # type: ignore[assignment]
 
-logger = logging.getLogger(__name__)
-
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
 from interfaces.ingestion import DataIngestionService
 from observability.tracing import pipeline_span
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["Ticker", "DataIngestor", "BinanceStreamHandle"]
 
@@ -28,10 +29,14 @@ class BinanceStreamHandle:
         self._ws = ws
         self._active = False
 
-    def start(self, *, symbol: str, interval: str, callback: Callable[[dict], None]) -> None:
+    def start(
+        self, *, symbol: str, interval: str, callback: Callable[[dict], None]
+    ) -> None:
         self._active = True
         self._ws.start()
-        self._ws.kline(symbol=symbol.lower(), id=1, interval=interval, callback=callback)
+        self._ws.kline(
+            symbol=symbol.lower(), id=1, interval=interval, callback=callback
+        )
 
     def close(self) -> None:
         if self._active:
@@ -88,9 +93,13 @@ class DataIngestor(DataIngestionService):
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     raise ValueError("CSV file must include a header row")
-                missing = [field for field in required_fields if field not in reader.fieldnames]
+                missing = [
+                    field for field in required_fields if field not in reader.fieldnames
+                ]
                 if missing:
-                    raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
+                    raise ValueError(
+                        f"CSV missing required columns: {', '.join(missing)}"
+                    )
                 for row_number, row in enumerate(reader, start=2):
                     try:
                         ts_raw = float(row["ts"])
@@ -106,11 +115,15 @@ class DataIngestor(DataIngestionService):
                             instrument_type=instrument_type,
                         )
                     except (TypeError, ValueError, InvalidOperation) as exc:
-                        logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
+                        logger.warning(
+                            "Skipping malformed row %s in %s: %s", row_number, path, exc
+                        )
                         continue
                     on_tick(tick)
 
-    def binance_ws(self, symbol: str, on_tick: Callable[[Ticker], None], *, interval: str = "1m") -> object:
+    def binance_ws(
+        self, symbol: str, on_tick: Callable[[Ticker], None], *, interval: str = "1m"
+    ) -> object:
         if BinanceWS is None:
             raise RuntimeError("python-binance is not installed")
 

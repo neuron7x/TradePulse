@@ -1,6 +1,10 @@
 from __future__ import annotations
-import time, numpy as np
-from core.neuro.amm import AMMConfig, AdaptiveMarketMind
+
+import time
+
+import numpy as np
+
+from core.neuro.amm import AdaptiveMarketMind, AMMConfig
 
 n = 100000
 rng = np.random.default_rng(0)

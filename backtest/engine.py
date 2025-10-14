@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
-import numpy as np
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import numpy as np
 from numpy.typing import NDArray
-
-from core.utils.metrics import get_metrics_collector
-from interfaces.backtest import BacktestEngine
 
 from backtest.transaction_costs import (
     PerUnitCommission,
     TransactionCostModel,
     load_market_costs,
 )
+from core.utils.metrics import get_metrics_collector
+from interfaces.backtest import BacktestEngine
+
 from .performance import (
     PerformanceReport,
     compute_performance_metrics,
@@ -32,7 +33,9 @@ class LatencyConfig:
 
     @property
     def total_delay(self) -> int:
-        delay = int(self.signal_to_order + self.order_to_execution + self.execution_to_fill)
+        delay = int(
+            self.signal_to_order + self.order_to_execution + self.execution_to_fill
+        )
         return max(0, delay)
 
 
@@ -93,7 +96,9 @@ class _SimpleOrderBook:
         best_ask = mid + spread / 2.0
         return best_bid, best_ask
 
-    def fill_price(self, side: str, quantity: float, idx: int, slippage: SlippageConfig) -> float:
+    def fill_price(
+        self, side: str, quantity: float, idx: int, slippage: SlippageConfig
+    ) -> float:
         quantity = float(abs(quantity))
         if quantity == 0.0 or not np.isfinite(quantity):
             bid, ask = self._best_quotes(idx)
@@ -138,7 +143,9 @@ class _SimpleOrderBook:
         return float(avg_price)
 
 
-def _compute_positions(signals: NDArray[np.float64], latency: LatencyConfig) -> NDArray[np.float64]:
+def _compute_positions(
+    signals: NDArray[np.float64], latency: LatencyConfig
+) -> NDArray[np.float64]:
     executed = np.zeros_like(signals, dtype=float)
     schedule: dict[int, float] = {}
     delay = latency.total_delay
@@ -182,13 +189,22 @@ def _apply_portfolio_constraints(
             lookback = min(len(returns), max(int(constraints.volatility_lookback), 1))
             window = returns[-lookback:] if lookback else returns
             with np.errstate(invalid="ignore", divide="ignore"):
-                realized_vol = float(np.std(window, ddof=1)) if window.size > 1 else float(np.std(window))
+                realized_vol = (
+                    float(np.std(window, ddof=1))
+                    if window.size > 1
+                    else float(np.std(window))
+                )
             if realized_vol > 1e-12:
                 scale = float(target_vol) / realized_vol
                 adjusted = adjusted * scale
                 if max_gross is not None or max_net is not None:
                     limit = min(
-                        [float(abs(value)) for value in (max_gross, max_net) if value is not None] or [1.0]
+                        [
+                            float(abs(value))
+                            for value in (max_gross, max_net)
+                            if value is not None
+                        ]
+                        or [1.0]
                     )
                     adjusted = np.clip(adjusted, -limit, limit)
     return np.clip(adjusted, -1.0, 1.0)
@@ -220,7 +236,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
         with metrics.measure_backtest(strategy_name) as ctx:
             price_array = np.asarray(prices, dtype=float)
             if price_array.ndim != 1 or price_array.size < 2:
-                raise ValueError("prices must be a 1-D array with at least two observations")
+                raise ValueError(
+                    "prices must be a 1-D array with at least two observations"
+                )
 
             latency_cfg = latency or LatencyConfig()
             order_book_cfg = order_book or OrderBookConfig()
@@ -244,11 +262,15 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 signal_ctx["status"] = "success"
 
             if raw_signals.shape != price_array.shape:
-                raise ValueError("signal_fn must return an array with the same length as prices")
+                raise ValueError(
+                    "signal_fn must return an array with the same length as prices"
+                )
 
             signals = np.clip(raw_signals, -1.0, 1.0)
             if constraints is not None:
-                signals = _apply_portfolio_constraints(signals, price_array, constraints)
+                signals = _apply_portfolio_constraints(
+                    signals, price_array, constraints
+                )
             executed_positions = _compute_positions(signals, latency_cfg)
             price_moves = np.diff(price_array)
 
@@ -266,7 +288,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 prev_position = float(prev_positions[idx])
                 price_index = min(idx, price_array.size - 1)
                 ref_price = float(price_array[price_index])
-                financing_costs[idx] = float(transaction_cost_model.get_financing(prev_position, ref_price))
+                financing_costs[idx] = float(
+                    transaction_cost_model.get_financing(prev_position, ref_price)
+                )
 
                 qty = float(abs(change))
                 if qty == 0.0:
@@ -276,14 +300,18 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 mid_price = float(price_array[trade_price_index])
                 fill_price = float(mid_price)
 
-                book_fill_price = book.fill_price(side, qty, trade_price_index, slippage_cfg)
+                book_fill_price = book.fill_price(
+                    side, qty, trade_price_index, slippage_cfg
+                )
                 if side == "buy":
                     slippage_costs[idx] += max(0.0, (book_fill_price - mid_price) * qty)
                 else:
                     slippage_costs[idx] += max(0.0, (mid_price - book_fill_price) * qty)
                 fill_price = float(book_fill_price)
 
-                spread_adj = float(max(transaction_cost_model.get_spread(mid_price, side), 0.0))
+                spread_adj = float(
+                    max(transaction_cost_model.get_spread(mid_price, side), 0.0)
+                )
                 if spread_adj > 0.0:
                     spread_costs[idx] = spread_adj * qty
                     if side == "buy":
@@ -291,7 +319,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
                     else:
                         fill_price -= spread_adj
 
-                slippage_adj = float(max(transaction_cost_model.get_slippage(qty, mid_price, side), 0.0))
+                slippage_adj = float(
+                    max(transaction_cost_model.get_slippage(qty, mid_price, side), 0.0)
+                )
                 if slippage_adj > 0.0:
                     slippage_costs[idx] += slippage_adj * qty
                     if side == "buy":
@@ -299,7 +329,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
                     else:
                         fill_price -= slippage_adj
 
-                commission_costs[idx] = max(0.0, float(transaction_cost_model.get_commission(qty, fill_price)))
+                commission_costs[idx] = max(
+                    0.0, float(transaction_cost_model.get_commission(qty, fill_price))
+                )
 
             pnl = (
                 positions * price_moves
@@ -338,7 +370,9 @@ class WalkForwardEngine(BacktestEngine[Result]):
             ctx["report_path"] = str(report_path)
             ctx["max_dd"] = max_dd
             ctx["trades"] = trades
-            ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
+            ctx["equity"] = (
+                float(equity_curve[-1]) if equity_curve.size else initial_capital
+            )
             ctx["commission_cost"] = total_commission
             ctx["spread_cost"] = total_spread
             ctx["slippage_cost"] = total_slippage
@@ -391,4 +425,3 @@ def walk_forward(
         cost_config=cost_config,
         constraints=constraints,
     )
-

@@ -36,7 +36,9 @@ def _order_book(freq: str) -> pd.DataFrame:
         },
         index=index,
     )
-    return resample_order_book(levels, freq=freq, bid_cols=["bid_1", "bid_2"], ask_cols=["ask_1", "ask_2"])
+    return resample_order_book(
+        levels, freq=freq, bid_cols=["bid_1", "bid_2"], ask_cols=["ask_1", "ask_2"]
+    )
 
 
 def test_hierarchical_features_with_benchmarks():
@@ -49,4 +51,3 @@ def test_hierarchical_features_with_benchmarks():
     flat = {k: v for tf in result.features.values() for k, v in tf.items()}
     assert "entropy" in result.features["1min"]
     assert any(key.startswith("microprice") for key in flat)
-

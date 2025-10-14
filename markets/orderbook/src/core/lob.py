@@ -9,10 +9,10 @@ matching logic.
 """
 from __future__ import annotations
 
+import heapq
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-import heapq
 from typing import Deque, Dict, Iterable, List, Optional, Protocol, Tuple
 
 

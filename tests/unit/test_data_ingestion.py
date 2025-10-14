@@ -31,7 +31,9 @@ def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None
         ingestor.binance_ws("BTCUSDT", lambda _: None)
 
 
-def test_binance_ws_emits_ticks_when_dependency_available(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_binance_ws_emits_ticks_when_dependency_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[Ticker] = []
 
     class DummyWS:
@@ -71,7 +73,9 @@ def test_historical_csv_validates_required_columns(tmp_path: Path) -> None:
         ingestor.historical_csv(str(csv_path), lambda _: None)
 
 
-def test_historical_csv_skips_malformed_rows(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_historical_csv_skips_malformed_rows(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     csv_path = tmp_path / "history_malformed.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
@@ -119,7 +123,9 @@ def test_historical_csv_rejects_symlink(tmp_path: Path) -> None:
 
 def test_historical_csv_enforces_size_limit(tmp_path: Path) -> None:
     csv_path = tmp_path / "large.csv"
-    csv_path.write_text("ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8")
+    csv_path.write_text(
+        "ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8"
+    )
 
     ingestor = DataIngestor(allowed_roots=[tmp_path], max_csv_bytes=32)
 

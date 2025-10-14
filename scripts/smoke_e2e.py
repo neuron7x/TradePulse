@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backtest.engine import walk_forward, Result  # noqa: E402
+from backtest.engine import Result, walk_forward  # noqa: E402
 from core.data.ingestion import DataIngestor, Ticker  # noqa: E402
 
 

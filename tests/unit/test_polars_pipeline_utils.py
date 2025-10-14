@@ -10,7 +10,9 @@ class DummyArrowColumn:
     def __init__(self, array: np.ndarray):
         self._array = array
 
-    def to_numpy(self, zero_copy_only: bool = True) -> np.ndarray:  # pragma: no cover - pass through
+    def to_numpy(
+        self, zero_copy_only: bool = True
+    ) -> np.ndarray:  # pragma: no cover - pass through
         return self._array
 
 

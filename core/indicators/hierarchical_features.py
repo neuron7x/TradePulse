@@ -9,6 +9,7 @@ import numpy as np
 import pandas as pd
 
 from core.data.resampling import align_timeframes
+
 from .hurst import hurst_exponent
 from .kuramoto import compute_phase
 
@@ -78,7 +79,11 @@ class HierarchicalFeatureResult:
 
 
 def _flatten(features: Mapping[str, Mapping[str, float]]) -> Dict[str, float]:
-    return {f"{tf}.{name}": value for tf, values in features.items() for name, value in values.items()}
+    return {
+        f"{tf}.{name}": value
+        for tf, values in features.items()
+        for name, value in values.items()
+    }
 
 
 def compute_hierarchical_features(
@@ -128,12 +133,18 @@ def compute_hierarchical_features(
             np.sin(phases, out=sin_vals)
             cos_vals[~mask] = 0.0
             sin_vals[~mask] = 0.0
-            np.add(agg_cos[: close.size], cos_vals, out=agg_cos[: close.size], where=mask)
-            np.add(agg_sin[: close.size], sin_vals, out=agg_sin[: close.size], where=mask)
+            np.add(
+                agg_cos[: close.size], cos_vals, out=agg_cos[: close.size], where=mask
+            )
+            np.add(
+                agg_sin[: close.size], sin_vals, out=agg_sin[: close.size], where=mask
+            )
             agg_counts[: close.size] += mask
             local_sum_real = float(np.add.reduce(cos_vals, dtype=np.float64))
             local_sum_imag = float(np.add.reduce(sin_vals, dtype=np.float64))
-            local_magnitude = (local_sum_real * local_sum_real + local_sum_imag * local_sum_imag) ** 0.5
+            local_magnitude = (
+                local_sum_real * local_sum_real + local_sum_imag * local_sum_imag
+            ) ** 0.5
             local_kuramoto = float(np.clip(local_magnitude / valid_count, 0.0, 1.0))
         else:
             cos_vals.fill(0.0)
@@ -158,7 +169,9 @@ def compute_hierarchical_features(
             imbalance = book.get("imbalance")
             microprice = book.get("microprice")
             if imbalance is not None:
-                features[name]["book_imbalance"] = float(np.nanmean(np.asarray(imbalance, dtype=np.float32)))
+                features[name]["book_imbalance"] = float(
+                    np.nanmean(np.asarray(imbalance, dtype=np.float32))
+                )
             if microprice is not None:
                 microprice = np.asarray(microprice, dtype=np.float32)
                 price_delta = microprice - close

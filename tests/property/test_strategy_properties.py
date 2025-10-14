@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import math
+
 import numpy as np
 import pandas as pd
 import pytest
 
 try:
-    from hypothesis import given, settings, strategies as st
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
     from hypothesis.extra.numpy import arrays
 except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
-from core.agent.strategy import Strategy, PiAgent
+from core.agent.strategy import PiAgent, Strategy
 
 
 class TestStrategyProperties:
@@ -20,7 +22,11 @@ class TestStrategyProperties:
 
     @settings(max_examples=100, deadline=None)
     @given(
-        name=st.text(min_size=1, max_size=50, alphabet=st.characters(blacklist_characters="\x00\n\r")),
+        name=st.text(
+            min_size=1,
+            max_size=50,
+            alphabet=st.characters(blacklist_characters="\x00\n\r"),
+        ),
         alpha=st.floats(min_value=0.01, max_value=10.0, allow_nan=False),
         beta=st.floats(min_value=0.01, max_value=10.0, allow_nan=False),
     )
@@ -30,16 +36,15 @@ class TestStrategyProperties:
         """Mutated strategy should have different parameters."""
         strategy = Strategy(name=name, params={"alpha": alpha, "beta": beta})
         mutant = strategy.generate_mutation(scale=0.1)
-        
+
         # Name should be different
         assert mutant.name != strategy.name
         assert mutant.name.startswith(name)
-        
+
         # At least one param should be different (with high probability)
-        params_differ = (
-            mutant.params.get("alpha") != strategy.params.get("alpha") or
-            mutant.params.get("beta") != strategy.params.get("beta")
-        )
+        params_differ = mutant.params.get("alpha") != strategy.params.get(
+            "alpha"
+        ) or mutant.params.get("beta") != strategy.params.get("beta")
         # This might rarely fail due to random chance, but should pass most of the time
         assert params_differ or mutant.params == strategy.params
 
@@ -62,7 +67,7 @@ class TestStrategyProperties:
             },
         )
         strategy.validate_params()
-        
+
         # Check bounds
         assert 5 <= strategy.params["lookback"] <= 500
         assert 0.0 <= strategy.params["threshold"] <= 5.0
@@ -73,19 +78,23 @@ class TestStrategyProperties:
         prices=arrays(
             dtype=np.float64,
             shape=st.integers(min_value=50, max_value=300),
-            elements=st.floats(min_value=50.0, max_value=500.0, allow_nan=False, allow_infinity=False),
+            elements=st.floats(
+                min_value=50.0, max_value=500.0, allow_nan=False, allow_infinity=False
+            ),
         )
     )
-    def test_simulate_performance_returns_finite_score(self, prices: np.ndarray) -> None:
+    def test_simulate_performance_returns_finite_score(
+        self, prices: np.ndarray
+    ) -> None:
         """simulate_performance should return a finite score for valid data."""
         strategy = Strategy(
             name="test",
             params={"lookback": 20, "threshold": 0.5, "risk_budget": 1.0},
         )
-        
+
         df = pd.DataFrame({"close": prices})
         score = strategy.simulate_performance(df)
-        
+
         assert math.isfinite(score)
         assert isinstance(score, float)
         assert strategy.score == score
@@ -101,15 +110,19 @@ class TestStrategyProperties:
         prices=arrays(
             dtype=np.float64,
             shape=st.integers(min_value=100, max_value=200),
-            elements=st.floats(min_value=80.0, max_value=120.0, allow_nan=False, allow_infinity=False),
+            elements=st.floats(
+                min_value=80.0, max_value=120.0, allow_nan=False, allow_infinity=False
+            ),
         )
     )
-    def test_simulate_performance_sets_metrics_in_params(self, prices: np.ndarray) -> None:
+    def test_simulate_performance_sets_metrics_in_params(
+        self, prices: np.ndarray
+    ) -> None:
         """simulate_performance should add max_drawdown and trades to params."""
         strategy = Strategy(name="test", params={"lookback": 20})
         df = pd.DataFrame({"close": prices})
         strategy.simulate_performance(df)
-        
+
         assert "max_drawdown" in strategy.params
         assert "trades" in strategy.params
         assert isinstance(strategy.params["max_drawdown"], float)
@@ -159,7 +172,7 @@ class TestPiAgentProperties:
             strategy=Strategy(name="original", params={"alpha": 1.0, "beta": 2.0})
         )
         mutant = agent.mutate()
-        
+
         assert isinstance(mutant, PiAgent)
         assert mutant is not agent
         assert mutant.strategy is not agent.strategy
@@ -176,7 +189,7 @@ class TestPiAgentProperties:
             strategy=Strategy(name="test", params={"alpha": alpha, "beta": beta})
         )
         agent.repair()
-        
+
         # After repair, no NaN should remain
         assert not math.isnan(agent.strategy.params["beta"])
         assert agent.strategy.params["beta"] == 0.0
@@ -188,20 +201,21 @@ class TestPiAgentProperties:
                 name="test", params={"instability_threshold": 0.1, "hysteresis": 0.0}
             )
         )
-        
+
         # High instability state
         state = {"R": 0.95, "delta_H": -0.5, "kappa_mean": -0.5}
-        
+
         # First call should trigger
         result1 = agent.detect_instability(state)
-        
+
         # Immediate next call should not trigger (cooldown)
-        result2 = agent.detect_instability(state)
-        result3 = agent.detect_instability(state)
-        
-        # After cooldown expires (3 calls), it should trigger again
-        result4 = agent.detect_instability(state)
-        
+        assert agent.detect_instability(state) is False
+        assert agent.detect_instability(state) is False
+
+        # After cooldown expires (3 additional calls), it should trigger again
+        assert agent.detect_instability(state) is False
+        assert agent.detect_instability(state) is True
+
         # First should trigger, next 2-3 should be cooled down
         assert result1 is True
         # During cooldown, should return False
@@ -232,4 +246,4 @@ class TestStrategyEdgeCases:
         )
         mutant = strategy.generate_mutation()
         assert mutant.params["mode"] == "aggressive"
-        assert mutant.params["enabled"] == True  # Using == because True == 1 in Python
+        assert bool(mutant.params["enabled"])

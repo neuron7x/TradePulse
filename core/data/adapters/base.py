@@ -9,7 +9,12 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional, TypeVar
 
 from aiolimiter import AsyncLimiter
-from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+from tenacity import (
+    AsyncRetrying,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_random_exponential,
+)
 
 from core.data.models import PriceTick as Ticker
 from core.utils.logging import get_logger
@@ -61,12 +66,16 @@ class RetryConfig:
     multiplier: float = 0.5
     max_backoff: float = 15.0
     jitter: float = 0.1
-    exceptions: tuple[type[BaseException], ...] = field(default_factory=_default_retry_exceptions)
+    exceptions: tuple[type[BaseException], ...] = field(
+        default_factory=_default_retry_exceptions
+    )
 
     def compute_backoff(self, attempt_number: int) -> float:
         """Return the exponential backoff for a given retry attempt."""
 
-        base_delay = min(self.max_backoff, self.multiplier * (2 ** max(0, attempt_number - 1)))
+        base_delay = min(
+            self.max_backoff, self.multiplier * (2 ** max(0, attempt_number - 1))
+        )
         if self.jitter <= 0:
             return base_delay
         jitter_delta = random.uniform(0, base_delay * self.jitter)
@@ -126,7 +135,9 @@ class FaultTolerancePolicy:
         retry = self.retry
 
         async for attempt in AsyncRetrying(
-            wait=wait_random_exponential(multiplier=retry.multiplier, max=retry.max_backoff),
+            wait=wait_random_exponential(
+                multiplier=retry.multiplier, max=retry.max_backoff
+            ),
             stop=stop_after_attempt(retry.attempts),
             retry=retry_if_exception_type(retry.exceptions),
             reraise=True,
@@ -134,7 +145,9 @@ class FaultTolerancePolicy:
             with attempt:
                 return await self._apply_rate_limit(operation)
 
-        raise RuntimeError("AsyncRetrying did not execute any attempts")  # pragma: no cover - defensive
+        raise RuntimeError(
+            "AsyncRetrying did not execute any attempts"
+        )  # pragma: no cover - defensive
 
     async def sleep_for_attempt(self, attempt_number: int) -> None:
         """Sleep using the computed backoff for streaming reconnects."""
@@ -156,7 +169,9 @@ class IngestionAdapter(ABC):
         rate_limit: Optional[RateLimitConfig] = None,
         timeout: Optional[TimeoutConfig] = None,
     ) -> None:
-        self._policy = FaultTolerancePolicy(retry=retry, rate_limit=rate_limit, timeout=timeout)
+        self._policy = FaultTolerancePolicy(
+            retry=retry, rate_limit=rate_limit, timeout=timeout
+        )
 
     async def _run_with_policy(self, operation: Callable[[], Awaitable[T]]) -> T:
         return await self._policy.run(operation)

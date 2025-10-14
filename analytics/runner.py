@@ -85,7 +85,9 @@ def _current_git_sha(cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def collect_run_metadata(run_dir: Path, original_cwd: Path, cfg: DictConfig) -> RunMetadata:
+def collect_run_metadata(
+    run_dir: Path, original_cwd: Path, cfg: DictConfig
+) -> RunMetadata:
     """Collect metadata that allows reproducing the current experiment run."""
 
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -122,7 +124,9 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
 
     data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
     if not data_path.exists():
-        logger.warning("Data file %s does not exist; analytics step skipped.", data_path)
+        logger.warning(
+            "Data file %s does not exist; analytics step skipped.", data_path
+        )
         return {"status": "missing-data", "path": str(data_path)}
 
     df = pd.read_csv(data_path)
@@ -177,7 +181,9 @@ def main(cfg: DictConfig) -> None:
     original_cwd = Path(get_original_cwd())
     metadata = collect_run_metadata(run_dir, original_cwd, cfg)
 
-    logging.getLogger(__name__).info("Running with configuration:\n%s", OmegaConf.to_yaml(cfg))
+    logging.getLogger(__name__).info(
+        "Running with configuration:\n%s", OmegaConf.to_yaml(cfg)
+    )
 
     results = run_pipeline(cfg)
     _write_metadata(metadata)

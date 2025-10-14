@@ -71,14 +71,17 @@ def validate_and_quarantine(
         price_column=price_column,
     )
     clean = buckets["clean"].reset_index()
-    quarantined = pd.concat([buckets["spikes"], buckets["duplicates"]]).drop_duplicates()
+    quarantined = pd.concat(
+        [buckets["spikes"], buckets["duplicates"]]
+    ).drop_duplicates()
     return QualityReport(
         clean=clean,
-        quarantined=pd.concat([quarantined, duplicates.set_index(timestamp_col)]).reset_index(),
+        quarantined=pd.concat(
+            [quarantined, duplicates.set_index(timestamp_col)]
+        ).reset_index(),
         duplicates=duplicates.reset_index(drop=True),
         spikes=buckets["spikes"].reset_index(),
     )
 
 
 __all__ = ["QualityReport", "quarantine_anomalies", "validate_and_quarantine"]
-

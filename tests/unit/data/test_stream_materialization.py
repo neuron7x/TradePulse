@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import UTC
 import time
+from datetime import UTC
 
 import pandas as pd
 import pytest
@@ -140,9 +140,9 @@ def test_backfill_only_updates_checkpoint(stream_payload: pd.DataFrame) -> None:
     checkpoint_store = InMemoryCheckpointStore()
     writes: list[pd.DataFrame] = []
 
-    deduped = stream_payload.sort_values(by=["entity_id", "ts"], kind="mergesort").drop_duplicates(
-        ["entity_id", "ts"], keep="last"
-    )
+    deduped = stream_payload.sort_values(
+        by=["entity_id", "ts"], kind="mergesort"
+    ).drop_duplicates(["entity_id", "ts"], keep="last")
 
     materializer = StreamMaterializer(
         lambda _name, frame: writes.append(frame.copy()),
@@ -238,7 +238,9 @@ def test_materializer_recovers_from_partial_write(stream_payload: pd.DataFrame) 
     assert len(checkpoint.checkpoint_ids) == 2
 
 
-def test_materializer_handles_slow_writer(monkeypatch: pytest.MonkeyPatch, stream_payload: pd.DataFrame) -> None:
+def test_materializer_handles_slow_writer(
+    monkeypatch: pytest.MonkeyPatch, stream_payload: pd.DataFrame
+) -> None:
     checkpoint_store = InMemoryCheckpointStore()
     writes: list[pd.DataFrame] = []
     sleep_calls: list[float] = []

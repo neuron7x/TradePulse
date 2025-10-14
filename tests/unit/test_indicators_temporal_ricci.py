@@ -35,13 +35,17 @@ def test_price_level_graph_builder_validates_volume_length() -> None:
 
 
 def test_temporal_ricci_analyzer_reports_metrics() -> None:
-    prices = np.concatenate([
-        _synthetic_series(400, 0.05, seed=1),
-        _synthetic_series(400, 0.25, seed=2),
-    ])
+    prices = np.concatenate(
+        [
+            _synthetic_series(400, 0.05, seed=1),
+            _synthetic_series(400, 0.25, seed=2),
+        ]
+    )
     volumes = np.abs(np.sin(np.linspace(0, 4 * np.pi, prices.size - 1))) + 0.1
     dates = pd.date_range("2024-01-01", periods=prices.size, freq="1min")
-    df = pd.DataFrame({"close": prices, "volume": np.append(volumes, volumes[-1])}, index=dates)
+    df = pd.DataFrame(
+        {"close": prices, "volume": np.append(volumes, volumes[-1])}, index=dates
+    )
 
     analyzer = TemporalRicciAnalyzer(window_size=128, n_snapshots=6, n_levels=12)
     result = analyzer.analyze(df)
@@ -84,10 +88,12 @@ def test_temporal_ricci_analyzer_requires_close_column_and_non_empty_df() -> Non
 
 def test_temporal_transition_score_reacts_to_regime_change() -> None:
     steady_prices = _synthetic_series(512, 0.05, seed=11)
-    volatile_prices = np.concatenate([
-        _synthetic_series(256, 0.05, seed=21),
-        _synthetic_series(256, 0.4, seed=22),
-    ])
+    volatile_prices = np.concatenate(
+        [
+            _synthetic_series(256, 0.05, seed=21),
+            _synthetic_series(256, 0.4, seed=22),
+        ]
+    )
 
     dates = pd.date_range("2024-01-01", periods=steady_prices.size, freq="1min")
     steady_df = pd.DataFrame({"close": steady_prices}, index=dates)
@@ -100,5 +106,7 @@ def test_temporal_transition_score_reacts_to_regime_change() -> None:
     steady_result = analyzer.analyze(steady_df)
     volatile_result = analyzer.analyze(volatile_df)
 
-    assert volatile_result.topological_transition_score >= steady_result.topological_transition_score
-
+    assert (
+        volatile_result.topological_transition_score
+        >= steady_result.topological_transition_score
+    )

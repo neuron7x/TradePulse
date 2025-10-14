@@ -69,4 +69,8 @@ def test_monte_carlo_regime_shifts_are_reproducible() -> None:
         assert np.allclose(scenario_a.returns, scenario_b.returns)
         assert math.isclose(scenario_a.dropout_ratio, scenario_b.dropout_ratio)
         assert 0.0 <= scenario_a.dropout_ratio <= 1.0
-        assert config.volatility_scale[0] <= scenario_a.volatility_scale <= config.volatility_scale[1]
+        assert (
+            config.volatility_scale[0]
+            <= scenario_a.volatility_scale
+            <= config.volatility_scale[1]
+        )

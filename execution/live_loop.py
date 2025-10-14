@@ -36,7 +36,9 @@ class Signal:
             try:
                 handler(*args, **kwargs)
             except Exception:  # pragma: no cover - defensive logging path
-                logging.getLogger(__name__).exception("Signal handler failed", extra={"event": "signal.error"})
+                logging.getLogger(__name__).exception(
+                    "Signal handler failed", extra={"event": "signal.error"}
+                )
 
 
 @dataclass(slots=True)
@@ -128,7 +130,10 @@ class LiveExecutionLoop:
 
         if self._started:
             raise RuntimeError("LiveExecutionLoop already started")
-        self._logger.info("Starting live execution loop", extra={"event": "live_loop.start", "cold_start": cold_start})
+        self._logger.info(
+            "Starting live execution loop",
+            extra={"event": "live_loop.start", "cold_start": cold_start},
+        )
         self._stop.clear()
         self._activity.clear()
         self._kill_notified = False
@@ -150,7 +155,9 @@ class LiveExecutionLoop:
 
         if not self._started:
             return
-        self._logger.info("Shutting down live execution loop", extra={"event": "live_loop.shutdown"})
+        self._logger.info(
+            "Shutting down live execution loop", extra={"event": "live_loop.shutdown"}
+        )
         self._stop.set()
         self._activity.set()
         for thread in self._threads:
@@ -162,7 +169,10 @@ class LiveExecutionLoop:
             except Exception:  # pragma: no cover - defensive
                 self._logger.exception(
                     "Failed to disconnect connector",
-                    extra={"event": "live_loop.disconnect_error", "venue": context.name},
+                    extra={
+                        "event": "live_loop.disconnect_error",
+                        "venue": context.name,
+                    },
                 )
         self._started = False
 
@@ -208,7 +218,9 @@ class LiveExecutionLoop:
                 return
             except Exception as exc:  # pragma: no cover - rarely triggered in tests
                 attempt += 1
-                delay = min(self._config.max_backoff, backoff * max(1, 2 ** (attempt - 1)))
+                delay = min(
+                    self._config.max_backoff, backoff * max(1, 2 ** (attempt - 1))
+                )
                 self._logger.warning(
                     "Connector initialisation failed",
                     extra={
@@ -240,7 +252,11 @@ class LiveExecutionLoop:
         except Exception as exc:
             self._logger.warning(
                 "Failed to fetch open orders during reconciliation",
-                extra={"event": "live_loop.reconcile_failed", "venue": context.name, "error": str(exc)},
+                extra={
+                    "event": "live_loop.reconcile_failed",
+                    "venue": context.name,
+                    "error": str(exc),
+                },
             )
             return
 
@@ -271,7 +287,9 @@ class LiveExecutionLoop:
 
         for order_id in orphan_on_oms:
             order = venue_orders[order_id]
-            correlation = context.oms.correlation_for(order_id) or f"recovered-{order_id}"
+            correlation = (
+                context.oms.correlation_for(order_id) or f"recovered-{order_id}"
+            )
             context.oms.adopt_open_order(order, correlation_id=correlation)
             self._order_connector[order_id] = context.name
             self._last_reported_fill[order_id] = order.filled_quantity
@@ -301,7 +319,11 @@ class LiveExecutionLoop:
                 except Exception as exc:  # pragma: no cover - logged for visibility
                     self._logger.exception(
                         "Order processing failed",
-                        extra={"event": "live_loop.process_error", "venue": context.name, "error": str(exc)},
+                        extra={
+                            "event": "live_loop.process_error",
+                            "venue": context.name,
+                            "error": str(exc),
+                        },
                     )
                     continue
 
@@ -319,7 +341,10 @@ class LiveExecutionLoop:
                     except Exception:  # pragma: no cover - defensive
                         self._logger.exception(
                             "Failed to record metrics",
-                            extra={"event": "live_loop.metrics_error", "venue": context.name},
+                            extra={
+                                "event": "live_loop.metrics_error",
+                                "venue": context.name,
+                            },
                         )
                 self._logger.info(
                     "Order processed",
@@ -375,7 +400,9 @@ class LiveExecutionLoop:
                         if price <= 0:
                             price = 1.0
                         context.oms.register_fill(order.order_id, delta, price)
-                        self._last_reported_fill[order.order_id] = remote.filled_quantity
+                        self._last_reported_fill[order.order_id] = (
+                            remote.filled_quantity
+                        )
                         self._logger.info(
                             "Registered fill",
                             extra={
@@ -396,7 +423,10 @@ class LiveExecutionLoop:
     def _heartbeat_loop(self) -> None:
         backoff_attempts: MutableMapping[str, int] = defaultdict(int)
         while not self._stop.is_set():
-            if self._risk_manager.kill_switch.is_triggered() and not self._kill_notified:
+            if (
+                self._risk_manager.kill_switch.is_triggered()
+                and not self._kill_notified
+            ):
                 reason = self._risk_manager.kill_switch.reason
                 self._logger.error(
                     "Kill-switch triggered, stopping live loop",
@@ -460,10 +490,14 @@ class LiveExecutionLoop:
             if self._stop.wait(self._config.heartbeat_interval):
                 return
 
-    def _emit_position_snapshot(self, venue: str, positions: Iterable[Mapping[str, object]]) -> None:
+    def _emit_position_snapshot(
+        self, venue: str, positions: Iterable[Mapping[str, object]]
+    ) -> None:
         positions_list = list(positions)
         for position in positions_list:
-            symbol = str(position.get("symbol") or position.get("instrument") or "unknown")
+            symbol = str(
+                position.get("symbol") or position.get("instrument") or "unknown"
+            )
             try:
                 quantity = float(position.get("qty") or position.get("quantity") or 0.0)
             except (TypeError, ValueError):  # pragma: no cover - defensive
@@ -473,11 +507,14 @@ class LiveExecutionLoop:
             except Exception:  # pragma: no cover - defensive
                 self._logger.exception(
                     "Failed to record position metric",
-                    extra={"event": "live_loop.position_metric_error", "venue": venue, "symbol": symbol},
+                    extra={
+                        "event": "live_loop.position_metric_error",
+                        "venue": venue,
+                        "symbol": symbol,
+                    },
                 )
 
         self.on_position_snapshot.emit(venue, positions_list)
 
 
 __all__ = ["LiveExecutionLoop", "LiveLoopConfig"]
-

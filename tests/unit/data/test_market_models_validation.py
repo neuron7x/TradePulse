@@ -1,19 +1,13 @@
 # SPDX-License-Identifier: MIT
-from decimal import Decimal
-
-from decimal import Decimal
-
 from datetime import UTC, datetime, timedelta, timezone
+from decimal import Decimal
 
 import pandas as pd
 import pytest
-
 from pydantic import ValidationError
 
 from core.data.models import (
     AggregateMetric,
-    DataKind,
-    InstrumentType,
     MarketMetadata,
     OHLCVBar,
     PriceTick,
@@ -132,7 +126,7 @@ def test_aggregate_metric_validates_inputs() -> None:
             value=Decimal("10000000000000"),
             timestamp=pd.Timestamp("2024-01-01T00:00:00Z", tz=UTC),
             window_seconds=60,
-    )
+        )
     _assert_validation_error(exc.value, contains="exceeds the allowed bound")
 
 
@@ -171,7 +165,9 @@ def test_market_data_point_enforce_utc_rejects_invalid_timezone() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         tick._enforce_utc()
 
-    object.__setattr__(tick, "timestamp", datetime(2024, 1, 1, tzinfo=timezone(timedelta(hours=1))))
+    object.__setattr__(
+        tick, "timestamp", datetime(2024, 1, 1, tzinfo=timezone(timedelta(hours=1)))
+    )
     with pytest.raises(ValueError, match="normalised to UTC"):
         tick._enforce_utc()
 

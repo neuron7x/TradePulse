@@ -21,8 +21,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.trading import signal_to_dto
-from execution.risk import RiskLimits, RiskManager
 from domain import Signal, SignalAction
+from execution.risk import RiskLimits, RiskManager
 from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
 from src.audit.audit_logger import AuditLogger
 from src.risk.risk_manager import RiskManagerFacade

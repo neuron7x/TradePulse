@@ -1,18 +1,25 @@
 from __future__ import annotations
-import numpy as np
+
 from dataclasses import dataclass
 
+import numpy as np
+
 Float = np.float32
+
 
 def ema_update(prev: float, x: float, span: int) -> float:
     """One-step EMA update (float32, O(1))."""
     alpha = Float(2.0 / (1.0 + span))
     return Float((1.0 - alpha) * Float(prev) + alpha * Float(x))
 
+
 def ewvar_update(prev_var: float, pe: float, lam: float, eps: float = 1e-12) -> float:
     """EWMA variance update for residuals (float32, O(1))."""
     lam = Float(lam)
-    return Float(lam * Float(prev_var) + (1.0 - lam) * (Float(pe) * Float(pe)) + Float(eps))
+    return Float(
+        lam * Float(prev_var) + (1.0 - lam) * (Float(pe) * Float(pe)) + Float(eps)
+    )
+
 
 @dataclass
 class EWEntropyConfig:
@@ -22,9 +29,11 @@ class EWEntropyConfig:
     decay: float = 0.975
     eps: float = 1e-12
 
+
 class EWEntropy:
     """Exponentially-weighted discrete Shannon entropy over fixed bins.
     Streaming, O(1), float32."""
+
     def __init__(self, cfg: EWEntropyConfig):
         self.cfg = cfg
         self._counts = np.full(cfg.bins, Float(1e-6), dtype=Float)  # small prior

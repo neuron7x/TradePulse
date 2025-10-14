@@ -18,7 +18,6 @@ from execution.connectors import OrderError
 
 from .common import AuthenticatedRESTExecutionConnector, CredentialError, HMACSigner
 
-
 _STATUS_MAP = {
     "OPEN": OrderStatus.OPEN,
     "FILLED": OrderStatus.FILLED,

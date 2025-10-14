@@ -10,7 +10,7 @@ from typing import AsyncIterator, Tuple
 from prometheus_client import start_http_server
 
 from analytics.amm_metrics import publish_metrics, timed_update
-from core.neuro.amm import AMMConfig, AdaptiveMarketMind
+from core.neuro.amm import AdaptiveMarketMind, AMMConfig
 
 REQUIRED_COLUMNS: Tuple[str, ...] = ("x", "R", "kappa")
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,15}$")

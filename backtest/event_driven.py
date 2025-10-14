@@ -1,4 +1,5 @@
 """Event-driven backtest engine with chunked data ingestion."""
+
 from __future__ import annotations
 
 import heapq
@@ -12,13 +13,13 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from backtest.transaction_costs import PerUnitCommission, TransactionCostModel
 from core.utils.metrics import get_metrics_collector
+from interfaces.backtest import BacktestEngine
 
 from .engine import LatencyConfig, OrderBookConfig, Result, SlippageConfig
-from .performance import compute_performance_metrics, export_performance_report
 from .events import FillEvent, MarketEvent, OrderEvent, SignalEvent
-from interfaces.backtest import BacktestEngine
-from backtest.transaction_costs import PerUnitCommission, TransactionCostModel
+from .performance import compute_performance_metrics, export_performance_report
 
 if TYPE_CHECKING:
     from backtest.market_calendar import MarketCalendar
@@ -84,8 +85,14 @@ class CSVChunkDataHandler(MarketDataHandler):
     def stream(self) -> Iterator[Iterable[MarketEvent]]:
         reader = pd.read_csv(
             self.path,
-            usecols=[self.price_column] if self.date_column is None else [self.date_column, self.price_column],
-            parse_dates=[self.date_column] if self.parse_dates and self.date_column else None,
+            usecols=(
+                [self.price_column]
+                if self.date_column is None
+                else [self.date_column, self.price_column]
+            ),
+            parse_dates=(
+                [self.date_column] if self.parse_dates and self.date_column else None
+            ),
             dtype=self.dtype,
             chunksize=self.chunk_size,
         )
@@ -116,7 +123,9 @@ class CSVChunkDataHandler(MarketDataHandler):
 class Strategy:
     """Base strategy interface for event-driven backtests."""
 
-    def on_market_event(self, event: MarketEvent) -> Iterable[SignalEvent]:  # pragma: no cover - interface
+    def on_market_event(
+        self, event: MarketEvent
+    ) -> Iterable[SignalEvent]:  # pragma: no cover - interface
         raise NotImplementedError
 
 
@@ -138,7 +147,9 @@ class VectorisedStrategy(Strategy):
         price_array = np.asarray(prices, dtype=float)
         signals = np.asarray(signal_fn(price_array), dtype=float)
         if signals.shape != price_array.shape:
-            raise ValueError("signal_fn must return an array with the same length as prices")
+            raise ValueError(
+                "signal_fn must return an array with the same length as prices"
+            )
         signals = np.clip(signals, -1.0, 1.0)
         return cls(signals, symbol=symbol)
 
@@ -148,9 +159,15 @@ class VectorisedStrategy(Strategy):
             return ()
         signal_value = float(self._signals[next_index])
         LOGGER.debug(
-            "strategy emitted precomputed signal %.4f for future step %s", signal_value, next_index
+            "strategy emitted precomputed signal %.4f for future step %s",
+            signal_value,
+            next_index,
         )
-        return (SignalEvent(symbol=self._symbol, target_position=signal_value, step=event.step),)
+        return (
+            SignalEvent(
+                symbol=self._symbol, target_position=signal_value, step=event.step
+            ),
+        )
 
 
 @dataclass(slots=True)
@@ -298,8 +315,12 @@ class SimulatedExecutionHandler:
                 step=current_step,
             )
 
-        avg_price, per_unit_slippage_cost = self._apply_per_unit_slippage(avg_price, filled_qty, side)
-        avg_price, stochastic_slippage_cost = self._apply_stochastic_slippage(avg_price, filled_qty, side)
+        avg_price, per_unit_slippage_cost = self._apply_per_unit_slippage(
+            avg_price, filled_qty, side
+        )
+        avg_price, stochastic_slippage_cost = self._apply_stochastic_slippage(
+            avg_price, filled_qty, side
+        )
 
         (
             avg_price,
@@ -309,7 +330,12 @@ class SimulatedExecutionHandler:
         ) = self._apply_transaction_costs(avg_price, filled_qty, side)
 
         spread_book_cost = abs(reference_price - mid_price) * filled_qty
-        total_slippage_cost = depth_slippage_cost + per_unit_slippage_cost + stochastic_slippage_cost + slippage_model_cost
+        total_slippage_cost = (
+            depth_slippage_cost
+            + per_unit_slippage_cost
+            + stochastic_slippage_cost
+            + slippage_model_cost
+        )
         total_spread_cost = spread_book_cost + spread_model_cost
 
         fill = FillEvent(
@@ -357,7 +383,9 @@ class SimulatedExecutionHandler:
         total_cost = 0.0
         filled = 0.0
         depth_cost = 0.0
-        depth = tuple(float(max(level, 0.0)) for level in self._order_book.depth_profile)
+        depth = tuple(
+            float(max(level, 0.0)) for level in self._order_book.depth_profile
+        )
 
         for level_idx, capacity in enumerate(depth, start=1):
             if remaining <= 0.0:
@@ -478,19 +506,27 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
 
         if strategy is None:
             if price_array.size == 0:
-                raise ValueError("prices must be provided when using the default strategy")
-            strategy_impl = VectorisedStrategy.from_signal_function(price_array, signal_fn, symbol=symbol)
+                raise ValueError(
+                    "prices must be provided when using the default strategy"
+                )
+            strategy_impl = VectorisedStrategy.from_signal_function(
+                price_array, signal_fn, symbol=symbol
+            )
         else:
             strategy_impl = strategy
 
         metrics = get_metrics_collector()
         with metrics.measure_backtest(strategy_name) as ctx:
-            event_queue: queue.Queue[FillEvent | MarketEvent | OrderEvent | SignalEvent] = queue.Queue()
+            event_queue: queue.Queue[
+                FillEvent | MarketEvent | OrderEvent | SignalEvent
+            ] = queue.Queue()
             delayed: list[tuple[int, int, SignalEvent | OrderEvent | FillEvent]] = []
             counter = 0
             current_step = -1
 
-            portfolio = Portfolio(symbol=symbol, initial_capital=initial_capital, fee_per_unit=fee)
+            portfolio = Portfolio(
+                symbol=symbol, initial_capital=initial_capital, fee_per_unit=fee
+            )
             rng = np.random.default_rng(random_seed)
             execution_handler = SimulatedExecutionHandler(
                 order_book_cfg,
@@ -506,7 +542,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
             total_spread = 0.0
             total_financing = 0.0
 
-            def schedule(event: SignalEvent | OrderEvent | FillEvent, delay: int) -> None:
+            def schedule(
+                event: SignalEvent | OrderEvent | FillEvent, delay: int
+            ) -> None:
                 nonlocal counter
                 release = current_step + max(0, delay)
                 event.step = release
@@ -528,7 +566,8 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         and not calendar.is_open(market_event.timestamp)
                     ):
                         LOGGER.debug(
-                            "skipping market event outside trading hours at %s", market_event.timestamp
+                            "skipping market event outside trading hours at %s",
+                            market_event.timestamp,
                         )
                         release_ready()
                         continue
@@ -541,7 +580,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                         prior_position = float(portfolio.position_history[-1])
                     else:
                         prior_position = float(portfolio.position)
-                    financing_cost = float(cost_model.get_financing(prior_position, reference_price))
+                    financing_cost = float(
+                        cost_model.get_financing(prior_position, reference_price)
+                    )
                     if financing_cost:
                         portfolio.apply_financing(financing_cost)
                         total_financing += financing_cost
@@ -617,7 +658,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                     elif isinstance(pending, FillEvent):
                         portfolio.on_fill(pending)
                     else:  # pragma: no cover - safety net
-                        LOGGER.warning("Unhandled delayed event type: %s", type(pending))
+                        LOGGER.warning(
+                            "Unhandled delayed event type: %s", type(pending)
+                        )
 
                     release_ready()
 
@@ -629,9 +672,17 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                 if portfolio.position_history is not None
                 else np.array([], dtype=float)
             )
-            pnl_total = float(equity_curve[-1] - initial_capital) if equity_curve.size else 0.0
-            peaks = np.maximum.accumulate(equity_curve) if equity_curve.size else np.array([], dtype=float)
-            drawdowns = equity_curve - peaks if peaks.size else np.array([], dtype=float)
+            pnl_total = (
+                float(equity_curve[-1] - initial_capital) if equity_curve.size else 0.0
+            )
+            peaks = (
+                np.maximum.accumulate(equity_curve)
+                if equity_curve.size
+                else np.array([], dtype=float)
+            )
+            drawdowns = (
+                equity_curve - peaks if peaks.size else np.array([], dtype=float)
+            )
             max_dd = float(drawdowns.min()) if drawdowns.size else 0.0
 
             trades = portfolio.trades
@@ -639,7 +690,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
             ctx["pnl"] = pnl_total
             ctx["max_dd"] = max_dd
             ctx["trades"] = trades
-            ctx["equity"] = float(equity_curve[-1]) if equity_curve.size else initial_capital
+            ctx["equity"] = (
+                float(equity_curve[-1]) if equity_curve.size else initial_capital
+            )
             ctx["status"] = "success"
             ctx["commission_cost"] = float(total_commission)
             ctx["spread_cost"] = float(total_spread)
@@ -656,7 +709,9 @@ class EventDrivenBacktestEngine(BacktestEngine[Result]):
                 if equity_curve.size
                 else np.array([], dtype=float)
             )
-            position_changes = np.diff(positions) if positions.size else np.array([], dtype=float)
+            position_changes = (
+                np.diff(positions) if positions.size else np.array([], dtype=float)
+            )
             performance = compute_performance_metrics(
                 equity_curve=equity_curve,
                 pnl=pnl_series,

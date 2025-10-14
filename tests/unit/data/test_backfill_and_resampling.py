@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
 from core.data.backfill import CacheKey, GapFillPlanner, LayerCache, detect_gaps
-from core.data.resampling import align_timeframes, resample_l1_to_ohlcv, resample_ticks_to_l1
+from core.data.resampling import (
+    align_timeframes,
+    resample_l1_to_ohlcv,
+    resample_ticks_to_l1,
+)
 
 
 def make_index(start: str, periods: int, freq: str) -> pd.DatetimeIndex:
@@ -41,7 +45,9 @@ def test_gap_planner_combines_frames():
 
 def test_resampling_tick_to_ohlcv_roundtrip():
     tick_index = make_index("2024-01-01", 120, "10s")
-    ticks = pd.DataFrame({"price": np.linspace(100, 101, len(tick_index)), "size": 1}, index=tick_index)
+    ticks = pd.DataFrame(
+        {"price": np.linspace(100, 101, len(tick_index)), "size": 1}, index=tick_index
+    )
     l1 = resample_ticks_to_l1(ticks, freq="1min")
     ohlcv = resample_l1_to_ohlcv(l1, freq="1min")
     assert set(ohlcv.columns) == {"open", "high", "low", "close", "volume"}
@@ -53,4 +59,3 @@ def test_align_timeframes_pad_missing_values():
     slow = pd.DataFrame({"close": [1]}, index=make_index("2024-01-01", 1, "2min"))
     aligned = align_timeframes({"fast": ref, "slow": slow}, reference="fast")
     assert aligned["slow"].iloc[-1]["close"] == 1
-

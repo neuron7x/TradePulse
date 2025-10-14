@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 import pandas as pd
 import pytest
@@ -41,7 +41,9 @@ def test_cli_generates_templates(tmp_path: Path) -> None:
     runner = CliRunner()
     for command in ("ingest", "backtest", "optimize", "exec", "report"):
         destination = tmp_path / f"{command}.yaml"
-        result = runner.invoke(cli, [command, "--generate-config", "--template-output", str(destination)])
+        result = runner.invoke(
+            cli, [command, "--generate-config", "--template-output", str(destination)]
+        )
         assert result.exit_code == 0, result.output
         assert destination.exists()
 
@@ -50,7 +52,9 @@ def test_cli_aliases_generate_templates(tmp_path: Path) -> None:
     runner = CliRunner()
     for alias in ("materialize", "train", "serve"):
         destination = tmp_path / f"{alias}.yaml"
-        result = runner.invoke(cli, [alias, "--generate-config", "--template-output", str(destination)])
+        result = runner.invoke(
+            cli, [alias, "--generate-config", "--template-output", str(destination)]
+        )
         assert result.exit_code == 0, result.output
         assert destination.exists()
 
@@ -116,7 +120,9 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
     manager.render("optimize", optimize_cfg_path)
     optimize_cfg = _load_yaml(optimize_cfg_path)
     optimize_cfg["metadata"]["backtest"]["data"]["path"] = str(sample_prices)
-    optimize_cfg["metadata"]["backtest"]["results_path"] = str(tmp_path / "opt_backtest.json")
+    optimize_cfg["metadata"]["backtest"]["results_path"] = str(
+        tmp_path / "opt_backtest.json"
+    )
     optimize_cfg["results_path"] = str(tmp_path / "optimize.json")
     optimize_cfg["versioning"] = {"backend": "dvc", "repo_path": str(repo_path)}
     _write_yaml(optimize_cfg_path, optimize_cfg)
@@ -170,7 +176,7 @@ def test_backtest_outputs_jsonl(tmp_path: Path, sample_prices: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     lines = [line for line in result.output.splitlines() if line.startswith("{")]
-    assert any("\"metric\": \"total_return\"" in line for line in lines)
+    assert any('"metric": "total_return"' in line for line in lines)
 
 
 def test_versioning_manager_writes_metadata(tmp_path: Path) -> None:
@@ -195,7 +201,13 @@ def test_feature_catalog_register(tmp_path: Path, sample_prices: Path) -> None:
         destination=tmp_path / "dest.csv",
     )
     config.destination.write_text("data", encoding="utf-8")
-    entry = catalog.register("artifact", config.destination, config=config, lineage=["input"], metadata={"owner": "qa"})
+    entry = catalog.register(
+        "artifact",
+        config.destination,
+        config=config,
+        lineage=["input"],
+        metadata={"owner": "qa"},
+    )
     assert entry.name == "artifact"
     stored = catalog.find("artifact")
     assert stored is not None and stored.checksum == entry.checksum

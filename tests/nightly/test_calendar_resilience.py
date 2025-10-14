@@ -5,14 +5,15 @@ from __future__ import annotations
 import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pytest
-from zoneinfo import ZoneInfo
 
 from backtest.market_calendar import MarketCalendar, SessionHours
 from core.data.adapters.base import IngestionAdapter, RetryConfig
-from core.data.connectors.market import BaseMarketDataConnector, DEFAULT_SCHEMA_ROOT
-from core.data.models import DataKind, InstrumentType, MarketMetadata, PriceTick as Ticker
+from core.data.connectors.market import DEFAULT_SCHEMA_ROOT, BaseMarketDataConnector
+from core.data.models import DataKind, InstrumentType, MarketMetadata
+from core.data.models import PriceTick as Ticker
 from core.messaging.schema_registry import EventSchemaRegistry
 
 pytestmark = [pytest.mark.nightly, pytest.mark.slow]
@@ -27,8 +28,12 @@ def _nyse_calendar() -> MarketCalendar:
         date(2024, 12, 25),
     }
     special_sessions = {
-        date(2024, 11, 29): SessionHours(time(9, 30), time(13, 0)),  # Thanksgiving Friday
-        date(2024, 3, 15): SessionHours(time(9, 30), time(12, 0)),  # Simulated outage early close
+        date(2024, 11, 29): SessionHours(
+            time(9, 30), time(13, 0)
+        ),  # Thanksgiving Friday
+        date(2024, 3, 15): SessionHours(
+            time(9, 30), time(12, 0)
+        ),  # Simulated outage early close
     }
     return MarketCalendar(
         "America/New_York",
@@ -64,7 +69,9 @@ def test_calendar_handles_consecutive_holiday_sequence() -> None:
         datetime(2024, 12, 2, 0, 0, tzinfo=ZoneInfo("UTC")),
     )
     assert len(thanksgiving_week) == 4
-    close_hours = [session[1].astimezone(ZoneInfo("UTC")).hour for session in thanksgiving_week]
+    close_hours = [
+        session[1].astimezone(ZoneInfo("UTC")).hour for session in thanksgiving_week
+    ]
     assert close_hours == [21, 21, 21, 18]
 
     friday_close = thanksgiving_week[-1][1] + timedelta(minutes=10)
@@ -76,7 +83,9 @@ class _FlakyAdapter(IngestionAdapter):
     """Adapter that simulates network outages before recovering."""
 
     def __init__(self, *, failures: int, ticks: list[Ticker]) -> None:
-        super().__init__(retry=RetryConfig(attempts=5, multiplier=0.01, max_backoff=0.05, jitter=0.0))
+        super().__init__(
+            retry=RetryConfig(attempts=5, multiplier=0.01, max_backoff=0.05, jitter=0.0)
+        )
         self._failures = failures
         self._ticks = ticks
         self.fetch_calls = 0
@@ -100,7 +109,9 @@ class _FlakyAdapter(IngestionAdapter):
             yield tick
 
 
-async def _collect_ticks(connector: BaseMarketDataConnector, expected: int) -> list[dict[str, object]]:
+async def _collect_ticks(
+    connector: BaseMarketDataConnector, expected: int
+) -> list[dict[str, object]]:
     events = []
     async for event in connector.stream_ticks():
         events.append(event.model_dump())  # type: ignore[union-attr]

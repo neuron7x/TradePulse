@@ -1,15 +1,15 @@
 """Pytest fixtures and utilities for performance regression enforcement."""
+
 from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 import pytest
-
 
 _BASELINES_PATH = Path(__file__).with_name("benchmark_baselines.json")
 _DEFAULT_THRESHOLD = 0.15  # Allow up to +15% regression by default.
@@ -64,7 +64,9 @@ def _load_baselines() -> dict[str, float]:
             "Benchmark baseline file is missing. Generate baselines before running performance tests."
         ) from exc
     if not isinstance(data, dict):  # pragma: no cover - defensive
-        raise RuntimeError("Benchmark baseline file must contain a mapping of benchmark keys to floats.")
+        raise RuntimeError(
+            "Benchmark baseline file must contain a mapping of benchmark keys to floats."
+        )
     return {str(key): float(value) for key, value in data.items()}
 
 
@@ -129,7 +131,9 @@ def benchmark_guard(
 
         stats = getattr(benchmark, "stats", None)
         if stats is None or not hasattr(stats, "stats"):
-            raise RuntimeError("pytest-benchmark did not provide timing statistics for the executed benchmark")
+            raise RuntimeError(
+                "pytest-benchmark did not provide timing statistics for the executed benchmark"
+            )
         mean = float(stats["mean"])
 
         baseline = benchmark_baselines[baseline_key]
@@ -179,7 +183,9 @@ def _persist_benchmark_artifacts(records: list[_BenchmarkRecord]) -> None:
         "generated_at": timestamp.isoformat(),
         "records": [_serialize_record(record) for record in records],
     }
-    artifact_path = artifact_dir / f"benchmark-summary-{timestamp.strftime('%Y%m%dT%H%M%SZ')}.json"
+    artifact_path = (
+        artifact_dir / f"benchmark-summary-{timestamp.strftime('%Y%m%dT%H%M%SZ')}.json"
+    )
     artifact_path.write_text(json.dumps(payload, indent=2, sort_keys=True))
 
     if _ARTIFACT_TTL_DAYS <= 0:
@@ -188,7 +194,10 @@ def _persist_benchmark_artifacts(records: list[_BenchmarkRecord]) -> None:
     cutoff = timestamp - timedelta(days=_ARTIFACT_TTL_DAYS)
     for existing in artifact_dir.glob("benchmark-summary-*.json"):
         try:
-            if datetime.fromtimestamp(existing.stat().st_mtime, tz=timezone.utc) < cutoff:
+            if (
+                datetime.fromtimestamp(existing.stat().st_mtime, tz=timezone.utc)
+                < cutoff
+            ):
                 existing.unlink()
         except OSError:  # pragma: no cover - best-effort cleanup
             continue

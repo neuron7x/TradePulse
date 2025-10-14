@@ -27,7 +27,9 @@ def remote_control_fixture() -> Iterator[RemoteControlBundle]:
     facade = RiskManagerFacade(risk_manager)
     authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
     app = FastAPI()
-    app.include_router(create_remote_control_router(facade, audit_logger, authenticator))
+    app.include_router(
+        create_remote_control_router(facade, audit_logger, authenticator)
+    )
     client = TestClient(app)
     try:
         yield client, risk_manager, records, audit_logger
@@ -35,7 +37,9 @@ def remote_control_fixture() -> Iterator[RemoteControlBundle]:
         client.close()
 
 
-def test_kill_switch_endpoint_engages_kill_switch(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_endpoint_engages_kill_switch(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, audit_logger = remote_control_fixture
     response = client.post(
         "/admin/kill-switch",
@@ -73,7 +77,9 @@ def test_kill_switch_endpoint_reflects_facade_state() -> None:
     facade = StubFacade()
     authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
     app = FastAPI()
-    app.include_router(create_remote_control_router(facade, audit_logger, authenticator))
+    app.include_router(
+        create_remote_control_router(facade, audit_logger, authenticator)
+    )
     client = TestClient(app)
     try:
         response = client.post(
@@ -90,7 +96,9 @@ def test_kill_switch_endpoint_reflects_facade_state() -> None:
     assert facade.reasons == ["scheduled maintenance"]
 
 
-def test_kill_switch_requires_valid_token(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_requires_valid_token(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, _ = remote_control_fixture
     response = client.post(
         "/admin/kill-switch",
@@ -102,7 +110,9 @@ def test_kill_switch_requires_valid_token(remote_control_fixture: RemoteControlB
     assert records == []
 
 
-def test_kill_switch_rejects_whitespace_reason(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_rejects_whitespace_reason(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, _ = remote_control_fixture
     response = client.post(
         "/admin/kill-switch",
@@ -114,12 +124,18 @@ def test_kill_switch_rejects_whitespace_reason(remote_control_fixture: RemoteCon
     assert records == []
 
 
-def test_kill_switch_reaffirmation_is_audited(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_reaffirmation_is_audited(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, _, records, _ = remote_control_fixture
     headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "auditor"}
-    first = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+    first = client.post(
+        "/admin/kill-switch", headers=headers, json={"reason": "initial"}
+    )
     assert first.status_code == 200
-    second = client.post("/admin/kill-switch", headers=headers, json={"reason": "still engaged"})
+    second = client.post(
+        "/admin/kill-switch", headers=headers, json={"reason": "still engaged"}
+    )
     assert second.status_code == 200
     body = second.json()
     assert body["already_engaged"] is True
@@ -146,26 +162,34 @@ def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() 
     assert risk_manager.kill_switch.reason == "manual intervention required"
 
 
-def test_kill_switch_prefers_forwarded_for_header(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_prefers_forwarded_for_header(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, _, records, _ = remote_control_fixture
     headers = {
         "X-Admin-Token": "s3cr3t-token",
         "X-Admin-Subject": "auditor",
         "X-Forwarded-For": "203.0.113.10:443, 10.0.0.1",
     }
-    response = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+    response = client.post(
+        "/admin/kill-switch", headers=headers, json={"reason": "initial"}
+    )
     assert response.status_code == 200
     assert records[0].ip_address == "203.0.113.10"
 
 
-def test_kill_switch_falls_back_to_real_ip(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_falls_back_to_real_ip(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, _, records, _ = remote_control_fixture
     headers = {
         "X-Admin-Token": "s3cr3t-token",
         "X-Real-IP": "2001:db8::1%eth0",
         "X-Forwarded-For": "invalid-entry",
     }
-    response = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
+    response = client.post(
+        "/admin/kill-switch", headers=headers, json={"reason": "initial"}
+    )
     assert response.status_code == 200
     assert records[0].ip_address == "2001:db8::1"
 
@@ -203,7 +227,9 @@ def test_kill_switch_state_endpoint_returns_state_and_audit(
     assert records[0].details["reason"] == "manual override"
 
 
-def test_kill_switch_reset_endpoint_is_idempotent(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_reset_endpoint_is_idempotent(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, audit_logger = remote_control_fixture
     headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "ops"}
 

@@ -54,7 +54,9 @@ def test_polars_backend_prepares_index_and_roundtrips(tmp_path, monkeypatch):
             storage["from_pandas"] = frame.copy()
             return _Dataset(frame)
 
-        def read_parquet(self, path: Path) -> _Dataset:  # pragma: no cover - signature parity
+        def read_parquet(
+            self, path: Path
+        ) -> _Dataset:  # pragma: no cover - signature parity
             return _Dataset(storage["written"])
 
     monkeypatch.setattr(dataframe_io, "_load_polars", lambda: _PolarsModule())
@@ -80,12 +82,16 @@ def test_select_backend_prefers_json_when_allowed(monkeypatch):
 
     monkeypatch.setattr(dataframe_io, "_available_backends", lambda: [json_backend])
 
-    selected = dataframe_io._select_backend(require_parquet=False, allow_json_fallback=True)
+    selected = dataframe_io._select_backend(
+        require_parquet=False, allow_json_fallback=True
+    )
     assert selected.name == "json"
 
 
 def test_select_backend_requires_parquet(monkeypatch):
-    monkeypatch.setattr(dataframe_io, "_available_backends", lambda: [dataframe_io._json_backend()])
+    monkeypatch.setattr(
+        dataframe_io, "_available_backends", lambda: [dataframe_io._json_backend()]
+    )
 
     with pytest.raises(dataframe_io.MissingParquetDependencyError):
         dataframe_io._select_backend(require_parquet=True, allow_json_fallback=False)

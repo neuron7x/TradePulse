@@ -95,7 +95,13 @@ class VWAPAlgorithm(ExecutionAlgorithm):
 class POVAlgorithm(ExecutionAlgorithm):
     """Participation of volume algorithm."""
 
-    def __init__(self, *, participation: float, forecast_volume: Sequence[float], duration: timedelta) -> None:
+    def __init__(
+        self,
+        *,
+        participation: float,
+        forecast_volume: Sequence[float],
+        duration: timedelta,
+    ) -> None:
         if not 0 < participation <= 1:
             raise ValueError("participation must be between 0 and 1")
         if not forecast_volume:
@@ -112,8 +118,7 @@ class POVAlgorithm(ExecutionAlgorithm):
             raise ValueError("forecast_volume must sum to positive value")
         target_qty = parent.quantity
         allocations = [
-            min(target_qty, self.participation * bucket)
-            for bucket in self.forecast
+            min(target_qty, self.participation * bucket) for bucket in self.forecast
         ]
         # Normalize allocations to ensure full quantity is sent if possible
         allocated = sum(allocations)
