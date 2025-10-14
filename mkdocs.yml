@@ -45,7 +45,10 @@ nav:
       - FAQ: faq.md
       - Troubleshooting: troubleshooting.md
   - Core Concepts:
-      - Architecture: ARCHITECTURE.md
+      - Architecture:
+          - Platform Overview: ARCHITECTURE.md
+          - System Diagrams: architecture/system_overview.md
+          - Feature Store: architecture/feature_store.md
       - Indicators:
           - Overview: indicators.md
           - Adaptive Market Mind: indicators/amm.md
