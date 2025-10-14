@@ -193,6 +193,30 @@ The testing automation is split across two workflows:
   1. **E2E Pipeline**: Executes `python scripts/smoke_e2e.py` against `data/sample.csv`.
   2. **Artifact Upload**: Persists generated signals and reports for inspection.
 
+### Reproducing the Tests workflow locally with `act`
+
+Use the repository-scoped `.actrc` to run the GitHub Actions test workflow in Docker containers that mirror CI. The configuration pins `ubuntu-latest` to `ghcr.io/catthehacker/ubuntu:act-latest`, applies the `linux/amd64` container architecture, and defines a `tests` profile wired to `.github/workflows/tests.yml`. Supporting environment and secret bootstrap files live in `.github/act/tests.env` and `.github/act/tests.secrets` respectively (the latter provides a placeholder `GITHUB_TOKEN`).
+
+Run the full workflow matrix exactly as CI does:
+
+```bash
+act --profile tests
+```
+
+Target an individual job within the workflow by combining `--profile` with `--job` (the job ID is `tests`):
+
+```bash
+act --profile tests --job tests
+```
+
+Limit execution to a specific matrix entry by supplying one or more `--matrix` selectors. The syntax is `<key>:<value>` and can be repeated to pin multiple axes:
+
+```bash
+act --profile tests --job tests --matrix python-version:3.12
+```
+
+All commands automatically consume the env/secret files referenced by the profile, so no manual exports are required. Update the placeholder secrets if you need authenticated calls during local runs.
+
 ### Coverage Enforcement
 
 The CI enforces both line and branch coverage thresholds using `pytest-cov`:
