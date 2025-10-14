@@ -1,5 +1,6 @@
 'use client'
 
+import { useRouter } from 'next/navigation'
 import type { ChangeEvent, CSSProperties } from 'react'
 import { useMemo, useState } from 'react'
 
@@ -236,9 +237,12 @@ function buildPreview(config: ScenarioConfig) {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [templateId, setTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id)
   const [draft, setDraft] = useState<ScenarioDraft>(() => toDraft(SCENARIO_TEMPLATES[0].defaults))
   const [actionMessage, setActionMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [signingOut, setSigningOut] = useState(false)
 
   const selectedTemplate = useMemo(
     () => SCENARIO_TEMPLATES.find((entry) => entry.id === templateId) ?? SCENARIO_TEMPLATES[0],
@@ -274,6 +278,21 @@ export default function Home() {
   const resetTemplate = () => {
     setDraft(toDraft(selectedTemplate.defaults))
     setActionMessage(null)
+  }
+
+  const handleSignOut = async () => {
+    setSessionError(null)
+    setSigningOut(true)
+    try {
+      const response = await fetch('/api/auth/session', { method: 'DELETE' })
+      if (!response.ok) {
+        throw new Error('Failed to invalidate the session')
+      }
+      router.replace('/login')
+    } catch (error) {
+      setSigningOut(false)
+      setSessionError('Unable to sign out safely. Please retry in a moment or clear cookies manually.')
+    }
   }
 
   const handleCopy = async () => {
@@ -337,12 +356,46 @@ export default function Home() {
       }}
     >
       <section style={{ maxWidth: '960px', margin: '0 auto', display: 'grid', gap: '2.5rem' }}>
-        <header style={{ textAlign: 'left' }}>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: 700, marginBottom: '0.75rem' }}>Scenario Studio</h1>
-          <p style={{ color: '#cbd5f5', lineHeight: 1.6 }}>
-            Sanity-check strategy inputs before pushing them into execution. Select a template, adjust the levers, and review
-            automatic hints about risk concentration and timeframe hygiene.
-          </p>
+        <header style={{ textAlign: 'left', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              alignItems: 'center',
+            }}
+          >
+            <div>
+              <h1 style={{ fontSize: '2.5rem', fontWeight: 700, marginBottom: '0.35rem' }}>Scenario Studio</h1>
+              <p style={{ color: '#cbd5f5', lineHeight: 1.6, margin: 0 }}>
+                Sanity-check strategy inputs before pushing them into execution. Select a template, adjust the levers, and
+                review automatic hints about risk concentration and timeframe hygiene.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              style={{
+                padding: '0.6rem 1.1rem',
+                borderRadius: '999px',
+                border: '1px solid rgba(148, 163, 184, 0.4)',
+                background: signingOut ? 'rgba(148, 163, 184, 0.2)' : 'rgba(14, 165, 233, 0.2)',
+                color: '#e0f2fe',
+                cursor: signingOut ? 'not-allowed' : 'pointer',
+                transition: 'opacity 150ms ease',
+                fontWeight: 600,
+              }}
+            >
+              {signingOut ? 'Signing out…' : 'Sign out'}
+            </button>
+          </div>
+          {sessionError ? (
+            <div role="alert" style={{ color: '#f97316', fontWeight: 600 }}>
+              {sessionError}
+            </div>
+          ) : null}
         </header>
 
         <section style={panelStyle}>

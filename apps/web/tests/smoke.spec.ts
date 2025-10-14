@@ -1,9 +1,35 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import type { Page } from '@playwright/test';
+
+const USERNAME = process.env.SCENARIO_STUDIO_USERNAME ?? 'demo';
+const PASSWORD = process.env.SCENARIO_STUDIO_PASSWORD ?? 'demo-pass';
+
+async function ensureAuthenticated(page: Page) {
+  await page.goto('/login');
+  const current = new URL(page.url());
+
+  if (current.pathname !== '/login') {
+    await page.goto('/');
+    return;
+  }
+
+  await page.fill('input[name="username"]', USERNAME);
+  await page.fill('input[name="password"]', PASSWORD);
+
+  await Promise.all([
+    page.waitForNavigation({ url: (url) => new URL(url).pathname === '/' }),
+    page.getByRole('button', { name: 'Sign in' }).click(),
+  ]);
+  await page.waitForURL((url) => new URL(url).pathname === '/');
+}
 
 test.describe('Scenario Studio smoke', () => {
+  test.beforeEach(async ({ page }) => {
+    await ensureAuthenticated(page);
+  });
+
   test('renders the primary dashboard layout', async ({ page }) => {
-    await page.goto('/');
     await expect(page).toHaveTitle(/TradePulse Scenario Studio/i);
     await expect(page.getByRole('heading', { name: 'Scenario Studio' })).toBeVisible();
     await expect(page.getByLabel('Scenario template')).toBeVisible();
@@ -22,8 +48,6 @@ test.describe('Scenario Studio smoke', () => {
         configurable: true,
       });
     });
-
-    await page.goto('/');
 
     const previewLocator = page.locator('pre');
     const copyButton = page.getByRole('button', { name: 'Copy to clipboard' });
@@ -48,7 +72,6 @@ test.describe('Scenario Studio smoke', () => {
   });
 
   test('has no critical accessibility regressions', async ({ page }) => {
-    await page.goto('/');
     const scanResults = await new AxeBuilder({ page }).analyze();
     const severeViolations = scanResults.violations.filter((violation) =>
       ['critical', 'serious'].includes(violation.impact ?? '')
