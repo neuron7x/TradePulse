@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -65,7 +66,18 @@ def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> Non
     body = response.json()
     assert body["symbol"] == "TEST-USD"
     assert "features" in body
-    assert body["features"].get("macd") is not None
+    features = body["features"]
+    macd_keys = (
+        "macd",
+        "macd_signal",
+        "macd_histogram",
+        "macd_ema_fast",
+        "macd_ema_slow",
+    )
+    for key in macd_keys:
+        value = features.get(key)
+        assert value is not None, f"{key} missing in features payload"
+        assert not math.isclose(float(value), 0.0, abs_tol=1e-9), f"{key} should be non-zero"
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
@@ -91,7 +103,20 @@ def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
     signal = body["signal"]
     assert signal["symbol"] == "TEST-USD"
     assert 0.0 <= signal["confidence"] <= 1.0
-    assert "score" in signal["metadata"]
+    metadata = signal["metadata"]
+    assert "score" in metadata
+    macd_components = metadata.get("macd_components")
+    assert macd_components is not None
+    for key in (
+        "macd",
+        "macd_signal",
+        "macd_histogram",
+        "macd_ema_fast",
+        "macd_ema_slow",
+    ):
+        value = macd_components.get(key)
+        assert value is not None, f"{key} missing in signal metadata"
+        assert not math.isclose(float(value), 0.0, abs_tol=1e-9), f"{key} should be non-zero"
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")

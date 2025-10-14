@@ -202,6 +202,8 @@ class OnlineSignalForecaster:
         macd_histogram = float(
             latest.get("macd_histogram", macd - macd_signal_line)
         )
+        macd_ema_fast = float(latest.get("macd_ema_fast", 0.0))
+        macd_ema_slow = float(latest.get("macd_ema_slow", 0.0))
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
@@ -246,6 +248,13 @@ class OnlineSignalForecaster:
                 "score": score,
                 "horizon_seconds": horizon_seconds,
                 "component_contributions": contributions,
+                "macd_components": {
+                    "macd": macd,
+                    "macd_signal": macd_signal_line,
+                    "macd_histogram": macd_histogram,
+                    "macd_ema_fast": macd_ema_fast,
+                    "macd_ema_slow": macd_ema_slow,
+                },
                 "macd_component_explanations": {
                     "macd_trend": "Measures overall EMA divergence; positive values indicate bullish acceleration.",
                     "macd_crossover": "Rewards MACD leading the signal line; negative values highlight bearish crossovers.",
