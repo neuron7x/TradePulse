@@ -94,15 +94,34 @@ def _current_git_sha(cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
+def _extract_experiment_section(
+    settings: ExperimentSettings | DictConfig,
+) -> ExperimentSettings | DictConfig:
+    """Return the experiment configuration for both typed and raw inputs."""
+
+    if isinstance(settings, ExperimentSettings):
+        return settings
+
+    experiment_cfg = settings.get("experiment")
+    if experiment_cfg is not None:
+        return experiment_cfg
+    return settings
+
+
 def collect_run_metadata(
-    run_dir: Path, original_cwd: Path, settings: ExperimentSettings
+    run_dir: Path, original_cwd: Path, settings: ExperimentSettings | DictConfig
 ) -> RunMetadata:
     """Collect metadata that allows reproducing the current experiment run."""
 
     timestamp = datetime.now(timezone.utc).isoformat()
     git_sha = _current_git_sha(original_cwd)
-    environment = settings.name
-    seed = int(settings.random_seed)
+    experiment_cfg = _extract_experiment_section(settings)
+    if isinstance(experiment_cfg, ExperimentSettings):
+        environment = experiment_cfg.name
+        seed = int(experiment_cfg.random_seed)
+    else:
+        environment = str(experiment_cfg.get("name", "")) or "default"
+        seed = int(experiment_cfg.get("random_seed", 0))
     return RunMetadata(
         run_dir=run_dir,
         original_cwd=original_cwd,
@@ -124,30 +143,47 @@ def _write_metadata(metadata: RunMetadata) -> None:
     metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def run_pipeline(settings: ExperimentSettings) -> dict[str, Any]:
+def run_pipeline(settings: ExperimentSettings | DictConfig) -> dict[str, Any]:
     """Execute the analytics pipeline using configuration parameters."""
 
     logger = logging.getLogger("tradepulse.experiment")
-    data_cfg = settings.data
-    analytics_cfg = settings.analytics
+    experiment_cfg = _extract_experiment_section(settings)
 
-    data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
+    if isinstance(experiment_cfg, ExperimentSettings):
+        data_cfg = experiment_cfg.data
+        analytics_cfg = experiment_cfg.analytics
+        data_path_value = data_cfg.price_csv
+        price_column = str(data_cfg.price_column)
+        window = int(analytics_cfg.window)
+        bins = int(analytics_cfg.bins)
+        delta = float(analytics_cfg.delta)
+    else:
+        data_cfg = experiment_cfg.get("data")
+        analytics_cfg = experiment_cfg.get("analytics")
+        if data_cfg is None or analytics_cfg is None:
+            raise ValueError("experiment configuration must define 'data' and 'analytics' sections")
+
+        data_path_value = data_cfg.get("price_csv")
+        price_column = str(data_cfg.get("price_column", "price"))
+        window = int(analytics_cfg.get("window", 256))
+        bins = int(analytics_cfg.get("bins", 48))
+        delta = float(analytics_cfg.get("delta", 0.005))
+
+    if data_path_value is None:
+        raise ValueError("experiment configuration must set data.price_csv")
+
+    data_path = Path(to_absolute_path(str(data_path_value)))
     if not data_path.exists():
         logger.warning("Data file %s does not exist; analytics step skipped.", data_path)
         return {"status": "missing-data", "path": str(data_path)}
 
     df = pd.read_csv(data_path)
-    price_column = str(data_cfg.price_column)
     if price_column not in df.columns:
         raise ValueError(
             f"Price column '{price_column}' not found in dataset columns {list(df.columns)}"
         )
 
     prices = df[price_column].to_numpy()
-    window = int(analytics_cfg.window)
-    bins = int(analytics_cfg.bins)
-    delta = float(analytics_cfg.delta)
-
     if len(prices) < window:
         raise ValueError(
             f"Not enough price observations ({len(prices)}) for window size {window}."
