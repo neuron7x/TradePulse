@@ -21,9 +21,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.trading import signal_to_dto
-from execution.risk import RiskLimits, RiskManager
 from domain import Signal, SignalAction
-from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from execution.risk import RiskLimits, RiskManager
+from src.admin.remote_control import (
+    AdminRateLimiter,
+    TokenAuthenticator,
+    create_remote_control_router,
+)
 from src.audit.audit_logger import AuditLogger
 from src.risk.risk_manager import RiskManagerFacade
 
@@ -178,7 +182,9 @@ class OnlineSignalForecaster:
 
     def latest_feature_vector(self, features: pd.DataFrame) -> pd.Series:
         if features.empty:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
+            )
         latest = features.iloc[-1].dropna()
         if latest.empty:
             raise HTTPException(
@@ -187,7 +193,9 @@ class OnlineSignalForecaster:
             )
         return latest
 
-    def derive_signal(self, symbol: str, latest: pd.Series, horizon_seconds: int) -> tuple[Signal, float]:
+    def derive_signal(
+        self, symbol: str, latest: pd.Series, horizon_seconds: int
+    ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
         macd = float(latest.get("macd", 0.0))
         rsi = float(latest.get("rsi", 50.0))
@@ -239,6 +247,7 @@ def create_app(
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
     admin_token: str | None = None,
     audit_secret: str | None = None,
+    admin_rate_limit: tuple[int, float] | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies."""
 
@@ -257,14 +266,20 @@ def create_app(
     if missing:
         joined = ", ".join(missing)
         raise RuntimeError(
-            "Missing required secret(s): {}. Provide them via create_app parameters or environment variables.".format(
-                joined
-            )
+            (
+                "Missing required secret(s): {}. Provide them via create_app parameters or "
+                "environment variables."
+            ).format(joined)
         )
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
     audit_logger = AuditLogger(secret=resolved_audit_secret)
     authenticator = TokenAuthenticator(token=resolved_admin_token)
+    rate_limit_values = admin_rate_limit or (5, 60.0)
+    admin_rate_limiter = AdminRateLimiter(
+        max_attempts=int(rate_limit_values[0]),
+        interval_seconds=float(rate_limit_values[1]),
+    )
 
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period
@@ -297,12 +312,20 @@ def create_app(
         allow_origins=["*"],
         allow_credentials=False,
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"]
+        allow_headers=["*"],
     )
 
-    app.include_router(create_remote_control_router(risk_manager_facade, audit_logger, authenticator))
+    app.include_router(
+        create_remote_control_router(
+            risk_manager_facade,
+            audit_logger,
+            authenticator,
+            rate_limiter=admin_rate_limiter,
+        )
+    )
     app.state.risk_manager = risk_manager_facade.risk_manager
     app.state.audit_logger = audit_logger
+    app.state.admin_rate_limiter = admin_rate_limiter
 
     async def enforce_rate_limit() -> None:
         loop = asyncio.get_running_loop()
@@ -316,10 +339,28 @@ def create_app(
     def get_forecaster() -> OnlineSignalForecaster:
         return forecaster
 
+    def _append_vary_header(response: Response, value: str) -> None:
+        existing = response.headers.get("Vary")
+        if not existing:
+            response.headers["Vary"] = value
+            return
+        values = {entry.strip() for entry in existing.split(",") if entry.strip()}
+        if value not in values:
+            response.headers["Vary"] = f"{existing}, {value}"
+
     @app.middleware("http")
-    async def add_cache_headers(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def add_cache_headers(
+        request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         response = await call_next(request)
-        response.headers.setdefault("Cache-Control", f"public, max-age={ttl_cache.ttl_seconds}")
+        path = request.url.path
+        if path.startswith("/admin") or response.status_code >= 400:
+            response.headers["Cache-Control"] = "no-store"
+            response.headers.setdefault("Pragma", "no-cache")
+            _append_vary_header(response, "X-Admin-Token")
+        else:
+            response.headers["Cache-Control"] = f"private, max-age={ttl_cache.ttl_seconds}"
+        _append_vary_header(response, "Accept")
         return response
 
     @app.get("/health", tags=["health"], summary="Health probe")
@@ -383,7 +424,9 @@ def create_app(
             score=score,
             signal=signal_to_dto(signal),
         )
-        etag = hashlib.sha256(json.dumps(body.model_dump(), sort_keys=True, default=str).encode("utf-8")).hexdigest()
+        etag = hashlib.sha256(
+            json.dumps(body.model_dump(), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
         await ttl_cache.set(cache_key, body, etag)
         response.headers["X-Cache-Status"] = "miss"
         response.headers["ETag"] = etag

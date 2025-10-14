@@ -8,7 +8,11 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from execution.risk import RiskLimits, RiskManager
-from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from src.admin.remote_control import (
+    AdminRateLimiter,
+    TokenAuthenticator,
+    create_remote_control_router,
+)
 from src.audit.audit_logger import AuditLogger, AuditRecord
 from src.risk.risk_manager import KillSwitchState, RiskManagerFacade
 
@@ -35,7 +39,9 @@ def remote_control_fixture() -> Iterator[RemoteControlBundle]:
         client.close()
 
 
-def test_kill_switch_endpoint_engages_kill_switch(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_endpoint_engages_kill_switch(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, audit_logger = remote_control_fixture
     response = client.post(
         "/admin/kill-switch",
@@ -130,6 +136,48 @@ def test_kill_switch_reaffirmation_is_audited(remote_control_fixture: RemoteCont
     assert reaffirmation.details["reason"] == "still engaged"
 
 
+def test_admin_rate_limiter_blocks_excessive_attempts() -> None:
+    records: list[AuditRecord] = []
+    audit_logger = AuditLogger(
+        secret="unit-test-secret",
+        sink=records.append,
+        clock=lambda: datetime(2025, 1, 1, tzinfo=timezone.utc),
+    )
+    risk_manager = RiskManager(RiskLimits())
+    facade = RiskManagerFacade(risk_manager)
+    authenticator = TokenAuthenticator(token="s3cr3t-token", subject="unit-admin")
+    limiter = AdminRateLimiter(max_attempts=1, interval_seconds=60.0)
+    app = FastAPI()
+    app.include_router(
+        create_remote_control_router(
+            facade,
+            audit_logger,
+            authenticator,
+            rate_limiter=limiter,
+        )
+    )
+    client = TestClient(app)
+    try:
+        first = client.post(
+            "/admin/kill-switch",
+            headers={"X-Admin-Token": "s3cr3t-token"},
+            json={"reason": "initial"},
+        )
+        assert first.status_code == 200
+
+        second = client.post(
+            "/admin/kill-switch",
+            headers={"X-Admin-Token": "s3cr3t-token"},
+            json={"reason": "follow-up"},
+        )
+        assert second.status_code == 429
+        assert "Too many administrative requests" in second.json()["detail"]
+        # No additional audit event should be recorded once the limiter rejects the request.
+        assert len(records) == 1
+    finally:
+        client.close()
+
+
 def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() -> None:
     risk_manager = RiskManager(RiskLimits())
     facade = RiskManagerFacade(risk_manager)
@@ -146,7 +194,9 @@ def test_risk_manager_facade_preserves_reason_when_reaffirmed_without_message() 
     assert risk_manager.kill_switch.reason == "manual intervention required"
 
 
-def test_kill_switch_prefers_forwarded_for_header(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_prefers_forwarded_for_header(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, _, records, _ = remote_control_fixture
     headers = {
         "X-Admin-Token": "s3cr3t-token",
@@ -203,7 +253,9 @@ def test_kill_switch_state_endpoint_returns_state_and_audit(
     assert records[0].details["reason"] == "manual override"
 
 
-def test_kill_switch_reset_endpoint_is_idempotent(remote_control_fixture: RemoteControlBundle) -> None:
+def test_kill_switch_reset_endpoint_is_idempotent(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
     client, risk_manager, records, audit_logger = remote_control_fixture
     headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "ops"}
 
