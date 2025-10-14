@@ -8,7 +8,7 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
+os.environ.setdefault("TRADEPULSE_ADMIN_SIGNING_KEY", "import-admin-signing-key")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
 
 from application.api.service import create_app
@@ -16,15 +16,18 @@ from application.api.service import create_app
 
 @pytest.fixture()
 def configured_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("TRADEPULSE_ADMIN_SIGNING_KEY", raising=False)
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
-    return create_app(admin_token="unit-admin-token", audit_secret="unit-audit-secret")
+    return create_app(
+        admin_signing_key="unit-admin-signing-key",
+        audit_secret="unit-audit-secret",
+    )
 
 
 def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("TRADEPULSE_ADMIN_SIGNING_KEY", raising=False)
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
-    with pytest.raises(RuntimeError, match="TRADEPULSE_ADMIN_TOKEN"):
+    with pytest.raises(RuntimeError, match="TRADEPULSE_ADMIN_SIGNING_KEY"):
         create_app()
 
 

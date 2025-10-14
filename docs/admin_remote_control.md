@@ -8,7 +8,8 @@ TradePulse exposes a protected FastAPI endpoint at `/admin/kill-switch` that tog
 
 Key properties:
 
-- **Token-protected** – a shared secret token is required in every request (production deployments should upgrade to SSO or JWT).
+- **Short-lived credentials** – HMAC-backed bearer tokens issued by the platform secret manager and bound to specific scopes and audiences.
+- **mTLS enforcement** – every request must present the expected client certificate thumbprint to pass verification.
 - **Audited** – every action is recorded through the structured audit logger with a tamper-evident HMAC signature.
 - **Idempotent** – repeated requests while the switch is active are acknowledged and logged as reaffirmations.
 
@@ -18,14 +19,10 @@ Set the following environment variables before starting the FastAPI application:
 
 | Variable | Description |
 | --- | --- |
-| `TRADEPULSE_ADMIN_TOKEN` | Static bearer token required in the `X-Admin-Token` header. |
+| `TRADEPULSE_ADMIN_SIGNING_KEY` | HMAC signing key retrieved from the secret manager for issuing admin credentials. |
 | `TRADEPULSE_AUDIT_SECRET` | Secret used to sign audit records for integrity verification. |
 
-> **Important:** Development defaults are provided (`dev-admin-token`, `dev-audit-secret`) to simplify local testing. Always override them in production.
-
-### Optional Headers
-
-- `X-Admin-Subject`: Overrides the default administrator subject stored in audit logs. Use it to provide the operator's username or SSO principal.
+> **Important:** Development defaults are provided (`dev-admin-signing-key`, `dev-audit-secret`) to simplify local testing. Always override them in production.
 
 ## Request Flow
 
@@ -35,8 +32,8 @@ Set the following environment variables before starting the FastAPI application:
      "reason": "manual intervention after monitoring alert"
    }
    ```
-2. Include the `X-Admin-Token` header containing the configured administrative token.
-3. Optionally include `X-Admin-Subject` to capture the operator identity in the audit log.
+2. Include the `Authorization: Bearer <token>` header where `<token>` is the short-lived credential minted from the secret manager.
+3. Provide `X-Client-Cert-Thumbprint` with the SHA-256 thumbprint of the authenticated mTLS client certificate.
 
 ## Responses
 
@@ -58,7 +55,7 @@ If the switch was previously active, `status` becomes `"already-engaged"` and `a
 Audit events include the following fields:
 
 - `event_type`: `kill_switch_engaged` or `kill_switch_reaffirmed`
-- `actor`: Administrator subject (from `X-Admin-Subject` or default)
+- `actor`: Administrator subject extracted from the credential payload
 - `ip_address`: Remote IP extracted from the request
 - `details`: Structured metadata containing the provided reason and whether the switch was already active
 - `signature`: HMAC-SHA256 signature computed with `TRADEPULSE_AUDIT_SECRET`
@@ -77,7 +74,7 @@ The suite validates authentication, kill-switch semantics, and audit logging int
 
 ## Production Recommendations
 
-- Replace the static token with your organisation's SSO or JWT solution by extending `TokenAuthenticator`.
+- Integrate the secret manager minting workflow with your SSO provider so that `ShortLivedTokenVerifier` receives signed JWTs or HMAC tokens tied to operator identities.
 - Persist audit records to an append-only datastore (for example, write-through to SIEM or immutable storage).
 - Configure alerts on the `kill_switch_reaffirmed` event to avoid unnoticed overrides.
 - Integrate the kill-switch status into your incident response runbooks so that restarts include a reset step if appropriate.

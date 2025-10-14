@@ -23,9 +23,24 @@ from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipel
 from application.trading import signal_to_dto
 from execution.risk import RiskLimits, RiskManager
 from domain import Signal, SignalAction
-from src.admin.remote_control import TokenAuthenticator, create_remote_control_router
+from src.admin.remote_control import ShortLivedTokenVerifier, create_remote_control_router
 from src.audit.audit_logger import AuditLogger
 from src.risk.risk_manager import RiskManagerFacade
+
+
+ADMIN_SIGNING_SECRET_NAME = "tradepulse.admin.remote-control"
+
+
+class _StaticSecretManager:
+    """In-memory secret manager used for signing administrative credentials."""
+
+    def __init__(self, signing_key: str) -> None:
+        self._signing_key = signing_key
+
+    def get_secret(self, name: str) -> str:
+        if name != ADMIN_SIGNING_SECRET_NAME:
+            raise RuntimeError(f"Unknown secret requested: {name}")
+        return self._signing_key
 
 
 @dataclass(slots=True)
@@ -237,7 +252,7 @@ def create_app(
     rate_limiter: AsyncLimiter | None = None,
     cache: TTLCache | None = None,
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
-    admin_token: str | None = None,
+    admin_signing_key: str | None = None,
     audit_secret: str | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies."""
@@ -247,11 +262,13 @@ def create_app(
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
 
-    resolved_admin_token = admin_token or os.environ.get("TRADEPULSE_ADMIN_TOKEN")
+    resolved_admin_signing_key = admin_signing_key or os.environ.get(
+        "TRADEPULSE_ADMIN_SIGNING_KEY"
+    )
     resolved_audit_secret = audit_secret or os.environ.get("TRADEPULSE_AUDIT_SECRET")
     missing = []
-    if not resolved_admin_token:
-        missing.append("TRADEPULSE_ADMIN_TOKEN")
+    if not resolved_admin_signing_key:
+        missing.append("TRADEPULSE_ADMIN_SIGNING_KEY")
     if not resolved_audit_secret:
         missing.append("TRADEPULSE_AUDIT_SECRET")
     if missing:
@@ -264,7 +281,11 @@ def create_app(
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
     audit_logger = AuditLogger(secret=resolved_audit_secret)
-    authenticator = TokenAuthenticator(token=resolved_admin_token)
+    secret_manager = _StaticSecretManager(signing_key=resolved_admin_signing_key)
+    authenticator = ShortLivedTokenVerifier(
+        secret_manager=secret_manager,
+        secret_name=ADMIN_SIGNING_SECRET_NAME,
+    )
 
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period

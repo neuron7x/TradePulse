@@ -86,6 +86,32 @@ Warm starts resume trading after a controlled shutdown or short outage.
   intervention before restarting. Investigate the root cause before resetting
   the switch.
 
+## Remote Kill-Switch Operations
+
+The `/admin/kill-switch` endpoint is guarded by short-lived, HMAC-signed tokens
+and mandatory mTLS client certificates. Operators must complete the following
+flow when performing a remote kill-switch engagement:
+
+1. **Establish mTLS identity** – use the operational client certificate issued
+   by security engineering. Capture its SHA-256 thumbprint for request headers
+   and ensure the certificate is loaded into the automation tooling that will
+   invoke the API.
+2. **Request an administrative credential** – call the platform's secret manager
+   workflow to mint a new token scoped to `kill-switch:engage` with the
+   `tradepulse.admin.kill-switch` audience. Tokens expire within minutes; request
+   a fresh credential immediately before the operation.
+3. **Invoke the endpoint** – send a POST request to `/admin/kill-switch` with
+   the JSON payload `{ "reason": "<human readable explanation>" }`, an
+   `Authorization: Bearer <token>` header, and an
+   `X-Client-Cert-Thumbprint` header containing the exact certificate thumbprint.
+4. **Validate the response** – the service rejects expired credentials, missing
+   scopes, or mTLS mismatches with `401/403` responses. Successful activations
+   return the kill-switch state and emit an `admin` audit log entry recording the
+   subject, thumbprint, and originating IP address.
+5. **Rotate credentials** – tokens are single-purpose. Discard them after the
+   operation and audit the secret manager to confirm issuance details for the
+   post-mortem record.
+
 ## Shutdown Procedure
 
 1. Call `loop.shutdown()` to stop background workers and disconnect connectors.
