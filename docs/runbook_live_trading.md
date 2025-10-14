@@ -12,7 +12,8 @@ trading sessions.
    exchange connector.
 2. **Risk controls** – verify that the `RiskManager` limits reflect the latest
    risk committee directives and that the kill-switch has been reset after the
-   previous trading session.
+   previous trading session (use `GET /admin/kill-switch` followed by
+   `DELETE /admin/kill-switch` if required).
 3. **State directory** – ensure the state directory configured in
    `LiveLoopConfig.state_dir` is writeable and backed up. Historical OMS state
    files are required for warm restarts and forensic analysis.
@@ -83,8 +84,9 @@ Warm starts resume trading after a controlled shutdown or short outage.
   systems (P&L, hedging) reflect the corrected state.
 - **Kill-switch activation** – when the risk kill-switch triggers, the live loop
   stops all background tasks, emits `on_kill_switch`, and requires manual
-  intervention before restarting. Investigate the root cause before resetting
-  the switch.
+  intervention before restarting. Investigate the root cause, confirm the
+  current status with `GET /admin/kill-switch`, and only resume once
+  `DELETE /admin/kill-switch` records a successful reset event.
 
 ## Shutdown Procedure
 

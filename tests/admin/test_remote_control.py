@@ -168,3 +168,74 @@ def test_kill_switch_falls_back_to_real_ip(remote_control_fixture: RemoteControl
     response = client.post("/admin/kill-switch", headers=headers, json={"reason": "initial"})
     assert response.status_code == 200
     assert records[0].ip_address == "2001:db8::1"
+
+
+def test_kill_switch_state_endpoint_returns_state_and_audit(
+    remote_control_fixture: RemoteControlBundle,
+) -> None:
+    client, risk_manager, records, audit_logger = remote_control_fixture
+    headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "observer"}
+
+    response = client.get("/admin/kill-switch", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {
+        "status": "disengaged",
+        "kill_switch_engaged": False,
+        "reason": "",
+        "already_engaged": False,
+    }
+    assert len(records) == 1
+    view_record = records[0]
+    assert view_record.event_type == "kill_switch_state_viewed"
+    assert view_record.actor == "observer"
+    assert audit_logger.verify(view_record)
+
+    records.clear()
+    risk_manager.kill_switch.trigger("manual override")
+    response = client.get("/admin/kill-switch", headers=headers)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kill_switch_engaged"] is True
+    assert body["status"] == "engaged"
+    assert body["reason"] == "manual override"
+    assert len(records) == 1
+    assert records[0].details["reason"] == "manual override"
+
+
+def test_kill_switch_reset_endpoint_is_idempotent(remote_control_fixture: RemoteControlBundle) -> None:
+    client, risk_manager, records, audit_logger = remote_control_fixture
+    headers = {"X-Admin-Token": "s3cr3t-token", "X-Admin-Subject": "ops"}
+
+    risk_manager.kill_switch.trigger("manual intervention")
+    first = client.delete("/admin/kill-switch", headers=headers)
+    assert first.status_code == 200
+    body = first.json()
+    assert body == {
+        "status": "reset",
+        "kill_switch_engaged": False,
+        "reason": "manual intervention",
+        "already_engaged": True,
+    }
+    assert not risk_manager.kill_switch.is_triggered()
+    assert len(records) == 1
+    reset_record = records[0]
+    assert reset_record.event_type == "kill_switch_reset"
+    assert reset_record.details["previously_engaged"] is True
+    assert reset_record.details["reason"] == "manual intervention"
+    assert audit_logger.verify(reset_record)
+
+    second = client.delete("/admin/kill-switch", headers=headers)
+    assert second.status_code == 200
+    body = second.json()
+    assert body == {
+        "status": "already-clear",
+        "kill_switch_engaged": False,
+        "reason": "",
+        "already_engaged": False,
+    }
+    assert len(records) == 2
+    noop_record = records[1]
+    assert noop_record.event_type == "kill_switch_reset_noop"
+    assert noop_record.details["previously_engaged"] is False
+    assert audit_logger.verify(noop_record)

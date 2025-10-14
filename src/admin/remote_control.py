@@ -51,6 +51,17 @@ class KillSwitchResponse(BaseModel):
     already_engaged: bool = Field(..., description="True if the kill-switch was already active.")
 
 
+def _build_kill_switch_response(status: str, state: KillSwitchState) -> KillSwitchResponse:
+    """Serialise a kill-switch state into the public response model."""
+
+    return KillSwitchResponse(
+        status=status,
+        kill_switch_engaged=state.engaged,
+        reason=state.reason,
+        already_engaged=state.already_engaged,
+    )
+
+
 class TokenAuthenticator:
     """Validate administrative requests using a static token."""
 
@@ -180,11 +191,63 @@ def create_remote_control_router(
             },
         )
         status_message = "already-engaged" if state.already_engaged else "engaged"
-        return KillSwitchResponse(
-            status=status_message,
-            kill_switch_engaged=state.engaged,
-            reason=state.reason,
-            already_engaged=state.already_engaged,
+        return _build_kill_switch_response(status_message, state)
+
+    @router.get(
+        "/kill-switch",
+        response_model=KillSwitchResponse,
+        status_code=status.HTTP_200_OK,
+        summary="Read the global kill-switch state",
+    )
+    async def read_kill_switch_state(
+        request: Request,
+        identity: AdminIdentity = Depends(authenticator),
+        manager: RiskManagerFacade = Depends(get_risk_manager),
+        logger: AuditLogger = Depends(get_audit_logger),
+    ) -> KillSwitchResponse:
+        """Return the current kill-switch status and audit the read."""
+
+        state = manager.kill_switch_state()
+        logger.log_event(
+            event_type="kill_switch_state_viewed",
+            actor=identity.subject,
+            ip_address=_resolve_ip(request),
+            details={
+                "kill_switch_engaged": state.engaged,
+                "reason": state.reason,
+                "path": str(request.url.path),
+            },
         )
+        status_message = "engaged" if state.engaged else "disengaged"
+        return _build_kill_switch_response(status_message, state)
+
+    @router.delete(
+        "/kill-switch",
+        response_model=KillSwitchResponse,
+        status_code=status.HTTP_200_OK,
+        summary="Reset the global kill-switch",
+    )
+    async def reset_kill_switch(
+        request: Request,
+        identity: AdminIdentity = Depends(authenticator),
+        manager: RiskManagerFacade = Depends(get_risk_manager),
+        logger: AuditLogger = Depends(get_audit_logger),
+    ) -> KillSwitchResponse:
+        """Reset the kill-switch in an idempotent manner and audit the action."""
+
+        state = manager.reset_kill_switch()
+        event_type = "kill_switch_reset" if state.already_engaged else "kill_switch_reset_noop"
+        logger.log_event(
+            event_type=event_type,
+            actor=identity.subject,
+            ip_address=_resolve_ip(request),
+            details={
+                "previously_engaged": state.already_engaged,
+                "reason": state.reason,
+                "path": str(request.url.path),
+            },
+        )
+        status_message = "reset" if state.already_engaged else "already-clear"
+        return _build_kill_switch_response(status_message, state)
 
     return router
