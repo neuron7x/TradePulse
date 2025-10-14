@@ -414,6 +414,15 @@ Before releasing a new version:
 - Regular security audits
 - Dependency scanning
 
+## Контроль required status checks
+
+- Coverage check (Codecov) має бути обов'язковим для PR у main/develop.
+- Якщо coverage check зник, додайте його у Branch protection rules.
+- Як це зробити: https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches
+
+**Coverage інтеграція:**  
+- [Codecov + GitHub інтеграція](https://docs.codecov.com/docs/github-checks)
+
 ---
 
 ## Incident Response
