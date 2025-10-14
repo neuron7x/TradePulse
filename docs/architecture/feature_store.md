@@ -44,3 +44,12 @@ online store safely:
 * **Deterministic deduplication** normalises both stream payloads and
   historical frames before hashing, ensuring consistent behaviour across
   pandas and backend versions.
+
+## Internal topology
+
+<figure markdown>
+![Feature store internal topology](assets/feature_store_internals.svg){ width="960" }
+<figcaption>Streaming materialisers enforce schema validation, retention policies, and deterministic deduplication before upserting into Redis or SQLite, while the offline validator reconciles lakehouse snapshots.</figcaption>
+</figure>
+
+Update the Mermaid source in [`assets/feature_store_internals.mmd`](assets/feature_store_internals.mmd) to regenerate the rendered diagram alongside this page.

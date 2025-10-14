@@ -325,7 +325,7 @@ TradePulse/
 └── docs/               # Documentation
 ```
 
-Dive deeper with the dedicated [architecture diagram suite](docs/architecture/system_overview.md) covering system context, component interactions, and governance data flows. The [feature store architecture breakdown](docs/architecture/feature_store.md) complements these visuals with data engineering specifics.
+Dive deeper with the dedicated [architecture diagram suite](docs/architecture/system_overview.md) covering the rendered system context, component interaction sequence, and governance data flows. The [feature store architecture breakdown](docs/architecture/feature_store.md) complements these visuals with detailed retention and materialisation internals.
 
 ---
 

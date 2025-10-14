@@ -1,0 +1,45 @@
+%% TradePulse system overview context diagram
+flowchart LR
+    subgraph External[External Data Providers]
+        Mkt[Market Data APIs]
+        Alt[Alternative Signals]
+        News[News & Sentiment]
+        Ops[Brokerage Events]
+    end
+
+    subgraph Ingestion[Ingestion & Orchestration]
+        Sched[Scheduler]
+        Connect[Connector Workers]
+        Stream[Streaming ETL]
+        Valid[Schema Validation]
+    end
+
+    subgraph Platform[Unified Data Platform]
+        Lake[Feature Lake]
+        Catalog[Metadata Catalog]
+        Models[Model Registry]
+        FS[Feature Store]
+    end
+
+    subgraph Services[Analytics & Execution Services]
+        Risk[Risk Engine]
+        Strat[Strategy Engine]
+        Backtest[Backtesting]
+        Exec[Execution Gateway]
+        API[Public API]
+    end
+
+    subgraph Experience[Experience Channels]
+        UI[Trader UI]
+        CLI[CLI Tooling]
+        Reports[Automated Reporting]
+        Partners[Partner Integrations]
+    end
+
+    External --> Ingestion
+    Ingestion --> Platform
+    Platform --> Services
+    Services --> Experience
+    Experience -->|Feedback| Services
+    Services -->|Signals| Platform
+    Platform -->|Metadata| Ingestion
