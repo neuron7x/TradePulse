@@ -95,12 +95,12 @@ with st.sidebar:
         step=0.0005,
         format="%0.4f",
     )
-    use_gpu = st.toggle(
+    use_gpu = st.checkbox(
         "Use GPU acceleration",
         value=False,
         help="Requires CuPy support at runtime",
     )
-    backend_url = st.text_input(
+    backend_url_input = st.text_input(
         "Telemetry API endpoint",
         placeholder="https://telemetry.example.com/ingest",
         help="Optional. When provided the dashboard will POST metrics along with trace context.",
@@ -110,6 +110,8 @@ with st.sidebar:
         value=False,
         help="Enable to POST computed metrics to the configured backend endpoint.",
     )
+
+backend_url = backend_url_input.strip()
 
 uploaded = st.file_uploader("Upload CSV with columns: ts, price, volume", type=["csv"])
 
@@ -137,13 +139,19 @@ if uploaded:
                 delta=delta,
                 gpu_requested=use_gpu,
             ) as span:
-                metrics = compute_indicator_metrics(
-                    prices,
-                    window=window,
-                    bins=bins,
-                    delta=delta,
-                    use_gpu=use_gpu,
-                )
+                try:
+                    metrics = compute_indicator_metrics(
+                        prices,
+                        window=window,
+                        bins=bins,
+                        delta=delta,
+                        use_gpu=use_gpu,
+                    )
+                except ValueError as exc:
+                    st.error(str(exc))
+                    span.record_exception(exc)
+                    span.set_attributes({"error": True})
+                    st.stop()
                 span.set_attributes(
                     {
                         "metrics.phase": metrics["phase"],
@@ -172,6 +180,9 @@ if uploaded:
 
             chart_df = prepared.set_index("ts")["price"]
             st.line_chart(chart_df, height=320)
+
+            if send_to_backend and not backend_url:
+                st.warning("Provide a telemetry endpoint URL to enable metric forwarding.")
 
             if backend_url and send_to_backend:
                 with tracer.start_as_current_span(
