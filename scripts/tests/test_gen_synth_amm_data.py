@@ -1,12 +1,10 @@
 """Tests for gen_synth_amm_data.py script."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import csv
 from pathlib import Path
-
-import pytest
 
 from scripts import gen_synth_amm_data
 
@@ -96,9 +94,7 @@ def test_main_success(tmp_path: Path, capsys) -> None:
     """Test that main returns 0 on success and prints output path."""
     output_path = tmp_path / "test_output.csv"
 
-    exit_code = gen_synth_amm_data.main(
-        ["-o", str(output_path), "-n", "10", "-s", "1"]
-    )
+    exit_code = gen_synth_amm_data.main(["-o", str(output_path), "-n", "10", "-s", "1"])
 
     assert exit_code == 0
     assert output_path.exists()
