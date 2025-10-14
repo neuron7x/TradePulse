@@ -238,6 +238,7 @@ function buildPreview(config: ScenarioConfig) {
 export default function Home() {
   const [templateId, setTemplateId] = useState<string>(SCENARIO_TEMPLATES[0].id)
   const [draft, setDraft] = useState<ScenarioDraft>(() => toDraft(SCENARIO_TEMPLATES[0].defaults))
+  const [actionMessage, setActionMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
 
   const selectedTemplate = useMemo(
     () => SCENARIO_TEMPLATES.find((entry) => entry.id === templateId) ?? SCENARIO_TEMPLATES[0],
@@ -266,11 +267,64 @@ export default function Home() {
 
   const handleChange = (field: ScenarioField) => (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
+    setActionMessage(null)
     setDraft((current) => ({ ...current, [field]: value }))
   }
 
   const resetTemplate = () => {
     setDraft(toDraft(selectedTemplate.defaults))
+    setActionMessage(null)
+  }
+
+  const handleCopy = async () => {
+    if (hasErrors) {
+      setActionMessage({
+        kind: 'error',
+        text: 'Resolve form errors before exporting the scenario JSON.',
+      })
+      return
+    }
+
+    try {
+      if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+        throw new Error('Clipboard API unavailable')
+      }
+      await navigator.clipboard.writeText(preview)
+      setActionMessage({ kind: 'success', text: 'Scenario JSON copied to clipboard.' })
+    } catch (error) {
+      setActionMessage({
+        kind: 'error',
+        text: 'Failed to copy the scenario JSON. Please try again.',
+      })
+    }
+  }
+
+  const handleDownload = () => {
+    if (hasErrors) {
+      setActionMessage({
+        kind: 'error',
+        text: 'Resolve form errors before exporting the scenario JSON.',
+      })
+      return
+    }
+
+    try {
+      const blob = new Blob([preview], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `scenario-${templateId}.json`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      setActionMessage({ kind: 'success', text: 'Scenario JSON download started.' })
+    } catch (error) {
+      setActionMessage({
+        kind: 'error',
+        text: 'Failed to start the scenario JSON download. Please try again.',
+      })
+    }
   }
 
   return (
@@ -303,6 +357,7 @@ export default function Home() {
                 onChange={(event) => {
                   const value = event.target.value
                   setTemplateId(value)
+                  setActionMessage(null)
                   const template = SCENARIO_TEMPLATES.find((entry) => entry.id === value)
                   if (template) {
                     setDraft(toDraft(template.defaults))
@@ -366,7 +421,7 @@ export default function Home() {
                 )
               })}
 
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   onClick={resetTemplate}
@@ -381,7 +436,52 @@ export default function Home() {
                 >
                   Reset to template defaults
                 </button>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  disabled={hasErrors}
+                  style={{
+                    backgroundColor: hasErrors ? 'rgba(15, 23, 42, 0.6)' : '#38bdf8',
+                    border: '1px solid rgba(148, 163, 184, 0.4)',
+                    color: hasErrors ? '#94a3b8' : '#0f172a',
+                    padding: '0.55rem 1rem',
+                    borderRadius: '0.65rem',
+                    cursor: hasErrors ? 'not-allowed' : 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Copy to clipboard
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  disabled={hasErrors}
+                  style={{
+                    backgroundColor: hasErrors ? 'rgba(15, 23, 42, 0.6)' : '#22d3ee',
+                    border: '1px solid rgba(148, 163, 184, 0.4)',
+                    color: hasErrors ? '#94a3b8' : '#0f172a',
+                    padding: '0.55rem 1rem',
+                    borderRadius: '0.65rem',
+                    cursor: hasErrors ? 'not-allowed' : 'pointer',
+                    fontWeight: 600,
+                  }}
+                >
+                  Download JSON
+                </button>
               </div>
+              {actionMessage ? (
+                <p
+                  role="status"
+                  style={{
+                    marginTop: '0.5rem',
+                    color: actionMessage.kind === 'success' ? '#4ade80' : '#f97316',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  {actionMessage.text}
+                </p>
+              ) : null}
             </form>
           </div>
         </section>
