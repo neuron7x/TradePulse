@@ -59,6 +59,8 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "volatility_10",
         "rsi",
         "macd",
+        "macd_ema_fast",
+        "macd_ema_slow",
         "price_range",
         "log_volume",
         "volume_z",
@@ -70,6 +72,43 @@ def test_feature_pipeline_generates_expected_columns() -> None:
     assert expected.issubset(features.columns)
     # ensure leakage control ready: there should be NaNs at start because of rolling windows
     assert features.isna().sum().max() > 0
+
+
+def test_macd_components_align_with_golden_baseline() -> None:
+    dataset = pd.read_csv("data/golden/indicator_macd_baseline.csv", parse_dates=["ts"])
+    frame = dataset[["ts", "close"]].set_index("ts")
+    cfg = FeaturePipelineConfig(technical_windows=(), macd_fast=12, macd_slow=26)
+    pipeline = SignalFeaturePipeline(cfg)
+    features = pipeline.transform(frame)
+
+    components = features[["macd_ema_fast", "macd_ema_slow", "macd"]].rename(
+        columns={
+            "macd_ema_fast": "ema_12",
+            "macd_ema_slow": "ema_26",
+        }
+    )
+    baseline = dataset.set_index("ts")[["ema_12", "ema_26", "macd"]]
+    combined = components.join(baseline, how="inner", lsuffix="_pipeline", rsuffix="_baseline")
+
+    assert not combined.empty
+    np.testing.assert_allclose(
+        combined["ema_12_pipeline"],
+        combined["ema_12_baseline"],
+        rtol=5e-4,
+        atol=6e-2,
+    )
+    np.testing.assert_allclose(
+        combined["ema_26_pipeline"],
+        combined["ema_26_baseline"],
+        rtol=5e-4,
+        atol=6e-2,
+    )
+    np.testing.assert_allclose(
+        combined["macd_pipeline"],
+        combined["macd_baseline"],
+        rtol=5e-4,
+        atol=6e-2,
+    )
 
 
 def test_feature_pipeline_float_precision_consistency() -> None:
