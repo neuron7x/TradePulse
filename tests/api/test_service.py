@@ -66,6 +66,8 @@ def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> Non
     assert body["symbol"] == "TEST-USD"
     assert "features" in body
     assert body["features"].get("macd") is not None
+    assert body["features"].get("signal") is not None
+    assert body["features"].get("histogram") is not None
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
@@ -99,6 +101,21 @@ def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
     cached = client.post("/predictions", json=payload)
     assert cached.headers["X-Cache-Status"] == "hit"
     assert cached.json() == body
+
+
+def test_feature_endpoint_requires_macd_convergence_inputs(configured_app: FastAPI) -> None:
+    app = configured_app
+    client = TestClient(app)
+
+    payload = _build_payload()
+    payload["bars"] = payload["bars"][:20]
+
+    response = client.post("/features", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"]["code"] == 422
+    assert "missing components" in body["error"]["message"]
 
 
 def test_admin_endpoints_set_strict_cache_headers(configured_app: FastAPI) -> None:

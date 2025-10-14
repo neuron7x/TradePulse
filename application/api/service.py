@@ -75,6 +75,9 @@ class TTLCache:
             self._entries[key] = _CacheEntry(payload=payload, expires_at=expires, etag=etag)
 
 
+REQUIRED_MACD_FEATURES: tuple[str, ...] = ("macd", "signal", "histogram")
+
+
 def _ensure_timezone(ts: datetime) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
@@ -185,19 +188,41 @@ class OnlineSignalForecaster:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
             )
-        latest = features.iloc[-1].dropna()
-        if latest.empty:
+        latest = features.iloc[-1]
+        cleaned = latest.dropna()
+        if cleaned.empty:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Insufficient data to derive features",
             )
-        return latest
+        missing_macd = [field for field in REQUIRED_MACD_FEATURES if field not in cleaned]
+        if missing_macd:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Insufficient MACD convergence inputs; "
+                    "missing components: " + ", ".join(sorted(missing_macd))
+                ),
+            )
+        return cleaned
 
     def derive_signal(
         self, symbol: str, latest: pd.Series, horizon_seconds: int
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
-        macd = float(latest.get("macd", 0.0))
+        missing_components = [field for field in REQUIRED_MACD_FEATURES if field not in latest]
+        if missing_components:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Insufficient MACD convergence inputs; "
+                    "missing components: " + ", ".join(sorted(missing_components))
+                ),
+            )
+
+        macd = float(latest["macd"])
+        macd_signal = float(latest["signal"])
+        macd_histogram = float(latest["histogram"])
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
@@ -209,6 +234,8 @@ class OnlineSignalForecaster:
         score += np.tanh(ret_1 * 100.0) * 0.2
         score += np.tanh(queue_imbalance) * 0.1
         score -= abs(volatility_20) * 0.05
+        score += np.tanh(macd - macd_signal) * 0.05
+        score += np.tanh(macd_histogram) * 0.05
 
         threshold = 0.15
         if score > threshold:
@@ -229,6 +256,9 @@ class OnlineSignalForecaster:
             metadata={
                 "score": score,
                 "horizon_seconds": horizon_seconds,
+                "macd": macd,
+                "macd_signal": macd_signal,
+                "macd_histogram": macd_histogram,
             },
         )
         return signal, score

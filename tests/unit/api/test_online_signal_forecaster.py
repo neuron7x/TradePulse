@@ -55,7 +55,17 @@ class TestLatestFeatureVector:
     def test_all_nan_row_raises_unprocessable_entity(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
     ) -> None:
-        features = pd.DataFrame([{"macd": np.nan, "rsi": np.nan, "return_1": np.nan}])
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": np.nan,
+                    "signal": np.nan,
+                    "histogram": np.nan,
+                    "rsi": np.nan,
+                    "return_1": np.nan,
+                }
+            ]
+        )
         forecaster = make_forecaster(features)
 
         with pytest.raises(HTTPException) as excinfo:
@@ -70,6 +80,8 @@ class TestLatestFeatureVector:
             [
                 {
                     "macd": 0.1,
+                    "signal": 0.08,
+                    "histogram": 0.02,
                     "rsi": 53.0,
                     "return_1": 0.005,
                     "queue_imbalance": 0.2,
@@ -84,6 +96,26 @@ class TestLatestFeatureVector:
         assert isinstance(latest, pd.Series)
         assert not latest.isna().any()
 
+    def test_missing_macd_components_raise_unprocessable_entity(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": 0.2,
+                    "rsi": 55.0,
+                    "return_1": 0.01,
+                    "queue_imbalance": 0.1,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.latest_feature_vector(features)
+
+        assert excinfo.value.status_code == 422
+
 
 class TestDeriveSignal:
     @pytest.mark.parametrize(
@@ -91,37 +123,43 @@ class TestDeriveSignal:
         [
             (
                 pd.Series(
-                    {
-                        "macd": 1.2,
-                        "rsi": 68.0,
-                        "return_1": 0.03,
-                        "queue_imbalance": 0.8,
-                        "volatility_20": 0.05,
-                    }
+                        {
+                            "macd": 1.2,
+                            "signal": 0.8,
+                            "histogram": 0.4,
+                            "rsi": 68.0,
+                            "return_1": 0.03,
+                            "queue_imbalance": 0.8,
+                            "volatility_20": 0.05,
+                        }
                 ),
                 SignalAction.BUY,
             ),
             (
                 pd.Series(
-                    {
-                        "macd": -1.5,
-                        "rsi": 28.0,
-                        "return_1": -0.04,
-                        "queue_imbalance": -0.7,
-                        "volatility_20": 0.03,
-                    }
+                        {
+                            "macd": -1.5,
+                            "signal": -1.0,
+                            "histogram": -0.5,
+                            "rsi": 28.0,
+                            "return_1": -0.04,
+                            "queue_imbalance": -0.7,
+                            "volatility_20": 0.03,
+                        }
                 ),
                 SignalAction.SELL,
             ),
             (
                 pd.Series(
-                    {
-                        "macd": 0.02,
-                        "rsi": 49.0,
-                        "return_1": 0.0005,
-                        "queue_imbalance": 0.01,
-                        "volatility_20": 0.02,
-                    }
+                        {
+                            "macd": 0.02,
+                            "signal": 0.03,
+                            "histogram": -0.01,
+                            "rsi": 49.0,
+                            "return_1": 0.0005,
+                            "queue_imbalance": 0.01,
+                            "volatility_20": 0.02,
+                        }
                 ),
                 SignalAction.HOLD,
             ),
@@ -154,6 +192,8 @@ class TestDeriveSignal:
             [
                 {
                     "macd": 0.5,
+                    "signal": 0.45,
+                    "histogram": 0.05,
                     "rsi": 62.0,
                     "return_1": 0.015,
                     "queue_imbalance": 0.4,
@@ -176,4 +216,24 @@ class TestDeriveSignal:
         assert response.horizon_seconds == horizon
         assert response.signal["metadata"]["horizon_seconds"] == horizon
         assert response.signal["metadata"]["score"] == pytest.approx(score, rel=1e-6)
+
+    def test_derive_signal_requires_macd_components(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": 0.3,
+                    "rsi": 60.0,
+                    "return_1": 0.02,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+        series = features.iloc[0]
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.derive_signal("BTC-USD", series, 300)
+
+        assert excinfo.value.status_code == 422
 

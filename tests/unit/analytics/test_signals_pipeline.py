@@ -59,6 +59,8 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "volatility_10",
         "rsi",
         "macd",
+        "signal",
+        "histogram",
         "price_range",
         "log_volume",
         "volume_z",
