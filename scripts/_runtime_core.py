@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
+from core.utils.determinism import apply_thread_determinism
+
 DEFAULT_SEED = 1337
 DEFAULT_LOCALE = "C"
 _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
@@ -42,6 +44,8 @@ def configure_deterministic_runtime(
 
     resolved_seed = seed if seed is not None else int(os.getenv("SCRIPTS_RANDOM_SEED", DEFAULT_SEED))
     resolved_locale = locale_name or os.getenv("SCRIPTS_LOCALE", DEFAULT_LOCALE)
+
+    apply_thread_determinism()
 
     os.environ["PYTHONHASHSEED"] = str(resolved_seed)
     random.seed(resolved_seed)

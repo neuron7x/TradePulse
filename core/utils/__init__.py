@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: MIT
 """Shared utilities for TradePulse."""
 
+from .clock import freeze_time
 from .logging import (
     JSONFormatter,
     StructuredLogger,
@@ -24,5 +25,6 @@ __all__ = [
     "start_metrics_server",
     "AutoRollbackGuard",
     "SLOConfig",
+    "freeze_time",
 ]
 

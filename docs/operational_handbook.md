@@ -35,6 +35,9 @@ teams can reach production readiness without tribal knowledge.
   backfills, and quality validation suites when ingest feeds misbehave, forming
   the "golden data" pathway for regulated markets
   [`docs/runbook_data_incident.md`](runbook_data_incident.md).
+- **Indicator MACD baseline** – `data/golden/indicator_macd_baseline.csv`
+  provides a five-row canonical dataset with pre-computed MACD components so
+  regressions can compare indicator outputs deterministically.
 - **Quality gates** – Enforce code, test, and performance standards by adopting
   the gating catalogue in [`docs/quality_gates.md`](quality_gates.md), which
   pairs coverage, regression budgets, and break-glass expectations with CI
@@ -49,6 +52,9 @@ teams can reach production readiness without tribal knowledge.
   [`docs/notebooks/complete_tutorial.ipynb`](notebooks/complete_tutorial.ipynb)
   demonstrates ingestion, feature building, model training, backtesting, and
   reporting with deterministic seeds.
+- **Frozen clocks** – Tests and smoke scripts can call
+  `core.utils.freeze_time` to pin wall-clock and monotonic timers, eliminating
+  time-sensitive flakes during reproducibility checks.
 - **Example gallery** – Developers can execute runnable workflows from
   [`docs/examples/README.md`](examples/README.md) and the scripts under
   [`examples/`](../examples/). Performance demos and indicator profiles rely on
