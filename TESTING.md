@@ -17,6 +17,10 @@ TradePulse employs a comprehensive testing strategy that includes:
 - **Security Tests**: Prevent sensitive data leakage in audit logs and shared fixtures.
 - **UI Smoke & Accessibility**: Exercise the Next.js dashboard via Playwright and aXe rules.
 
+For a capability-to-suite traceability view, consult the
+[regression test matrix](tests/TEST_PLAN.md) which links major product behaviours to the
+automated coverage that protects them.
+
 ## Test Structure
 
 ```
