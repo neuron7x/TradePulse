@@ -93,6 +93,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 1.2,
+                        "macd_signal": 0.6,
+                        "macd_histogram": 0.6,
                         "rsi": 68.0,
                         "return_1": 0.03,
                         "queue_imbalance": 0.8,
@@ -105,6 +107,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": -1.5,
+                        "macd_signal": -0.8,
+                        "macd_histogram": -0.7,
                         "rsi": 28.0,
                         "return_1": -0.04,
                         "queue_imbalance": -0.7,
@@ -117,6 +121,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 0.02,
+                        "macd_signal": 0.03,
+                        "macd_histogram": -0.01,
                         "rsi": 49.0,
                         "return_1": 0.0005,
                         "queue_imbalance": 0.01,
@@ -141,11 +147,56 @@ class TestDeriveSignal:
         assert 0.0 <= signal.confidence <= 1.0
 
         if expected_action is SignalAction.BUY:
-            assert score > 0.15
+            assert score > 0.12
         elif expected_action is SignalAction.SELL:
-            assert score < -0.15
+            assert score < -0.12
         else:
-            assert -0.15 <= score <= 0.15
+            assert -0.12 <= score <= 0.12
+
+    def test_bullish_macd_convergence_scores_positive(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        series = pd.Series(
+            {
+                "macd": -0.2,
+                "macd_signal": -0.35,
+                "macd_histogram": 0.15,
+                "rsi": 52.0,
+                "return_1": 0.01,
+                "queue_imbalance": 0.1,
+                "volatility_20": 0.015,
+            }
+        )
+        forecaster = make_forecaster(pd.DataFrame([series]))
+
+        signal, score = forecaster.derive_signal("SOL-USD", series, 600)
+
+        assert score > 0.12
+        assert signal.action is SignalAction.BUY
+        assert "component_contributions" in signal.metadata
+        assert signal.metadata["component_contributions"]["macd_crossover"] > 0
+
+    def test_bearish_macd_convergence_scores_negative(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        series = pd.Series(
+            {
+                "macd": 0.18,
+                "macd_signal": 0.45,
+                "macd_histogram": -0.27,
+                "rsi": 44.0,
+                "return_1": -0.012,
+                "queue_imbalance": -0.2,
+                "volatility_20": 0.018,
+            }
+        )
+        forecaster = make_forecaster(pd.DataFrame([series]))
+
+        signal, score = forecaster.derive_signal("ADA-USD", series, 600)
+
+        assert score < -0.12
+        assert signal.action is SignalAction.SELL
+        assert signal.metadata["component_contributions"]["macd_crossover"] < 0
 
     def test_signal_to_dto_in_prediction_response(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
@@ -154,6 +205,8 @@ class TestDeriveSignal:
             [
                 {
                     "macd": 0.5,
+                    "macd_signal": 0.2,
+                    "macd_histogram": 0.3,
                     "rsi": 62.0,
                     "return_1": 0.015,
                     "queue_imbalance": 0.4,
