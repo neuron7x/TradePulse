@@ -29,6 +29,7 @@ class FeaturePipelineConfig:
     macd_fast: int = 12
     macd_slow: int = 26
     volatility_window: int = 20
+    macd_signal_window: int = 9
     microstructure_window: int = 50
 
 
@@ -125,7 +126,15 @@ class SignalFeaturePipeline:
         features["rsi"] = _rsi(price, cfg.rsi_window)
         fast_ema = price.ewm(span=cfg.macd_fast, adjust=False, min_periods=cfg.macd_fast).mean()
         slow_ema = price.ewm(span=cfg.macd_slow, adjust=False, min_periods=cfg.macd_slow).mean()
-        features["macd"] = fast_ema - slow_ema
+        macd = fast_ema - slow_ema
+        features["macd"] = macd
+        macd_signal = macd.ewm(
+            span=cfg.macd_signal_window,
+            adjust=False,
+            min_periods=cfg.macd_signal_window,
+        ).mean()
+        features["macd_signal"] = macd_signal
+        features["macd_histogram"] = macd - macd_signal
         features["price_range"] = (high - low).astype(float)
 
         if volume is not None:
