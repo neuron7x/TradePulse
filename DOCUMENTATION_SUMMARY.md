@@ -198,8 +198,13 @@ This document summarizes the comprehensive documentation, security, and monitori
   - Notes on edge cases and behavior
 - Class docstrings with:
   - Attributes documentation
-  - Complete examples
-  - Integration patterns
+  - Cross-links to related modules and governance guides
+
+**docs/documentation_governance.md - Documentation Quality Framework**
+- Defines ownership model (steward, domain owner, release manager, quality engineer)
+- Introduces metadata front matter requirements for all new documents
+- Establishes lifecycle checkpoints, automation gates, and review cadences
+- Details metrics, templates, and tooling integration for continuous improvement
 
 **core/indicators/hurst.py - Complete Documentation**
 - Module-level documentation on Hurst exponent theory

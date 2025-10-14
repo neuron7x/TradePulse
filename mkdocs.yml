@@ -90,6 +90,7 @@ nav:
   - Quality Management:
       - DoR & DoD Checklist: quality-dor-dod.md
       - Quality Gates: quality_gates.md
+      - Documentation Governance: documentation_governance.md
 
 markdown_extensions:
   - admonition

@@ -97,6 +97,9 @@ focused document so contributors can quickly find the details they need.
   to sustain healthy engineering velocity while avoiding unplanned outages.
 - Use the [Quality DoR/DoD checklist](quality-dor-dod.md) to enforce clear entry
   and exit criteria before pulling or closing quality-focused work.
+- Align with the [Documentation Governance and Quality Framework](documentation_governance.md)
+  when planning, reviewing, or auditing knowledge base changes to keep content
+  accurate and discoverable.
 
 ---
 
