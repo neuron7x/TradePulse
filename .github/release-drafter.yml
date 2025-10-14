@@ -25,7 +25,7 @@ categories:
 
 change-template: '- $TITLE @$AUTHOR (#$NUMBER)'
 no-changes-template: 'No changes in this release.'
-latest: true
+latest: 'true'
 version-resolver:
   major:
     labels:
