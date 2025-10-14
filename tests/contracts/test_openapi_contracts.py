@@ -10,6 +10,7 @@ os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
 
 from application.api.service import create_app  # noqa: E402  - env vars must be set before import
+from application.settings import AdminApiSettings
 
 
 BASELINE = Path("interfaces/http/openapi/1.0.0.json")
@@ -17,7 +18,11 @@ BASELINE = Path("interfaces/http/openapi/1.0.0.json")
 
 @pytest.fixture()
 def fastapi_app():
-    return create_app(admin_token="import-admin-token", audit_secret="import-audit-secret")
+    settings = AdminApiSettings(
+        admin_token="import-admin-token",
+        audit_secret="import-audit-secret",
+    )
+    return create_app(settings=settings)
 
 
 def test_openapi_contract_matches_baseline(fastapi_app) -> None:

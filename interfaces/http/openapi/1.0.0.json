@@ -333,7 +333,7 @@
   "paths": {
     "/admin/kill-switch": {
       "delete": {
-        "description": "Reset the kill-switch in an idempotent manner and audit the action.",
+        "description": "Reset the kill-switch in an idempotent manner and preserve an audit trail.",
         "operationId": "reset_kill_switch_admin_kill_switch_delete",
         "parameters": [
           {
@@ -393,7 +393,7 @@
         ]
       },
       "get": {
-        "description": "Return the current kill-switch status and audit the read.",
+        "description": "Inspect the kill-switch state and append an immutable audit record.",
         "operationId": "read_kill_switch_state_admin_kill_switch_get",
         "parameters": [
           {
@@ -453,7 +453,7 @@
         ]
       },
       "post": {
-        "description": "Engage the risk manager kill-switch and log the operation.",
+        "description": "Engage or reaffirm the kill-switch and emit a signed audit log entry.",
         "operationId": "engage_kill_switch_admin_kill_switch_post",
         "parameters": [
           {

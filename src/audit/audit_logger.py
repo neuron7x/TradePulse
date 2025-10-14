@@ -9,9 +9,10 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
 
+import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["AuditLogger", "AuditRecord", "AuditSink"]
+__all__ = ["AuditLogger", "AuditRecord", "AuditSink", "HttpAuditSink"]
 
 
 _REDACTED_VALUE = "[REDACTED]"
@@ -83,7 +84,7 @@ class AuditSink(Protocol):
 
 
 class AuditLogger:
-    """Generate signed audit records and forward them to configured sinks."""
+    """Generate signed audit records, sign them, and forward to configured sinks."""
 
     def __init__(
         self,
@@ -148,3 +149,56 @@ class AuditLogger:
         audit_payload = record.model_dump()
         audit_payload["details"] = _redact_sensitive_payload(audit_payload["details"])
         self._logger.info("audit.event", extra={"audit": audit_payload})
+
+
+class HttpAuditSink:
+    """Forward audit records to an external HTTP endpoint."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        http_client: httpx.Client | None = None,
+        timeout: float = 5.0,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        if not endpoint:
+            raise ValueError("endpoint must be provided for the audit sink")
+        self._endpoint = endpoint
+        self._client = http_client
+        self._timeout = timeout
+        self._logger = logger or logging.getLogger("tradepulse.audit.http_sink")
+
+    def __call__(self, record: AuditRecord) -> None:
+        payload = record.model_dump(mode="json")
+        response: httpx.Response | None = None
+        try:
+            if self._client is not None:
+                response = self._client.post(
+                    self._endpoint,
+                    json=payload,
+                    timeout=self._timeout,
+                )
+            else:
+                response = httpx.post(
+                    self._endpoint,
+                    json=payload,
+                    timeout=self._timeout,
+                )
+            response.raise_for_status()
+        except Exception as exc:  # pragma: no cover - logging side effect
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            elif response is not None:
+                status_code = response.status_code
+            self._logger.error(
+                "Failed to forward audit record",
+                exc_info=exc,
+                extra={
+                    "audit_sink": {
+                        "endpoint": self._endpoint,
+                        "status_code": status_code,
+                    }
+                },
+            )

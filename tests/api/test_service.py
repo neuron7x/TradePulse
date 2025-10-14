@@ -11,13 +11,18 @@ os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
 
 from application.api.service import create_app
+from application.settings import AdminApiSettings
 
 
 @pytest.fixture()
 def configured_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
     monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
-    return create_app(admin_token="unit-admin-token", audit_secret="unit-audit-secret")
+    settings = AdminApiSettings(
+        admin_token="unit-admin-token",
+        audit_secret="unit-audit-secret",
+    )
+    return create_app(settings=settings)
 
 
 def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -28,6 +28,10 @@ Set the following environment variables before starting the FastAPI application:
 | --- | --- |
 | `TRADEPULSE_ADMIN_TOKEN` | Static bearer token required in the `X-Admin-Token` header. |
 | `TRADEPULSE_AUDIT_SECRET` | Secret used to sign audit records for integrity verification. |
+| `TRADEPULSE_ADMIN_SUBJECT` | Default subject recorded for audit events when no `X-Admin-Subject` header is provided. |
+| `TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS` | Maximum administrative attempts allowed within the rate-limit window (default `5`). |
+| `TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS` | Rolling window in seconds for the administrative rate limiter (default `60`). |
+| `TRADEPULSE_AUDIT_WEBHOOK_URL` | Optional HTTPS endpoint that receives a JSON copy of every administrative audit event. |
 
 > **Important:** Development defaults are provided (`dev-admin-token`, `dev-audit-secret`) to simplify local testing. Always override them in production.
 

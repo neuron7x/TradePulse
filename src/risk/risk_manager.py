@@ -19,7 +19,7 @@ class KillSwitchState:
 
 
 class RiskManagerFacade:
-    """Thin wrapper that exposes high-level risk management operations."""
+    """Expose kill-switch operations of :class:`execution.risk.RiskManager`."""
 
     def __init__(self, risk_manager: RiskManager) -> None:
         self._risk_manager = risk_manager
