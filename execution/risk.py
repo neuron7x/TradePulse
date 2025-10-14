@@ -42,7 +42,20 @@ class OrderRateExceeded(RiskError):
 
 @dataclass(slots=True)
 class RiskLimits:
-    """Risk guardrails that must be enforced prior to execution."""
+    """Risk guardrails that must be enforced prior to execution.
+
+    Attributes:
+        max_notional: Absolute notional cap per instrument.
+        max_position: Signed position cap.
+        max_orders_per_interval: Order submissions allowed within ``interval_seconds``.
+        interval_seconds: Rolling window length for the throttle.
+        kill_switch_limit_multiplier: Severity multiplier that instantly trips the
+            kill-switch when exceeded.
+        kill_switch_violation_threshold: Consecutive limit breaches that trigger
+            the kill-switch.
+        kill_switch_rate_limit_threshold: Consecutive throttle breaches that
+            trigger the kill-switch.
+    """
 
     max_notional: float = float("inf")
     max_position: float = float("inf")
@@ -66,34 +79,55 @@ class RiskLimits:
 
 
 class KillSwitch:
-    """Global kill-switch toggled on critical failures."""
+    """Global kill-switch toggled on critical failures.
+
+    The kill-switch mirrors the operational blueprint in
+    ``docs/admin_remote_control.md`` and is surfaced via CLI and observability
+    tooling for rapid operator response.
+    """
 
     def __init__(self) -> None:
         self._triggered = False
         self._reason = ""
 
     def trigger(self, reason: str) -> None:
+        """Engage the kill-switch with an explanatory ``reason``."""
+
         self._triggered = True
         self._reason = reason
 
     def reset(self) -> None:
+        """Clear the kill-switch state."""
+
         self._triggered = False
         self._reason = ""
 
     @property
     def reason(self) -> str:
+        """Return the human-readable explanation for the last trigger."""
+
         return self._reason
 
     def is_triggered(self) -> bool:
+        """Indicate whether the kill-switch is currently engaged."""
+
         return self._triggered
 
     def guard(self) -> None:
+        """Raise :class:`RiskError` if the kill-switch is active."""
+
         if self._triggered:
             raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
 
 
 class RiskManager(RiskController):
-    """Apply notional/position caps and order throttling."""
+    """Apply notional/position caps and order throttling.
+
+    The manager coordinates with :mod:`execution.audit`, records metrics for the
+    observability pipeline in ``docs/monitoring.md`` and enforces the governance
+    rules codified in ``docs/documentation_governance.md`` before orders reach
+    the venue adapters.
+    """
 
     def __init__(
         self,
@@ -353,7 +387,19 @@ class RiskManager(RiskController):
         return self._kill_switch
 
     def register_fill(self, symbol: str, side: str, qty: float, price: float) -> None:
-        """Update exposure after a confirmed fill."""
+        """Update exposure after a confirmed fill.
+
+        Args:
+            symbol: External instrument identifier; normalised via
+                :func:`core.data.catalog.normalize_symbol`.
+            side: Executed direction (``"buy"`` or ``"sell"``).
+            qty: Fill quantity in base units.
+            price: Fill price used for notional tracking.
+
+        Notes:
+            Exposure updates feed portfolio analytics described in
+            ``docs/risk_ml_observability.md``.
+        """
 
         self._validate_inputs(qty, price)
         canonical_symbol = self._canonical_symbol(symbol)
@@ -363,16 +409,24 @@ class RiskManager(RiskController):
         self._last_notional[canonical_symbol] = abs(position * price)
 
     def current_position(self, symbol: str) -> float:
+        """Return the signed position for ``symbol``."""
+
         canonical_symbol = self._canonical_symbol(symbol)
         return float(self._positions.get(canonical_symbol, 0.0))
 
     def current_notional(self, symbol: str) -> float:
+        """Return the absolute notional exposure for ``symbol``."""
+
         canonical_symbol = self._canonical_symbol(symbol)
         return float(self._last_notional.get(canonical_symbol, 0.0))
 
 
 class IdempotentRetryExecutor:
-    """Retry wrapper that guarantees idempotency via explicit keys."""
+    """Retry wrapper that guarantees idempotency via explicit keys.
+
+    The executor is designed for side-effect-free RPCs such as venue state
+    queries and follows the retry governance guidance in ``docs/execution.md``.
+    """
 
     def __init__(self, *, backoff: Callable[[int], float] | None = None) -> None:
         self._results: Dict[str, object] = {}
@@ -385,6 +439,27 @@ class IdempotentRetryExecutor:
         retries: int = 3,
         retry_exceptions: tuple[type[Exception], ...] = (Exception,),
     ) -> object:
+        """Execute ``func`` with retries while caching the first success.
+
+        Args:
+            key: Cache key ensuring idempotent semantics.
+            func: Callable receiving the attempt count (starting at ``1``).
+            retries: Maximum number of attempts.
+            retry_exceptions: Tuple of exception types that should trigger retry
+                behaviour.
+
+        Returns:
+            object: The result of ``func`` from the first successful attempt.
+
+        Raises:
+            Exception: Re-raises the last exception when retries are exhausted.
+
+        Examples:
+            >>> executor = IdempotentRetryExecutor()
+            >>> executor.run("ping", lambda attempt: attempt)
+            1
+        """
+
         if key in self._results:
             return self._results[key]
 
@@ -410,7 +485,12 @@ class IdempotentRetryExecutor:
 
 
 class DefaultPortfolioRiskAnalyzer(PortfolioRiskAnalyzer):
-    """Portfolio risk analyzer compatible with :func:`portfolio_heat`."""
+    """Portfolio risk analyzer compatible with :func:`portfolio_heat`.
+
+    The analyzer mirrors the directional heat aggregation described in
+    ``docs/risk_ml_observability.md`` and provides a lightweight default for
+    CLI tooling and notebooks.
+    """
 
     def heat(self, positions: Iterable[Mapping[str, float]]) -> float:
         total = 0.0
@@ -425,7 +505,16 @@ class DefaultPortfolioRiskAnalyzer(PortfolioRiskAnalyzer):
 
 
 def portfolio_heat(positions: Iterable[Mapping[str, float]]) -> float:
-    """Compute aggregate risk heat with directionality and weights."""
+    """Compute aggregate risk heat with directionality and weights.
+
+    Args:
+        positions: Iterable of dictionaries containing ``qty``, ``price``,
+            ``risk_weight``, and ``side`` keys.
+
+    Returns:
+        float: Absolute risk heat used for monitoring dashboards in
+        ``docs/monitoring.md``.
+    """
 
     analyzer = DefaultPortfolioRiskAnalyzer()
     return analyzer.heat(positions)

@@ -32,7 +32,11 @@ except ModuleNotFoundError:  # pragma: no cover
 
 
 class RiskAwarePositionSizer(PositionSizer):
-    """Default implementation of :class:`interfaces.execution.PositionSizer`."""
+    """Default implementation of :class:`interfaces.execution.PositionSizer`.
+
+    The sizer follows the risk-budgeting blueprint in ``docs/execution.md`` and
+    the governance safeguards recorded in ``docs/documentation_governance.md``.
+    """
 
     def size(
         self,
@@ -99,7 +103,17 @@ def position_sizing(
     *,
     max_leverage: float = 5.0,
 ) -> float:
-    """Convenience wrapper returning risk-aware position size in base units."""
+    """Convenience wrapper returning risk-aware position size in base units.
+
+    Args:
+        balance: Available capital in account currency.
+        risk: Fraction of capital to deploy.
+        price: Execution price of the instrument.
+        max_leverage: Maximum allowable leverage multiplier.
+
+    Returns:
+        float: Quantity computed via :class:`RiskAwarePositionSizer`.
+    """
 
     return RiskAwarePositionSizer().size(
         balance,
