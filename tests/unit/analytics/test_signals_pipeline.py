@@ -59,6 +59,8 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "volatility_5",
         "volatility_10",
         "rsi",
+        "macd_ema_fast",
+        "macd_ema_slow",
         "macd",
         "macd_signal",
         "macd_histogram",
@@ -208,14 +210,20 @@ def test_macd_pipeline_matches_golden_baseline() -> None:
     macd = features.loc[frame.index, "macd"].to_numpy()
     macd_signal = features.loc[frame.index, "macd_signal"].to_numpy()
     macd_histogram = features.loc[frame.index, "macd_histogram"].to_numpy()
+    macd_ema_fast = features.loc[frame.index, "macd_ema_fast"].to_numpy()
+    macd_ema_slow = features.loc[frame.index, "macd_ema_slow"].to_numpy()
 
     expected_macd = baseline["macd"].to_numpy(dtype=float)
     expected_signal = baseline["signal"].to_numpy(dtype=float)
     expected_histogram = baseline["histogram"].to_numpy(dtype=float)
+    expected_fast = baseline["ema_12"].to_numpy(dtype=float)
+    expected_slow = baseline["ema_26"].to_numpy(dtype=float)
 
     np.testing.assert_allclose(macd, expected_macd, rtol=1e-6, atol=1e-6)
     np.testing.assert_allclose(macd_signal, expected_signal, rtol=1e-6, atol=1e-6)
     np.testing.assert_allclose(macd_histogram, expected_histogram, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(macd_ema_fast, expected_fast, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(macd_ema_slow, expected_slow, rtol=1e-6, atol=1e-6)
 
 
 def test_feature_pipeline_handles_empty_frame() -> None:

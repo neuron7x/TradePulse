@@ -126,6 +126,8 @@ class SignalFeaturePipeline:
         features["rsi"] = _rsi(price, cfg.rsi_window)
         fast_ema = price.ewm(span=cfg.macd_fast, adjust=False, min_periods=1).mean()
         slow_ema = price.ewm(span=cfg.macd_slow, adjust=False, min_periods=1).mean()
+        features["macd_ema_fast"] = fast_ema
+        features["macd_ema_slow"] = slow_ema
         features["macd"] = fast_ema - slow_ema
         features["macd_signal"] = features["macd"].ewm(
             span=cfg.macd_signal, adjust=False, min_periods=1
