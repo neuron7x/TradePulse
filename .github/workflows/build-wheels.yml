@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Check out repository
@@ -40,7 +40,23 @@ jobs:
           cibuildwheel --output-dir wheelhouse
 
       - name: List built wheels
-        run: ls -lh wheelhouse
+        run: |
+          python - <<'PY'
+          import pathlib
+
+          wheel_dir = pathlib.Path("wheelhouse")
+          if not wheel_dir.exists():
+              raise SystemExit("wheelhouse directory not found")
+
+          wheels = sorted(wheel_dir.glob("*.whl"))
+          if not wheels:
+              raise SystemExit("no wheels were produced")
+
+          print("Built wheels:\n")
+          for path in wheels:
+              size = path.stat().st_size
+              print(f"  {path.name} ({size / 1024 / 1024:.2f} MiB)")
+          PY
 
       - name: Verify Linux wheels with auditwheel
         if: runner.os == 'Linux'
