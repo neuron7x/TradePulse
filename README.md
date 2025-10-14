@@ -281,7 +281,7 @@ TradePulse relies on an extensive pytest testbed covering unit, integration, pro
 pytest tests/
 
 # Run with branch coverage and HTML report
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch \
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch \
   --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html
 
 # Skip slow tests during development

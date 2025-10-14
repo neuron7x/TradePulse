@@ -147,7 +147,7 @@ use_coverage = true
 [tool.coverage.run]
 branch = true
 parallel = true
-source = ["core", "backtest", "execution"]
+source = ["core", "backtest", "execution", "analytics"]
 
 [tool.coverage.report]
 fail_under = 90
