@@ -59,6 +59,8 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "volatility_10",
         "rsi",
         "macd",
+        "macd_signal",
+        "macd_histogram",
         "price_range",
         "log_volume",
         "volume_z",
@@ -187,3 +189,19 @@ def test_feature_pipeline_handles_empty_frame() -> None:
     features = pipeline.transform(frame)
 
     assert features.empty
+
+
+def test_macd_features_match_golden_baseline() -> None:
+    df = pd.read_csv("data/golden/indicator_macd_baseline.csv", parse_dates=["ts"])
+    frame = df.set_index("ts")[["close"]]
+    pipeline = SignalFeaturePipeline(FeaturePipelineConfig())
+    features = pipeline.transform(frame)
+
+    macd_cols = ["macd", "macd_signal", "macd_histogram"]
+    result = features[macd_cols]
+
+    expected = df.set_index("ts")[["macd", "signal", "histogram"]].rename(
+        columns={"signal": "macd_signal", "histogram": "macd_histogram"}
+    )
+
+    pd.testing.assert_frame_equal(result, expected, atol=1e-10, rtol=0.0)

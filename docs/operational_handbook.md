@@ -36,7 +36,8 @@ teams can reach production readiness without tribal knowledge.
   the "golden data" pathway for regulated markets
   [`docs/runbook_data_incident.md`](runbook_data_incident.md).
 - **Indicator MACD baseline** – `data/golden/indicator_macd_baseline.csv`
-  provides a five-row canonical dataset with pre-computed MACD components so
+  provides a five-row canonical dataset with pre-computed MACD, MACD signal,
+  and MACD histogram components so
   regressions can compare indicator outputs deterministically.
 - **Quality gates** – Enforce code, test, and performance standards by adopting
   the gating catalogue in [`docs/quality_gates.md`](quality_gates.md), which
