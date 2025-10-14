@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -187,3 +188,22 @@ def test_feature_pipeline_handles_empty_frame() -> None:
     features = pipeline.transform(frame)
 
     assert features.empty
+
+
+def test_macd_matches_golden_baseline() -> None:
+    golden_path = Path("data/golden/indicator_macd_baseline.csv")
+    golden_frame = pd.read_csv(golden_path, parse_dates=["ts"]).set_index("ts")
+
+    input_frame = golden_frame[["close"]].copy()
+    pipeline = SignalFeaturePipeline(FeaturePipelineConfig())
+    features = pipeline.transform(input_frame)
+
+    expected_macd = golden_frame["macd"].astype(float)
+
+    pd.testing.assert_series_equal(
+        features["macd"],
+        expected_macd,
+        check_names=False,
+        rtol=1e-9,
+        atol=1e-6,
+    )

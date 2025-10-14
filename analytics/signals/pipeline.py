@@ -120,11 +120,11 @@ class SignalFeaturePipeline:
             rolling = price.rolling(window=window, min_periods=window)
             features[f"sma_{window}"] = rolling.mean()
             features[f"volatility_{window}"] = returns.rolling(window=window, min_periods=window).std()
-            features[f"ema_{window}"] = price.ewm(span=window, adjust=False, min_periods=window).mean()
+            features[f"ema_{window}"] = price.ewm(span=window, adjust=False).mean()
 
         features["rsi"] = _rsi(price, cfg.rsi_window)
-        fast_ema = price.ewm(span=cfg.macd_fast, adjust=False, min_periods=cfg.macd_fast).mean()
-        slow_ema = price.ewm(span=cfg.macd_slow, adjust=False, min_periods=cfg.macd_slow).mean()
+        fast_ema = price.ewm(span=cfg.macd_fast, adjust=False).mean()
+        slow_ema = price.ewm(span=cfg.macd_slow, adjust=False).mean()
         features["macd"] = fast_ema - slow_ema
         features["price_range"] = (high - low).astype(float)
 
@@ -156,7 +156,7 @@ class SignalFeaturePipeline:
                 returns, signed_volume, window, _hasbrouck_window
             )
             features["signed_volume_ema"] = signed_volume.ewm(
-                span=window, adjust=False, min_periods=window
+                span=window, adjust=False
             ).mean()
 
         return features
