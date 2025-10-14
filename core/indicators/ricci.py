@@ -1,17 +1,33 @@
 # SPDX-License-Identifier: MIT
+"""Ricci curvature-based structural stress indicators for price graphs.
+
+This module turns price histories into discrete graphs and computes
+Ollivier–Ricci curvature to characterise structural fragility. The approach
+follows the geometric market diagnostics documented in ``docs/indicators.md``
+and the resilience monitoring playbooks in ``docs/risk_ml_observability.md``.
+By embedding curvature metrics into the feature stack, we meet the governance
+requirement that core risk signals expose interpretable topology, as detailed
+in ``docs/documentation_governance.md``.
+
+Key dependencies include optional NetworkX (with an in-repo fallback) for graph
+manipulation, NumPy for numerical work, and SciPy for Wasserstein distances when
+available. The module records telemetry using ``core.utils`` helpers to satisfy
+traceability expectations laid out in ``docs/quality_gates.md``.
+"""
+
 from __future__ import annotations
 
 import asyncio
+import logging
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, Literal
-import warnings
-import logging
 
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.logging import get_logger
 from ..utils.metrics import get_metrics_collector
+from .base import BaseFeature, FeatureResult
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
@@ -46,7 +62,11 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def neighbors(self, node: int) -> Iterable[int]:
             return tuple(self._adj.get(int(node), ()))
 
-        def degree(self, node: int | None = None, weight: str | None = None) -> Iterable[tuple[int, float]] | float:
+        def degree(
+            self,
+            node: int | None = None,
+            weight: str | None = None,
+        ) -> Iterable[tuple[int, float]] | float:
             if node is None:
                 if weight:
                     return tuple((n, sum(neigh.values())) for n, neigh in self._adj.items())
@@ -60,7 +80,10 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def number_of_edges(self) -> int:
             return sum(len(neigh) for neigh in self._adj.values()) // 2
 
-        def edges(self, data: bool = False) -> Iterable[tuple[int, int] | tuple[int, int, dict[str, float]]]:
+        def edges(
+            self,
+            data: bool = False,
+        ) -> Iterable[tuple[int, int] | tuple[int, int, dict[str, float]]]:
             seen: set[tuple[int, int]] = set()
             for u, neigh in self._adj.items():
                 for v in neigh:
@@ -78,7 +101,12 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         def number_of_nodes(self) -> int:
             return len(self._adj)
 
-        def shortest_path_length(self, source: int, target: int, weight: str | None = None) -> float:
+        def shortest_path_length(
+            self,
+            source: int,
+            target: int,
+            weight: str | None = None,
+        ) -> float:
             import heapq
 
             if source == target:
@@ -99,7 +127,12 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
                         heapq.heappush(heap, (nd, neigh))
             return float("inf")
 
-        def get_edge_data(self, u: int, v: int, default: dict[str, float] | None = None) -> dict[str, float] | None:
+        def get_edge_data(
+            self,
+            u: int,
+            v: int,
+            default: dict[str, float] | None = None,
+        ) -> dict[str, float] | None:
             weight = self._adj.get(int(u), {}).get(int(v))
             if weight is None:
                 return default
@@ -208,17 +241,30 @@ def mean_ricci(
     parallel: Literal["none", "async"] = "none",
     max_workers: int | None = None,
 ) -> float:
-    """Compute mean Ollivier-Ricci curvature over all edges.
-    
+    """Compute the mean Ollivier–Ricci curvature of a price graph.
+
     Args:
-        G: NetworkX graph
-        chunk_size: Process edges in chunks for large graphs (default: None, no chunking)
-        use_float32: Use float32 precision for computations (default: False)
-        parallel: Parallel execution mode (``"async"`` uses asyncio thread pools)
-        max_workers: Optional limit for the async worker pool
-        
+        G: Input graph whose edge weights encode price transition costs.
+        chunk_size: Optional batch size for edge iteration to bound memory usage.
+        use_float32: When ``True``, accumulate in ``float32`` as a performance
+            trade-off.
+        parallel: Execution strategy. Set to ``"async"`` to evaluate edges via an
+            asyncio-backed thread pool, mirroring the scaling guidance in
+            ``docs/execution.md``.
+        max_workers: Upper bound for the thread pool when ``parallel`` is async.
+
     Returns:
-        Mean Ricci curvature across all edges
+        Mean curvature value across all edges. ``0.0`` is returned for empty
+        graphs.
+
+    Raises:
+        RuntimeError: Propagated if asynchronous execution fails to initialise a
+            loop.
+
+    Notes:
+        High positive curvature implies tightly connected price states, while
+        negative curvature indicates dispersion—a signal cross-referenced by the
+        monitoring blueprint in ``docs/risk_ml_observability.md``.
     """
     with _logger.operation(
         "mean_ricci",
@@ -230,9 +276,9 @@ def mean_ricci(
     ):
         if G.number_of_edges() == 0:
             return 0.0
-        
+
         edges = list(G.edges())
-        
+
         # Chunked processing for large graphs
         if chunk_size is not None and len(edges) > chunk_size:
             dtype = np.float32 if use_float32 else float
@@ -242,9 +288,9 @@ def mean_ricci(
                 chunk_edges = edges[i:i + chunk_size]
                 chunk_curv = [ricci_curvature_edge(G, u, v) for u, v in chunk_edges]
                 curvatures.extend(chunk_curv)
-            
+
             return float(np.mean(np.array(curvatures, dtype=dtype)))
-        
+
         # Standard processing
         if parallel == "async":
             curv = _run_ricci_async(G, edges, max_workers)
@@ -259,7 +305,11 @@ def mean_ricci(
             return 0.0
         return float(np.mean(arr))
 
-def _run_ricci_async(G: nx.Graph, edges: list[tuple[int, int]], max_workers: int | None) -> list[float]:
+def _run_ricci_async(
+    G: nx.Graph,
+    edges: list[tuple[int, int]],
+    max_workers: int | None,
+) -> list[float]:
     async def _runner() -> list[float]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None
@@ -292,14 +342,26 @@ def _run_ricci_async(G: nx.Graph, edges: list[tuple[int, int]], max_workers: int
 def _w1_fallback(a, b):
     import numpy as _np
     # normalize
-    a = _np.asarray(a, dtype=float); b = _np.asarray(b, dtype=float)
-    a = a / (a.sum() + 1e-12); b = b / (b.sum() + 1e-12)
-    cdfa = _np.cumsum(a); cdfb = _np.cumsum(b)
+    a = _np.asarray(a, dtype=float)
+    b = _np.asarray(b, dtype=float)
+    a = a / (a.sum() + 1e-12)
+    b = b / (b.sum() + 1e-12)
+    cdfa = _np.cumsum(a)
+    cdfb = _np.cumsum(b)
     return float(_np.abs(cdfa - cdfb).sum()) / len(a)
 
 
 class MeanRicciFeature(BaseFeature):
-    """Feature computing mean Ollivier–Ricci curvature of a price graph."""
+    """Feature wrapper for mean Ollivier–Ricci curvature.
+
+    The feature converts a univariate price series into a quantised graph using
+    :func:`build_price_graph` and then averages edge-level curvature. This is the
+    production-ready implementation referenced in ``docs/indicators.md`` and the
+    ``docs/risk_ml_observability.md`` control blueprint.
+
+    Attributes are configured via the constructor to align the feature with
+    portfolio monitoring guidelines (see ``docs/monitoring.md``).
+    """
 
     def __init__(
         self,

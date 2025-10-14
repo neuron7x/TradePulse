@@ -1,20 +1,35 @@
 # SPDX-License-Identifier: MIT
+"""Walk-forward backtesting engine with execution realism controls.
+
+The engine models signal latency, slippage, spreads, and financing to produce a
+traceable equity curve, aligning with the methodology described in
+``docs/performance.md`` and the operational checklist in
+``docs/runbook_live_trading.md``. It serves as the reference implementation for
+portfolio walk-forward evaluation across TradePulse components and feeds
+observability metrics expected by ``docs/quality_gates.md``.
+
+Dependencies include NumPy for vectorised PnL computation, transaction cost
+models from :mod:`backtest.transaction_costs`, and metrics collectors for
+governance-compliant telemetry.
+"""
+
 from __future__ import annotations
-import numpy as np
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+import numpy as np
 from numpy.typing import NDArray
-
-from core.utils.metrics import get_metrics_collector
-from interfaces.backtest import BacktestEngine
 
 from backtest.transaction_costs import (
     PerUnitCommission,
     TransactionCostModel,
     load_market_costs,
 )
+from core.utils.metrics import get_metrics_collector
+from interfaces.backtest import BacktestEngine
+
 from .performance import (
     PerformanceReport,
     compute_performance_metrics,
@@ -182,14 +197,20 @@ def _apply_portfolio_constraints(
             lookback = min(len(returns), max(int(constraints.volatility_lookback), 1))
             window = returns[-lookback:] if lookback else returns
             with np.errstate(invalid="ignore", divide="ignore"):
-                realized_vol = float(np.std(window, ddof=1)) if window.size > 1 else float(np.std(window))
+                if window.size > 1:
+                    realized_vol = float(np.std(window, ddof=1))
+                else:
+                    realized_vol = float(np.std(window))
             if realized_vol > 1e-12:
                 scale = float(target_vol) / realized_vol
                 adjusted = adjusted * scale
                 if max_gross is not None or max_net is not None:
-                    limit = min(
-                        [float(abs(value)) for value in (max_gross, max_net) if value is not None] or [1.0]
-                    )
+                    candidate_limits = [
+                        float(abs(value))
+                        for value in (max_gross, max_net)
+                        if value is not None
+                    ]
+                    limit = min(candidate_limits or [1.0])
                     adjusted = np.clip(adjusted, -limit, limit)
     return np.clip(adjusted, -1.0, 1.0)
 
@@ -213,7 +234,58 @@ class WalkForwardEngine(BacktestEngine[Result]):
         cost_config: str | Path | Mapping[str, Any] | None = None,
         constraints: PortfolioConstraints | None = None,
     ) -> Result:
-        """Vectorised walk-forward backtest with configurable execution realism."""
+        """Execute a vectorised walk-forward backtest.
+
+        Args:
+            prices: One-dimensional array of prices. The series must be strictly
+                positive and length two or greater.
+            signal_fn: Callable that maps the price series to normalised target
+                positions. The returned array must align with ``prices`` in
+                shape.
+            fee: Fallback per-unit commission when a market-specific model is not
+                supplied.
+            initial_capital: Starting equity for the cumulative PnL series.
+            strategy_name: Identifier used for metrics, reporting, and file
+                exports.
+            latency: Optional :class:`LatencyConfig` describing signal, order, and
+                fill delays.
+            order_book: Optional :class:`OrderBookConfig` modelling spread and
+                depth.
+            slippage: Optional :class:`SlippageConfig` capturing execution impact.
+            market: Market code used to load transaction cost templates via
+                :func:`backtest.transaction_costs.load_market_costs`.
+            cost_model: Explicit transaction cost model overriding autodetection.
+            cost_config: Path-like or mapping configuration source passed to
+                :func:`load_market_costs` when ``market`` is provided.
+            constraints: Optional :class:`PortfolioConstraints` limiting the target
+                positions, as suggested in ``docs/execution.md``.
+
+        Returns:
+            :class:`Result` dataclass containing realised PnL, drawdown, trade
+            count, equity curve, and cost breakdowns.
+
+        Raises:
+            ValueError: If ``prices`` is not a 1-D vector of sufficient length, or
+                if ``signal_fn`` produces an array of incompatible shape.
+
+        Examples:
+            >>> prices = np.linspace(100, 101, 16)
+            >>> def mean_revert(series):
+            ...     return np.sign(np.mean(series) - series)
+            >>> engine = WalkForwardEngine()
+            >>> result = engine.run(prices, mean_revert)
+            >>> round(result.pnl, 4)
+            0.0
+
+        Notes:
+            - PnL is computed as ``position[t] * Δprice[t]`` minus the configured
+              cost legs.
+            - Latency shifts are applied before cost evaluation to emulate a live
+              order pipeline, matching the governance requirements of
+              ``docs/runbook_live_trading.md``.
+            - The generated :class:`PerformanceReport` is exported to disk for
+              audit trails mandated in ``docs/documentation_governance.md``.
+        """
 
         metrics = get_metrics_collector()
 
@@ -266,7 +338,11 @@ class WalkForwardEngine(BacktestEngine[Result]):
                 prev_position = float(prev_positions[idx])
                 price_index = min(idx, price_array.size - 1)
                 ref_price = float(price_array[price_index])
-                financing_costs[idx] = float(transaction_cost_model.get_financing(prev_position, ref_price))
+                financing_cost = transaction_cost_model.get_financing(
+                    prev_position,
+                    ref_price,
+                )
+                financing_costs[idx] = float(financing_cost)
 
                 qty = float(abs(change))
                 if qty == 0.0:
@@ -291,7 +367,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
                     else:
                         fill_price -= spread_adj
 
-                slippage_adj = float(max(transaction_cost_model.get_slippage(qty, mid_price, side), 0.0))
+                model_slippage = transaction_cost_model.get_slippage(qty, mid_price, side)
+                slippage_adj = float(max(model_slippage, 0.0))
                 if slippage_adj > 0.0:
                     slippage_costs[idx] += slippage_adj * qty
                     if side == "buy":
@@ -299,7 +376,8 @@ class WalkForwardEngine(BacktestEngine[Result]):
                     else:
                         fill_price -= slippage_adj
 
-                commission_costs[idx] = max(0.0, float(transaction_cost_model.get_commission(qty, fill_price)))
+                commission = transaction_cost_model.get_commission(qty, fill_price)
+                commission_costs[idx] = max(0.0, float(commission))
 
             pnl = (
                 positions * price_moves
