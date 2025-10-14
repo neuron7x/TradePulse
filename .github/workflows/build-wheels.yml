@@ -40,10 +40,12 @@ jobs:
           cibuildwheel --output-dir wheelhouse
 
       - name: List built wheels
+        shell: bash
         run: ls -lh wheelhouse
 
       - name: Verify Linux wheels with auditwheel
         if: runner.os == 'Linux'
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install auditwheel
@@ -55,6 +57,7 @@ jobs:
 
       - name: Verify macOS wheels with delocate
         if: runner.os == 'macOS'
+        shell: bash
         run: |
           python -m pip install --upgrade pip
           python -m pip install delocate
