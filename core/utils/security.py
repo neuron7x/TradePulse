@@ -112,6 +112,8 @@ class SecretDetector:
                 ".yaml",
                 ".json",
                 ".env",
+                ".env.local",
+                ".env.production",
             ]
 
         normalized_extensions = {ext.lower() for ext in extensions}
@@ -122,14 +124,14 @@ class SecretDetector:
             if not filepath.is_file():
                 continue
                 
-            file_suffix = filepath.suffix.lower()
             file_name = filepath.name.lower()
 
-            if normalized_extensions and (
-                file_suffix not in normalized_extensions
-                and file_name not in normalized_extensions
-            ):
-                continue
+            if normalized_extensions:
+                matches_extension = any(
+                    file_name == ext or file_name.endswith(ext) for ext in normalized_extensions
+                )
+                if not matches_extension:
+                    continue
                 
             findings = self.scan_file(filepath)
             if findings:
