@@ -70,6 +70,13 @@ class TestLatestFeatureVector:
             [
                 {
                     "macd": 0.1,
+                    "macd_signal": 0.05,
+                    "macd_histogram": 0.05,
+                    "macd_ema_fast": 101.0,
+                    "macd_ema_slow": 100.0,
+                    "ema_5": 100.5,
+                    "ema_20": 100.2,
+                    "ema_60": 99.8,
                     "rsi": 53.0,
                     "return_1": 0.005,
                     "queue_imbalance": 0.2,
@@ -83,6 +90,10 @@ class TestLatestFeatureVector:
 
         assert isinstance(latest, pd.Series)
         assert not latest.isna().any()
+        assert {"macd_signal", "macd_histogram", "macd_ema_fast", "macd_ema_slow"}.issubset(
+            latest.index
+        )
+        assert {key for key in latest.index if key.startswith("ema_")} >= {"ema_5", "ema_20", "ema_60"}
 
 
 class TestDeriveSignal:
@@ -93,6 +104,13 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 1.2,
+                        "macd_signal": 0.8,
+                        "macd_histogram": 0.4,
+                        "macd_ema_fast": 102.0,
+                        "macd_ema_slow": 99.0,
+                        "ema_5": 101.5,
+                        "ema_20": 100.0,
+                        "ema_60": 98.5,
                         "rsi": 68.0,
                         "return_1": 0.03,
                         "queue_imbalance": 0.8,
@@ -105,6 +123,13 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": -1.5,
+                        "macd_signal": -1.0,
+                        "macd_histogram": -0.5,
+                        "macd_ema_fast": 97.0,
+                        "macd_ema_slow": 100.0,
+                        "ema_5": 98.0,
+                        "ema_20": 99.5,
+                        "ema_60": 101.0,
                         "rsi": 28.0,
                         "return_1": -0.04,
                         "queue_imbalance": -0.7,
@@ -117,6 +142,13 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 0.02,
+                        "macd_signal": 0.01,
+                        "macd_histogram": 0.01,
+                        "macd_ema_fast": 100.0,
+                        "macd_ema_slow": 100.0,
+                        "ema_5": 100.0,
+                        "ema_20": 100.0,
+                        "ema_60": 100.0,
                         "rsi": 49.0,
                         "return_1": 0.0005,
                         "queue_imbalance": 0.01,
@@ -154,6 +186,13 @@ class TestDeriveSignal:
             [
                 {
                     "macd": 0.5,
+                    "macd_signal": 0.2,
+                    "macd_histogram": 0.3,
+                    "macd_ema_fast": 103.0,
+                    "macd_ema_slow": 100.5,
+                    "ema_5": 102.5,
+                    "ema_20": 101.0,
+                    "ema_60": 99.5,
                     "rsi": 62.0,
                     "return_1": 0.015,
                     "queue_imbalance": 0.4,
@@ -174,6 +213,63 @@ class TestDeriveSignal:
         )
 
         assert response.horizon_seconds == horizon
-        assert response.signal["metadata"]["horizon_seconds"] == horizon
-        assert response.signal["metadata"]["score"] == pytest.approx(score, rel=1e-6)
+        metadata = response.signal["metadata"]
+        assert metadata["horizon_seconds"] == horizon
+        assert metadata["score"] == pytest.approx(score, rel=1e-6)
+        indicators = metadata["technical_indicators"]
+        assert indicators["macd_signal"] == features.iloc[0]["macd_signal"]
+        assert indicators["macd_histogram"] == features.iloc[0]["macd_histogram"]
+        assert indicators["emas"]["ema_20"] == features.iloc[0]["ema_20"]
+
+    def test_macd_divergence_biases_signal_buy(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        series = pd.Series(
+            {
+                "macd": 1.0,
+                "macd_signal": 0.1,
+                "macd_histogram": 1.2,
+                "macd_ema_fast": 105.0,
+                "macd_ema_slow": 100.0,
+                "ema_5": 104.0,
+                "ema_20": 102.0,
+                "ema_60": 99.0,
+                "rsi": 50.0,
+                "return_1": 0.0,
+                "queue_imbalance": 0.0,
+                "volatility_20": 0.01,
+            }
+        )
+        forecaster = make_forecaster(pd.DataFrame([series]))
+
+        signal, score = forecaster.derive_signal("SOL-USD", series, 300)
+
+        assert signal.action is SignalAction.BUY
+        assert score > 0.15
+
+    def test_macd_divergence_biases_signal_sell(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        series = pd.Series(
+            {
+                "macd": -1.0,
+                "macd_signal": -0.1,
+                "macd_histogram": -1.3,
+                "macd_ema_fast": 95.0,
+                "macd_ema_slow": 100.0,
+                "ema_5": 96.0,
+                "ema_20": 98.0,
+                "ema_60": 101.0,
+                "rsi": 50.0,
+                "return_1": 0.0,
+                "queue_imbalance": 0.0,
+                "volatility_20": 0.01,
+            }
+        )
+        forecaster = make_forecaster(pd.DataFrame([series]))
+
+        signal, score = forecaster.derive_signal("SOL-USD", series, 300)
+
+        assert signal.action is SignalAction.SELL
+        assert score < -0.15
 

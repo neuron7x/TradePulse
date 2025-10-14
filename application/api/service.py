@@ -198,17 +198,34 @@ class OnlineSignalForecaster:
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
         macd = float(latest.get("macd", 0.0))
+        macd_signal = float(latest.get("macd_signal", macd))
+        macd_histogram = float(latest.get("macd_histogram", macd - macd_signal))
+        macd_ema_fast = float(latest.get("macd_ema_fast", macd))
+        macd_ema_slow = float(latest.get("macd_ema_slow", macd))
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
         queue_imbalance = float(latest.get("queue_imbalance", 0.0))
 
+        ema_columns = {
+            key: float(value)
+            for key, value in latest.items()
+            if key.startswith("ema_")
+        }
+
         score = 0.0
-        score += np.tanh(macd) * 0.4
+        score += np.tanh(macd) * 0.35
         score += ((rsi - 50.0) / 50.0) * 0.3
         score += np.tanh(ret_1 * 100.0) * 0.2
         score += np.tanh(queue_imbalance) * 0.1
         score -= abs(volatility_20) * 0.05
+
+        divergence_score = np.tanh(macd_histogram) * 0.2
+        if macd > macd_signal and macd_ema_fast > macd_ema_slow:
+            divergence_score += 0.1
+        elif macd < macd_signal and macd_ema_fast < macd_ema_slow:
+            divergence_score -= 0.1
+        score += divergence_score
 
         threshold = 0.15
         if score > threshold:
@@ -229,6 +246,14 @@ class OnlineSignalForecaster:
             metadata={
                 "score": score,
                 "horizon_seconds": horizon_seconds,
+                "technical_indicators": {
+                    "macd": macd,
+                    "macd_signal": macd_signal,
+                    "macd_histogram": macd_histogram,
+                    "macd_ema_fast": macd_ema_fast,
+                    "macd_ema_slow": macd_ema_slow,
+                    "emas": ema_columns,
+                },
             },
         )
         return signal, score
