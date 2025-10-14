@@ -55,7 +55,17 @@ class TestLatestFeatureVector:
     def test_all_nan_row_raises_unprocessable_entity(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
     ) -> None:
-        features = pd.DataFrame([{"macd": np.nan, "rsi": np.nan, "return_1": np.nan}])
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": np.nan,
+                    "macd_signal": np.nan,
+                    "macd_histogram": np.nan,
+                    "rsi": np.nan,
+                    "return_1": np.nan,
+                }
+            ]
+        )
         forecaster = make_forecaster(features)
 
         with pytest.raises(HTTPException) as excinfo:
@@ -70,6 +80,8 @@ class TestLatestFeatureVector:
             [
                 {
                     "macd": 0.1,
+                    "macd_signal": 0.08,
+                    "macd_histogram": 0.02,
                     "rsi": 53.0,
                     "return_1": 0.005,
                     "queue_imbalance": 0.2,
@@ -83,6 +95,46 @@ class TestLatestFeatureVector:
 
         assert isinstance(latest, pd.Series)
         assert not latest.isna().any()
+
+    def test_missing_macd_feature_raises_unprocessable_entity(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": 0.1,
+                    "macd_histogram": 0.03,
+                    "rsi": 52.0,
+                    "return_1": 0.004,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.latest_feature_vector(features)
+
+        assert excinfo.value.status_code == 422
+
+    def test_infinite_macd_feature_raises_unprocessable_entity(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": np.inf,
+                    "macd_signal": 0.1,
+                    "macd_histogram": 0.05,
+                    "rsi": 55.0,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.latest_feature_vector(features)
+
+        assert excinfo.value.status_code == 422
 
 
 class TestDeriveSignal:

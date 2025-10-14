@@ -185,7 +185,34 @@ class OnlineSignalForecaster:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
             )
-        latest = features.iloc[-1].dropna()
+
+        latest_row = features.iloc[-1]
+
+        required_macd_columns = pd.Index(("macd", "macd_signal", "macd_histogram"))
+        missing_columns = required_macd_columns.difference(latest_row.index)
+        if not missing_columns.empty:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Missing MACD features: {', '.join(sorted(missing_columns))}",
+            )
+
+        try:
+            macd_values = latest_row.loc[required_macd_columns].astype(float)
+        except (TypeError, ValueError) as exc:  # pragma: no cover - defensive
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Non-numeric MACD features detected",
+            ) from exc
+
+        invalid_mask = ~np.isfinite(macd_values.to_numpy())
+        if invalid_mask.any():
+            invalid_columns = required_macd_columns[invalid_mask]
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Unavailable MACD features: {', '.join(sorted(invalid_columns))}",
+            )
+
+        latest = latest_row.replace({np.inf: np.nan, -np.inf: np.nan}).dropna()
         if latest.empty:
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -197,11 +224,9 @@ class OnlineSignalForecaster:
         self, symbol: str, latest: pd.Series, horizon_seconds: int
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
-        macd = float(latest.get("macd", 0.0))
-        macd_signal_line = float(latest.get("macd_signal", macd))
-        macd_histogram = float(
-            latest.get("macd_histogram", macd - macd_signal_line)
-        )
+        macd = float(latest["macd"])
+        macd_signal_line = float(latest["macd_signal"])
+        macd_histogram = float(latest["macd_histogram"])
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
