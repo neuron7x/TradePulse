@@ -59,6 +59,7 @@ def test_feature_pipeline_generates_expected_columns() -> None:
         "volatility_10",
         "rsi",
         "macd",
+        "macd_signal",
         "price_range",
         "log_volume",
         "volume_z",
@@ -171,6 +172,26 @@ def test_microstructure_window_edge_cases(window: int, expected_non_nan: int) ->
 
     assert features[kyles_col].notna().sum() == expected_non_nan
     assert features[hasbrouck_col].notna().sum() == expected_non_nan
+
+
+def test_macd_signal_window_follows_configuration() -> None:
+    frame = _sample_market_frame(200)
+    default_pipeline = SignalFeaturePipeline(FeaturePipelineConfig())
+    fast_signal_pipeline = SignalFeaturePipeline(FeaturePipelineConfig(macd_signal=5))
+
+    default_features = default_pipeline.transform(frame)
+    fast_signal_features = fast_signal_pipeline.transform(frame)
+
+    assert "macd_signal" in default_features
+    assert "macd_signal" in fast_signal_features
+
+    mask = default_features["macd_signal"].notna() & fast_signal_features["macd_signal"].notna()
+    assert mask.any(), "Both pipelines should produce overlapping finite observations"
+
+    default_values = default_features.loc[mask, "macd_signal"].to_numpy()
+    fast_values = fast_signal_features.loc[mask, "macd_signal"].to_numpy()
+
+    assert not np.allclose(default_values, fast_values), "Signal smoothing should depend on the configured window"
 
 
 def test_feature_pipeline_handles_empty_frame() -> None:
