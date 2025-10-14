@@ -184,6 +184,20 @@ python -m scripts lint  # Full lint suite
 
 ---
 
+## Coverage job та Codecov інтеграція
+
+- Всі pull request повинні мати успішний coverage check — це забезпечується workflow `.github/workflows/coverage.yml`.
+- Якщо coverage не відображається або з'являється тег "відсутнє покриття":
+  1. Переконайтесь, що pipeline не впав і coverage.xml згенеровано.
+  2. Перевірте наявність `secrets.CODECOV_TOKEN` у налаштуваннях репозиторію.
+  3. Перезапустіть coverage workflow вручну.
+  4. Див. інструкцію: https://docs.codecov.com/docs/github-checks
+- Badge coverage додається у README автоматично.
+
+**Детальніше:**  
+- [Codecov + GitHub інтеграція](https://docs.codecov.com/docs/github-checks)
+- [Troubleshooting](https://docs.codecov.com/docs/common-issues)
+
 ## Code Standards
 
 ### Commit Messages
