@@ -22,6 +22,7 @@ from datetime import UTC
 from typing import List, MutableMapping, Optional
 
 import pandas as pd
+from pandas.tseries.frequencies import to_offset
 
 from core.data.timeutils import normalize_timestamp
 
@@ -97,12 +98,31 @@ class Gap:
             raise ValueError("Gap requires start < end")
 
 
+def _resolve_cadence(expected_index: pd.DatetimeIndex) -> pd.tseries.offsets.BaseOffset:
+    """Return the sampling cadence of ``expected_index``.
+
+    Preference is given to an explicitly declared ``freq``.  When that is not
+    available we fall back to the inferred frequency.  A clear error is raised
+    if neither is defined so callers can correct the input before arithmetic is
+    attempted.
+    """
+
+    freq = expected_index.freq or expected_index.inferred_freq
+    if freq is None:
+        raise ValueError(
+            "Unable to determine expected_index frequency; set DatetimeIndex.freq "
+            "or provide an index with an inferrable cadence."
+        )
+    return to_offset(freq)
+
+
 def detect_gaps(
     expected_index: pd.DatetimeIndex,
     existing_index: pd.DatetimeIndex,
 ) -> List[Gap]:
     """Return gaps between ``expected_index`` and ``existing_index``."""
 
+    cadence = _resolve_cadence(expected_index)
     missing = expected_index.difference(existing_index)
     if missing.empty:
         return []
@@ -111,11 +131,12 @@ def detect_gaps(
     start = missing[0]
     prev = missing[0]
     for ts in missing[1:]:
-        if ts - prev > expected_index.freq:
-            gaps.append(Gap(start=start, end=prev + expected_index.freq))
+        expected_next = prev + cadence
+        if ts != expected_next:
+            gaps.append(Gap(start=start, end=expected_next))
             start = ts
         prev = ts
-    gaps.append(Gap(start=start, end=prev + expected_index.freq))
+    gaps.append(Gap(start=start, end=prev + cadence))
     return gaps
 
 
@@ -143,10 +164,11 @@ class GapFillPlanner:
         *,
         expected_index: pd.DatetimeIndex,
     ) -> BackfillPlan:
+        cadence = _resolve_cadence(expected_index)
         coverage = self._cache.coverage(key)
         existing = self._cache.get(key)
         if existing.empty:
-            return BackfillPlan(gaps=[Gap(start=expected_index[0], end=expected_index[-1] + expected_index.freq)])
+            return BackfillPlan(gaps=[Gap(start=expected_index[0], end=expected_index[-1] + cadence)])
         gaps = detect_gaps(expected_index, existing.index)
         return BackfillPlan(gaps=gaps, covered=coverage)
 
