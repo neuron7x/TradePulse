@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -71,6 +72,7 @@ def test_feature_pipeline_generates_expected_columns() -> None:
     assert expected.issubset(features.columns)
     # MACD should now be available from the first observation
     assert not features["macd"].isna().iloc[0]
+    assert not features["macd_signal"].isna().iloc[0]
     # ensure leakage control ready: there should be NaNs at start because of rolling windows
     assert features.isna().sum().max() > 0
 
@@ -192,6 +194,24 @@ def test_macd_signal_window_follows_configuration() -> None:
     fast_values = fast_signal_features.loc[mask, "macd_signal"].to_numpy()
 
     assert not np.allclose(default_values, fast_values), "Signal smoothing should depend on the configured window"
+
+
+def test_macd_pipeline_matches_golden_baseline() -> None:
+    baseline_path = Path("data/golden/indicator_macd_baseline.csv")
+    baseline = pd.read_csv(baseline_path, parse_dates=["ts"])
+    frame = baseline.set_index("ts")[["close"]]
+
+    pipeline = SignalFeaturePipeline(FeaturePipelineConfig())
+    features = pipeline.transform(frame)
+
+    macd = features.loc[frame.index, "macd"].to_numpy()
+    macd_signal = features.loc[frame.index, "macd_signal"].to_numpy()
+
+    expected_macd = baseline["macd"].to_numpy(dtype=float)
+    expected_signal = baseline["signal"].to_numpy(dtype=float)
+
+    np.testing.assert_allclose(macd, expected_macd, rtol=1e-6, atol=1e-6)
+    np.testing.assert_allclose(macd_signal, expected_signal, rtol=1e-6, atol=1e-6)
 
 
 def test_feature_pipeline_handles_empty_frame() -> None:

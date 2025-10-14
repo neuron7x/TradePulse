@@ -128,7 +128,7 @@ class SignalFeaturePipeline:
         slow_ema = price.ewm(span=cfg.macd_slow, adjust=False, min_periods=1).mean()
         features["macd"] = fast_ema - slow_ema
         features["macd_signal"] = features["macd"].ewm(
-            span=cfg.macd_signal, adjust=False, min_periods=cfg.macd_signal
+            span=cfg.macd_signal, adjust=False, min_periods=1
         ).mean()
         features["price_range"] = (high - low).astype(float)
 
