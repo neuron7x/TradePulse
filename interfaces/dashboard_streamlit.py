@@ -3,14 +3,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import pandas as pd
-import requests
 import streamlit as st
 
 from interfaces.cli import compute_indicator_metrics
-from observability.tracing import current_traceparent, get_tracer
+from interfaces.dashboard_telemetry import post_metrics
+from observability.tracing import get_tracer
 
 
 def _prepare_dataframe(
@@ -58,28 +56,6 @@ def _prepare_dataframe(
         )
 
     return working, errors, warnings
-
-
-def _post_metrics(url: str, payload: dict[str, Any]) -> tuple[bool, str]:
-    """Send metrics to an API endpoint, propagating the active traceparent."""
-
-    headers = {"Content-Type": "application/json"}
-    enriched_payload = dict(payload)
-    traceparent = current_traceparent()
-    if traceparent:
-        headers["traceparent"] = traceparent
-        enriched_payload.setdefault("traceparent", traceparent)
-
-    try:
-        response = requests.post(url, json=enriched_payload, headers=headers, timeout=5)
-    except requests.RequestException as exc:  # pragma: no cover - network errors
-        return False, f"Failed to POST metrics: {exc}"
-
-    if 200 <= response.status_code < 300:
-        return True, "Metrics successfully sent to backend."
-    return False, f"Backend responded with status {response.status_code}: {response.text[:200]}"
-
-
 st.set_page_config(page_title="TradePulse — Real-time Indicators", layout="wide")
 st.title("TradePulse — Real-time Indicators")
 
@@ -189,7 +165,7 @@ if uploaded:
                     "dashboard.telemetry_post",
                     backend_url=backend_url,
                 ) as span:
-                    success, status = _post_metrics(
+                    success, status = post_metrics(
                         backend_url,
                         {key: value for key, value in metrics.items() if key != "gpu_used"}
                         | {"gpu_requested": use_gpu},
