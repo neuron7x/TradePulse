@@ -16,16 +16,13 @@ def dashboard_app() -> AppTest:
     return AppTest.from_file(str(app_path))
 
 
-def test_dashboard_renders_core_metrics(dashboard_app: AppTest) -> None:
+def test_dashboard_renders_core_metrics(
+    dashboard_app: AppTest, monkeypatch: pytest.MonkeyPatch
+) -> None:
     fixture = Path(__file__).resolve().parents[1] / "fixtures" / "dashboard_sample.csv"
-    data = fixture.read_bytes()
+    monkeypatch.setenv("TRADEPULSE_DASHBOARD_TEST_UPLOAD", str(fixture))
 
-    app = dashboard_app.run()
-    app = app.file_uploader[0].upload(
-        data=data,
-        file_name="dashboard_sample.csv",
-        mime_type="text/csv",
-    ).run()
+    app = dashboard_app.run(timeout=10)
 
     labels = {metric.label for metric in app.metric}
     assert {"Kuramoto R", "Entropy H", "ΔH"}.issubset(labels)

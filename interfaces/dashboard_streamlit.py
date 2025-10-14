@@ -3,6 +3,10 @@
 
 from __future__ import annotations
 
+import io
+import os
+from pathlib import Path
+
 import pandas as pd
 import streamlit as st
 
@@ -89,11 +93,37 @@ with st.sidebar:
 
 backend_url = backend_url_input.strip()
 
-uploaded = st.file_uploader("Upload CSV with columns: ts, price, volume", type=["csv"])
+uploaded = st.file_uploader(
+    "Upload CSV with columns: ts, price, volume",
+    type=["csv"],
+    key="price_upload",
+)
 
-if uploaded:
+fixture_override = os.getenv("TRADEPULSE_DASHBOARD_TEST_UPLOAD")
+fixture_bytes: bytes | None = None
+fixture_name: str | None = None
+if not uploaded and fixture_override:
+    fixture_path = Path(fixture_override).expanduser()
     try:
-        raw_df = pd.read_csv(uploaded)
+        fixture_bytes = fixture_path.read_bytes()
+    except OSError as exc:
+        st.error(f"Failed to read fixture CSV: {exc}")
+    else:
+        fixture_name = fixture_path.name
+        st.info(
+            "Loaded fixture data for automated testing: %s" % fixture_name
+        )
+
+data_source = uploaded
+if not data_source and fixture_bytes is not None:
+    buffer = io.BytesIO(fixture_bytes)
+    if fixture_name:
+        setattr(buffer, "name", fixture_name)
+    data_source = buffer
+
+if data_source is not None:
+    try:
+        raw_df = pd.read_csv(data_source)
     except Exception as exc:  # pragma: no cover - pandas raises specific subclasses
         st.error(f"Failed to read CSV: {exc}")
     else:
@@ -110,10 +140,12 @@ if uploaded:
             tracer = get_tracer("tradepulse.dashboard")
             with tracer.start_as_current_span(
                 "dashboard.compute_metrics",
-                window=window,
-                bins=bins,
-                delta=delta,
-                gpu_requested=use_gpu,
+                attributes={
+                    "window": window,
+                    "bins": bins,
+                    "delta": delta,
+                    "gpu_requested": use_gpu,
+                },
             ) as span:
                 try:
                     metrics = compute_indicator_metrics(
@@ -163,7 +195,7 @@ if uploaded:
             if backend_url and send_to_backend:
                 with tracer.start_as_current_span(
                     "dashboard.telemetry_post",
-                    backend_url=backend_url,
+                    attributes={"backend_url": backend_url},
                 ) as span:
                     success, status = post_metrics(
                         backend_url,
