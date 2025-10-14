@@ -369,9 +369,19 @@ class ExperimentSettings(BaseModel):
         return self.database.resolve()
 
 
+def _with_hydra_runtime_defaults(cfg: DictConfig) -> DictConfig:
+    """Provide fallback Hydra runtime values when composing configs programmatically."""
+
+    if OmegaConf.select(cfg, "hydra") is not None:
+        return cfg
+
+    fallback = OmegaConf.create({"hydra": {"run": {"dir": str(Path.cwd() / "outputs")}}})
+    return OmegaConf.merge(fallback, cfg)
+
+
 def _convert_experiment_cfg(cfg: DictConfig) -> MutableMapping[str, Any]:
     container = OmegaConf.to_container(
-        cfg, resolve=False, structured_config_mode=SCMode.DICT
+        cfg, resolve=True, structured_config_mode=SCMode.DICT
     )
     if not isinstance(container, MutableMapping):
         raise TypeError("experiment configuration must be a mapping")
@@ -384,6 +394,8 @@ def load_experiment_settings(
     secret_loader: SecretLoader | None = None,
 ) -> ExperimentSettings:
     """Load and validate experiment settings from a Hydra DictConfig."""
+
+    cfg = _with_hydra_runtime_defaults(cfg)
 
     experiment_cfg = cfg.get("experiment")
     if experiment_cfg is None:
