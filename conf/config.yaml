@@ -1,4 +1,5 @@
 defaults:
+  - schema@experiment: experiment
   - experiment: local
   - _self_
 

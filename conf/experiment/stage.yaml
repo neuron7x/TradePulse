@@ -1,5 +1,12 @@
+defaults:
+  - _self_
+  - /secrets@database.password: stage_db_password
 name: stage
-db_uri: "postgresql://stage:${STAGE_DB_PASSWORD:-secure}@host/stage"
+database:
+  driver: postgresql
+  user: stage
+  host: host
+  name: stage
 debug: false
 log_level: INFO
 random_seed: 2024

@@ -1,5 +1,12 @@
+defaults:
+  - _self_
+  - /secrets@database.password: prod_db_password
 name: prod
-db_uri: "postgresql://prod:${PROD_DB_PASSWORD:-secure}@host/prod"
+database:
+  driver: postgresql
+  user: prod
+  host: host
+  name: prod
 debug: false
 log_level: WARNING
 random_seed: 7

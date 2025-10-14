@@ -54,6 +54,48 @@ composite:
 All values are validated by the Pydantic models; invalid inputs raise a
 `ConfigError` with a descriptive message.
 
+## Hydra experiment configuration
+
+The analytics runner under `analytics/runner.py` now validates its Hydra
+configuration through the Pydantic schemas in `configs/settings.py`. Hydra
+defaults compose a structured experiment tree backed by dataclasses so that the
+resulting `DictConfig` has a stable schema. `load_experiment_settings` converts
+the Hydra output into an `ExperimentSettings` instance and enforces several
+rules before any computation starts:
+
+- Database connections must either provide a full URI or individual
+  components (`driver`, `user`, `host`, `name`, and a `SecretRef`). The
+  resulting DSN is validated as a proper URL.
+- Analytics windows and bin counts must exceed safe minimums (window ≥ 32,
+  bins ≥ 8) and the Ricci delta must fall in the `(0, 1)` interval.
+- Tracking directories cannot be empty or traverse parent directories when
+  tracking is enabled.
+
+Secrets are modelled as `SecretRef` objects that point at Vault or AWS Secrets
+Manager paths. Production and staging profiles in `conf/experiment/*.yaml` no
+longer embed fallback passwords; instead they reference entries registered via
+Hydra structured configs (for example `secrets@database.password:
+stage_db_password`). The default secret loader resolves these references from
+environment variables using the pattern:
+
+```
+SECRETS__VAULT__SECRET__DATA__TRADEPULSE__PROD__POSTGRES__PASSWORD=<value>
+```
+
+Provide the equivalent key for staging (`...__STAGE__...`) when running those
+profiles locally or in CI. Missing variables raise a `SecretResolutionError`,
+causing the build to fail immediately.
+
+To exercise the validation logic in automation, run:
+
+```bash
+python scripts/validate_experiment_configs.py
+```
+
+The script iterates through the supported Hydra experiments (`ci`, `local`,
+`stage`, `prod`) and aborts with a non-zero status if required secrets or
+schema validations are missing.
+
 ## CLI usage
 
 The Kuramoto–Ricci integration script demonstrates CLI overrides:

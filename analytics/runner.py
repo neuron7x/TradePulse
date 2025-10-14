@@ -19,6 +19,15 @@ import pandas as pd
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
+from configs.secrets import default_secret_loader
+from configs.settings import (
+    ExperimentSettings,
+    load_experiment_settings,
+    register_structured_configs,
+)
+
+register_structured_configs()
+
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
@@ -85,13 +94,15 @@ def _current_git_sha(cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def collect_run_metadata(run_dir: Path, original_cwd: Path, cfg: DictConfig) -> RunMetadata:
+def collect_run_metadata(
+    run_dir: Path, original_cwd: Path, settings: ExperimentSettings
+) -> RunMetadata:
     """Collect metadata that allows reproducing the current experiment run."""
 
     timestamp = datetime.now(timezone.utc).isoformat()
     git_sha = _current_git_sha(original_cwd)
-    environment = str(cfg.experiment.name)
-    seed = int(cfg.experiment.random_seed)
+    environment = settings.name
+    seed = int(settings.random_seed)
     return RunMetadata(
         run_dir=run_dir,
         original_cwd=original_cwd,
@@ -113,12 +124,12 @@ def _write_metadata(metadata: RunMetadata) -> None:
     metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
+def run_pipeline(settings: ExperimentSettings) -> dict[str, Any]:
     """Execute the analytics pipeline using configuration parameters."""
 
     logger = logging.getLogger("tradepulse.experiment")
-    data_cfg = cfg.experiment.data
-    analytics_cfg = cfg.experiment.analytics
+    data_cfg = settings.data
+    analytics_cfg = settings.analytics
 
     data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
     if not data_path.exists():
@@ -169,17 +180,28 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
 def main(cfg: DictConfig) -> None:
     """Hydra entrypoint that orchestrates experiment execution."""
 
-    configure_logging(str(cfg.experiment.log_level))
-    set_random_seeds(int(cfg.experiment.random_seed))
+    secret_loader = default_secret_loader()
+    experiment_settings = load_experiment_settings(cfg, secret_loader=secret_loader)
+
+    configure_logging(experiment_settings.log_level)
+    set_random_seeds(int(experiment_settings.random_seed))
     apply_reproducibility_settings(cfg)
 
     run_dir = Path.cwd()
     original_cwd = Path(get_original_cwd())
-    metadata = collect_run_metadata(run_dir, original_cwd, cfg)
+    metadata = collect_run_metadata(run_dir, original_cwd, experiment_settings)
 
-    logging.getLogger(__name__).info("Running with configuration:\n%s", OmegaConf.to_yaml(cfg))
+    sanitized = experiment_settings.model_dump(mode="json")
+    if "database" in sanitized:
+        sanitized_database = dict(sanitized["database"])
+        sanitized_database["uri"] = "<redacted>"
+        sanitized_database.pop("password", None)
+        sanitized["database"] = sanitized_database
+    logging.getLogger(__name__).info(
+        "Running with configuration:\n%s", json.dumps(sanitized, indent=2)
+    )
 
-    results = run_pipeline(cfg)
+    results = run_pipeline(experiment_settings)
     _write_metadata(metadata)
 
     results_path = run_dir / "pipeline_results.json"

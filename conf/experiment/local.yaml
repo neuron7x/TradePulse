@@ -1,5 +1,6 @@
 name: local
-db_uri: "sqlite:///local.db"
+database:
+  uri: sqlite:///local.db
 debug: true
 log_level: DEBUG
 random_seed: 42
