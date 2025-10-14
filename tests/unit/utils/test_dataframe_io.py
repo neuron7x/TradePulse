@@ -49,9 +49,17 @@ def test_polars_backend_prepares_index_and_roundtrips(tmp_path, monkeypatch):
         def to_pandas(self, *, use_pyarrow: bool = False):
             return self._frame.copy()
 
+        def to_dict(self, *, as_series: bool = False):
+            assert as_series is False
+            return {column: self._frame[column].tolist() for column in self._frame.columns}
+
     class _PolarsModule:
         def from_pandas(self, frame: pd.DataFrame) -> _Dataset:
             storage["from_pandas"] = frame.copy()
+            return _Dataset(frame)
+
+        def DataFrame(self, data, *, strict: bool = False):  # pragma: no cover - signature parity
+            frame = pd.DataFrame(data)
             return _Dataset(frame)
 
         def read_parquet(self, path: Path) -> _Dataset:  # pragma: no cover - signature parity
@@ -73,6 +81,106 @@ def test_polars_backend_prepares_index_and_roundtrips(tmp_path, monkeypatch):
 
     payload = backend.to_bytes_fn(original, index=False)
     assert payload == b"parquet"
+
+
+def test_polars_backend_read_falls_back_without_pyarrow(tmp_path, monkeypatch):
+    """Reading via polars should not require pyarrow to be installed."""
+
+    storage: dict[str, pd.DataFrame] = {}
+
+    class _Dataset:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self._frame = frame.copy()
+
+        def write_parquet(self, buffer):
+            storage["written"] = self._frame.copy()
+            buffer.write(b"parquet")
+
+        def to_pandas(self, *, use_pyarrow: bool = False):
+            raise ModuleNotFoundError("No module named 'pyarrow'", name="pyarrow")
+
+        def to_dict(self, *, as_series: bool = False):
+            assert as_series is False
+            return {column: self._frame[column].tolist() for column in self._frame.columns}
+
+    class _PolarsModule:
+        def __init__(self) -> None:
+            self.created_from_dict: dict[str, list] | None = None
+
+        def from_pandas(self, frame: pd.DataFrame) -> _Dataset:
+            storage["from_pandas"] = frame.copy()
+            return _Dataset(frame)
+
+        def DataFrame(self, data, *, strict: bool = False):  # pragma: no cover - signature parity
+            self.created_from_dict = data
+            frame = pd.DataFrame(data)
+            return _Dataset(frame)
+
+        def read_parquet(self, path: Path) -> _Dataset:  # pragma: no cover - signature parity
+            return _Dataset(storage["written"])
+
+    monkeypatch.setattr(dataframe_io, "_load_polars", lambda: _PolarsModule())
+
+    backend = dataframe_io._polars_backend()
+
+    original = pd.DataFrame({"alpha": [1.0, 2.0], "beta": pd.date_range("2023-01-01", periods=2)})
+    path = tmp_path / "data.parquet"
+
+    backend.write_fn(original, path, index=False)
+    assert path.exists()
+
+    round_trip = backend.read_fn(path)
+    pd.testing.assert_frame_equal(round_trip, original.reset_index(drop=True))
+
+
+def test_polars_backend_prepare_falls_back_without_pyarrow(tmp_path, monkeypatch):
+    """``_prepare`` should materialize via dictionaries when pyarrow is absent."""
+
+    storage: dict[str, pd.DataFrame] = {}
+
+    class _Dataset:
+        def __init__(self, frame: pd.DataFrame) -> None:
+            self._frame = frame.copy()
+
+        def write_parquet(self, buffer):
+            storage["written"] = self._frame.copy()
+            buffer.write(b"parquet")
+
+        def to_pandas(self, *, use_pyarrow: bool = False):  # pragma: no cover - unused in test
+            return self._frame.copy()
+
+        def to_dict(self, *, as_series: bool = False):  # pragma: no cover - unused in test
+            assert as_series is False
+            return {column: self._frame[column].tolist() for column in self._frame.columns}
+
+    class _PolarsModule:
+        def __init__(self) -> None:
+            self.created_from_dict: dict[str, list] | None = None
+
+        def from_pandas(self, frame: pd.DataFrame) -> _Dataset:
+            raise ImportError("pyarrow missing")
+
+        def DataFrame(self, data, *, strict: bool = False):
+            self.created_from_dict = data
+            frame = pd.DataFrame(data)
+            return _Dataset(frame)
+
+        def read_parquet(self, path: Path) -> _Dataset:  # pragma: no cover - signature parity
+            return _Dataset(storage["written"])
+
+    module = _PolarsModule()
+    monkeypatch.setattr(dataframe_io, "_load_polars", lambda: module)
+
+    backend = dataframe_io._polars_backend()
+
+    original = pd.DataFrame({"value": [1.0, 2.5]}, index=pd.Index(["row1", "row2"], name="id"))
+    path = tmp_path / "data.parquet"
+
+    backend.write_fn(original, path, index=True)
+    assert path.exists()
+
+    expected_payload = original.reset_index().to_dict(orient="list")
+    assert module.created_from_dict == expected_payload
 
 
 def test_select_backend_prefers_json_when_allowed(monkeypatch):

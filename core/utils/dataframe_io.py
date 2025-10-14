@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import importlib
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -87,16 +88,35 @@ def _polars_backend() -> _Backend:
             payload = frame.reset_index()
         else:
             payload = frame.reset_index(drop=True)
-        return pl.from_pandas(payload)
+        try:
+            return pl.from_pandas(payload)
+        except (ImportError, ModuleNotFoundError):
+            data = payload.to_dict(orient="list")
+            return pl.DataFrame(data, strict=False)
 
     def _write(frame: pd.DataFrame, path: Path, index: bool) -> None:
         buffer = io.BytesIO()
         _prepare(frame, index).write_parquet(buffer)
         path.write_bytes(buffer.getvalue())
 
+    def _materialize_without_pyarrow(dataset) -> pd.DataFrame:
+        """Convert a polars dataframe to pandas without requiring pyarrow."""
+
+        # ``to_dict(as_series=False)`` returns a mapping from column names to
+        # python lists and preserves column order, which pandas can ingest
+        # without the optional ``pyarrow`` dependency.
+        materialized = dataset.to_dict(as_series=False)
+        return pd.DataFrame(materialized, columns=list(materialized.keys()))
+
     def _read(path: Path) -> pd.DataFrame:
         dataset = pl.read_parquet(path)
-        return dataset.to_pandas(use_pyarrow=False)
+        try:
+            return dataset.to_pandas(use_pyarrow=False)
+        except ModuleNotFoundError as exc:
+            missing = getattr(exc, "name", None)
+            if missing not in (None, "pyarrow"):  # pragma: no cover - defensive
+                raise
+            return _materialize_without_pyarrow(dataset)
 
     def _to_bytes(frame: pd.DataFrame, index: bool) -> bytes:
         buffer = io.BytesIO()
@@ -173,11 +193,21 @@ def write_dataframe(
     backend.write_fn(frame, target, index)
 
     index_path = base.with_suffix(".index.json")
+    names_path = base.with_suffix(".index.names.json")
     if index and backend.name == "polars":
         index_frame = frame.index.to_frame(index=False)
         _json_backend().write_fn(index_frame, index_path, index=False)
-    elif index_path.exists():
-        index_path.unlink()
+        if isinstance(frame.index, pd.MultiIndex):
+            names = list(frame.index.names)
+        else:
+            names = [frame.index.name]
+        names_payload = [name if name is not None else None for name in names]
+        names_path.write_text(json.dumps(names_payload))
+    else:
+        if index_path.exists():
+            index_path.unlink()
+        if names_path.exists():
+            names_path.unlink()
     return target
 
 
@@ -240,9 +270,22 @@ def read_dataframe(path: Path, *, allow_json_fallback: bool = False) -> pd.DataF
             index_path = path.with_suffix(".index.json")
             if index_path.exists():
                 index_frame = _json_backend().read_fn(index_path)
+                for column in index_frame.columns:
+                    try:
+                        index_frame[column] = pd.to_datetime(index_frame[column])
+                    except (TypeError, ValueError):  # pragma: no cover - heterogeneous index
+                        continue
+                names_path = path.with_suffix(".index.names.json")
+                index_names: list[str | None] | None = None
+                if names_path.exists():
+                    with names_path.open("r", encoding="utf-8") as handle:
+                        raw_names = json.load(handle)
+                    index_names = [name if name is not None else None for name in raw_names]
+                if index_names and len(index_names) == index_frame.shape[1]:
+                    index_frame.columns = index_names
                 if index_frame.shape[1] == 1:
-                    column = index_frame.columns[0]
-                    frame.index = pd.Index(index_frame.iloc[:, 0], name=column)
+                    series = index_frame.iloc[:, 0]
+                    frame.index = pd.Index(series, name=series.name)
                 else:
                     frame.index = pd.MultiIndex.from_frame(index_frame, names=list(index_frame.columns))
                 if backend_name == "polars":
@@ -272,6 +315,9 @@ def purge_dataframe_artifacts(base_path: Path) -> None:
     index_path = base_path.with_suffix(".index.json")
     if index_path.exists():
         index_path.unlink()
+    names_path = base_path.with_suffix(".index.names.json")
+    if names_path.exists():
+        names_path.unlink()
 
 
 def dataframe_to_parquet_bytes(frame: pd.DataFrame, *, index: bool = False) -> bytes:
