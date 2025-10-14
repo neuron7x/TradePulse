@@ -1,5 +1,8 @@
 # TradePulse
 
+<a href="https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml"><img src="https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml/badge.svg"></a>
+<a href="https://github.com/neuron7x/TradePulse/actions/workflows/security.yml"><img src="https://github.com/neuron7x/TradePulse/actions/workflows/security.yml/badge.svg"></a>
+
 **Advanced algorithmic trading framework powered by geometric market indicators**
 
 [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml)
