@@ -1,0 +1,20 @@
+codecov:
+  require_ci_to_pass: yes
+  notify:
+    wait_for_ci: true
+
+coverage:
+  status:
+    project:
+      default:
+        informational: false
+        target: auto
+        threshold: 0%
+    patch:
+      default:
+        informational: false
+        target: auto
+        threshold: 0%
+comment:
+  layout: "reach, diff, flags, files"
+  behavior: default

@@ -146,8 +146,9 @@ tests/fuzz/
 # Run tests locally
 pytest tests/
 
-# Run with coverage
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics
+# Run with coverage (branch coverage + CI threshold)
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics \
+  --cov-branch --cov-fail-under=90
 ```
 
 See [TESTING.md](TESTING.md) for detailed testing guidelines.
@@ -187,6 +188,8 @@ python -m scripts lint  # Full lint suite
 ## Coverage job та Codecov інтеграція
 
 - Всі pull request повинні мати успішний coverage check — це забезпечується workflow `.github/workflows/coverage.yml`.
+- Pipeline виконує `pytest` з `--cov-branch` та `--cov-fail-under=90`, тому локально перевіряйте не менше 90% сумарного покриття перед push.
+- Codecov блокує злиття при падінні загального або diff-покриття. Виправляйте тести або оновлюйте baseline, перш ніж запитувати review.
 - Якщо coverage не відображається або з'являється тег "відсутнє покриття":
   1. Переконайтесь, що pipeline не впав і coverage.xml згенеровано.
   2. Перевірте наявність `secrets.CODECOV_TOKEN` у налаштуваннях репозиторію.
