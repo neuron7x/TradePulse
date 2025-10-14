@@ -138,8 +138,12 @@ print(f"SMA(50): {result.value:.2f}")
 
 ### 5. Risk Management
 
+Use ``execution.order.position_sizing(balance, risk, price, max_leverage=5.0)``
+to convert account risk into base units. The helper enforces leverage caps while
+keeping your per-trade loss aligned with ``balance * risk``.
+
 ```python
-from execution.risk import position_sizing, calculate_stop_loss
+from execution.order import position_sizing
 
 # Account settings
 balance = 10000.0
@@ -154,16 +158,22 @@ size = position_sizing(
     balance=balance,
     risk=risk_per_trade,
     price=entry_price,
-    stop_loss_pct=stop_loss_pct
 )
 
-# Calculate stop loss price
-stop_loss_price = calculate_stop_loss(entry_price, stop_loss_pct, 'long')
+# Manually derive the stop loss price for a long position.
+# When risking ``stop_loss_pct`` of the entry price, the protective order
+# sits ``stop_loss_pct`` below ``entry_price``. For short trades the sign flips.
+stop_loss_price = entry_price * (1 - stop_loss_pct)
 
 print(f"Position Size: {size:.6f}")
 print(f"Stop Loss: ${stop_loss_price:.2f}")
 print(f"Risk Amount: ${balance * risk_per_trade:.2f}")
 ```
+
+The same approach works for short positions by adding the percentage to the
+entry price instead of subtracting it: ``entry_price * (1 + stop_loss_pct)``.
+If your broker specifies stop losses in ticks or currency instead of
+percentages, convert the value to a price offset before applying the formula.
 
 ### 6. Strategy Optimization
 
