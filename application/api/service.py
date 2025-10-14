@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
@@ -17,9 +16,10 @@ from aiolimiter import AsyncLimiter
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
+from application.settings import AdminApiSettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
 from execution.risk import RiskLimits, RiskManager
@@ -28,7 +28,7 @@ from src.admin.remote_control import (
     TokenAuthenticator,
     create_remote_control_router,
 )
-from src.audit.audit_logger import AuditLogger
+from src.audit.audit_logger import AuditLogger, HttpAuditSink
 from src.risk.risk_manager import RiskManagerFacade
 
 
@@ -245,40 +245,70 @@ def create_app(
     rate_limiter: AsyncLimiter | None = None,
     cache: TTLCache | None = None,
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
-    admin_token: str | None = None,
-    audit_secret: str | None = None,
-    admin_rate_limit: tuple[int, float] | None = None,
+    settings: AdminApiSettings | None = None,
 ) -> FastAPI:
-    """Build the FastAPI application with configured dependencies."""
+    """Build the FastAPI application with configured dependencies.
+
+    Args:
+        rate_limiter: Optional AsyncLimiter controlling request throughput for
+            inference endpoints.
+        cache: Shared cache instance for feature and prediction responses.
+        forecaster_factory: Callable returning the forecaster implementation.
+        settings: Administrative configuration backing the kill-switch API. When
+            omitted the values are loaded from :class:`AdminApiSettings` using
+            environment variables.
+    """
 
     limiter = rate_limiter or AsyncLimiter(max_rate=60, time_period=60)
     ttl_cache = cache or TTLCache(ttl_seconds=30, max_entries=512)
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
 
-    resolved_admin_token = admin_token or os.environ.get("TRADEPULSE_ADMIN_TOKEN")
-    resolved_audit_secret = audit_secret or os.environ.get("TRADEPULSE_AUDIT_SECRET")
-    missing = []
-    if not resolved_admin_token:
-        missing.append("TRADEPULSE_ADMIN_TOKEN")
-    if not resolved_audit_secret:
-        missing.append("TRADEPULSE_AUDIT_SECRET")
-    if missing:
-        joined = ", ".join(missing)
+    try:
+        resolved_settings = settings or AdminApiSettings()
+    except ValidationError as exc:  # pragma: no cover - defensive branch
+        alias_map = {
+            "admin_token": "TRADEPULSE_ADMIN_TOKEN",
+            "ADMIN_TOKEN": "TRADEPULSE_ADMIN_TOKEN",
+            "audit_secret": "TRADEPULSE_AUDIT_SECRET",
+            "AUDIT_SECRET": "TRADEPULSE_AUDIT_SECRET",
+            "admin_subject": "TRADEPULSE_ADMIN_SUBJECT",
+            "ADMIN_SUBJECT": "TRADEPULSE_ADMIN_SUBJECT",
+            "admin_rate_limit_max_attempts": "TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS",
+            "ADMIN_RATE_LIMIT_MAX_ATTEMPTS": "TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS",
+            "admin_rate_limit_interval_seconds": "TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS",
+            "ADMIN_RATE_LIMIT_INTERVAL_SECONDS": "TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS",
+            "audit_webhook_url": "TRADEPULSE_AUDIT_WEBHOOK_URL",
+            "AUDIT_WEBHOOK_URL": "TRADEPULSE_AUDIT_WEBHOOK_URL",
+        }
+        missing = [
+            alias_map.get(error["loc"][0], error["loc"][0])
+            for error in exc.errors()
+            if error.get("type") == "missing"
+        ]
+        joined = ", ".join(sorted(set(missing))) or "configuration values"
         raise RuntimeError(
             (
-                "Missing required secret(s): {}. Provide them via create_app parameters or "
-                "environment variables."
+                "Missing required secret(s): {}. Provide them via AdminApiSettings or environment variables."
             ).format(joined)
-        )
+        ) from exc
+
+    admin_token_value = resolved_settings.admin_token.get_secret_value()
+    audit_secret_value = resolved_settings.audit_secret.get_secret_value()
+    admin_subject = resolved_settings.admin_subject
+    rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
+    rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
+
+    audit_sink = None
+    if resolved_settings.audit_webhook_url is not None:
+        audit_sink = HttpAuditSink(str(resolved_settings.audit_webhook_url))
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
-    audit_logger = AuditLogger(secret=resolved_audit_secret)
-    authenticator = TokenAuthenticator(token=resolved_admin_token)
-    rate_limit_values = admin_rate_limit or (5, 60.0)
+    audit_logger = AuditLogger(secret=audit_secret_value, sink=audit_sink)
+    authenticator = TokenAuthenticator(token=admin_token_value, subject=admin_subject)
     admin_rate_limiter = AdminRateLimiter(
-        max_attempts=int(rate_limit_values[0]),
-        interval_seconds=float(rate_limit_values[1]),
+        max_attempts=int(rate_limit_max_attempts),
+        interval_seconds=float(rate_limit_interval),
     )
 
     limiter_rate = limiter.max_rate

@@ -210,6 +210,7 @@ def create_remote_control_router(
         response_model=KillSwitchResponse,
         status_code=status.HTTP_200_OK,
         summary="Engage the global kill-switch",
+        description="Engage or reaffirm the kill-switch and emit a signed audit log entry.",
     )
     async def engage_kill_switch(
         payload: KillSwitchRequest,
@@ -241,6 +242,7 @@ def create_remote_control_router(
         response_model=KillSwitchResponse,
         status_code=status.HTTP_200_OK,
         summary="Read the global kill-switch state",
+        description="Inspect the kill-switch state and append an immutable audit record.",
     )
     async def read_kill_switch_state(
         request: Request,
@@ -270,6 +272,7 @@ def create_remote_control_router(
         response_model=KillSwitchResponse,
         status_code=status.HTTP_200_OK,
         summary="Reset the global kill-switch",
+        description="Reset the kill-switch in an idempotent manner and preserve an audit trail.",
     )
     async def reset_kill_switch(
         request: Request,

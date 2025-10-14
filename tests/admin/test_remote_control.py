@@ -311,3 +311,16 @@ def test_kill_switch_reset_endpoint_is_idempotent(
     assert noop_record.event_type == "kill_switch_reset_noop"
     assert noop_record.details["previously_engaged"] is False
     assert audit_logger.verify(noop_record)
+
+
+def test_kill_switch_endpoints_are_documented(remote_control_fixture: RemoteControlBundle) -> None:
+    client, _, _, _ = remote_control_fixture
+    schema = client.app.openapi()
+    path_item = schema["paths"]["/admin/kill-switch"]
+
+    assert "description" in path_item["post"]
+    assert "audit log" in path_item["post"]["description"].lower()
+    assert "description" in path_item["get"]
+    assert "audit" in path_item["get"]["description"].lower()
+    assert "description" in path_item["delete"]
+    assert "audit" in path_item["delete"]["description"].lower()
