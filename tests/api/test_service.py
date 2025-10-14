@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -10,7 +11,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
 
-from application.api.service import create_app
+from application.api.service import OnlineSignalForecaster, create_app
 from application.settings import AdminApiSettings
 
 
@@ -99,6 +100,34 @@ def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
     cached = client.post("/predictions", json=payload)
     assert cached.headers["X-Cache-Status"] == "hit"
     assert cached.json() == body
+
+
+def test_prediction_endpoint_requires_macd_convergence() -> None:
+    incomplete_features = pd.DataFrame([{"macd": 0.4, "rsi": 58.0}])
+
+    class _IncompletePipeline:
+        def transform(self, frame: pd.DataFrame) -> pd.DataFrame:  # pragma: no cover - trivial
+            return incomplete_features.copy()
+
+    def forecaster_factory() -> OnlineSignalForecaster:
+        return OnlineSignalForecaster(pipeline=_IncompletePipeline())
+
+    settings = AdminApiSettings(
+        admin_token="unit-admin-token",
+        audit_secret="unit-audit-secret",
+    )
+    app = create_app(settings=settings, forecaster_factory=forecaster_factory)
+    client = TestClient(app)
+
+    payload = _build_payload()
+    payload["horizon_seconds"] = 300
+
+    response = client.post("/predictions", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert "Missing MACD convergence features" in body["error"]["message"]
+    assert body["error"]["code"] == 422
 
 
 def test_admin_endpoints_set_strict_cache_headers(configured_app: FastAPI) -> None:

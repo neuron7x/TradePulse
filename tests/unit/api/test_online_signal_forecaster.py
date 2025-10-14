@@ -55,13 +55,45 @@ class TestLatestFeatureVector:
     def test_all_nan_row_raises_unprocessable_entity(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
     ) -> None:
-        features = pd.DataFrame([{"macd": np.nan, "rsi": np.nan, "return_1": np.nan}])
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": np.nan,
+                    "macd_signal": np.nan,
+                    "macd_histogram": np.nan,
+                    "rsi": np.nan,
+                    "return_1": np.nan,
+                }
+            ]
+        )
         forecaster = make_forecaster(features)
 
         with pytest.raises(HTTPException) as excinfo:
             forecaster.latest_feature_vector(features)
 
         assert excinfo.value.status_code == 422
+
+    def test_missing_macd_components_raise_unprocessable_entity(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        features = pd.DataFrame(
+            [
+                {
+                    "macd": 0.2,
+                    "macd_signal": np.nan,
+                    "macd_histogram": np.nan,
+                    "rsi": 55.0,
+                    "return_1": 0.001,
+                }
+            ]
+        )
+        forecaster = make_forecaster(features)
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.latest_feature_vector(features)
+
+        assert excinfo.value.status_code == 422
+        assert "Missing MACD convergence features" in excinfo.value.detail
 
     def test_valid_row_returns_clean_series(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
@@ -70,6 +102,8 @@ class TestLatestFeatureVector:
             [
                 {
                     "macd": 0.1,
+                    "macd_signal": 0.05,
+                    "macd_histogram": 0.05,
                     "rsi": 53.0,
                     "return_1": 0.005,
                     "queue_imbalance": 0.2,
@@ -93,6 +127,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 1.2,
+                        "macd_signal": 0.9,
+                        "macd_histogram": 0.3,
                         "rsi": 68.0,
                         "return_1": 0.03,
                         "queue_imbalance": 0.8,
@@ -105,6 +141,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": -1.5,
+                        "macd_signal": -1.1,
+                        "macd_histogram": -0.4,
                         "rsi": 28.0,
                         "return_1": -0.04,
                         "queue_imbalance": -0.7,
@@ -117,6 +155,8 @@ class TestDeriveSignal:
                 pd.Series(
                     {
                         "macd": 0.02,
+                        "macd_signal": 0.01,
+                        "macd_histogram": 0.01,
                         "rsi": 49.0,
                         "return_1": 0.0005,
                         "queue_imbalance": 0.01,
@@ -147,6 +187,27 @@ class TestDeriveSignal:
         else:
             assert -0.15 <= score <= 0.15
 
+    def test_missing_macd_components_raise_error(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
+        series = pd.Series(
+            {
+                "macd": 0.5,
+                "rsi": 60.0,
+                "return_1": 0.01,
+                "queue_imbalance": 0.2,
+                "volatility_20": 0.01,
+            }
+        )
+        horizon = 600
+        forecaster = make_forecaster(pd.DataFrame([series]))
+
+        with pytest.raises(HTTPException) as excinfo:
+            forecaster.derive_signal("BTC-USD", series, horizon)
+
+        assert excinfo.value.status_code == 422
+        assert "Missing MACD convergence features" in excinfo.value.detail
+
     def test_signal_to_dto_in_prediction_response(
         self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
     ) -> None:
@@ -154,6 +215,8 @@ class TestDeriveSignal:
             [
                 {
                     "macd": 0.5,
+                    "macd_signal": 0.45,
+                    "macd_histogram": 0.05,
                     "rsi": 62.0,
                     "return_1": 0.015,
                     "queue_imbalance": 0.4,

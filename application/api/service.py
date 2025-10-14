@@ -7,7 +7,7 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Sequence
 from weakref import WeakKeyDictionary
 
 import numpy as np
@@ -174,6 +174,19 @@ class OnlineSignalForecaster:
 
     def __init__(self, pipeline: SignalFeaturePipeline | None = None) -> None:
         self._pipeline = pipeline or SignalFeaturePipeline(FeaturePipelineConfig())
+        self._required_macd_fields: tuple[str, str, str] = (
+            "macd",
+            "macd_signal",
+            "macd_histogram",
+        )
+
+    @staticmethod
+    def _macd_missing_message(missing_fields: Sequence[str]) -> str:
+        joined = ", ".join(sorted(missing_fields))
+        return (
+            "Missing MACD convergence features: {}. Provide additional historical bars to "
+            "compute indicator smoothing."
+        ).format(joined)
 
     def compute_features(self, payload: FeatureRequest) -> pd.DataFrame:
         frame = payload.to_frame()
@@ -185,10 +198,21 @@ class OnlineSignalForecaster:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
             )
-        latest = features.iloc[-1].dropna()
+        latest_row = features.iloc[-1]
+        missing_macd = [
+            field
+            for field in self._required_macd_fields
+            if field not in latest_row.index or pd.isna(latest_row[field])
+        ]
+        if missing_macd:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=self._macd_missing_message(missing_macd),
+            )
+        latest = latest_row.dropna()
         if latest.empty:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="Insufficient data to derive features",
             )
         return latest
@@ -197,7 +221,20 @@ class OnlineSignalForecaster:
         self, symbol: str, latest: pd.Series, horizon_seconds: int
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
-        macd = float(latest.get("macd", 0.0))
+        missing_macd = [
+            field
+            for field in self._required_macd_fields
+            if field not in latest.index or pd.isna(latest[field])
+        ]
+        if missing_macd:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=self._macd_missing_message(missing_macd),
+            )
+
+        macd = float(latest["macd"])
+        macd_signal = float(latest["macd_signal"])
+        macd_histogram = float(latest["macd_histogram"])
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
@@ -205,6 +242,8 @@ class OnlineSignalForecaster:
 
         score = 0.0
         score += np.tanh(macd) * 0.4
+        score += np.tanh(macd_histogram) * 0.05
+        score += np.tanh(macd_signal) * 0.05
         score += ((rsi - 50.0) / 50.0) * 0.3
         score += np.tanh(ret_1 * 100.0) * 0.2
         score += np.tanh(queue_imbalance) * 0.1
@@ -229,6 +268,9 @@ class OnlineSignalForecaster:
             metadata={
                 "score": score,
                 "horizon_seconds": horizon_seconds,
+                "macd": macd,
+                "macd_signal": macd_signal,
+                "macd_histogram": macd_histogram,
             },
         )
         return signal, score
