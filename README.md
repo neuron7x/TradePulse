@@ -269,6 +269,50 @@ scaled = scale_series(large_data, use_float32=True)
 python -m interfaces.cli live --source csv --path sample.csv --window 200
 ```
 
+### Streamlit Dashboard
+
+TradePulse includes a web-based dashboard built with Streamlit for real-time market analysis visualization.
+
+#### Authentication Setup
+
+The dashboard requires authentication for security. Configure credentials via environment variables:
+
+```bash
+# 1. Copy the example environment file
+cp .env.example .env
+
+# 2. Generate a secure password hash (example using Python)
+python -c "import bcrypt; print(bcrypt.hashpw('your_secure_password'.encode(), bcrypt.gensalt()).decode())"
+
+# 3. Update .env with your credentials
+# DASHBOARD_ADMIN_USERNAME=admin
+# DASHBOARD_ADMIN_PASSWORD_HASH=<your_generated_hash>
+# DASHBOARD_COOKIE_KEY=<generate_random_key>  # e.g., python -c "import secrets; print(secrets.token_urlsafe(32))"
+```
+
+#### Running the Dashboard
+
+```bash
+# Install Streamlit dependencies (if not already installed)
+pip install -r requirements.txt
+
+# Run the dashboard
+streamlit run interfaces/dashboard_streamlit.py
+
+# The dashboard will open at http://localhost:8501
+# Login with the credentials configured in .env
+```
+
+**Default credentials (development only):**
+- Username: `admin`
+- Password: `admin123` (⚠️ Change this in production!)
+
+**Security Notes:**
+- Never commit `.env` files to version control
+- Always use strong passwords in production
+- Generate unique cookie keys for each environment
+- Password hashes are stored using bcrypt for security
+
 See [Usage Examples](docs/examples/) and [Performance Demo](examples/performance_demo.py) for more detailed examples.
 
 ---
