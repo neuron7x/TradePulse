@@ -8,9 +8,12 @@ traceable equity curve, aligning with the methodology described in
 portfolio walk-forward evaluation across TradePulse components and feeds
 observability metrics expected by ``docs/quality_gates.md``.
 
-Dependencies include NumPy for vectorised PnL computation, transaction cost
-models from :mod:`backtest.transaction_costs`, and metrics collectors for
-governance-compliant telemetry.
+Upstream consumers pass in price series and strategy callbacks from research or
+signal layers, while downstream clients include CLI backtests, notebooks, and
+reporting tools. Dependencies include NumPy for vectorised PnL computation,
+transaction cost models from :mod:`backtest.transaction_costs`, and metrics
+collectors for governance-compliant telemetry, mirroring the data flow outlined
+in ``docs/documentation_governance.md``.
 """
 
 from __future__ import annotations
@@ -39,7 +42,15 @@ from .performance import (
 
 @dataclass(slots=True)
 class LatencyConfig:
-    """Configuration of discrete delays in the execution pipeline."""
+    """Configuration of discrete delays in the execution pipeline.
+
+    Attributes:
+        signal_to_order: Number of bar steps between signal generation and order
+            submission.
+        order_to_execution: Bars between submission and broker acknowledgement.
+        execution_to_fill: Additional bars until the fill is booked, mirroring
+            the latency taxonomy in ``docs/execution.md``.
+    """
 
     signal_to_order: int = 0
     order_to_execution: int = 0
@@ -47,13 +58,23 @@ class LatencyConfig:
 
     @property
     def total_delay(self) -> int:
+        """Aggregate latency in bars covering the entire pipeline."""
+
         delay = int(self.signal_to_order + self.order_to_execution + self.execution_to_fill)
         return max(0, delay)
 
 
 @dataclass(slots=True)
 class OrderBookConfig:
-    """Synthetic limit order book configuration."""
+    """Synthetic limit order book configuration.
+
+    Attributes:
+        spread_bps: Half-spread in basis points.
+        depth_profile: Sequence describing relative depth multiples per level.
+        infinite_depth: When ``True`` the final level replenishes to absorb any
+            residual quantity, following the stress-test policy in
+            ``docs/performance.md``.
+    """
 
     spread_bps: float = 0.0
     depth_profile: Sequence[float] = (1.0, 0.75, 0.5)
@@ -62,7 +83,13 @@ class OrderBookConfig:
 
 @dataclass(slots=True)
 class SlippageConfig:
-    """Model slippage incurred at execution time."""
+    """Model slippage incurred at execution time.
+
+    Attributes:
+        per_unit_bps: Directional per-unit adjustment in basis points.
+        depth_impact_bps: Incremental impact per depth level.
+        stochastic_bps: Reserved for stochastic slippage modelling.
+    """
 
     per_unit_bps: float = 0.0
     depth_impact_bps: float = 0.0
@@ -71,7 +98,15 @@ class SlippageConfig:
 
 @dataclass(slots=True)
 class PortfolioConstraints:
-    """Risk controls applied to target positions before execution."""
+    """Risk controls applied to target positions before execution.
+
+    Attributes:
+        max_gross_exposure: Absolute cap on target positions.
+        max_net_exposure: Net exposure cap, enforcing the policy in
+            ``docs/execution.md``.
+        target_volatility: Desired realised volatility used for scaling.
+        volatility_lookback: Sample length for the realised volatility estimate.
+    """
 
     max_gross_exposure: float | None = None
     max_net_exposure: float | None = None
@@ -95,13 +130,20 @@ class Result:
 
 
 class _SimpleOrderBook:
-    """A lightweight LOB simulator that exposes best levels and depth."""
+    """A lightweight LOB simulator that exposes best levels and depth.
+
+    The simulator is intentionally deterministic and single-asset, matching the
+    requirements in ``docs/performance.md`` for reproducible backtests. It
+    assumes spreads are symmetric and depth levels remain static across time.
+    """
 
     def __init__(self, prices: NDArray[np.float64], config: OrderBookConfig) -> None:
         self._prices = prices
         self._config = config
 
     def _best_quotes(self, idx: int) -> tuple[float, float]:
+        """Return the best bid/ask quotes at index ``idx``."""
+
         mid = float(self._prices[min(idx, self._prices.size - 1)])
         spread = mid * self._config.spread_bps * 1e-4
         best_bid = mid - spread / 2.0
@@ -109,6 +151,8 @@ class _SimpleOrderBook:
         return best_bid, best_ask
 
     def fill_price(self, side: str, quantity: float, idx: int, slippage: SlippageConfig) -> float:
+        """Simulate a fill price using depth-implied slippage adjustments."""
+
         quantity = float(abs(quantity))
         if quantity == 0.0 or not np.isfinite(quantity):
             bid, ask = self._best_quotes(idx)
@@ -154,6 +198,16 @@ class _SimpleOrderBook:
 
 
 def _compute_positions(signals: NDArray[np.float64], latency: LatencyConfig) -> NDArray[np.float64]:
+    """Shift signals forward to emulate pipeline latency.
+
+    Args:
+        signals: Target position array emitted by the strategy.
+        latency: Configuration describing discrete pipeline delays.
+
+    Returns:
+        NDArray[np.float64]: Positions after latency adjustments.
+    """
+
     executed = np.zeros_like(signals, dtype=float)
     schedule: dict[int, float] = {}
     delay = latency.total_delay
@@ -177,6 +231,21 @@ def _apply_portfolio_constraints(
     prices: NDArray[np.float64],
     constraints: PortfolioConstraints,
 ) -> NDArray[np.float64]:
+    """Apply exposure and volatility constraints to raw signals.
+
+    Args:
+        signals: Target position array prior to risk adjustments.
+        prices: Price series for volatility estimation.
+        constraints: Portfolio-level exposure configuration.
+
+    Returns:
+        NDArray[np.float64]: Adjusted positions respecting configured limits.
+
+    Notes:
+        Volatility scaling uses sample standard deviation over the configured
+        lookback, consistent with ``docs/performance.md``.
+    """
+
     adjusted = np.asarray(signals, dtype=float).copy()
     max_gross = constraints.max_gross_exposure
     if max_gross is not None:
@@ -216,7 +285,13 @@ def _apply_portfolio_constraints(
 
 
 class WalkForwardEngine(BacktestEngine[Result]):
-    """Concrete implementation of :class:`interfaces.backtest.BacktestEngine`."""
+    """Concrete implementation of :class:`interfaces.backtest.BacktestEngine`.
+
+    The engine encapsulates latency-aware execution, transaction-cost
+    modelling, and telemetry hooks so that backtests mirror the live execution
+    stack described in ``docs/runbook_live_trading.md``. Results feed the
+    performance reporting workflow in ``docs/documentation_governance.md``.
+    """
 
     def run(
         self,
@@ -452,7 +527,11 @@ def walk_forward(
     cost_config: str | Path | Mapping[str, Any] | None = None,
     constraints: PortfolioConstraints | None = None,
 ) -> Result:
-    """Compatibility wrapper that delegates to :class:`WalkForwardEngine`."""
+    """Compatibility wrapper delegating to :class:`WalkForwardEngine`.
+
+    This helper mirrors the public API used by notebooks and CLI commands,
+    ensuring instrumentation and configuration defaults remain consistent.
+    """
 
     engine = WalkForwardEngine()
     return engine.run(

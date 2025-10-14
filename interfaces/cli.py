@@ -39,7 +39,8 @@ def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
         window: Lookback window for phase, entropy, and curvature indicators.
 
     Returns:
-        Array of integer signals in ``{-1, 0, 1}`` aligned with ``prices``.
+        np.ndarray: Array of integer signals in ``{-1, 0, 1}`` aligned with
+        ``prices``.
 
     Examples:
         >>> prices = np.linspace(100, 105, 256)
@@ -74,7 +75,14 @@ def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
 
 
 def _load_yaml() -> Any:
-    """Return the PyYAML module, raising a helpful error when missing."""
+    """Return the PyYAML module, raising a helpful error when missing.
+
+    Returns:
+        Any: The imported PyYAML module.
+
+    Raises:
+        RuntimeError: If PyYAML is not installed.
+    """
 
     try:
         import yaml  # type: ignore[import-not-found]
@@ -87,7 +95,14 @@ def _load_yaml() -> Any:
 
 
 def _apply_config(args: argparse.Namespace) -> argparse.Namespace:
-    """Merge configuration overrides from a YAML file into CLI arguments."""
+    """Merge configuration overrides from a YAML file into CLI arguments.
+
+    Args:
+        args: Namespace produced by :mod:`argparse`.
+
+    Returns:
+        argparse.Namespace: Updated namespace reflecting YAML overrides.
+    """
 
     config_path = getattr(args, "config", None)
     if not config_path:
@@ -120,7 +135,15 @@ def _apply_config(args: argparse.Namespace) -> argparse.Namespace:
 
 
 def _make_data_ingestor(csv_path: str | None = None) -> DataIngestor:
-    """Return a DataIngestor constrained to directories derived from *csv_path*."""
+    """Return a :class:`DataIngestor` constrained to directories derived from ``csv_path``.
+
+    Args:
+        csv_path: Optional CSV location used to infer allowed directories.
+
+    Returns:
+        DataIngestor: Configured ingestor with restricted roots per
+        ``docs/documentation_governance.md``.
+    """
 
     allowed = None
     if csv_path:
@@ -129,6 +152,7 @@ def _make_data_ingestor(csv_path: str | None = None) -> DataIngestor:
 
 
 def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
+    """Attach the active traceparent to ``payload`` when available."""
     traceparent = current_traceparent()
     if not traceparent:
         return payload
@@ -144,6 +168,9 @@ def cmd_analyze(args):
         args: Parsed :class:`argparse.Namespace` with CLI options. Expected
             attributes include ``csv``, ``price_col``, ``window``, ``bins``,
             ``delta``, ``gpu``, and ``traceparent``.
+
+    Returns:
+        None: Writes a JSON payload to stdout.
 
     Notes:
         Outputs a JSON payload suitable for audit pipelines described in
@@ -186,6 +213,9 @@ def cmd_backtest(args):
             ``price_col``, ``window``, ``fee``, ``config``, ``gpu``, and
             ``traceparent``.
 
+    Returns:
+        None: Emits JSON summary statistics to stdout.
+
     Notes:
         Returns backtest statistics in JSON form to comply with
         ``docs/performance.md`` reporting guidance. The walk-forward engine is the
@@ -206,6 +236,9 @@ def cmd_live(args):
         args: Parsed :class:`argparse.Namespace` including ``config``, ``venue``,
             ``state_dir``, ``cold_start``, ``metrics_port``, and ``traceparent``
             attributes.
+
+    Returns:
+        None: Executes the live runner with side effects only.
 
     Notes:
         Delegates to :class:`interfaces.live_runner.LiveTradingRunner`, ensuring
@@ -236,6 +269,9 @@ def _run_with_trace_context(cmd_name: str, args: argparse.Namespace) -> None:
     Args:
         cmd_name: Name of the command for tracer labelling.
         args: Parsed arguments namespace.
+
+    Returns:
+        None.
 
     Notes:
         This helper ensures every CLI invocation participates in distributed

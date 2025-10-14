@@ -9,10 +9,14 @@ By embedding curvature metrics into the feature stack, we meet the governance
 requirement that core risk signals expose interpretable topology, as detailed
 in ``docs/documentation_governance.md``.
 
-Key dependencies include optional NetworkX (with an in-repo fallback) for graph
-manipulation, NumPy for numerical work, and SciPy for Wasserstein distances when
-available. The module records telemetry using ``core.utils`` helpers to satisfy
-traceability expectations laid out in ``docs/quality_gates.md``.
+Upstream data arrives from the ingestion pipeline via indicator callers, while
+downstream consumers include the feature engineering stack, execution risk
+monitoring, and CLI diagnostics in ``interfaces/cli.py``. Key dependencies
+include optional NetworkX (with an in-repo fallback) for graph manipulation,
+NumPy for numerical work, and SciPy for Wasserstein distances when available.
+The module records telemetry using ``core.utils`` helpers to satisfy
+traceability expectations laid out in ``docs/quality_gates.md`` and to
+coordinate with the governance guardrails documented in ``docs/monitoring.md``.
 """
 
 from __future__ import annotations
@@ -150,7 +154,31 @@ except Exception:  # pragma: no cover
 
 
 def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
-    """Quantize price levels into nodes; connect adjacent active levels."""
+    """Quantise a price path into a level graph.
+
+    Args:
+        prices: One-dimensional array of strictly positive prices representing a
+            single asset history.
+        delta: Relative price increment controlling the resolution of quantised
+            levels as documented in ``docs/indicators.md``.
+
+    Returns:
+        nx.Graph: Undirected graph whose nodes correspond to discretised price
+        levels and whose edges capture successive transitions weighted by price
+        deltas.
+
+    Examples:
+        >>> prices = np.array([100.0, 100.5, 101.0])
+        >>> G = build_price_graph(prices, delta=0.01)
+        >>> sorted(G.nodes())
+        [-0, 1, 2]
+
+    Notes:
+        Non-finite prices are removed before quantisation in accordance with the
+        cleansing contract in ``docs/documentation_governance.md``. Empty or
+        degenerate series yield an empty graph, keeping downstream curvature
+        computations stable.
+    """
     p = np.asarray(prices, dtype=float)
     mask = np.isfinite(p)
     if mask.sum() < 2:
@@ -170,7 +198,23 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
     return G
 
 def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
-    """Return degree-weighted distribution over neighbors within radius."""
+    """Return the degree-weighted probability mass over a node's neighbourhood.
+
+    Args:
+        G: Graph produced by :func:`build_price_graph` or a compatible structure.
+        node: Node identifier whose neighbourhood distribution is required.
+        radius: Currently unused, reserved for future extensions involving
+            multi-hop neighbourhoods.
+
+    Returns:
+        np.ndarray: Probability vector whose elements sum to one and correspond
+        to the relative transition weights from ``node``.
+
+    Notes:
+        When ``node`` is isolated a single mass ``[1.0]`` is returned to avoid
+        downstream NaNs. Edge weights are sanitised to remain finite, matching
+        the governance requirements of ``docs/quality_gates.md``.
+    """
     neigh = [n for n in G.neighbors(node)]
     if not neigh:  # pragma: no cover - defensive guard for isolated nodes
         return np.array([1.0])
@@ -188,7 +232,24 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     return w_arr / total
 
 def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
-    """Ollivier–Ricci curvature κ(x,y) = 1 - W1(μ_x, μ_y)/d(x,y) for unweighted graphs."""
+    """Evaluate the Ollivier–Ricci curvature for a specific edge.
+
+    Args:
+        G: Graph describing price transitions.
+        x: Source node identifier.
+        y: Target node identifier.
+
+    Returns:
+        float: Curvature value in the range ``(-∞, 1]`` where negative values
+        denote dispersion and positive values indicate clustering.
+
+    Notes:
+        The implementation normalises discrete neighbourhood measures and uses
+        SciPy's Wasserstein distance when available, falling back to a cumulative
+        distribution approximation otherwise. Shortest-path calculations are
+        hardened through :func:`_shortest_path_length_safe`, aligning with the
+        numerical stability guidance in ``docs/monitoring.md``.
+    """
     if not G.has_edge(x, y):  # pragma: no cover - caller ensures edge exists
         return 0.0
     mu_x = local_distribution(G, x)
@@ -211,7 +272,21 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
 
 
 def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
-    """Return a robust shortest path length that tolerates bad edge weights."""
+    """Return a robust shortest-path distance tolerant to malformed weights.
+
+    Args:
+        G: Graph describing price transitions.
+        x: Source node identifier.
+        y: Target node identifier.
+
+    Returns:
+        float: Weighted path length, falling back to unweighted distance when
+        weight metadata is invalid. ``inf`` is returned when no path exists.
+
+    Notes:
+        The helper logs debug diagnostics when weight issues arise, which feed
+        into the risk observability pipeline in ``docs/risk_ml_observability.md``.
+    """
 
     def _call_shortest_path(graph: nx.Graph, weight: str | None) -> float:
         if hasattr(graph, "shortest_path_length"):
@@ -254,8 +329,8 @@ def mean_ricci(
         max_workers: Upper bound for the thread pool when ``parallel`` is async.
 
     Returns:
-        Mean curvature value across all edges. ``0.0`` is returned for empty
-        graphs.
+        float: Mean curvature value across all edges. ``0.0`` is returned for
+        empty graphs.
 
     Raises:
         RuntimeError: Propagated if asynchronous execution fails to initialise a
@@ -264,7 +339,9 @@ def mean_ricci(
     Notes:
         High positive curvature implies tightly connected price states, while
         negative curvature indicates dispersion—a signal cross-referenced by the
-        monitoring blueprint in ``docs/risk_ml_observability.md``.
+        monitoring blueprint in ``docs/risk_ml_observability.md``. ``float32``
+        accumulation is recommended only when graphs exceed ~50k edges; otherwise
+        ``float64`` provides more stable averages.
     """
     with _logger.operation(
         "mean_ricci",
@@ -310,6 +387,7 @@ def _run_ricci_async(
     edges: list[tuple[int, int]],
     max_workers: int | None,
 ) -> list[float]:
+    """Evaluate curvature across edges concurrently using asyncio threads."""
     async def _runner() -> list[float]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None
@@ -340,8 +418,22 @@ def _run_ricci_async(
 
 
 def _w1_fallback(a, b):
+    """Approximate the Wasserstein-1 distance without SciPy dependencies.
+
+    Args:
+        a: First probability mass function.
+        b: Second probability mass function.
+
+    Returns:
+        float: Approximation of the 1-Wasserstein distance.
+
+    Notes:
+        The method uses cumulative sums on normalised arrays and mirrors the
+        fallback described in ``docs/indicators.md`` for low-dependency builds.
+    """
+
     import numpy as _np
-    # normalize
+
     a = _np.asarray(a, dtype=float)
     b = _np.asarray(b, dtype=float)
     a = a / (a.sum() + 1e-12)
@@ -373,16 +465,17 @@ class MeanRicciFeature(BaseFeature):
         max_workers: int | None = None,
         name: str | None = None,
     ) -> None:
-        """Initialize mean Ricci curvature feature.
+        """Initialise the feature configuration.
 
         Args:
-            delta: Price quantization granularity (default: 0.005)
-            chunk_size: Process edges in chunks for large graphs (default: None)
-            use_float32: Use float32 precision for memory efficiency (default: False)
+            delta: Price quantisation granularity.
+            chunk_size: Process edges in chunks for large graphs.
+            use_float32: Use ``float32`` precision for memory efficiency.
             parallel_async: Execute curvature computations concurrently via
-                asyncio thread pools (default: False)
-            max_workers: Optional cap for the async worker pool (default: None)
-            name: Optional custom name (default: "mean_ricci")
+                asyncio thread pools.
+            max_workers: Optional cap for the async worker pool when
+                ``parallel_async`` is enabled.
+            name: Optional custom name.
         """
         super().__init__(name or "mean_ricci")
         self.delta = float(delta)
@@ -392,7 +485,15 @@ class MeanRicciFeature(BaseFeature):
         self.max_workers = max_workers
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
-        """Compute mean Ricci curvature of price graph."""
+        """Compute mean Ricci curvature of the price graph.
+
+        Args:
+            data: Price array used to build the underlying graph.
+            **_: Additional keyword arguments (ignored).
+
+        Returns:
+            FeatureResult: Mean curvature value and metadata about graph size.
+        """
 
         with _metrics.measure_feature_transform(self.name, "ricci"):
             G = build_price_graph(data, delta=self.delta)
