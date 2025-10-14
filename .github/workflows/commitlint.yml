@@ -1,0 +1,161 @@
+name: Commitlint
+
+# GitHub Intervention Protocol (GIP) v1.0
+# Validates that commits follow Conventional Commits specification
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    name: Validate Commit Messages
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Check if commitlint config exists
+        id: check-config
+        run: |
+          if [ -f "commitlint.config.cjs" ] || [ -f "commitlint.config.js" ] || [ -f ".commitlintrc.js" ]; then
+            echo "config_exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "config_exists=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Install commitlint
+        if: steps.check-config.outputs.config_exists == 'true'
+        run: |
+          npm install --save-dev @commitlint/cli @commitlint/config-conventional
+      
+      - name: Validate PR commits with commitlint
+        if: steps.check-config.outputs.config_exists == 'true' && github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get base and head refs
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.event.pull_request.head.sha }}
+          
+          echo "Validating commits from ${BASE_SHA} to ${HEAD_SHA}"
+          
+          # Validate all commits in the PR
+          npx commitlint --from ${BASE_SHA} --to ${HEAD_SHA} --verbose
+      
+      - name: Validate push commit with commitlint
+        if: steps.check-config.outputs.config_exists == 'true' && github.event_name == 'push'
+        run: |
+          # For push events, validate the commit
+          echo "${{ github.event.head_commit.message }}" | npx commitlint --verbose
+      
+      - name: Manual validation (fallback)
+        if: steps.check-config.outputs.config_exists == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const conventionalCommitRegex = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\(.+\))?!?:\s.+/;
+            
+            let commits = [];
+            
+            if (context.eventName === 'pull_request') {
+              const { data } = await github.rest.pulls.listCommits({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number
+              });
+              commits = data.map(c => ({ sha: c.sha.substring(0, 7), message: c.commit.message }));
+            } else {
+              // For push events
+              commits = [{
+                sha: context.sha.substring(0, 7),
+                message: context.payload.head_commit.message
+              }];
+            }
+            
+            const invalidCommits = [];
+            
+            for (const commit of commits) {
+              const firstLine = commit.message.split('\n')[0];
+              
+              // Skip merge commits
+              if (firstLine.startsWith('Merge ')) {
+                continue;
+              }
+              
+              if (!conventionalCommitRegex.test(firstLine)) {
+                invalidCommits.push({ sha: commit.sha, message: firstLine });
+              }
+            }
+            
+            if (invalidCommits.length > 0) {
+              let comment = '## ❌ Conventional Commits Validation Failed\n\n';
+              comment += 'The following commits do not follow the [Conventional Commits](https://www.conventionalcommits.org/) specification:\n\n';
+              
+              for (const commit of invalidCommits) {
+                comment += `- \`${commit.sha}\`: ${commit.message}\n`;
+              }
+              
+              comment += '\n### ✅ Correct Format\n\n';
+              comment += '```\n';
+              comment += '<type>(<scope>): <subject>\n';
+              comment += '```\n\n';
+              comment += '**Types**: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`\n\n';
+              comment += '**Examples**:\n';
+              comment += '- `feat(backtest): add support for multi-timeframe analysis`\n';
+              comment += '- `fix(execution): prevent order duplication on retry`\n';
+              comment += '- `docs(api): update authentication flow diagram`\n';
+              comment += '- `ci(workflows): add intervention gate validation`\n\n';
+              comment += '### 🔧 How to Fix\n\n';
+              comment += '1. **Amend your commit message**:\n';
+              comment += '   ```bash\n';
+              comment += '   git commit --amend -m "feat(scope): your message"\n';
+              comment += '   git push --force-with-lease\n';
+              comment += '   ```\n\n';
+              comment += '2. **Or use interactive rebase** to fix multiple commits:\n';
+              comment += '   ```bash\n';
+              comment += '   git rebase -i HEAD~N  # N = number of commits to fix\n';
+              comment += '   # Change "pick" to "reword" for commits to fix\n';
+              comment += '   git push --force-with-lease\n';
+              comment += '   ```\n\n';
+              comment += 'See [GIP Documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md#ci-gate-commitlint) for more details.\n';
+              
+              if (context.eventName === 'pull_request') {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body: comment
+                });
+              }
+              
+              core.setFailed(`${invalidCommits.length} commit(s) do not follow Conventional Commits format`);
+            } else {
+              console.log('✅ All commits follow Conventional Commits format');
+            }
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Commitlint Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Validates that all commits follow [Conventional Commits](https://www.conventionalcommits.org/) specification." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Format: \`<type>(<scope>): <subject>\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See [GIP Documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md) for details." >> $GITHUB_STEP_SUMMARY

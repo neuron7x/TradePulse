@@ -1,6 +1,7 @@
 # CODEOWNERS
 
 # This is a CODEOWNERS file that requires at least one code owner to approve changes.
+# GitHub Intervention Protocol (GIP) v1.0 enforces reviews for critical paths.
 
 # Default ownership ensures at least one reviewer is requested for every change.
 * @neuron7x
@@ -13,3 +14,15 @@
 /ui/ @neuron7x
 /tests/ @neuron7x
 /docs/ @neuron7x
+
+# Architecture Decision Records - require explicit review for architectural changes
+/docs/adr/ @neuron7x
+
+# Intervention Protocol documentation - changes require maintainer approval
+/docs/GIP_SYSTEM_PROMPT.md @neuron7x
+
+# Changelog - ensure quality control for release notes
+/CHANGELOG.md @neuron7x
+
+# CI/CD workflows - protect automation integrity
+/.github/workflows/ @neuron7x

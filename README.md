@@ -351,11 +351,17 @@ See the [Monitoring Guide](docs/monitoring.md) for setup and configuration detai
 
 ## 🤝 Contributing
 
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development workflow
-- Code standards
-- PR and issue templates
-- Review checklists
+We welcome contributions! TradePulse follows the **GitHub Intervention Protocol (GIP) v1.0** for quality control.
+
+**Quick Start:**
+- All PRs must use the [PR template](.github/pull_request_template.md) with evidence, test plan, and rollback plan
+- Commits must follow [Conventional Commits](https://www.conventionalcommits.org/) format: `<type>(<scope>): <subject>`
+- Automated CI gates validate completeness and commit format
+
+**Resources:**
+- **Full Guidelines**: [CONTRIBUTING.md](CONTRIBUTING.md) - Development workflow, code standards, review process
+- **GIP Documentation**: [docs/GIP_SYSTEM_PROMPT.md](docs/GIP_SYSTEM_PROMPT.md) - Complete intervention protocol
+- **Intervention Request**: [Submit structured intervention request](.github/ISSUE_TEMPLATE/intervention_request.yml)
 
 ---
 

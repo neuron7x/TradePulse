@@ -1,0 +1,228 @@
+name: Intervention Gate
+
+# GitHub Intervention Protocol (GIP) v1.0
+# Validates that PRs follow the intervention protocol and contain all required sections
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate-intervention:
+    runs-on: ubuntu-latest
+    name: Validate Intervention Protocol Compliance
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      
+      - name: Check PR Description Completeness
+        id: check-description
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            const prTitle = context.payload.pull_request.title || '';
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            
+            // Skip for certain labels
+            const skipLabels = ['dependencies', 'documentation-only', 'break-glass'];
+            const shouldSkip = skipLabels.some(label => labels.includes(label));
+            
+            if (shouldSkip) {
+              console.log('⏭️ Skipping intervention gate due to label:', labels);
+              core.setOutput('skip', 'true');
+              return;
+            }
+            
+            const errors = [];
+            const warnings = [];
+            
+            // Required sections for all PRs
+            const requiredSections = [
+              { name: 'Context', pattern: /#+\s*Context/i },
+              { name: 'Evidence', pattern: /#+\s*Evidence/i },
+              { name: 'Solution', pattern: /#+\s*Solution/i },
+              { name: 'Test Plan', pattern: /#+\s*Test\s*Plan/i },
+              { name: 'Rollback Plan', pattern: /#+\s*Rollback\s*Plan/i },
+              { name: 'Documentation Updates', pattern: /#+\s*Documentation\s*Updates/i }
+            ];
+            
+            // Check each required section
+            for (const section of requiredSections) {
+              if (!section.pattern.test(prBody)) {
+                errors.push(`❌ Missing required section: **${section.name}**`);
+              } else {
+                // Check if section is not just a placeholder
+                const sectionMatch = prBody.match(new RegExp(`${section.pattern.source}[\\s\\S]*?(?=\\n#|$)`, 'i'));
+                if (sectionMatch) {
+                  const content = sectionMatch[0].replace(/<!--[\s\S]*?-->/g, '').trim();
+                  const contentLines = content.split('\n').filter(line => 
+                    line.trim() && 
+                    !line.match(/^#+\s*/) && 
+                    !line.match(/^-\s*\[\s*\]/) &&
+                    !line.trim().startsWith('<!--')
+                  );
+                  
+                  if (contentLines.length < 2) {
+                    warnings.push(`⚠️ Section **${section.name}** appears incomplete (needs more detail)`);
+                  }
+                }
+              }
+            }
+            
+            // Check documentation updates checkboxes
+            const changelogChecked = /- \[x\].*CHANGELOG/i.test(prBody);
+            const adrChecked = /- \[x\].*ADR/i.test(prBody);
+            const docsChecked = /- \[x\].*README/i.test(prBody) || /- \[x\].*guides/i.test(prBody);
+            
+            if (!changelogChecked && !prBody.includes('N/A')) {
+              warnings.push('⚠️ CHANGELOG.md update not checked - mark as N/A if not applicable');
+            }
+            
+            // Additional check for hotfix PRs
+            const isHotfix = labels.includes('hotfix') || /\bhotfix\b/i.test(prTitle);
+            if (isHotfix) {
+              const hotfixSections = [
+                { name: 'Incident & Post-Mortem', pattern: /#+\s*Incident.*Post-Mortem/i }
+              ];
+              
+              for (const section of hotfixSections) {
+                if (!section.pattern.test(prBody)) {
+                  errors.push(`❌ Hotfix PR missing required section: **${section.name}**`);
+                }
+              }
+              
+              // Check for incident ticket reference
+              if (!/#INC-/.test(prBody) && !/incident.*ticket/i.test(prBody)) {
+                errors.push('❌ Hotfix PR must reference an incident ticket (#INC-YYYY-NNN)');
+              }
+            }
+            
+            // Generate report
+            let comment = '## 🛡️ Intervention Gate Check\n\n';
+            
+            if (errors.length === 0 && warnings.length === 0) {
+              comment += '✅ **All intervention protocol requirements met!**\n\n';
+              comment += 'This PR follows the [GitHub Intervention Protocol (GIP) v1.0](../blob/main/docs/GIP_SYSTEM_PROMPT.md).\n';
+            } else {
+              if (errors.length > 0) {
+                comment += '### ❌ Required Fixes\n\n';
+                comment += errors.join('\n') + '\n\n';
+              }
+              
+              if (warnings.length > 0) {
+                comment += '### ⚠️ Warnings\n\n';
+                comment += warnings.join('\n') + '\n\n';
+              }
+              
+              comment += '### 📋 How to Fix\n\n';
+              comment += '1. Edit your PR description to include all required sections\n';
+              comment += '2. Use the [PR template](../blob/main/.github/pull_request_template.md) as a guide\n';
+              comment += '3. See [GIP documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md) for examples\n\n';
+              comment += '**Note**: You can add label `documentation-only` or `break-glass` to skip these checks if absolutely necessary.\n';
+            }
+            
+            // Post comment if there are issues
+            if (errors.length > 0 || warnings.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: comment
+              });
+            }
+            
+            // Fail the check if there are errors
+            if (errors.length > 0) {
+              core.setFailed('Intervention gate validation failed. See PR comments for details.');
+            }
+            
+            core.setOutput('errors', errors.length);
+            core.setOutput('warnings', warnings.length);
+      
+      - name: Check File Changes
+        if: steps.check-description.outputs.skip != 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number
+            });
+            
+            const changedFiles = files.map(f => f.filename);
+            const prBody = context.payload.pull_request.body || '';
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            
+            // Skip for documentation-only changes
+            const isDocsOnly = changedFiles.every(f => 
+              f.startsWith('docs/') || 
+              f.endsWith('.md') ||
+              f.endsWith('.txt')
+            );
+            
+            if (isDocsOnly && labels.includes('documentation-only')) {
+              console.log('✅ Documentation-only changes, relaxed validation');
+              return;
+            }
+            
+            const criticalPaths = ['core/', 'execution/', 'backtest/', 'analytics/'];
+            const hasCriticalChanges = changedFiles.some(f => 
+              criticalPaths.some(path => f.startsWith(path))
+            );
+            
+            // Check if CHANGELOG was updated (via newsfragments or directly)
+            const changelogUpdated = changedFiles.some(f => 
+              f.includes('CHANGELOG.md') || 
+              f.startsWith('newsfragments/')
+            );
+            
+            // Check if ADR was created/updated for critical changes
+            const adrUpdated = changedFiles.some(f => f.startsWith('docs/adr/'));
+            
+            const issues = [];
+            
+            if (!changelogUpdated && !isDocsOnly) {
+              // Check if marked as N/A in PR body
+              if (!prBody.includes('CHANGELOG') || !prBody.includes('N/A')) {
+                issues.push('⚠️ CHANGELOG.md not updated. Add an entry via `newsfragments/` or mark as N/A in PR description.');
+              }
+            }
+            
+            if (hasCriticalChanges && !adrUpdated) {
+              // Check if marked as N/A
+              if (!prBody.includes('ADR') || !prBody.includes('N/A')) {
+                issues.push('⚠️ Critical component changed but no ADR created. Consider documenting architectural decisions in `docs/adr/`.');
+              }
+            }
+            
+            if (issues.length > 0) {
+              let comment = '## 📝 Documentation Check\n\n';
+              comment += issues.join('\n\n');
+              comment += '\n\n**Note**: If these items are not applicable, mark them as N/A in your PR description with justification.';
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: comment
+              });
+            }
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Intervention Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ PR validated against GitHub Intervention Protocol (GIP) v1.0" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See [GIP Documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md) for details." >> $GITHUB_STEP_SUMMARY

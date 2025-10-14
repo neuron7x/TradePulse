@@ -1,0 +1,129 @@
+name: "🛠️ Intervention Request"
+description: Request a code or infrastructure intervention following GIP v1.0
+title: "[Intervention] "
+labels: ["intervention", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## GitHub Intervention Protocol (GIP) v1.0
+        
+        Use this template to request a structured intervention in TradePulse.
+        See [docs/GIP_SYSTEM_PROMPT.md](../../docs/GIP_SYSTEM_PROMPT.md) for complete guidelines.
+
+  - type: dropdown
+    id: intervention-type
+    attributes:
+      label: Intervention Type
+      description: Select the type of intervention needed
+      options:
+        - Standard (planned feature/refactor)
+        - Hotfix (critical production issue)
+        - Infrastructure (CI/CD, dependencies, config)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How urgent is this intervention?
+      options:
+        - Low (can wait for next sprint)
+        - Medium (should be addressed soon)
+        - High (blocking or affecting users)
+        - Critical (production down or security issue)
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: What needs to be changed and why?
+      placeholder: |
+        **What**: Describe the problem or opportunity
+        **Why**: Business justification or technical necessity
+        **When**: Desired timeline
+        **Who**: Stakeholders or affected teams
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Provide concrete data that justifies this intervention
+      placeholder: |
+        - Metrics or monitoring data
+        - Error logs or traces
+        - User feedback or support tickets
+        - Performance benchmarks
+        - Links to related discussions or ADRs
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposed-solution
+    attributes:
+      label: Proposed Solution (Optional)
+      description: If you have ideas about how to implement this, describe them here
+      placeholder: |
+        - Technical approach
+        - Alternatives considered
+        - Expected impact
+        - Dependencies
+
+  - type: textarea
+    id: success-criteria
+    attributes:
+      label: Success Criteria
+      description: How will we know this intervention was successful?
+      placeholder: |
+        - Specific metrics to track
+        - Expected outcomes
+        - Acceptance criteria
+        - Definition of done
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks & Dependencies
+      description: What could go wrong? What depends on this?
+      placeholder: |
+        - Potential risks or side effects
+        - Dependencies on other work
+        - Required reviews or approvals
+        - Rollback complexity
+
+  - type: textarea
+    id: additional-context
+    attributes:
+      label: Additional Context
+      description: Any other information that would be helpful
+      placeholder: |
+        - Screenshots or diagrams
+        - Related issues or PRs
+        - External references
+        - Team discussions
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Submission Checklist
+      description: Confirm you've provided the necessary information
+      options:
+        - label: I have provided concrete evidence for this request
+          required: true
+        - label: I have defined clear success criteria
+          required: true
+        - label: I have considered risks and dependencies
+          required: true
+        - label: I have linked related issues or discussions (if any)
+          required: false
+        - label: For hotfix - I have created an incident ticket
+          required: false

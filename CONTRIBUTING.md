@@ -8,6 +8,7 @@ This document outlines the rules and processes that enable fast and safe develop
 
 ## Table of Contents
 
+- [GitHub Intervention Protocol (GIP)](#github-intervention-protocol-gip)
 - [Architectural Framework](#architectural-framework)
 - [Prerequisites](#prerequisites)
 - [Development Workflow](#development-workflow)
@@ -18,6 +19,63 @@ This document outlines the rules and processes that enable fast and safe develop
 - [Local Development](#local-development)
 - [License](#license)
 - [Contact](#contact)
+
+---
+
+## GitHub Intervention Protocol (GIP)
+
+**TradePulse follows the GitHub Intervention Protocol (GIP) v1.0** for quality control of all code and infrastructure changes.
+
+### Key Requirements
+
+1. **Structured PRs**: All PRs must follow the [PR template](.github/pull_request_template.md) with complete sections:
+   - Context (what, why, who)
+   - Evidence (metrics, logs, data)
+   - Solution (implementation approach)
+   - Test Plan (specific tests)
+   - Rollback Plan (step-by-step recovery)
+   - Documentation Updates (CHANGELOG, ADR, guides)
+
+2. **Conventional Commits**: All commit messages must follow [Conventional Commits](https://www.conventionalcommits.org/) format:
+   ```
+   <type>(<scope>): <subject>
+   ```
+   Examples:
+   - `feat(backtest): add multi-timeframe support`
+   - `fix(execution): prevent order duplication`
+   - `docs(api): update authentication guide`
+
+3. **Automated Gates**: CI/CD enforces:
+   - **Intervention Gate**: Validates PR completeness
+   - **Commitlint**: Checks commit message format
+   - **Hotfix Gate**: Additional checks for emergency fixes
+
+4. **CODEOWNERS**: Required reviews for:
+   - `/docs/adr/` - Architecture decisions
+   - `/core/`, `/execution/` - Critical components
+   - `CHANGELOG.md` - Release notes
+   - `.github/workflows/` - CI/CD changes
+
+### For Developers
+
+- **Before opening PR**: Ensure commits follow Conventional Commits, prepare evidence (logs/metrics), write tests
+- **When filling PR**: Complete all template sections, link related issues, create ADR for architectural changes
+- **Documentation**: Update CHANGELOG via `newsfragments/`, update relevant guides
+
+### For Hotfixes
+
+Emergency fixes require additional validation:
+- Reference incident ticket (#INC-YYYY-NNN)
+- Include smoke test plan
+- Document rollback procedure with time estimates
+- Schedule post-mortem within 48 hours
+- Add `hotfix` label to trigger additional gates
+
+### Resources
+
+- **Full GIP Documentation**: [docs/GIP_SYSTEM_PROMPT.md](docs/GIP_SYSTEM_PROMPT.md)
+- **PR Template**: [.github/pull_request_template.md](.github/pull_request_template.md)
+- **Intervention Request**: [.github/ISSUE_TEMPLATE/intervention_request.yml](.github/ISSUE_TEMPLATE/intervention_request.yml)
 
 ---
 

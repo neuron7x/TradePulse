@@ -1,0 +1,187 @@
+name: Hotfix Gate
+
+# GitHub Intervention Protocol (GIP) v1.0
+# Additional validation for hotfix PRs requiring incident tracking and rollback plans
+
+on:
+  pull_request:
+    types: [opened, labeled, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  hotfix-validation:
+    runs-on: ubuntu-latest
+    name: Validate Hotfix Requirements
+    # Only run this job for PRs with the 'hotfix' label
+    if: contains(github.event.pull_request.labels.*.name, 'hotfix')
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+      
+      - name: Validate Hotfix Requirements
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            const prTitle = context.payload.pull_request.title || '';
+            
+            console.log('🚨 Hotfix PR detected - running additional validation...');
+            
+            const errors = [];
+            const warnings = [];
+            
+            // 1. Check for Incident & Post-Mortem section
+            if (!(/#+\s*Incident.*Post-Mortem/i.test(prBody))) {
+              errors.push('❌ Missing required section: **Incident & Post-Mortem**');
+            }
+            
+            // 2. Check for incident ticket reference
+            const incidentTicketPattern = /#INC-\d{4}-\d{3,}/;
+            if (!incidentTicketPattern.test(prBody)) {
+              errors.push('❌ Missing incident ticket reference (format: #INC-YYYY-NNN)');
+            }
+            
+            // 3. Check for root cause analysis
+            if (!/root\s*cause/i.test(prBody)) {
+              warnings.push('⚠️ No root cause mentioned - ensure incident analysis is documented');
+            }
+            
+            // 4. Check for post-mortem plan
+            if (!/post-mortem/i.test(prBody) || !(/scheduled|planned|completed/i.test(prBody))) {
+              warnings.push('⚠️ Post-mortem not clearly scheduled or completed');
+            }
+            
+            // 5. Check for smoke test plan
+            const hasSmokeTest = /smoke\s*test/i.test(prBody);
+            if (!hasSmokeTest) {
+              errors.push('❌ Missing smoke test plan - hotfixes must include immediate verification steps');
+            }
+            
+            // 6. Check for rollback plan detail
+            const rollbackSection = prBody.match(/#+\s*Rollback\s*Plan[\s\S]*?(?=\n#|$)/i);
+            if (rollbackSection) {
+              const rollbackContent = rollbackSection[0];
+              
+              // Check for time estimate
+              if (!/<\s*\d+\s*(min|hour|hr)/i.test(rollbackContent)) {
+                warnings.push('⚠️ Rollback plan should include time estimates (e.g., "< 5 min")');
+              }
+              
+              // Check for multiple rollback steps or alternatives
+              const steps = rollbackContent.match(/^\s*\d+\./gm) || [];
+              if (steps.length < 2) {
+                warnings.push('⚠️ Rollback plan should include multiple steps or alternatives');
+              }
+            } else {
+              errors.push('❌ Missing Rollback Plan section');
+            }
+            
+            // 7. Check for follow-up tasks
+            if (!/follow-up/i.test(prBody)) {
+              warnings.push('⚠️ Consider adding follow-up tasks to prevent recurrence');
+            }
+            
+            // 8. Check for monitoring/alerting updates
+            if (!/monitor|alert|observability|metrics/i.test(prBody)) {
+              warnings.push('⚠️ Consider documenting monitoring/alerting improvements');
+            }
+            
+            // Generate report
+            let comment = '## 🚨 Hotfix Gate Validation\n\n';
+            
+            if (errors.length === 0 && warnings.length === 0) {
+              comment += '✅ **All hotfix requirements met!**\n\n';
+              comment += 'This hotfix follows the emergency intervention protocol.\n\n';
+              comment += '### ⚡ Hotfix Checklist\n';
+              comment += '- ✅ Incident ticket referenced\n';
+              comment += '- ✅ Smoke test plan included\n';
+              comment += '- ✅ Rollback plan documented\n';
+              comment += '- ✅ Post-mortem planned\n\n';
+              comment += '**Next Steps**:\n';
+              comment += '1. Obtain expedited review from on-call engineer\n';
+              comment += '2. Execute smoke tests in staging\n';
+              comment += '3. Monitor deployment closely\n';
+              comment += '4. Complete post-mortem within 48 hours\n';
+            } else {
+              if (errors.length > 0) {
+                comment += '### ❌ Critical Issues\n\n';
+                comment += errors.join('\n') + '\n\n';
+              }
+              
+              if (warnings.length > 0) {
+                comment += '### ⚠️ Recommendations\n\n';
+                comment += warnings.join('\n') + '\n\n';
+              }
+              
+              comment += '### 📋 Hotfix Requirements\n\n';
+              comment += 'All hotfix PRs must include:\n\n';
+              comment += '1. **Incident Ticket**: Reference to #INC-YYYY-NNN\n';
+              comment += '2. **Root Cause**: Brief explanation of what went wrong\n';
+              comment += '3. **Smoke Test Plan**: Immediate verification steps\n';
+              comment += '4. **Rollback Plan**: Detailed rollback procedure with time estimates\n';
+              comment += '5. **Post-Mortem**: Scheduled or completed retrospective\n';
+              comment += '6. **Follow-up Tasks**: Prevention measures\n\n';
+              comment += 'See [GIP Documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md#hotfix-intervention) for examples.\n';
+            }
+            
+            // Always post comment for hotfix PRs
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: comment
+            });
+            
+            // Fail if there are critical errors
+            if (errors.length > 0) {
+              core.setFailed(`Hotfix validation failed with ${errors.length} error(s). See PR comments for details.`);
+            } else if (warnings.length > 0) {
+              console.log(`⚠️ Hotfix has ${warnings.length} warning(s) but passes validation`);
+            }
+      
+      - name: Check for break-glass override
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const labels = context.payload.pull_request.labels.map(l => l.name);
+            
+            if (labels.includes('break-glass')) {
+              const comment = '## 🔥 Break-Glass Override Detected\n\n';
+              comment += '⚠️ This hotfix has been marked with **break-glass** label.\n\n';
+              comment += 'Some validation checks may be bypassed for emergency situations.\n\n';
+              comment += '**Post-Deployment Requirements**:\n';
+              comment += '1. ✅ Complete full post-mortem within 48 hours\n';
+              comment += '2. ✅ Document bypass justification in incident report\n';
+              comment += '3. ✅ Create follow-up tasks for any skipped validations\n';
+              comment += '4. ✅ Update runbooks based on lessons learned\n\n';
+              comment += 'This override is logged and will be reviewed in the next retrospective.\n';
+              
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: comment
+              });
+              
+              console.log('🔥 Break-glass override applied - validation warnings suppressed');
+            }
+      
+      - name: Summary
+        if: always()
+        run: |
+          echo "### Hotfix Gate Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "🚨 Additional validation for hotfix PRs" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Hotfix PRs require:" >> $GITHUB_STEP_SUMMARY
+          echo "- Incident ticket reference" >> $GITHUB_STEP_SUMMARY
+          echo "- Smoke test plan" >> $GITHUB_STEP_SUMMARY
+          echo "- Detailed rollback procedure" >> $GITHUB_STEP_SUMMARY
+          echo "- Post-mortem planning" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "See [GIP Documentation](../blob/main/docs/GIP_SYSTEM_PROMPT.md) for details." >> $GITHUB_STEP_SUMMARY
