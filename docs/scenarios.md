@@ -30,6 +30,16 @@ Use the [Scenario Template](scenario_template.md) alongside the web-based **Scen
 
 > 🛡️ Pair these guardrails with the CLI sanity checks (`cli/amm_cli.py`) so malformed CSV feeds or unsafe metrics never reach production pipelines.
 
+### Updating shared scenario presets
+
+Scenario defaults are now stored centrally in `configs/scenarios/templates.json`. Both the Next.js Scenario Studio and the Python CLI utilities load from this file, so every change must keep the schema stable:
+
+1. Edit `configs/scenarios/templates.json`, preserving the object structure (`id`, `label`, `description`, `defaults`, `notes`).
+2. Run the unit test `pytest tests/unit/test_scenario_templates.py -k loadable` to confirm the JSON parses in both Python and Node.js/TypeScript toolchains.
+3. For UI changes, restart the Next.js dev server so it picks up the refreshed templates during SSR.
+
+Each template entry should document actionable notes that clarify sizing, market conditions, or integration caveats. Keep the narratives short (1–2 sentences) to remain readable in the Scenario Studio sidebar.
+
 ---
 
 ## Setting Up Development Environment

@@ -1,0 +1,47 @@
+[
+  {
+    "id": "momentum-breakout",
+    "label": "Momentum Breakout",
+    "description": "Targets high volume breakouts with moderate exposure.",
+    "defaults": {
+      "initialBalance": 15000,
+      "riskPerTrade": 1,
+      "maxPositions": 3,
+      "timeframe": "1h"
+    },
+    "notes": [
+      "Requires fast data refresh (≤ 1 minute).",
+      "Pair with trailing stops to lock in momentum exhaustion."
+    ]
+  },
+  {
+    "id": "mean-reversion",
+    "label": "Mean Reversion Swing",
+    "description": "Aims to fade extended moves with conservative sizing.",
+    "defaults": {
+      "initialBalance": 10000,
+      "riskPerTrade": 0.5,
+      "maxPositions": 2,
+      "timeframe": "4h"
+    },
+    "notes": [
+      "Ensure data set spans multiple regimes to avoid biased reversion.",
+      "Layer with volatility filters to avoid trending environments."
+    ]
+  },
+  {
+    "id": "volatility-breakout",
+    "label": "Volatility Expansion",
+    "description": "Captures volatility squeezes with disciplined portfolio caps.",
+    "defaults": {
+      "initialBalance": 25000,
+      "riskPerTrade": 0.75,
+      "maxPositions": 4,
+      "timeframe": "30m"
+    },
+    "notes": [
+      "Backtest with intraday transaction costs and slippage.",
+      "Consider volatility-adjusted position sizing for calmer sessions."
+    ]
+  }
+]
