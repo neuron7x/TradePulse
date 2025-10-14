@@ -198,19 +198,35 @@ class OnlineSignalForecaster:
     ) -> tuple[Signal, float]:
         # Compute a simple composite alpha score using a handful of stable metrics.
         macd = float(latest.get("macd", 0.0))
+        macd_signal_line = float(latest.get("macd_signal", macd))
+        macd_histogram = float(
+            latest.get("macd_histogram", macd - macd_signal_line)
+        )
         rsi = float(latest.get("rsi", 50.0))
         ret_1 = float(latest.get("return_1", 0.0))
         volatility_20 = float(latest.get("volatility_20", 0.0))
         queue_imbalance = float(latest.get("queue_imbalance", 0.0))
 
-        score = 0.0
-        score += np.tanh(macd) * 0.4
-        score += ((rsi - 50.0) / 50.0) * 0.3
-        score += np.tanh(ret_1 * 100.0) * 0.2
-        score += np.tanh(queue_imbalance) * 0.1
-        score -= abs(volatility_20) * 0.05
+        # The heuristic emphasises MACD structure: the raw MACD trend captures the
+        # dominant fast/slow EMA divergence, the crossover term highlights whether
+        # MACD is leading or lagging the signal line, and the histogram term scales
+        # the magnitude of the divergence to reward strong momentum while
+        # suppressing noise. RSI, short-term returns, and order-book imbalance are
+        # complementary momentum and flow signals, while realised volatility acts
+        # as a risk haircut.
+        contributions: dict[str, float] = {
+            "macd_trend": np.tanh(macd) * 0.28,
+            "macd_crossover": np.tanh(macd - macd_signal_line) * 0.24,
+            "macd_histogram": np.tanh(macd_histogram * 2.0) * 0.18,
+            "rsi_bias": ((rsi - 50.0) / 50.0) * 0.12,
+            "return_momentum": np.tanh(ret_1 * 120.0) * 0.1,
+            "order_flow": np.tanh(queue_imbalance) * 0.06,
+            "volatility_risk": -abs(volatility_20) * 0.04,
+        }
 
-        threshold = 0.15
+        score = sum(contributions.values())
+
+        threshold = 0.12
         if score > threshold:
             action = SignalAction.BUY
         elif score < -threshold:
@@ -218,17 +234,23 @@ class OnlineSignalForecaster:
         else:
             action = SignalAction.HOLD
 
-        confidence = float(min(1.0, max(0.0, abs(score) / 0.75)))
+        confidence = float(min(1.0, max(0.0, abs(score) / 0.85)))
         signal = Signal(
             symbol=symbol,
             action=action,
             confidence=confidence,
             rationale=(
-                "Composite heuristic based on MACD, RSI, return momentum and book imbalance"
+                "Composite heuristic weighting MACD trend, crossover momentum, histogram strength, RSI, returns, and book imbalance"
             ),
             metadata={
                 "score": score,
                 "horizon_seconds": horizon_seconds,
+                "component_contributions": contributions,
+                "macd_component_explanations": {
+                    "macd_trend": "Measures overall EMA divergence; positive values indicate bullish acceleration.",
+                    "macd_crossover": "Rewards MACD leading the signal line; negative values highlight bearish crossovers.",
+                    "macd_histogram": "Scales the magnitude of MACD vs signal separation to favour decisive momentum.",
+                },
             },
         )
         return signal, score
