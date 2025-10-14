@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from scripts import runtime
+from tests.tolerances import THREAD_BOUND_ENV_VARS
 
 
 def test_configure_logging_uses_utc_timestamp(monkeypatch, capsys) -> None:
@@ -30,6 +31,8 @@ def test_configure_deterministic_runtime_sets_seed(monkeypatch) -> None:
     import random
 
     assert random.randint(0, 1000) == 800
+    for key, value in THREAD_BOUND_ENV_VARS.items():
+        assert os.environ[key] == value
 
 
 def test_parse_env_file(tmp_path: Path) -> None:

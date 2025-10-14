@@ -99,10 +99,9 @@ except ImportError:  # pragma: no cover - Python <3.9 fallback
 
 import pytest
 
-from tests.tolerances import THREAD_BOUND_ENV_VARS
+from core.utils.determinism import apply_thread_determinism
 
-for _env_key, _env_value in THREAD_BOUND_ENV_VARS.items():
-    os.environ.setdefault(_env_key, _env_value)
+apply_thread_determinism(os.environ)
 
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:

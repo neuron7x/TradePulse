@@ -23,6 +23,22 @@ def _write_sample_csv(path: str | bytes):
     return df
 
 
+def _write_spiky_csv(path: str | bytes):
+    df = pd.DataFrame(
+        {
+            "ts": [
+                "2021-01-01T00:00:00Z",
+                "2021-01-01T00:00:10Z",
+                "2021-01-01T00:00:20Z",
+                "2021-01-01T00:00:30Z",
+            ],
+            "value": [1, 2, 100, 3],
+        }
+    )
+    df.to_csv(path, index=False)
+    return df
+
+
 def test_analyze_csv_returns_expected_metrics(tmp_path):
     csv_path = tmp_path / "example.csv"
     df = _write_sample_csv(csv_path)
@@ -38,6 +54,7 @@ def test_analyze_csv_returns_expected_metrics(tmp_path):
     assert analysis.timestamp_gap_stats is not None
     assert analysis.timestamp_gap_stats.median_seconds == pytest.approx(10.0)
     assert analysis.timestamp_gap_stats.max_seconds == pytest.approx(15.0)
+    assert analysis.spike_counts == {}
 
 
 def test_format_analysis_includes_column_limits(tmp_path):
@@ -52,6 +69,15 @@ def test_format_analysis_includes_column_limits(tmp_path):
     assert "…" not in report
 
 
+def test_analyze_csv_detects_spikes(tmp_path):
+    csv_path = tmp_path / "spikes.csv"
+    _write_spiky_csv(csv_path)
+
+    analysis = data_sanity.analyze_csv(csv_path)
+
+    assert analysis.spike_counts == {"value": 1}
+
+
 def test_main_handles_cli_execution(tmp_path, capsys):
     csv_path = tmp_path / "dataset.csv"
     _write_sample_csv(csv_path)
@@ -62,3 +88,14 @@ def test_main_handles_cli_execution(tmp_path, capsys):
     assert exit_code == 0
     assert f"# File: {csv_path}" in output
     assert "duplicates" in output
+
+
+def test_main_reports_spikes(tmp_path, capsys):
+    csv_path = tmp_path / "dataset.csv"
+    _write_spiky_csv(csv_path)
+
+    exit_code = data_sanity.main([str(tmp_path), "--spike-threshold", "5"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "- spikes: value=1" in output

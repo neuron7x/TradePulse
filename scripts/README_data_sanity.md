@@ -4,7 +4,10 @@ Perform sanity checks on CSV data files to identify quality issues.
 
 ## Description
 
-This script analyzes CSV files to identify data quality issues such as missing values, timestamp gaps, and other anomalies. It provides detailed statistics and can be configured to fail on errors, making it suitable for CI/CD pipelines.
+This script analyzes CSV files to identify data quality issues such as missing
+values, timestamp gaps, statistical spikes, and other anomalies. It provides
+detailed statistics and can be configured to fail on errors, making it suitable
+for CI/CD pipelines.
 
 ## Usage
 
@@ -52,6 +55,7 @@ python scripts/data_sanity.py --max-column-details 10
 | `--pattern` | `**/*.csv` | Glob-style pattern for directory walking |
 | `--timestamp-column` | `ts` | Column containing timestamps for gap statistics |
 | `--max-column-details` | `5` | Maximum number of per-column NaN ratios to display |
+| `--spike-threshold` | `10.0` | Median absolute deviation multiplier used to flag spikes |
 | `--fail-on-error` | `False` | Return non-zero exit status if any file fails to parse |
 
 ## Output Format
@@ -60,9 +64,9 @@ For each CSV file, the script reports:
 
 - File path
 - Total rows and columns
-- Memory usage estimate
 - Missing value statistics (overall and per-column)
 - Timestamp gap analysis (if timestamp column exists)
+- Spike counts per numeric column when deviations exceed the configured threshold
 - Any parsing errors
 
 ## Exit Codes

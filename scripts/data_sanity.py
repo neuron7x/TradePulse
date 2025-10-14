@@ -8,6 +8,8 @@ improvements include:
 * Structured analysis results that make downstream processing easier.
 * A tiny CLI powered by :mod:`argparse` for filtering input files and tweaking
   behaviour without editing the script.
+* Outlier detection using a configurable median absolute deviation threshold so
+  data spikes are surfaced alongside duplicate and missing value checks.
 
 Typical usage from the repository root::
 
@@ -46,6 +48,7 @@ class CSVAnalysis:
     duplicate_rows: int
     column_nan_ratios: dict[str, float]
     timestamp_gap_stats: TimestampGapStats | None
+    spike_counts: dict[str, int]
 
 
 def _iter_csv_files(paths: Sequence[Path], pattern: str) -> Iterable[Path]:
@@ -78,7 +81,35 @@ def _iter_csv_files(paths: Sequence[Path], pattern: str) -> Iterable[Path]:
             yield resolved
 
 
-def analyze_csv(path: Path, timestamp_column: str | None = "ts") -> CSVAnalysis:
+def _compute_spike_counts(df: pd.DataFrame, threshold: float = 10.0) -> dict[str, int]:
+    """Identify columns containing significant spikes/outliers."""
+
+    numeric = df.select_dtypes(include=["number"])
+    if numeric.empty:
+        return {}
+
+    spike_counts: dict[str, int] = {}
+    for column in numeric.columns:
+        series = numeric[column].dropna().astype(float)
+        if series.empty:
+            continue
+        median = float(series.median())
+        deviations = (series - median).abs()
+        mad = float(deviations.median())
+        if mad == 0.0:
+            mad = float(deviations.mean())
+        if mad == 0.0:
+            continue
+        scaled = deviations / mad
+        spikes = int(scaled.gt(threshold).sum())
+        if spikes:
+            spike_counts[column] = spikes
+    return spike_counts
+
+
+def analyze_csv(
+    path: Path, timestamp_column: str | None = "ts", spike_threshold: float = 10.0
+) -> CSVAnalysis:
     """Inspect a CSV file and derive lightweight quality metrics."""
 
     df = pd.read_csv(path)
@@ -104,6 +135,8 @@ def analyze_csv(path: Path, timestamp_column: str | None = "ts") -> CSVAnalysis:
         .to_dict()
     )
 
+    spike_counts = _compute_spike_counts(df, threshold=spike_threshold)
+
     return CSVAnalysis(
         path=Path(path),
         row_count=int(row_count),
@@ -112,6 +145,7 @@ def analyze_csv(path: Path, timestamp_column: str | None = "ts") -> CSVAnalysis:
         duplicate_rows=duplicate_rows,
         column_nan_ratios=per_column_nan,
         timestamp_gap_stats=timestamp_gap_stats,
+        spike_counts=spike_counts,
     )
 
 
@@ -149,6 +183,12 @@ def format_analysis(analysis: CSVAnalysis, *, max_column_details: int = 5) -> st
             f"{analysis.timestamp_gap_stats.max_seconds:.3f}"
         )
 
+    if analysis.spike_counts:
+        spike_details = ", ".join(
+            f"{column}={count}" for column, count in sorted(analysis.spike_counts.items())
+        )
+        report_lines.append(f"- spikes: {spike_details}")
+
     report_lines.append(f"- duplicates: {analysis.duplicate_rows}")
     return "\n".join(report_lines)
 
@@ -177,6 +217,15 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         help="Column containing timestamps used for gap statistics (default: ts).",
     )
     parser.add_argument(
+        "--spike-threshold",
+        type=float,
+        default=10.0,
+        help=(
+            "Median absolute deviation multiplier used to flag spikes in numeric "
+            "columns (default: 10.0)."
+        ),
+    )
+    parser.add_argument(
         "--max-column-details",
         type=int,
         default=5,
@@ -197,6 +246,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     exit_code = 0
 
     csv_files = sorted(_iter_csv_files(args.paths, args.pattern) or [])
+    spike_threshold = max(args.spike_threshold, 0.0)
+    if spike_threshold == 0.0:
+        spike_threshold = 10.0
 
     if not csv_files:
         print("No CSV files found — nothing to check (OK).")
@@ -204,7 +256,11 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     for csv_file in csv_files:
         try:
-            analysis = analyze_csv(csv_file, args.timestamp_column)
+            analysis = analyze_csv(
+                csv_file,
+                args.timestamp_column,
+                spike_threshold=spike_threshold,
+            )
         except Exception as exc:  # pragma: no cover - defensive: pandas error message varies
             analyses.append(f"# File: {csv_file}\n- ERROR: {exc}")
             if args.fail_on_error:
