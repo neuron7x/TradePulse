@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: MIT
 
 # === FPM-A (Fractal Project Method) integration ===
-.PHONY: fpma-graph fpma-check lock build-package publish-package clean-dist
+.PHONY: fpma-graph fpma-check lock build-package publish-package clean-dist \
+        test\:fast test\:all test\:heavy
 fpma-graph:
-        python -m scripts fpma graph
+	python -m scripts fpma graph
 
 fpma-check:
-        python -m scripts fpma check
+	python -m scripts fpma check
 
 .PHONY: lock
 lock:
@@ -30,24 +31,24 @@ clean-dist:
 
 .PHONY: generate
 generate:
-        buf generate
-        PYTHONPATH=. python tools/schema/generate_event_types.py
+	buf generate
+	PYTHONPATH=. python tools/schema/generate_event_types.py
 
 .PHONY: scripts-lint scripts-test scripts-gen-proto scripts-dev-up scripts-dev-down
 scripts-lint:
-        python -m scripts lint
+	python -m scripts lint
 
 scripts-test:
-        python -m scripts test
+	python -m scripts test
 
 scripts-gen-proto:
-        python -m scripts gen-proto
+	python -m scripts gen-proto
 
 scripts-dev-up:
-        python -m scripts dev-up
+	python -m scripts dev-up
 
 scripts-dev-down:
-        python -m scripts dev-down
+	python -m scripts dev-down
 
 .PHONY: mutation-test
 mutation-test:
@@ -57,4 +58,16 @@ mutation-test:
 .PHONY: security-audit
 security-audit:
 	python scripts/dependency_audit.py --requirement requirements.txt --requirement requirements-dev.txt
+
+.PHONY: test\:fast
+test\:fast:
+	pytest tests/ -m "not slow and not heavy_math and not nightly"
+
+.PHONY: test\:all
+test\:all:
+	pytest tests/ --cov=core --cov=backtest --cov=execution --cov-branch --cov-report=term-missing
+
+.PHONY: test\:heavy
+test\:heavy:
+	pytest tests/ -m "slow or heavy_math or nightly"
 

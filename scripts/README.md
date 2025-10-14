@@ -16,6 +16,9 @@ python -m scripts gen-proto
 python -m scripts dev-up
 python -m scripts dev-down
 python -m scripts fpma graph
+make test:fast   # Skip slow/nightly/heavy suites
+make test:all    # Full coverage-enabled suite
+make test:heavy  # Only heavy/slow/nightly suites
 ```
 
 ### Logging controls
