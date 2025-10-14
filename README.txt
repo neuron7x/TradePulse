@@ -1,18 +1,14 @@
+# TradePulse Text Overview
 
-# Kuramoto–Ricci Composite (Minimal, dep-light)
+This minimal README is kept for compatibility with tooling that expects a `README.txt` file.
+For the complete project description, setup instructions, and usage guides, refer to the
+primary documentation in [README.md](README.md).
 
-Lightweight, working implementation with **no SciPy/networkx** required.
+## Where to start
+- Follow the step-by-step onboarding instructions in [docs/quickstart.md](docs/quickstart.md).
+- Browse the full documentation index in [docs/index.md](docs/index.md) for deployment, backtesting,
+  and monitoring guides.
+- Explore runnable scripts and notebooks referenced throughout the [examples/](examples/) directory.
 
-## Run quick example
-```bash
-python /mnt/data/tradepulse_min/examples/quick_start.py
-```
-
-## Analyze CSV
-```bash
-python /mnt/data/tradepulse_min/scripts/integrate_kuramoto_ricci.py --data /mnt/data/tradepulse_min/sample.csv --config /mnt/data/tradepulse_min/configs/kuramoto_ricci_composite.yaml --output /mnt/data/tradepulse_min/outputs
-```
-
-Outputs:
-- `outputs/signal_history.csv`
-- `outputs/enhanced_features.csv`
+These resources are actively maintained; consult them instead of legacy external paths or
+out-of-date summaries.
