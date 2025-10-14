@@ -70,6 +70,27 @@ def test_scan_directory_filters_extensions(tmp_path_factory: pytest.TempPathFact
     assert "README.md" not in results
 
 
+def test_scan_directory_detects_dotenv_files(tmp_path_factory: pytest.TempPathFactory) -> None:
+    workspace = tmp_path_factory.mktemp("security-dotenv")
+    dotenv_file = workspace / ".env"
+    dotenv_file.write_text(
+        f"{API_KEY_LABEL}='{GENERIC_SECRET_VALUE}'\n",
+        encoding="utf-8",
+    )
+
+    ignored_file = workspace / "notes.txt"
+    ignored_file.write_text(
+        f"{PASSWORD_LABEL}='{GENERIC_SECRET_VALUE}'\n",
+        encoding="utf-8",
+    )
+
+    detector = SecretDetector()
+    results = detector.scan_directory(workspace)
+
+    assert ".env" in results
+    assert "notes.txt" not in results
+
+
 def test_check_for_hardcoded_secrets_reports_findings(tmp_path_factory: pytest.TempPathFactory, capsys: pytest.CaptureFixture[str]) -> None:
     project = tmp_path_factory.mktemp("security-project")
     secret_file = project / "secrets.py"

@@ -102,7 +102,19 @@ class SecretDetector:
         directory = Path(directory)
         
         if extensions is None:
-            extensions = [".py", ".js", ".ts", ".java", ".go", ".yml", ".yaml", ".json", ".env"]
+            extensions = [
+                ".py",
+                ".js",
+                ".ts",
+                ".java",
+                ".go",
+                ".yml",
+                ".yaml",
+                ".json",
+                ".env",
+            ]
+
+        normalized_extensions = {ext.lower() for ext in extensions}
             
         results: Dict[str, List[Tuple[str, int, str]]] = {}
         
@@ -110,7 +122,13 @@ class SecretDetector:
             if not filepath.is_file():
                 continue
                 
-            if extensions and filepath.suffix not in extensions:
+            file_suffix = filepath.suffix.lower()
+            file_name = filepath.name.lower()
+
+            if normalized_extensions and (
+                file_suffix not in normalized_extensions
+                and file_name not in normalized_extensions
+            ):
                 continue
                 
             findings = self.scan_file(filepath)
