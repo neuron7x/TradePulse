@@ -9,7 +9,7 @@ without external dependencies.
 
 | Dataset | Description |
 | --- | --- |
-| `indicator_macd_baseline.csv` | Five minute OHLC close snapshots with pre-computed MACD components. |
+| `indicator_macd_baseline.csv` | Five minute OHLC close snapshots with pre-computed MACD components (MACD, signal, histogram). |
 
 ## Usage
 

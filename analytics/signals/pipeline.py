@@ -130,6 +130,7 @@ class SignalFeaturePipeline:
         features["macd_signal"] = features["macd"].ewm(
             span=cfg.macd_signal, adjust=False, min_periods=1
         ).mean()
+        features["macd_histogram"] = features["macd"] - features["macd_signal"]
         features["price_range"] = (high - low).astype(float)
 
         if volume is not None:
