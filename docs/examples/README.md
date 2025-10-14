@@ -207,34 +207,47 @@ print(f"Best Parameters: {best_params}")
 
 ### 7. Metrics Calculation
 
+Combine lightweight objective helpers with the comprehensive backtest
+performance report to inspect only the metrics that are actually exposed by
+the library (`backtest.performance.PerformanceReport`).
+
 ```python
 import numpy as np
-from core.metrics import (
-    sharpe_ratio,
-    sortino_ratio,
-    max_drawdown,
-    calmar_ratio,
-    win_rate,
-    profit_factor
-)
+from core.strategies.objectives import sharpe_ratio
+from backtest.performance import compute_performance_metrics
 
-# Sample returns
+# Sample returns for a strategy (daily percentage changes)
 returns = np.array([0.02, -0.01, 0.03, -0.02, 0.04, 0.01, -0.01])
+initial_capital = 10_000.0
 
-# Calculate metrics
-sharpe = sharpe_ratio(returns, risk_free_rate=0.02)
-sortino = sortino_ratio(returns, risk_free_rate=0.02)
-max_dd = max_drawdown(returns)
-calmar = calmar_ratio(returns)
-win_pct = win_rate(returns)
-pf = profit_factor(returns)
+# Build an equity curve and simple PnL series for the performance report
+equity_curve = initial_capital * np.cumprod(1 + returns)
+pnl = initial_capital * returns
 
-print(f"Sharpe Ratio: {sharpe:.2f}")
-print(f"Sortino Ratio: {sortino:.2f}")
-print(f"Max Drawdown: {max_dd:.2%}")
-print(f"Calmar Ratio: {calmar:.2f}")
-print(f"Win Rate: {win_pct:.2%}")
-print(f"Profit Factor: {pf:.2f}")
+# Objective helpers live under core.strategies.objectives
+basic_sharpe = sharpe_ratio(returns, risk_free=0.02)
+
+# Full performance analytics are exposed by backtest.performance
+report = compute_performance_metrics(
+    equity_curve=equity_curve,
+    pnl=pnl,
+    initial_capital=initial_capital,
+    risk_free_rate=0.02,
+)
+metrics = report.as_dict()
+
+def display(name: str, value: float | None, scale: float = 1.0, suffix: str = "") -> None:
+    if value is None:
+        print(f"{name}: n/a")
+    else:
+        print(f"{name}: {scale * value:.2f}{suffix}")
+
+print(f"Objective Sharpe Ratio: {basic_sharpe:.2f}")
+display("Sharpe Ratio", metrics["sharpe_ratio"])
+display("Sortino Ratio", metrics["sortino_ratio"])
+display("Probabilistic Sharpe", metrics["probabilistic_sharpe_ratio"])
+display("Max Drawdown", metrics["max_drawdown"], scale=100 / initial_capital, suffix="%")
+display("Hit Ratio", metrics["hit_ratio"], scale=100, suffix="%")
 ```
 
 ### 8. Multi-Indicator Analysis
