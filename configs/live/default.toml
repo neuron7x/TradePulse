@@ -1,0 +1,39 @@
+# Default live trading configuration for TradePulse
+
+[loop]
+state_dir = "var/live_state"
+submission_interval = 0.25
+fill_poll_interval = 1.0
+heartbeat_interval = 10.0
+max_backoff = 60.0
+
+[risk]
+max_notional = 100000.0
+max_position = 10.0
+max_orders_per_interval = 120
+interval_seconds = 1.0
+kill_switch_limit_multiplier = 1.5
+kill_switch_violation_threshold = 3
+kill_switch_rate_limit_threshold = 3
+
+[metrics]
+port = 9000
+
+[[venues]]
+name = "binance"
+class = "execution.adapters.BinanceRESTConnector"
+sandbox = true
+
+  [venues.credentials]
+  env_prefix = "BINANCE"
+  required = ["API_KEY", "API_SECRET"]
+  optional = ["RECV_WINDOW"]
+
+[[venues]]
+name = "coinbase"
+class = "execution.adapters.CoinbaseRESTConnector"
+sandbox = true
+
+  [venues.credentials]
+  env_prefix = "COINBASE"
+  required = ["API_KEY", "API_SECRET", "PASSPHRASE"]
