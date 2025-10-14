@@ -1,4 +1,4 @@
-"""Convenience re-exports for runtime helper utilities."""
+"""Public exports for the runtime helpers package."""
 
 from .._runtime_core import (
     apply_environment,
