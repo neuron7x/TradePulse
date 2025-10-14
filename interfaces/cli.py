@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 from collections.abc import Mapping
 from pathlib import Path
@@ -29,6 +30,8 @@ from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
+
+LOGGER = logging.getLogger(__name__)
 
 
 def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
@@ -161,6 +164,64 @@ def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
+def compute_indicator_metrics(
+    prices: np.ndarray,
+    *,
+    window: int = 200,
+    bins: int = 64,
+    delta: float = 0.005,
+    use_gpu: bool = False,
+) -> dict[str, Any]:
+    """Return the indicator diagnostics shared by the CLI and dashboard."""
+
+    series = np.asarray(prices, dtype=float)
+    if series.ndim != 1:
+        raise ValueError("Indicator diagnostics expect a one-dimensional price series")
+    if series.size < window:
+        raise ValueError("Price series must be at least as long as the lookback window")
+
+    gpu_used = False
+    phases: np.ndarray
+    if use_gpu:
+        try:
+            from core.indicators.kuramoto import compute_phase_gpu  # type: ignore
+
+            phases = compute_phase_gpu(series)
+            gpu_used = True
+        except Exception:  # pragma: no cover - optional dependency path
+            LOGGER.warning(
+                "GPU phase computation requested but CuPy backend unavailable; "
+                "falling back to CPU"
+            )
+            phases = compute_phase(series)
+    else:
+        phases = compute_phase(series)
+
+    lookback_prices = series[-window:]
+    lookback_phases = phases[-window:]
+
+    R = float(kuramoto_order(lookback_phases))
+    H = float(entropy(lookback_prices, bins=bins))
+    dH = float(delta_entropy(series, window=window, bins_range=(10, 50)))
+    kappa_graph = build_price_graph(lookback_prices, delta=delta)
+    kappa = float(mean_ricci(kappa_graph))
+    Hs = float(hurst_exponent(lookback_prices))
+    phase = phase_flags(R, dH, kappa, H)
+
+    return {
+        "R": R,
+        "H": H,
+        "delta_H": dH,
+        "kappa_mean": kappa,
+        "Hurst": Hs,
+        "phase": phase,
+        "gpu_used": gpu_used,
+        "window": window,
+        "bins": bins,
+        "delta": delta,
+    }
+
+
 def cmd_analyze(args):
     """Compute indicator diagnostics for a CSV price series.
 
@@ -181,26 +242,16 @@ def cmd_analyze(args):
 
     df = pd.read_csv(args.csv)
     prices = df[args.price_col].to_numpy()
-    from core.indicators.kuramoto import compute_phase_gpu
-    phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
-    R = kuramoto_order(phases[-args.window:])
-    H = entropy(prices[-args.window:], bins=args.bins)
-    dH = delta_entropy(prices, window=args.window, bins_range=(10,50))
-    kappa = mean_ricci(build_price_graph(prices[-args.window:], delta=args.delta))
-    Hs = hurst_exponent(prices[-args.window:])
-    phase = phase_flags(R, dH, kappa, H)
+    metrics = compute_indicator_metrics(
+        prices,
+        window=args.window,
+        bins=args.bins,
+        delta=args.delta,
+        use_gpu=getattr(args, "gpu", False),
+    )
     print(
         json.dumps(
-            _enrich_with_trace(
-                {
-                    "R": float(R),
-                    "H": float(H),
-                    "delta_H": float(dH),
-                    "kappa_mean": float(kappa),
-                    "Hurst": float(Hs),
-                    "phase": phase,
-                }
-            ),
+            _enrich_with_trace(metrics),
             indent=2,
         )
     )
