@@ -146,42 +146,21 @@ def cmd_backtest(args):
     print(json.dumps(_enrich_with_trace(out), indent=2))
 
 def cmd_live(args):
-    args = _apply_config(args)
-    from core.data.ingestion import Ticker
-    import queue, threading
-    q = queue.Queue(maxsize=10000)
-    def on_tick(t: Ticker):
-        q.put(t)
-    if args.source == "csv":
-        _make_data_ingestor(args.path).historical_csv(args.path, on_tick)
-    else:
-        raise SystemExit("Only CSV demo supported in CLI live mode.")
+    from interfaces.live_runner import LiveTradingRunner
 
-    window = args.window
-    prices = []
-    while not q.empty():
-        t = q.get()
-        prices.append(float(t.price))
-        if len(prices) >= window:
-            p = np.array(prices[-window:])
-            phases = compute_phase(p)
-            R = kuramoto_order(phases)
-            H = entropy(p)
-            dH = delta_entropy(np.array(prices), window=window)
-            kappa = mean_ricci(build_price_graph(p, delta=0.005))
-            print(
-                json.dumps(
-                    _enrich_with_trace(
-                        {
-                            "ts": t.timestamp.isoformat(),
-                            "R": float(R),
-                            "H": float(H),
-                            "delta_H": float(dH),
-                            "kappa_mean": float(kappa),
-                        }
-                    )
-                )
-            )
+    config_path = Path(args.config).expanduser() if args.config else None
+    venues = tuple(args.venue or ()) or None
+    state_dir = Path(args.state_dir).expanduser() if args.state_dir else None
+    metrics_port = args.metrics_port
+    cold_start = bool(args.cold_start)
+
+    runner = LiveTradingRunner(
+        config_path,
+        venues=venues,
+        state_dir_override=state_dir,
+        metrics_port=metrics_port,
+    )
+    runner.run(cold_start=cold_start)
 
 
 def _run_with_trace_context(cmd_name: str, args: argparse.Namespace) -> None:
@@ -233,11 +212,20 @@ def main():
     pb.set_defaults(func=cmd_backtest)
 
     pl = sub.add_parser("live")
-    pl.add_argument("--source", choices=["csv"], default="csv")
-    pl.add_argument("--path", required=True)
-    pl.add_argument("--window", type=int, default=200)
-    pl.add_argument("--config", help="YAML config path", default=None)
-    pl.add_argument("--gpu", action="store_true")
+    pl.add_argument(
+        "--config",
+        default="configs/live/default.toml",
+        help="Path to the TOML configuration describing venues and risk limits.",
+    )
+    pl.add_argument(
+        "--venue",
+        action="append",
+        default=None,
+        help="Restrict execution to specific venues (can be provided multiple times).",
+    )
+    pl.add_argument("--state-dir", default=None, help="Override the state directory used for OMS state.")
+    pl.add_argument("--cold-start", action="store_true", help="Skip reconciliation on startup.")
+    pl.add_argument("--metrics-port", type=int, default=None, help="Expose Prometheus metrics on a port.")
     pl.add_argument("--traceparent", default=None, help=trace_arg_help)
     pl.set_defaults(func=cmd_live)
 
