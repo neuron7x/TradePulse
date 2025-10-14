@@ -43,3 +43,115 @@ Each top-level command is implemented in a dedicated module under
 [`scripts/commands`](./commands).  The modules provide reusable functions that
 can be imported from unit tests or other automation code.
 
+## Standalone Scripts
+
+### Data Utilities
+
+- **[data_sanity.py](README_data_sanity.md)** - Perform sanity checks on CSV data files
+- **[gen_synth_amm_data.py](README_gen_synth_amm_data.md)** - Generate synthetic AMM data for testing
+- **[resilient_data_sync.py](README_resilient_data_sync.md)** - Resilient data synchronization with retry logic
+- **[resilient_data_sync.sh](README_resilient_data_sync_sh.md)** - Bash version of resilient sync with comprehensive error handling
+
+### Configuration & Schema
+
+- **[export_tradepulse_schema.py](README_export_tradepulse_schema.md)** - Export TradePulse configuration JSON schema
+
+### Analysis & Testing
+
+- **[integrate_kuramoto_ricci.py](README_integrate_kuramoto_ricci.md)** - Run Kuramoto-Ricci composite integration pipeline
+- **[smoke_e2e.py](README_smoke_e2e.md)** - Nightly smoke end-to-end pipeline for integration testing
+- **[dependency_audit.py](README_dependency_audit.md)** - Audit Python dependencies for security vulnerabilities
+
+Each script has detailed documentation in its respective README file linked above.
+
+## Script Standards
+
+All scripts in this directory follow these standards:
+
+### Python Scripts
+
+- **Shebang**: `#!/usr/bin/env python3` for executable scripts
+- **License**: SPDX-License-Identifier: MIT header
+- **Imports**: `from __future__ import annotations` for Python 3.11+
+- **Type hints**: Full typing annotations on all functions
+- **CLI**: argparse or typer with comprehensive help text
+- **Logging**: Structured logging with logging module
+- **Exit codes**: Proper exit codes (0=success, non-zero=failure)
+- **Docstrings**: Module, function, and class docstrings
+- **Error handling**: Comprehensive exception handling
+- **Testing**: Unit tests in `scripts/tests/`
+
+### Bash Scripts
+
+- **Shebang**: `#!/usr/bin/env bash`
+- **Safety**: `set -euo pipefail` at the top
+- **Trap handlers**: Cleanup on EXIT, INT, TERM
+- **Shellcheck**: Pass shellcheck validation
+- **POSIX compatibility**: Avoid bash-specific features where possible
+- **Structured logging**: JSON or structured output
+- **Error handling**: Clear error messages and exit codes
+
+### Common Requirements
+
+- **Cross-platform**: Work on Linux, macOS, and Windows (Python)
+- **Idempotency**: Safe to run multiple times
+- **Atomicity**: Use temporary files and atomic operations
+- **Resource limits**: Respect CPU, memory, and time constraints
+- **Configuration**: Use .env or YAML for settings
+- **Documentation**: README with CLI examples and use cases
+- **Testing**: Comprehensive test coverage
+
+## Testing
+
+Run all script tests:
+
+```bash
+python -m pytest scripts/tests/ -v
+```
+
+Run specific test file:
+
+```bash
+python -m pytest scripts/tests/test_gen_synth_amm_data.py -v
+```
+
+## Linting and Formatting
+
+Format all scripts:
+
+```bash
+python -m black scripts/
+python -m ruff check scripts/ --fix
+```
+
+Lint bash scripts:
+
+```bash
+shellcheck scripts/*.sh
+```
+
+## CI Integration
+
+Scripts are integrated into CI workflows:
+
+- **Nightly smoke tests**: `smoke_e2e.py` runs nightly
+- **Security audits**: `dependency_audit.py` checks for vulnerabilities
+- **Data validation**: `data_sanity.py` validates CSV files
+- **Pre-commit hooks**: Black, ruff, shellcheck, mypy
+
+## Contributing
+
+When adding new scripts:
+
+1. Follow the script standards above
+2. Add comprehensive tests to `scripts/tests/`
+3. Create a README_scriptname.md with documentation
+4. Update this README with a link to the new script
+5. Ensure cross-platform compatibility
+6. Add type hints and docstrings
+7. Pass linting and formatting checks
+
+## License
+
+All scripts in this directory are licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+
