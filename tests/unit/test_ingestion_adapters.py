@@ -5,12 +5,24 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import AsyncIterator, Callable
 
 import httpx
 import pandas as pd
 import pytest
 
+from core.data.adapters import (
+    AlpacaIngestionAdapter,
+    CCXTIngestionAdapter,
+    CSVIngestionAdapter,
+    ParquetIngestionAdapter,
+    PolygonIngestionAdapter,
+    RetryConfig,
+)
+from core.data.adapters import ccxt as ccxt_module
+from core.data.adapters.base import IngestionAdapter
+from core.data.models import PriceTick as Ticker
+from core.utils.dataframe_io import MissingParquetDependencyError, write_dataframe
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 POLYGON_TEST_KEY = "".join(
@@ -46,23 +58,17 @@ ALPACA_TEST_SECRET = "".join(
     )
 )
 
-from core.data.adapters import (
-    AlpacaIngestionAdapter,
-    CCXTIngestionAdapter,
-    CSVIngestionAdapter,
-    ParquetIngestionAdapter,
-    PolygonIngestionAdapter,
-    RetryConfig,
-)
-from core.data.adapters import ccxt as ccxt_module
-from core.data.adapters.base import IngestionAdapter
-from core.data.models import PriceTick as Ticker
-from core.utils.dataframe_io import MissingParquetDependencyError, write_dataframe
-
 
 class DummyAdapter(IngestionAdapter):
     def __init__(self) -> None:
-        super().__init__(retry=RetryConfig(attempts=3, multiplier=0.01, max_backoff=0.02, jitter=0.0))
+        super().__init__(
+            retry=RetryConfig(
+                attempts=3,
+                multiplier=0.01,
+                max_backoff=0.02,
+                jitter=0.0,
+            )
+        )
         self.calls = 0
 
     async def fetch(self, **kwargs: object) -> str:
@@ -104,13 +110,22 @@ async def test_parquet_adapter_fetch(tmp_path: Path) -> None:
     adapter = ParquetIngestionAdapter()
     ticks = await adapter.fetch(path=file_path, symbol="BTCUSD", venue="BINANCE")
     assert len(ticks) == 2
-    assert float(ticks[0].price) == pytest.approx(df.loc[0, "price"], rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert float(ticks[0].price) == pytest.approx(
+        df.loc[0, "price"],
+        rel=FLOAT_REL_TOL,
+        abs=FLOAT_ABS_TOL,
+    )
 
 
 @pytest.mark.asyncio
 async def test_csv_adapter_stream(tmp_path: Path) -> None:
     csv_path = tmp_path / "ticks.csv"
-    csv_path.write_text("ts,price,volume\n1719878400,100.5,10\n1719878460,101.0,5\n", encoding="utf-8")
+    csv_path.write_text(
+        "ts,price,volume\n"
+        "1719878400,100.5,10\n"
+        "1719878460,101.0,5\n",
+        encoding="utf-8",
+    )
 
     adapter = CSVIngestionAdapter()
     stream = adapter.stream(path=csv_path, symbol="ETHUSD", venue="CSV")
@@ -124,7 +139,13 @@ class _StubExchange:
         self.params = params
         self.closed = False
 
-    async def fetch_ohlcv(self, symbol: str, timeframe: str, since: int | None, limit: int) -> list[list[float]]:
+    async def fetch_ohlcv(
+        self,
+        symbol: str,
+        timeframe: str,
+        since: int | None,
+        limit: int,
+    ) -> list[list[float]]:
         return [[1719878400000, 1, 2, 3, 4, 5]]
 
     async def close(self) -> None:
@@ -133,9 +154,20 @@ class _StubExchange:
 
 @pytest.mark.asyncio
 async def test_ccxt_adapter_fetch(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(ccxt_module, "_load_exchange_factory", lambda exchange_id: lambda params: _StubExchange(params))
+    def _factory_loader(_: str) -> Callable[[dict[str, object]], _StubExchange]:
+        return lambda params: _StubExchange(params)
 
-    adapter = CCXTIngestionAdapter(exchange_id="binance", retry=RetryConfig(attempts=2, multiplier=0.01, max_backoff=0.02, jitter=0.0))
+    monkeypatch.setattr(ccxt_module, "_load_exchange_factory", _factory_loader)
+
+    adapter = CCXTIngestionAdapter(
+        exchange_id="binance",
+        retry=RetryConfig(
+            attempts=2,
+            multiplier=0.01,
+            max_backoff=0.02,
+            jitter=0.0,
+        ),
+    )
     ticks = await adapter.fetch(symbol="BTC/USDT")
     assert len(ticks) == 1
     assert ticks[0].price == 4
@@ -184,7 +216,12 @@ async def test_polygon_adapter_fetch_with_retry() -> None:
     adapter = PolygonIngestionAdapter(
         api_key=POLYGON_TEST_KEY,
         client=client,  # type: ignore[arg-type]
-        retry=RetryConfig(attempts=2, multiplier=0.01, max_backoff=0.02, jitter=0.0),
+        retry=RetryConfig(
+            attempts=2,
+            multiplier=0.01,
+            max_backoff=0.02,
+            jitter=0.0,
+        ),
     )
     ticks = await adapter.fetch(symbol="AAPL", start="2024-01-01", end="2024-01-02")
     assert len(ticks) == 1
