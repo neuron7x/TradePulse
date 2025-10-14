@@ -1,0 +1,27 @@
+{
+  "description": "Response containing the most recent feature snapshot.",
+  "properties": {
+    "features": {
+      "additionalProperties": {
+        "type": "number"
+      },
+      "title": "Features",
+      "type": "object"
+    },
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    }
+  },
+  "required": [
+    "symbol",
+    "features"
+  ],
+  "title": "FeatureResponse",
+  "type": "object"
+}

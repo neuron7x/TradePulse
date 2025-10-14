@@ -1,0 +1,36 @@
+{
+  "description": "Response representing the generated trading signal.",
+  "properties": {
+    "generated_at": {
+      "format": "date-time",
+      "title": "Generated At",
+      "type": "string"
+    },
+    "horizon_seconds": {
+      "title": "Horizon Seconds",
+      "type": "integer"
+    },
+    "score": {
+      "description": "Composite alpha score driving the action.",
+      "title": "Score",
+      "type": "number"
+    },
+    "signal": {
+      "additionalProperties": true,
+      "title": "Signal",
+      "type": "object"
+    },
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    }
+  },
+  "required": [
+    "symbol",
+    "horizon_seconds",
+    "score",
+    "signal"
+  ],
+  "title": "PredictionResponse",
+  "type": "object"
+}

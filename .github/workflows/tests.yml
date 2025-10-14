@@ -40,6 +40,7 @@ jobs:
           .venv/bin/python -m pytest \
             -m "not flaky" \
             tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
+            tests/contracts/ tests/data/ tests/security/ \
             --cov=core --cov=backtest --cov=execution \
             --cov-branch \
             --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
@@ -86,7 +87,28 @@ jobs:
 
           if branch_rate < 90.0:
               raise SystemExit(f"Branch coverage {branch_rate:.2f}% is below the required 90% threshold")
-          PY
+      PY
+      - name: Update missing-coverage label
+        if: ${{ github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+            const label = 'missing-coverage';
+            const threshold = 90;
+            const lineRate = Number("${{ steps.coverage_summary.outputs.line_rate || '0' }}");
+            const branchRate = Number("${{ steps.coverage_summary.outputs.branch_rate || '0' }}");
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pull_number });
+            const hasLabel = labels.some(item => item.name === label);
+            if (lineRate >= threshold && branchRate >= threshold) {
+              if (hasLabel) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name: label }).catch(() => {});
+              }
+            } else if (!hasLabel) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [label] });
+            }
       - name: Run property-based tests with statistics
         run: |
           .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
@@ -199,6 +221,38 @@ jobs:
         with:
           name: pytest-profiling
           path: reports/profiling
+          if-no-files-found: warn
+
+  ui-smoke:
+    name: Playwright UI smoke tests
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Build Next.js application
+        working-directory: apps/web
+        run: npm run build
+      - name: Run Playwright smoke suite
+        working-directory: apps/web
+        env:
+          CI: 'true'
+        run: npx playwright test --config=playwright.config.ts --reporter=list
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
           if-no-files-found: warn
 
   flaky-tests:

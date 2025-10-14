@@ -12,6 +12,10 @@ TradePulse employs a comprehensive testing strategy that includes:
 - **Fuzz Tests**: Stress the system with malformed and adversarial payloads.
 - **End-to-End (E2E) Tests**: Reproduce realistic user journeys and CLI pipelines.
 - **Performance Tests**: Test behavior with large datasets (planned).
+- **Contract Tests**: Keep DTO JSON Schemas and OpenAPI documents stable for downstream consumers.
+- **Data Quality Gates**: Detect duplicates, spikes, and missing values before analytical jobs run.
+- **Security Tests**: Prevent sensitive data leakage in audit logs and shared fixtures.
+- **UI Smoke & Accessibility**: Exercise the Next.js dashboard via Playwright and aXe rules.
 
 ## Test Structure
 
@@ -21,6 +25,9 @@ tests/
 ├── integration/             # Workflow-level tests (pipelines, backtests, protocol adapters)
 ├── property/                # Property-based suites powered by Hypothesis
 ├── fuzz/                    # Fuzz harnesses targeting ingestion and message handling
+├── contracts/               # JSON Schema/OpenAPI compatibility suites
+├── data/                    # Data quality guardrails for reference datasets
+├── security/                # Logging and secret-leak safeguards
 ├── e2e/                     # Pytest smoke scenarios that mimic end-user flows
 └── fixtures/                # Shared fixtures, builders, and reusable data
 
@@ -102,6 +109,26 @@ pytest tests/property/
 pytest tests/fuzz/
 ```
 
+**Contract tests (JSON Schema + OpenAPI):**
+```bash
+pytest tests/contracts/
+```
+
+**Data quality guardrails:**
+```bash
+pytest tests/data/
+```
+When preparing new sample data files you can also run the standalone analyzer:
+```bash
+python scripts/data_sanity.py data --pattern "**/*.csv"
+```
+
+**Security guardrails:**
+```bash
+pytest tests/security/
+bandit -r tests/utils tests/scripts -ll
+```
+
 **E2E smoke tests (pytest harness):**
 ```bash
 pytest tests/e2e/
@@ -126,6 +153,15 @@ pytest tests/performance/test_memory_regression.py
 ```bash
 pytest -m heavy_math tests/unit/config/test_heavy_math_jobs.py
 ```
+
+**UI smoke & accessibility (Playwright):**
+```bash
+cd apps/web
+npm ci
+npm run build
+npx playwright test --config=playwright.config.ts
+```
+The Playwright project automatically runs aXe scans and fails the run if critical or serious accessibility violations are detected.
 
 ### Running Specific Test Files or Functions
 
@@ -186,8 +222,12 @@ The testing automation is split across two workflows:
   1. **Unit & Integration Tests**: Executed with branch coverage gates (line ≥ 90%, branch ≥ 90%).
   2. **Property-Based Tests**: Run with Hypothesis statistics enabled.
   3. **Fuzz Tests**: Replay deterministic fuzz corpora.
-  4. **Coverage Report**: Generated and uploaded to CI artifacts, plus Codecov uploads and GitHub step summaries.
-  5. **Flaky Quarantine**: A dedicated job re-runs `@pytest.mark.flaky` tests with retries and publishes a manifest without blocking the main pipeline.
+  4. **Contract Tests**: Enforce DTO JSON Schema/OpenAPI stability.
+  5. **Data Quality Gates**: Fail fast if golden/reference datasets degrade.
+  6. **Security Guardrails**: Ensure audit logging keeps secrets out of logs.
+  7. **Coverage Report**: Generated and uploaded to CI artifacts, plus Codecov uploads and GitHub step summaries.
+  8. **UI Smoke & Accessibility**: Playwright smoke plus aXe scans for critical dashboards.
+  9. **Flaky Quarantine**: A dedicated job re-runs `@pytest.mark.flaky` tests with retries and publishes a manifest without blocking the main pipeline.
 - **`heavy-math.yml` (per PR, nightly)**
   1. Executes the heavy-math suites defined in `configs/quality/heavy_math_jobs.yaml`.
   2. Enforces CPU/memory quotas via workflow dispatch inputs.
