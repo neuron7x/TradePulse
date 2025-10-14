@@ -1,0 +1,96 @@
+name: CI • tests + coverage gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  test:
+    name: PyTests + Coverage (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements*.txt
+            pyproject.toml
+            setup.cfg
+
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements-dev.txt
+          # інструменти:
+          pip install diff-cover
+
+      # Бейслайн-покриття на базовому коміті PR (щоб зловити будь-яке зниження project coverage)
+      - name: Compute baseline coverage (base branch)
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          git worktree add --detach ../base "$BASE_SHA"
+          pushd ../base
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            --cov --cov-report=xml:coverage_base.xml --cov-report=term
+          popd
+          cp ../base/coverage_base.xml coverage_base.xml
+          git worktree remove ../base --force
+
+      # Тести й coverage на поточній гілці
+      - name: Run tests with coverage
+        env:
+          PYTHONUNBUFFERED: '1'
+          PYTHONPATH: .
+        run: |
+          python -m pytest -q --maxfail=1 --disable-warnings \
+            --cov --cov-report=xml:coverage.xml \
+            --cov-report=term-missing:skip-covered
+
+      # Жорсткий gate: 100% diff coverage для усіх змінених рядків у PR
+      - name: Enforce 100% diff coverage
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+          diff-cover coverage.xml --compare-branch origin/${{ github.event.pull_request.base.ref }} --fail-under=100
+
+      # Жорсткий gate: валимо, якщо загальне покриття впало відносно бази
+      - name: Fail if project coverage decreased vs base
+        if: ${{ github.event_name == 'pull_request' }}
+        run: |
+          python ci/compare_coverage.py --base coverage_base.xml --current coverage.xml --mode strict
+
+      # Завантаження звіту в Codecov (для приватних — додай CODECOV_TOKEN в Secrets)
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: unittests
+          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      # Збереження артефактів (для дебагу)
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            coverage.xml
+            coverage_base.xml
+          if-no-files-found: ignore
