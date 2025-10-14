@@ -138,4 +138,4 @@ sequenceDiagram
 - **Operational runbooks:** `docs/runbook_live_trading.md` and `docs/runbook_data_incident.md`.
 - **Monitoring:** Grafana dashboards under `docs/monitoring.md`.
 
-For advanced workflows—federated feature stores, GPU inference, or cross-language orchestration—consult the whitepapers in `docs/architecture/` and the ADRs in `docs/adr/`.
+For advanced workflows—federated feature stores, GPU inference, or cross-language orchestration—consult the whitepapers in `docs/architecture/`, especially the [system diagram collection](architecture/system_overview.md), and the ADRs in `docs/adr/`.
