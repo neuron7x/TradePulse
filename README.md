@@ -184,7 +184,7 @@ See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instr
 
 ### Getting Started
 - [Quick Start Guide](docs/quickstart.md) – Get up and running in minutes.
-- [Installation Guide](docs/installation.md) – Detailed installation instructions.
+- [Installation Guide](docs/installation.md) – Prerequisites, supported platforms, virtualenv setup, extras, and dependency troubleshooting.
 - [Architecture Overview](docs/ARCHITECTURE.md) – System design and principles.
 - [Roadmap](docs/roadmap.md) – Development map aligned with quarterly goals.
 - [FAQ](docs/faq.md) – Frequently asked questions.
@@ -207,7 +207,7 @@ See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instr
 ### Operations
 - [Security Policy](SECURITY.md) – Security guidelines and vulnerability reporting.
 - [Monitoring Guide](docs/monitoring.md) – Metrics, logging, and alerting.
-- [Deployment](docs/deployment.md) – Production deployment guide.
+- [Deployment Guide](docs/deployment.md) – Infrastructure requirements, live runner configuration, secret management, and rollback playbooks.
 
 ---
 
