@@ -19,7 +19,7 @@ os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.t
 
 from application.api import security as security_module
 from application.api.rate_limit import InMemorySlidingWindowBackend, SlidingWindowRateLimiter
-from application.api.service import create_app
+from application.api.service import DependencyProbeResult, create_app
 from application.settings import (
     AdminApiSettings,
     ApiRateLimitSettings,
@@ -277,6 +277,51 @@ def test_client_rate_limit_is_enforced(security_context: Callable[..., str]) -> 
     other_token = security_context(subject="different-user")
     recovery = client.post("/features", json=payload, headers=_auth_headers(other_token))
     assert recovery.status_code == 200
+
+
+def test_health_probe_reports_ready_state(configured_app: FastAPI) -> None:
+    client = TestClient(configured_app)
+    response = client.get("/health")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ready"
+    risk_component = body["components"]["risk_manager"]
+    assert risk_component["healthy"] is True
+    assert risk_component["status"] == "operational"
+    assert "inference_cache" in body["components"]
+    assert "client_rate_limiter" in body["components"]
+
+
+def test_health_probe_reflects_kill_switch(configured_app: FastAPI) -> None:
+    app = configured_app
+    app.state.risk_manager.kill_switch.trigger("scheduled maintenance")
+    client = TestClient(app)
+
+    response = client.get("/health")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "failed"
+    risk = body["components"]["risk_manager"]
+    assert risk["healthy"] is False
+    assert risk["status"] == "failed"
+    assert risk["detail"] == "scheduled maintenance"
+
+
+def test_health_probe_flags_dependency_failure() -> None:
+    probes = {
+        "postgres": lambda: DependencyProbeResult(healthy=False, detail="connection refused"),
+    }
+    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"), dependency_probes=probes)
+    client = TestClient(app)
+
+    response = client.get("/health")
+    assert response.status_code == 503
+    body = response.json()
+    assert body["status"] == "failed"
+    dependency = body["components"]["dependency:postgres"]
+    assert dependency["healthy"] is False
+    assert dependency["status"] == "failed"
+    assert dependency["detail"] == "connection refused"
 
 
 def test_trusted_host_middleware_blocks_unlisted_hosts(

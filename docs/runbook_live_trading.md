@@ -74,6 +74,28 @@ Warm starts resume trading after a controlled shutdown or short outage.
 - **Lifecycle hooks** – subscribe to `on_kill_switch`, `on_reconnect`, and
   `on_position_snapshot` to integrate with alerting or downstream systems.
 
+### API Health Probe Interpretation
+
+- Use `GET /health` before enabling traffic to the inference API or live loop.
+  A `200` response with `"status": "ready"` indicates that the risk manager,
+  cache, rate limiters, and declared dependencies are within SLO. Any `503`
+  response requires intervention before proceeding.
+- The `risk_manager` component reports the kill-switch state. When
+  `status="failed"` or `healthy=false`, the kill-switch is engaged and the
+  detailed reason is surfaced in the `detail` field. Reset the kill-switch via
+  the admin API before resuming trading.
+- Dependency probes are emitted as `dependency:<name>` components. Failures are
+  reported with `status="failed"` and a descriptive message (for example,
+  `connection refused`). Investigate upstream services (Kafka, Postgres, market
+  data feeds) before retrying.
+- `client_rate_limiter` and `admin_rate_limiter` components expose utilisation
+  metrics and saturated keys. Repeated saturation should trigger incident
+  handling to avoid throttling critical traffic.
+- The `inference_cache` component reports occupancy of the TTL cache. A
+  `degraded` status indicates the cache is full and requests will skip the fast
+  path until entries expire; purge or expand the cache capacity if this state
+  persists.
+
 ## Failure Handling
 
 - **Connector disconnects** – heartbeat failures trigger exponential backoff
