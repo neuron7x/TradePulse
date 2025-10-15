@@ -84,8 +84,8 @@ helm create deploy/helm/tradepulse
 
 Update the generated files as follows:
 
-- **`values.yaml`** – set the container image (`image.repository`, `image.tag`), replica count, service type, and resource requests/limits.
-- **`templates/deployment.yaml`** – mount environment configuration via Secrets/ConfigMaps and open the metrics port.
+- **`values.yaml`** – set the container image (`image.repository`, `image.tag`), replica count, and service type. Define sensible resource requests/limits so the scheduler can reserve capacity for steady-state traffic.
+- **`templates/deployment.yaml`** – mount environment configuration via Secrets/ConfigMaps, open the metrics port, and wire HTTP probes for `/healthz` and `/readyz` to surface pod status to the control plane.
 
 Example patches for the Deployment template:
 
@@ -109,6 +109,8 @@ readinessProbe:
   initialDelaySeconds: 10
   periodSeconds: 10
 ```
+
+The repository ships with a production-ready manifest (`deploy/tradepulse-deployment.yaml`) that demonstrates these patterns: the Deployment constrains rollouts to one unavailable pod at a time, advertises resource guarantees, and exposes liveness/readiness/startup probes along with a dedicated metrics port.【F:deploy/tradepulse-deployment.yaml†L1-L74】 A companion `Service` (`deploy/tradepulse-service.yaml`) targets the HTTP and metrics endpoints, while an accompanying PodDisruptionBudget keeps at least two replicas available during voluntary disruptions to preserve availability guarantees.【F:deploy/tradepulse-service.yaml†L1-L24】
 
 Install or upgrade the release once the chart is configured and the container image is available in your registry:
 
