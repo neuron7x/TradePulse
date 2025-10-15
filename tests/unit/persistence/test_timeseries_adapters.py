@@ -238,8 +238,13 @@ class _FakeParquetModule:
     def __init__(self, store: Dict[str, List[Dict[str, Any]]]) -> None:
         self._store = store
 
-    def write_table(self, table: _FakeTable, path) -> None:
-        self._store[str(path)] = table.to_pylist()
+    def write_table(self, table: _FakeTable, path, append: bool = False) -> None:
+        key = str(path)
+        rows = table.to_pylist()
+        if append and key in self._store:
+            self._store[key].extend(rows)
+        else:
+            self._store[key] = rows
 
     def read_table(self, path) -> _FakeTable:
         rows = self._store[str(path)]
