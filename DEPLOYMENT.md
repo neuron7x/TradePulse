@@ -21,6 +21,18 @@ Before deploying, install the following tools:
 4. Replace placeholder application secrets (`SECRET_KEY`, `JWT_SECRET`, OAuth tokens, SMTP/Slack/Telegram credentials) with secure values before deploying anywhere outside of local development.【F:.env.example†L135-L183】
 5. Never commit populated `.env` files—store them in your secret manager or CI/CD vault and inject them during deployment.
 
+### Secure Database Connectivity
+
+- Provision client TLS material (root CA, client certificate, and private key) for each environment and store them in your
+  secret manager. Mount them into the container at runtime or distribute them via Kubernetes Secrets/ConfigMaps as read-only
+  files.
+- Export the corresponding environment variables that the Hydra experiments expect (`PROD_DB_CA_FILE`, `PROD_DB_CERT_FILE`,
+  `PROD_DB_KEY_FILE`, and their staging equivalents). These defaults map to `/etc/tradepulse/db/*.pem` paths in the sample
+  configuration so mounting the directory at that location keeps the templates working out of the box.【F:conf/experiment/prod.yaml†L2-L6】【F:conf/experiment/stage.yaml†L2-L6】
+- Ensure your database accepts only TLS-authenticated connections and requires the `verify-full` (or stronger) `sslmode` so
+  hostname and certificate validation protect against downgrade attacks. The configuration loader now rejects weaker modes,
+  causing application startup to fail fast if misconfigured.【F:core/config/postgres.py†L6-L43】
+
 ## Docker Compose Deployment
 
 The repository ships with a lightweight Compose stack that builds the TradePulse container and runs Prometheus for metrics scraping.【F:docker-compose.yml†L1-L12】
