@@ -70,6 +70,8 @@ Run the complete test suite:
 pytest tests/
 ```
 
+> **CI Gate**: Pull requests must pass `.venv/bin/python -m pytest -m "not flaky" tests/`, which exercises the full `tests/` tree (unit, integration, property, fuzz, contracts, data, security, e2e, neuro, strategies, admin, scripts, and utilities) with the flaky marker excluded. Align local runs with this command before opening a PR.
+
 Run with branch coverage report:
 ```bash
 pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-report=term-missing
