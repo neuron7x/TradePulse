@@ -130,6 +130,18 @@ alerts. 【F:core/agent/scheduler.py†L200-L370】
 
 ---
 
+## Strategy Orchestrator
+
+When strategies must be evaluated in parallel without blocking the main control
+thread, use :class:`StrategyOrchestrator`. The orchestrator coordinates multiple
+`StrategyFlow` definitions via a bounded worker pool, ensuring each flow runs in
+its own worker and preventing duplicate submissions from clobbering shared
+state. Results for each flow are aggregated, and any failures raise
+`StrategyOrchestrationError` containing both the exceptions and the successful
+partial results for post-mortem inspection. 【F:core/agent/orchestrator.py†L1-L165】
+
+---
+
 ## Best Practices
 
 - Keep market feature engineering consistent with `StrategySignature` to ensure
