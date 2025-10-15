@@ -327,6 +327,7 @@ EXCHANGE_API_SECRET=your-secret
 - Vault audit devices forward JSON logs to the centralized SIEM (`observability/audit-stream`). Logs capture token IDs, accessor, requesting service, path, and IP metadata.
 - Audit logs are retained for 400 days and analysed with anomaly detection rules (e.g., out-of-hours access, secrets enumeration attempts).
 - Weekly compliance reports enumerate rotation status, stale leases, and privileged access outliers. Findings trigger mandatory post-mortems for unresolved anomalies beyond 7 days.
+- Application services leverage the in-process `SecretManager` to emit signed audit records (via `src.audit.AuditLogger`) for every `get`, provider resolution, and forced refresh. Each entry records the secret metadata (never the value), caller identity, source IP, operation status, and is delivered to the configured webhook/SIEM sinks.
 
 ### 2. Database Queries
 

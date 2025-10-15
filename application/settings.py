@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Callable
+
+if TYPE_CHECKING:
+    from src.audit.audit_logger import AuditLogger
 
 from pydantic import (
     AnyUrl,
@@ -91,7 +95,11 @@ class AdminApiSettings(BaseSettings):
                 )
         return self
 
-    def build_secret_manager(self) -> "SecretManager":
+    def build_secret_manager(
+        self,
+        *,
+        audit_logger_factory: Callable[["SecretManager"], "AuditLogger"] | None = None,
+    ) -> "SecretManager":
         """Return a configured secret manager for administrative components."""
 
         from application.secrets.manager import ManagedSecret, ManagedSecretConfig, SecretManager
@@ -123,7 +131,7 @@ class AdminApiSettings(BaseSettings):
                 refresh_interval_seconds=refresh_interval,
             )
 
-        return SecretManager(secrets)
+        return SecretManager(secrets, audit_logger_factory=audit_logger_factory)
 
     model_config = SettingsConfigDict(
         env_prefix="TRADEPULSE_",
