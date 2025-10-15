@@ -41,6 +41,7 @@ jobs:
             -m "not flaky" \
             tests/unit/ tests/integration/ tests/property/ tests/fuzz/ \
             tests/contracts/ tests/data/ tests/security/ \
+            analytics/tests/ analytics/fpma/tests/ \
             --cov=core --cov=backtest --cov=execution \
             --cov-branch \
             --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
