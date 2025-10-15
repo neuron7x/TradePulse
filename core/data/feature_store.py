@@ -452,7 +452,7 @@ def reencrypt_sqlite_payloads(
         if source_envelope is None:
             raw = bytes(payload)
         else:
-            raw = source_envelope.decrypt(bytes(payload), allow_plaintext=True)
+            raw = source_envelope.decrypt(bytes(payload))
         transformed.append((name, target_envelope.encrypt(raw)))
 
     with sqlite3.connect(db_path) as connection:
