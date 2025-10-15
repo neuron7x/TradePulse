@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterable, Iterator, Sequence
 
-from .base import TimeSeriesAdapter, TimeSeriesPoint
+from .base import TimeSeriesAdapter, TimeSeriesPoint, sanitize_identifier
 
 
 class TimescaleTimeSeriesAdapter(TimeSeriesAdapter):
@@ -50,30 +50,34 @@ class TimescaleTimeSeriesAdapter(TimeSeriesAdapter):
             yield cursor
 
     def _ensure_table(self, table: str) -> None:
+        safe_table = sanitize_identifier(table)
+        time_column = sanitize_identifier(self._time_column)
         create_stmt = (
-            f"CREATE TABLE IF NOT EXISTS {table} ("
-            f"{self._time_column} TIMESTAMPTZ NOT NULL,"
+            f"CREATE TABLE IF NOT EXISTS {safe_table} ("
+            f"{time_column} TIMESTAMPTZ NOT NULL,"
             " tags JSONB DEFAULT '{}'::jsonb,"
             " values JSONB NOT NULL,"
-            f" PRIMARY KEY ({self._time_column}, tags))"
+            f" PRIMARY KEY ({time_column}, tags))"
         )
         with self._cursor() as cur:
             cur.execute(create_stmt)
             if self._hypertable:
                 cur.execute(
                     "SELECT create_hypertable(%s, %s, if_not_exists => true, chunk_time_interval => %s)",
-                    (table, self._time_column, self._chunk_interval),
+                    (safe_table, time_column, self._chunk_interval),
                 )
 
     def write_points(self, table: str, points: Sequence[TimeSeriesPoint]) -> int:
         if not points:
             return 0
-        self._ensure_table(table)
+        safe_table = sanitize_identifier(table)
+        time_column = sanitize_identifier(self._time_column)
+        self._ensure_table(safe_table)
         insert_stmt = (
-            f"INSERT INTO {table} ({self._time_column}, tags, values) "
+            f"INSERT INTO {safe_table} ({time_column}, tags, values) "  # nosec B608: identifiers sanitized
             "VALUES (%s, %s::jsonb, %s::jsonb) "
             "ON CONFLICT ({time_column}, tags) DO UPDATE SET values = excluded.values"
-        ).format(time_column=self._time_column)
+        ).format(time_column=time_column)
         payload = [
             (
                 point.timestamp,
@@ -94,19 +98,21 @@ class TimescaleTimeSeriesAdapter(TimeSeriesAdapter):
         end: datetime | None = None,
         limit: int | None = None,
     ) -> Iterable[TimeSeriesPoint]:
+        safe_table = sanitize_identifier(table)
+        time_column = sanitize_identifier(self._time_column)
         clauses = []
         params: list = []
         if start is not None:
-            clauses.append(f"{self._time_column} >= %s")
+            clauses.append(f"{time_column} >= %s")
             params.append(start)
         if end is not None:
-            clauses.append(f"{self._time_column} <= %s")
+            clauses.append(f"{time_column} <= %s")
             params.append(end)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
         query = (
-            f"SELECT {self._time_column}, tags, values FROM {table} {where} "
-            f"ORDER BY {self._time_column} ASC {limit_clause}"
+            f"SELECT {time_column}, tags, values FROM {safe_table} {where} "  # nosec B608: identifiers sanitized
+            f"ORDER BY {time_column} ASC {limit_clause}"
         )
         with self._cursor() as cur:
             cur.execute(query, params or None)

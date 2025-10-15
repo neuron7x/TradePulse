@@ -7,7 +7,7 @@ import importlib.util
 from datetime import datetime
 from typing import Iterable, Sequence
 
-from .base import TimeSeriesAdapter, TimeSeriesPoint
+from .base import TimeSeriesAdapter, TimeSeriesPoint, sanitize_identifier
 
 
 class ClickHouseTimeSeriesAdapter(TimeSeriesAdapter):
@@ -43,8 +43,9 @@ class ClickHouseTimeSeriesAdapter(TimeSeriesAdapter):
         return client
 
     def _ensure_table(self, table: str) -> None:
+        safe_table = sanitize_identifier(table)
         ddl = f"""
-        CREATE TABLE IF NOT EXISTS {table} (
+        CREATE TABLE IF NOT EXISTS {safe_table} (
             timestamp DateTime64(6) CODEC(DoubleDelta, ZSTD(1)),
             tags Map(String, String),
             values Map(String, Float64)
@@ -59,7 +60,8 @@ class ClickHouseTimeSeriesAdapter(TimeSeriesAdapter):
     def write_points(self, table: str, points: Sequence[TimeSeriesPoint]) -> int:
         if not points:
             return 0
-        self._ensure_table(table)
+        safe_table = sanitize_identifier(table)
+        self._ensure_table(safe_table)
         rows = [
             {
                 "timestamp": point.timestamp,
@@ -68,7 +70,7 @@ class ClickHouseTimeSeriesAdapter(TimeSeriesAdapter):
             }
             for point in points
         ]
-        self._client.insert(table, rows)
+        self._client.insert(safe_table, rows)
         return len(points)
 
     def read_points(
@@ -89,7 +91,11 @@ class ClickHouseTimeSeriesAdapter(TimeSeriesAdapter):
             params["end"] = end
         where = "WHERE " + " AND ".join(conditions) if conditions else ""
         limit_clause = f"LIMIT {int(limit)}" if limit is not None else ""
-        query = f"SELECT timestamp, tags, values FROM {table} {where} ORDER BY timestamp ASC {limit_clause}"
+        safe_table = sanitize_identifier(table)
+        query = (
+            f"SELECT timestamp, tags, values FROM {safe_table} {where} "  # nosec B608: identifier sanitized
+            f"ORDER BY timestamp ASC {limit_clause}"
+        )
         result = self._client.query(query, params=params or None)
         for row in result.result_rows:
             timestamp, tags, values = row

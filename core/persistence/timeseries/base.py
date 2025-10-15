@@ -4,7 +4,25 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import re
 from typing import Iterable, Protocol, Sequence
+
+
+_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_$]*$")
+
+
+def sanitize_identifier(identifier: str) -> str:
+    """Validate that *identifier* is safe for interpolation in SQL strings."""
+
+    parts = [part for part in identifier.split(".") if part]
+    if not parts:
+        msg = "Identifier must not be empty"
+        raise ValueError(msg)
+    for part in parts:
+        if not _IDENTIFIER.fullmatch(part):
+            msg = f"Invalid identifier segment: {part!r}"
+            raise ValueError(msg)
+    return ".".join(parts)
 
 
 @dataclass(slots=True)

@@ -14,6 +14,21 @@ from core.persistence.timeseries import timescale as timescale_module
 from core.persistence.timeseries.clickhouse import ClickHouseTimeSeriesAdapter
 from core.persistence.timeseries.parquet import ParquetTimeSeriesAdapter
 from core.persistence.timeseries.timescale import TimescaleTimeSeriesAdapter
+from core.persistence.timeseries.base import sanitize_identifier
+
+
+def test_sanitize_identifier_accepts_schema_prefix() -> None:
+    assert sanitize_identifier("metrics.prices") == "metrics.prices"
+
+
+def test_sanitize_identifier_rejects_invalid_characters() -> None:
+    with pytest.raises(ValueError):
+        sanitize_identifier("prices-today")
+
+
+def test_sanitize_identifier_rejects_empty() -> None:
+    with pytest.raises(ValueError):
+        sanitize_identifier("")
 
 
 class _DummyCursor:
