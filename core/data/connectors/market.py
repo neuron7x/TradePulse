@@ -118,13 +118,14 @@ class DeadLetterQueue:
         if target is None:
             raise ValueError("No persistence path configured for dead-letter queue")
 
-        if drain:
-            items = self.drain()
-        else:
-            items = list(self._items)
-        payload = [item.asdict() for item in items]
-
         with self._lock:
+            if drain:
+                items = list(self._items)
+                self._items.clear()
+            else:
+                items = list(self._items)
+            payload = [item.asdict() for item in items]
+
             target.parent.mkdir(parents=True, exist_ok=True)
             with target.open("w", encoding="utf-8") as handle:
                 json.dump(payload, handle, indent=2, sort_keys=True)
