@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import itertools
 import json
 import logging
 import os
@@ -281,7 +282,8 @@ class SiemAuditSink:
         self._sleep = sleep or time.sleep
         self._owns_client = http_client is None
         self._client = http_client or httpx.Client()
-        self._queue: PriorityQueue[tuple[float, Path | None]] = PriorityQueue()
+        self._queue: PriorityQueue[tuple[float, int, Path | None]] = PriorityQueue()
+        self._sequence = itertools.count()
         self._stop = threading.Event()
         self._lock = threading.Lock()
         self._load_existing_spool()
@@ -298,7 +300,7 @@ class SiemAuditSink:
 
     def close(self) -> None:
         self._stop.set()
-        self._queue.put((time.monotonic(), None))
+        self._queue.put((float("inf"), next(self._sequence), None))
         self._worker.join()
         if self._owns_client:
             self._client.close()
@@ -314,7 +316,7 @@ class SiemAuditSink:
             self._schedule(path, ready_at=time.monotonic())
 
     def _schedule(self, path: Path, *, ready_at: float) -> None:
-        self._queue.put((ready_at, path))
+        self._queue.put((ready_at, next(self._sequence), path))
 
     def _write_envelope(self, envelope: Mapping[str, Any]) -> Path:
         identifier = uuid4().hex
@@ -332,7 +334,7 @@ class SiemAuditSink:
     def _run(self) -> None:
         while True:
             try:
-                ready_at, path = self._queue.get(timeout=0.5)
+                ready_at, _, path = self._queue.get(timeout=0.5)
             except Empty:
                 if self._stop.is_set():
                     continue
