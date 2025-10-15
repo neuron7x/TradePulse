@@ -145,8 +145,8 @@ def test_entropy_feature_with_chunk_size_adds_metadata(uniform_series: np.ndarra
     
     # Verify computation still works correctly
     expected = entropy(uniform_series, bins=20, chunk_size=50)
-    # Chunked processing may have slight differences
-    assert abs(outcome.value - expected) < 0.5
+    # Chunked processing should now match non-chunked execution
+    assert outcome.value == pytest.approx(expected, rel=1e-9, abs=1e-12)
 
 
 def test_entropy_feature_with_combined_optimizations(uniform_series: np.ndarray) -> None:
@@ -197,8 +197,8 @@ def test_entropy_feature_chunk_size_behavior() -> None:
     assert np.isfinite(result_unchunked.value)
     assert np.isfinite(result_chunked.value)
     
-    # Results should be reasonably close (chunking uses weighted averaging)
-    assert abs(result_unchunked.value - result_chunked.value) < 1.0
+    # Chunking aggregates histograms and should match the single-pass result
+    assert result_unchunked.value == pytest.approx(result_chunked.value, rel=1e-9, abs=1e-12)
 
     # Metadata should reflect the difference
     assert "chunk_size" not in result_unchunked.metadata
@@ -217,7 +217,7 @@ def test_entropy_chunked_matches_heterogeneous_series() -> None:
 
     assert np.isfinite(baseline)
     assert np.isfinite(chunked)
-    assert chunked == pytest.approx(baseline, abs=0.7)
+    assert chunked == pytest.approx(baseline, rel=1e-9, abs=1e-12)
 
 
 def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
