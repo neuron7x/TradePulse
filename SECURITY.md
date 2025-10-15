@@ -98,6 +98,19 @@ We maintain a [Security Hall of Fame](SECURITY_HALL_OF_FAME.md) recognizing secu
 
 ## Security Best Practices
 
+### Branch Protection Requirements
+
+To preserve a consistent security posture, the `main` and `develop` branches must block merges unless the following status
+checks succeed:
+
+- `CodeQL Analysis (python)`
+- `CodeQL Analysis (go)`
+- `CodeQL Analysis (cpp)`
+- `CodeQL Analysis (rust)`
+
+Repository administrators should verify that these checks are configured as **required** in the GitHub branch protection rules
+whenever new workflows are introduced or renamed.
+
 ### For Contributors
 
 #### 1. Secrets Management
