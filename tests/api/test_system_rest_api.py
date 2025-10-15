@@ -112,3 +112,44 @@ def test_limit_order_requires_price_validation(client: TestClient) -> None:
     detail = response.json()
     assert detail["detail"][0]["msg"].startswith("Value error")
 
+
+def test_market_order_requires_reference_price(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "ETHUSD",
+            "side": "buy",
+            "quantity": 0.5,
+        },
+    )
+
+    assert response.status_code == 422
+    detail = response.json()
+    assert any(
+        "reference_price" in error.get("msg", "") for error in detail.get("detail", [])
+    )
+
+
+def test_market_order_uses_reference_price_for_risk_validation(
+    client: TestClient, system: TradePulseSystem, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, float] = {}
+
+    def _capture(symbol: str, side: str, qty: float, price: float) -> None:
+        captured.update(symbol=symbol, side=side, qty=qty, price=price)
+
+    monkeypatch.setattr(system.risk_manager, "validate_order", _capture)
+
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "ETHUSD",
+            "side": "buy",
+            "quantity": 0.25,
+            "reference_price": 1900.0,
+        },
+    )
+
+    assert response.status_code == 201
+    assert captured["price"] == 1900.0
+

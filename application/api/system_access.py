@@ -74,6 +74,11 @@ class OrderRequest(BaseModel):
     order_type: OrderType = Field(default=OrderType.MARKET)
     quantity: float = Field(..., gt=0.0)
     price: float | None = Field(default=None, gt=0.0)
+    reference_price: float | None = Field(
+        default=None,
+        gt=0.0,
+        description="Reference market price used for risk validation when no limit price is provided.",
+    )
     venue: str | None = Field(
         default=None,
         description="Target venue identifier. Defaults to the first configured connector.",
@@ -97,6 +102,12 @@ class OrderRequest(BaseModel):
             if order_type in priced_types and price is None:
                 raise ValueError("price must be supplied for priced order types")
         return data
+
+    @model_validator(mode="after")
+    def _validate_reference_price(self) -> "OrderRequest":
+        if self.price is None and self.reference_price is None:
+            raise ValueError("reference_price must be supplied when no price is provided")
+        return self
 
 
 class OrderResponse(BaseModel):
@@ -244,8 +255,8 @@ class SystemAccess:
         connector = self._system.get_connector(venue)
         async with self._lock:
             self._ensure_connected(venue)
-            risk_price = request.price or 1.0
-            if risk_price <= 0:
+            risk_price = request.price or request.reference_price
+            if risk_price is None or risk_price <= 0:
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="reference price must be positive",
