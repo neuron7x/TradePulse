@@ -40,4 +40,5 @@ The Mermaid definition can be edited in [`assets/data_flow.mmd`](assets/data_flo
 - [Feature Store Architecture](feature_store.md)
 - [Operational Readiness](../operational_readiness_runbooks.md)
 - [Deployment Guide](../deployment.md)
+- [Production Security Architecture](../security/architecture.md)
 

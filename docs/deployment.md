@@ -14,6 +14,10 @@ This guide outlines the production deployment requirements for TradePulse, inclu
 
 ### Networking & Security
 
+Refer to the [Production Security Architecture](security/architecture.md) for a
+full description of the edge, DMZ, and core tiers, including the logging and
+identity requirements that underpin these controls.
+
 - Restrict inbound access to OMS and connector hosts using security groups or firewall rules.
 - Enforce mTLS between strategy services and Kafka/Postgres where supported.
 - Mirror Prometheus metrics to your SIEM for long-term incident investigations.
