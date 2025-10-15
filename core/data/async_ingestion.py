@@ -7,11 +7,12 @@ import csv
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 from pathlib import Path
-from typing import AsyncIterator, Callable, Iterable, Optional
+from typing import Any, AsyncIterator, Callable, Iterable, Mapping, Optional, Tuple
 
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 
+from core.data.connectors.market import BaseMarketDataConnector
 from core.data.models import InstrumentType, PriceTick as Ticker
 from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
@@ -21,6 +22,10 @@ __all__ = ["AsyncDataIngestor", "AsyncWebSocketStream", "Ticker", "merge_streams
 
 logger = get_logger(__name__)
 metrics = get_metrics_collector()
+
+
+ConnectorFactory = Callable[[], BaseMarketDataConnector]
+ConnectorEntry = BaseMarketDataConnector | ConnectorFactory
 
 
 class AsyncDataIngestor(AsyncDataIngestionService):
@@ -34,6 +39,7 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         allowed_roots: Iterable[str | Path] | None = None,
         max_csv_bytes: Optional[int] = None,
         follow_symlinks: bool = False,
+        market_connectors: Mapping[str, ConnectorEntry] | None = None,
     ):
         """Initialize async data ingestor.
 
@@ -48,7 +54,12 @@ class AsyncDataIngestor(AsyncDataIngestionService):
             max_bytes=max_csv_bytes,
             follow_symlinks=follow_symlinks,
         )
-        
+        self._market_connectors: dict[str, ConnectorEntry] = {}
+        if market_connectors:
+            for name, connector in market_connectors.items():
+                key = name.lower()
+                self._market_connectors[key] = connector
+
     async def read_csv(
         self,
         path: str,
@@ -144,40 +155,48 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         interval_ms: int = 1000,
         max_ticks: Optional[int] = None,
     ) -> AsyncIterator[Ticker]:
-        """Stream ticks from a source (placeholder for real implementations).
-        
+        """Stream ticks from a live source.
+
         Args:
             source: Data source name
             symbol: Trading symbol
             instrument_type: Instrument classification (spot or futures)
             interval_ms: Polling interval in milliseconds
             max_ticks: Optional maximum number of ticks to yield
-            
+
         Yields:
             Ticker objects from the stream
         """
-        with logger.operation("async_stream_ticks", source=source, symbol=symbol):
-            count = 0
-            
-            while max_ticks is None or count < max_ticks:
-                # This is a placeholder - real implementation would connect to
-                # actual data source (WebSocket, API, etc.)
-                await asyncio.sleep(interval_ms / 1000.0)
-                
-                # Placeholder tick generation
-                tick = Ticker.create(
-                    symbol=symbol,
-                    venue=source.upper(),
-                    price=100.0 + (count % 10),
-                    timestamp=normalize_timestamp(datetime.now(timezone.utc)),
-                    volume=1000.0,
-                    instrument_type=instrument_type,
-                )
-                
+        connector, should_close = self._resolve_market_connector(source)
+        if connector is None:
+            async for tick in self._stream_synthetic(
+                source,
+                symbol,
+                instrument_type=instrument_type,
+                interval_ms=interval_ms,
+                max_ticks=max_ticks,
+            ):
                 yield tick
-                metrics.record_tick_processed(source, symbol)
-                count += 1
-                
+            return
+
+        count = 0
+        try:
+            with logger.operation("async_stream_ticks", source=source, symbol=symbol, mode="connector"):
+                async for event in connector.stream_ticks(symbol=symbol, instrument_type=instrument_type):
+                    tick = _tick_event_to_price_tick(
+                        event,
+                        venue=source.upper(),
+                        instrument_type=instrument_type,
+                    )
+                    yield tick
+                    metrics.record_tick_processed(source, symbol)
+                    count += 1
+                    if max_ticks is not None and count >= max_ticks:
+                        return
+        finally:
+            if should_close:
+                await connector.aclose()
+
     async def batch_process(
         self,
         ticks: AsyncIterator[Ticker],
@@ -208,8 +227,83 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         # Process remaining ticks
         if batch:
             callback(batch)
-            
+
         return total
+
+    async def fetch_market_snapshot(
+        self,
+        source: str,
+        *,
+        symbol: str,
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+        **kwargs: Any,
+    ) -> list[Ticker]:
+        """Fetch a bounded snapshot of ticks from a configured market connector."""
+
+        connector, should_close = self._resolve_market_connector(source)
+        if connector is None:
+            raise ValueError(f"No market data connector configured for source '{source}'")
+
+        params = dict(kwargs)
+        params.setdefault("symbol", symbol)
+        params.setdefault("instrument_type", instrument_type)
+
+        try:
+            with logger.operation("async_fetch_snapshot", source=source, symbol=symbol):
+                events = await connector.fetch_snapshot(**params)
+        finally:
+            if should_close:
+                await connector.aclose()
+
+        ticks: list[Ticker] = []
+        for event in events:
+            tick = _tick_event_to_price_tick(
+                event,
+                venue=source.upper(),
+                instrument_type=instrument_type,
+            )
+            ticks.append(tick)
+            metrics.record_tick_processed(source, symbol)
+        return ticks
+
+    def _resolve_market_connector(self, source: str) -> Tuple[Optional[BaseMarketDataConnector], bool]:
+        entry = self._market_connectors.get(source.lower())
+        if entry is None:
+            return None, False
+        if callable(entry):
+            connector = entry()
+            if not isinstance(connector, BaseMarketDataConnector):
+                raise TypeError("Connector factory must return a BaseMarketDataConnector instance")
+            return connector, True
+        return entry, False
+
+    async def _stream_synthetic(
+        self,
+        source: str,
+        symbol: str,
+        *,
+        instrument_type: InstrumentType,
+        interval_ms: int,
+        max_ticks: Optional[int],
+    ) -> AsyncIterator[Ticker]:
+        with logger.operation("async_stream_ticks", source=source, symbol=symbol, mode="synthetic"):
+            count = 0
+
+            while max_ticks is None or count < max_ticks:
+                await asyncio.sleep(interval_ms / 1000.0)
+
+                tick = Ticker.create(
+                    symbol=symbol,
+                    venue=source.upper(),
+                    price=100.0 + (count % 10),
+                    timestamp=normalize_timestamp(datetime.now(timezone.utc)),
+                    volume=1000.0,
+                    instrument_type=instrument_type,
+                )
+
+                yield tick
+                metrics.record_tick_processed(source, symbol)
+                count += 1
 
 
 class AsyncWebSocketStream:
@@ -294,3 +388,31 @@ __all__ = [
     "AsyncWebSocketStream",
     "merge_streams",
 ]
+
+
+def _tick_event_to_price_tick(
+    event: "TickEvent",
+    *,
+    venue: str,
+    instrument_type: InstrumentType,
+) -> Ticker:
+    from core.events import TickEvent  # Local import to avoid circular dependencies at module import time
+
+    if not isinstance(event, TickEvent):
+        raise TypeError("Expected TickEvent from connector stream")
+
+    price = event.last_price or event.bid_price or event.ask_price
+    if price is None:
+        raise ValueError("TickEvent is missing price information")
+
+    timestamp = datetime.fromtimestamp(event.timestamp / 1_000_000, tz=timezone.utc)
+    volume = event.volume or 0
+    tick = Ticker.create(
+        symbol=event.symbol,
+        venue=venue,
+        price=price,
+        timestamp=timestamp,
+        volume=volume,
+        instrument_type=instrument_type,
+    )
+    return tick

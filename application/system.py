@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import AsyncIterator, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 import numpy as np
 import pandas as pd
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.trading import signal_to_dto
+from core.data.connectors.market import BaseMarketDataConnector
 from core.data.async_ingestion import AsyncDataIngestor
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick
@@ -73,6 +74,7 @@ class TradePulseSystemConfig:
     live_settings: LiveLoopSettings = field(default_factory=LiveLoopSettings)
     allowed_data_roots: Iterable[str | Path] | None = None
     max_csv_bytes: int | None = None
+    market_data_connectors: Mapping[str, BaseMarketDataConnector | Callable[[], BaseMarketDataConnector]] | None = None
 
 
 class TradePulseSystem:
@@ -97,6 +99,7 @@ class TradePulseSystem:
         self._async_ingestor = async_data_ingestor or AsyncDataIngestor(
             allowed_roots=config.allowed_data_roots,
             max_csv_bytes=config.max_csv_bytes,
+            market_connectors=config.market_data_connectors,
         )
         self._pipeline = SignalFeaturePipeline(config.feature_pipeline)
         self._risk_manager = risk_manager or RiskManager(config.risk_limits)
@@ -181,6 +184,42 @@ class TradePulseSystem:
         self._last_symbol = symbol
         self._last_venue = venue
         return frame
+
+    def stream_market_data(
+        self,
+        source: str,
+        symbol: str,
+        *,
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+        interval_ms: int = 1000,
+        max_ticks: int | None = None,
+    ) -> AsyncIterator[PriceTick]:
+        """Return an async iterator streaming live market data from *source*."""
+
+        return self._async_ingestor.stream_ticks(
+            source,
+            symbol,
+            instrument_type=instrument_type,
+            interval_ms=interval_ms,
+            max_ticks=max_ticks,
+        )
+
+    async def fetch_market_snapshot(
+        self,
+        source: str,
+        *,
+        symbol: str,
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+        **kwargs,
+    ) -> list[PriceTick]:
+        """Fetch a snapshot of market data from a configured connector."""
+
+        return await self._async_ingestor.fetch_market_snapshot(
+            source,
+            symbol=symbol,
+            instrument_type=instrument_type,
+            **kwargs,
+        )
 
     def build_feature_frame(self, market_frame: pd.DataFrame) -> pd.DataFrame:
         """Return a feature-enriched frame aligned with ``market_frame``."""
