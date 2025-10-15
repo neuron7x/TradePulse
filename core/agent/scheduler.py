@@ -235,8 +235,13 @@ class StrategyScheduler:
             thread = self._thread
         if thread is not None:
             thread.join(timeout=timeout)
+            if thread.is_alive():
+                raise TimeoutError(
+                    "StrategyScheduler thread did not stop within the allotted timeout"
+                )
         with self._lock:
-            self._thread = None
+            if self._thread is thread and (thread is None or not thread.is_alive()):
+                self._thread = None
 
     # ------------------------------------------------------------------
     # Introspection helpers
