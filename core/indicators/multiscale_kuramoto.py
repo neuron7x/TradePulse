@@ -63,7 +63,13 @@ class MultiScaleResult:
 
 
 def _hilbert_phase(series: np.ndarray) -> np.ndarray:
-    """Return the instantaneous phase of the provided series."""
+    """Return the instantaneous phase of the provided series.
+
+    The SciPy implementation detrends the input before computing the analytic
+    signal. When SciPy is unavailable we mirror that behaviour so both paths
+    yield numerically consistent phases and downstream Kuramoto metrics remain
+    stable regardless of optional dependencies.
+    """
 
     x = np.asarray(series, dtype=float)
     if x.size == 0:
@@ -76,9 +82,22 @@ def _hilbert_phase(series: np.ndarray) -> np.ndarray:
             fill_value = float(np.mean(finite))
             x = np.where(np.isfinite(x), x, fill_value)
     if _signal is None:
-        # fallback: leverage FFT-based analytic signal
+        # fallback: leverage FFT-based analytic signal with explicit detrending
         n = x.size
-        X = np.fft.fft(x)
+        if n > 1:
+            t = np.arange(n, dtype=float)
+            t_mean = float(np.mean(t))
+            x_mean = float(np.mean(x))
+            denom = float(np.sum((t - t_mean) ** 2))
+            if denom > 0.0:
+                slope = float(np.sum((t - t_mean) * (x - x_mean)) / denom)
+            else:  # pragma: no cover - degenerate when all t identical
+                slope = 0.0
+            intercept = x_mean - slope * t_mean
+            detrended = x - (slope * t + intercept)
+        else:
+            detrended = x - x.mean()
+        X = np.fft.fft(detrended)
         h = np.zeros(n)
         if n % 2 == 0:
             h[0] = h[n // 2] = 1

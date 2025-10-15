@@ -9,6 +9,7 @@ import pytest
 
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
+import core.indicators.multiscale_kuramoto as kuramoto_module
 from core.indicators.multiscale_kuramoto import (
     KuramotoResult,
     MultiScaleKuramoto,
@@ -16,6 +17,8 @@ from core.indicators.multiscale_kuramoto import (
     MultiScaleResult,
     TimeFrame,
     WaveletWindowSelector,
+    _hilbert_phase,
+    _kuramoto,
 )
 
 
@@ -139,3 +142,36 @@ def test_multiscale_feature_reports_metadata_and_custom_price_column() -> None:
     )
     assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
     assert outcome.metadata["window_M5"] == 144
+
+
+def test_hilbert_phase_fft_fallback_matches_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
+    scipy_signal = pytest.importorskip("scipy.signal")
+
+    rng = np.random.default_rng(2024)
+    t = np.linspace(0.0, 12.0 * np.pi, 4096)
+    trend = 0.0005 * np.arange(t.size)
+    waveform = np.sin(t) + 0.5 * np.sin(t / 5.0)
+    noise = 0.05 * rng.standard_normal(t.shape)
+    series = trend + waveform + noise
+
+    original_signal = kuramoto_module._signal
+    try:
+        kuramoto_module._signal = scipy_signal  # ensure SciPy branch is active
+        phases_scipy = _hilbert_phase(series)
+
+        kuramoto_module._signal = None
+        phases_fft = _hilbert_phase(series)
+    finally:
+        kuramoto_module._signal = original_signal
+
+    # Compare on the unit circle to avoid wrap-around issues
+    assert np.allclose(
+        np.exp(1j * phases_fft),
+        np.exp(1j * phases_scipy),
+        rtol=1e-6,
+        atol=1e-6,
+    )
+
+    R_scipy, _ = _kuramoto(phases_scipy)
+    R_fft, _ = _kuramoto(phases_fft)
+    assert R_fft == pytest.approx(R_scipy, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)

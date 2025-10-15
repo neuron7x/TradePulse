@@ -134,7 +134,7 @@ def entropy(
         - Data is automatically scaled to [-1, 1] range for numerical stability
         - Invalid values (NaN, inf) are filtered out
         - Returns 0.0 if no valid data remains after filtering
-        - Chunked processing computes weighted average entropy across chunks
+        - Chunked processing aggregates histogram counts to match single-pass results
     """
     context_manager = (
         _logger.operation(
@@ -183,11 +183,20 @@ def entropy(
 
         # Chunked processing for large arrays
         if chunk_size is not None and x.size > chunk_size:
+            raw_scale = float(np.max(np.abs(x)))
+            if raw_scale != 0.0 and np.isfinite(raw_scale):
+                np.divide(x, raw_scale, out=x, casting="unsafe")
+            histogram_input = x
+            bin_edges = np.histogram_bin_edges(histogram_input, bins=bins)
             chunks = [
-                x[i : min(i + chunk_size, x.size)]
-                for i in range(0, x.size, chunk_size)
+                histogram_input[i : min(i + chunk_size, histogram_input.size)]
+                for i in range(0, histogram_input.size, chunk_size)
             ]
-            tasks = [(chunk, bins, dtype) for chunk in chunks if chunk.size > 0]
+            tasks = [
+                (chunk, bin_edges, dtype)
+                for chunk in chunks
+                if chunk.size > 0
+            ]
             if not tasks:
                 _LAST_ENTROPY_BACKEND = "cpu"
                 return 0.0
@@ -199,15 +208,22 @@ def entropy(
             else:
                 results = [_entropy_chunk_worker(task) for task in tasks]
 
-            entropies, weights = zip(*results)
-            weights_arr = np.array(weights, dtype=dtype)
-            entropies_arr = np.array(entropies, dtype=dtype)
-            total_weight = weights_arr.sum(dtype=dtype)
-            if total_weight == 0:
+            total_counts: np.ndarray | None = None
+            total_weight = 0
+            for counts, weight in results:
+                if total_counts is None:
+                    total_counts = counts.astype(dtype, copy=False)
+                else:
+                    total_counts = total_counts + counts.astype(dtype, copy=False)
+                total_weight += int(weight)
+
+            if total_counts is None or total_weight == 0:
                 _LAST_ENTROPY_BACKEND = "cpu"
                 return 0.0
+
+            probs = total_counts[total_counts > 0] / total_weight
             _LAST_ENTROPY_BACKEND = "cpu"
-            return float(np.dot(entropies_arr, weights_arr) / total_weight)
+            return float(-(probs * np.log(probs)).sum())
 
         # Standard single-pass processing
         # Normalize to [-1, 1] for numerical stability
@@ -331,30 +347,28 @@ def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no
     raise ValueError(f"Unknown backend '{backend}'")
 
 
-def _entropy_chunk_worker(task: tuple[np.ndarray, int, np.dtype]) -> tuple[float, int]:
-    chunk, bins, dtype = task
+def _entropy_chunk_worker(task: tuple[np.ndarray, np.ndarray, np.dtype]) -> tuple[np.ndarray, int]:
+    chunk, bin_edges, dtype = task
     chunk = np.asarray(chunk, dtype=dtype)
     if chunk.size == 0:
-        return 0.0, 0
-    scale = np.max(np.abs(chunk))
-    if scale and np.isfinite(scale):
-        chunk = chunk / scale
-    counts, _ = np.histogram(chunk, bins=bins, density=False)
-    total = counts.sum(dtype=dtype)
-    if total <= 0:
-        return 0.0, int(chunk.size)
-    probs = counts[counts > 0] / total
-    entropy_value = float(-(probs * np.log(probs)).sum())
-    return entropy_value, int(chunk.size)
+        return np.zeros(len(bin_edges) - 1, dtype=np.int64), 0
+    counts, _ = np.histogram(chunk, bins=bin_edges, density=False)
+    return counts.astype(np.int64, copy=False), int(chunk.size)
 
 
-def _run_entropy_process(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
+def _run_entropy_process(
+    tasks: Sequence[tuple[np.ndarray, np.ndarray, np.dtype]],
+    max_workers: int | None,
+) -> list[tuple[np.ndarray, int]]:
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(_entropy_chunk_worker, tasks))
 
 
-def _run_entropy_async(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
-    async def _runner() -> list[tuple[float, int]]:
+def _run_entropy_async(
+    tasks: Sequence[tuple[np.ndarray, np.ndarray, np.dtype]],
+    max_workers: int | None,
+) -> list[tuple[np.ndarray, int]]:
+    async def _runner() -> list[tuple[np.ndarray, int]]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None
         try:

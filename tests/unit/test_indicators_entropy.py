@@ -205,6 +205,21 @@ def test_entropy_feature_chunk_size_behavior() -> None:
     assert result_chunked.metadata["chunk_size"] == 1000
 
 
+def test_entropy_chunked_matches_single_pass_with_shared_scaling() -> None:
+    rng = np.random.default_rng(321)
+    segments = [
+        rng.normal(loc=0.0, scale=0.5, size=512),
+        rng.normal(loc=3.0, scale=0.8, size=768),
+        rng.normal(loc=-2.5, scale=1.2, size=640),
+    ]
+    data = np.concatenate(segments)
+
+    baseline = entropy(data, bins=40)
+    chunked = entropy(data, bins=40, chunk_size=200)
+
+    assert chunked == pytest.approx(baseline, rel=1e-6, abs=1e-6)
+
+
 def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     import core.indicators.entropy as entropy_module
 
