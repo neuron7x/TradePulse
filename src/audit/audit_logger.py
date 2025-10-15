@@ -289,7 +289,7 @@ class SiemAuditSink:
 
     def close(self) -> None:
         self._stop.set()
-        self._queue.put((float("inf"), next(self._sequence), None))
+        self._queue.put((time.monotonic(), next(self._sequence), None))
         self._worker.join()
         if self._owns_client:
             self._client.close()
