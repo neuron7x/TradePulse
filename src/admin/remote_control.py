@@ -259,6 +259,7 @@ def create_remote_control_router(
     async def reset_kill_switch(
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
+        __: None = Depends(enforce_admin_token),
         identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),

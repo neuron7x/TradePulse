@@ -22,11 +22,21 @@ spec:
                 secretKeyRef:
                   name: tradepulse-secrets
                   key: audit-secret-id
+            - name: TRADEPULSE_AUDIT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: audit-secret
             - name: TRADEPULSE_ADMIN_TOKEN_ID
               valueFrom:
                 secretKeyRef:
                   name: tradepulse-secrets
                   key: admin-token-id
+            - name: TRADEPULSE_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: admin-token
             - name: TRADEPULSE_OAUTH2_ISSUER
               valueFrom:
                 secretKeyRef:
@@ -62,6 +72,7 @@ spec:
 # provisioned outside of source control. The deployment references the
 # following secrets, which should be created via your preferred secret
 # management workflow (kubectl, ExternalSecrets, etc.):
-#   * tradepulse-secrets with keys: audit-secret-id, admin-token-id,
-#     oauth2-issuer, oauth2-audience, oauth2-jwks-uri
+#   * tradepulse-secrets with keys: audit-secret-id, audit-secret,
+#     admin-token-id, admin-token, oauth2-issuer, oauth2-audience,
+#     oauth2-jwks-uri
 #   * tradepulse-mtls-client with keys: client-ca.pem, client.crl
