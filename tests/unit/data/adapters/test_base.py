@@ -48,6 +48,19 @@ def test_retry_config_compute_backoff_applies_jitter(monkeypatch: pytest.MonkeyP
     assert calls == [(0.0, 1.0)]
 
 
+def test_retry_config_compute_backoff_respects_max_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = base.RetryConfig(multiplier=1.0, max_backoff=5.0, jitter=0.5)
+
+    def fake_uniform(low: float, high: float) -> float:
+        # Use the maximum jitter to attempt to exceed max_backoff.
+        return high
+
+    monkeypatch.setattr(base.random, "uniform", fake_uniform)
+
+    delay = config.compute_backoff(attempt_number=3)
+    assert delay == pytest.approx(config.max_backoff)
+
+
 @pytest.mark.asyncio
 async def test_fault_tolerance_policy_retries_with_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
     entries: list[str] = []
