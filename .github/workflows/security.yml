@@ -201,18 +201,125 @@ jobs:
       actions: read
       contents: read
       security-events: write
-    
+
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
-    
+
     - name: Initialize CodeQL
       uses: github/codeql-action/init@v4
       with:
         languages: python
         queries: security-extended
-    
+
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v4
       with:
         category: "/language:python"
+
+  dast-scan:
+    name: Dynamic Application Security Testing
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+        - name: apps-web
+          workdir: apps/web
+          install: npm ci
+          build: npm run build
+          start: npm run start -- --hostname 0.0.0.0 --port 3000
+          healthcheck: http://127.0.0.1:3000
+          artifact: dast-apps-web
+          log_file: web-server.log
+        - name: ui-dashboard
+          workdir: ui/dashboard
+          install: npm install
+          build: ""
+          start: npx --yes http-server ./src -p 3100 --silent
+          healthcheck: http://127.0.0.1:3100
+          artifact: dast-ui-dashboard
+          log_file: dashboard-server.log
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      if: ${{ matrix.install != '' }}
+      run: |
+        set -euo pipefail
+        ${INSTALL_COMMAND}
+      working-directory: ${{ matrix.workdir }}
+      env:
+        INSTALL_COMMAND: ${{ matrix.install }}
+
+    - name: Build application assets
+      if: ${{ matrix.build != '' }}
+      run: |
+        set -euo pipefail
+        ${BUILD_COMMAND}
+      working-directory: ${{ matrix.workdir }}
+      env:
+        BUILD_COMMAND: ${{ matrix.build }}
+
+    - name: Start application server
+      run: |
+        set -euo pipefail
+        ${START_COMMAND} > "${LOG_FILE}" 2>&1 &
+        echo $! > server.pid
+      working-directory: ${{ matrix.workdir }}
+      env:
+        START_COMMAND: ${{ matrix.start }}
+        LOG_FILE: ${{ matrix.log_file }}
+
+    - name: Wait for service readiness
+      run: npx --yes wait-on --timeout 60000 ${{ matrix.healthcheck }}
+
+    - name: Run OWASP ZAP baseline scan
+      run: |
+        set -euo pipefail
+        REPORT_DIR="${GITHUB_WORKSPACE}/dast/${{ matrix.name }}"
+        mkdir -p "${REPORT_DIR}"
+        docker run --rm --network host \
+          -v "${REPORT_DIR}:/zap/wrk/:rw" \
+          ghcr.io/zaproxy/zaproxy:stable \
+          zap-baseline.py \
+            -t "${{ matrix.healthcheck }}" \
+            -r report.html \
+            -w warnings.md \
+            -J report.json \
+            -m 10 \
+            -a
+
+    - name: Stop application server
+      if: always()
+      run: |
+        if [ -f server.pid ]; then
+          kill "$(cat server.pid)" 2>/dev/null || true
+          rm -f server.pid
+        fi
+      working-directory: ${{ matrix.workdir }}
+
+    - name: Collect server logs
+      if: always()
+      run: |
+        REPORT_DIR="${GITHUB_WORKSPACE}/dast/${{ matrix.name }}"
+        mkdir -p "${REPORT_DIR}"
+        if [ -f "${LOG_FILE}" ]; then
+          cp "${LOG_FILE}" "${REPORT_DIR}/server.log"
+        fi
+      working-directory: ${{ matrix.workdir }}
+      env:
+        LOG_FILE: ${{ matrix.log_file }}
+
+    - name: Upload DAST reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.artifact }}
+        path: dast/${{ matrix.name }}

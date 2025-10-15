@@ -1,0 +1,32 @@
+name: Buf Lint
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  buf-lint:
+    name: Protocol Buffer Checks
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+
+    - name: Set up Buf
+      uses: bufbuild/buf-setup-action@v1
+      with:
+        buf_version: latest
+
+    - name: Check formatting
+      run: buf format --diff --exit-code
+
+    - name: Run buf lint
+      run: buf lint
+
+    - name: Detect breaking changes
+      run: buf breaking --against '.git#branch=main'

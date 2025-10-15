@@ -178,6 +178,28 @@ and optionally writes a JSON report (see `python scripts/dependency_audit.py --h
   `trivy`/`grype`, and block promotion when high/critical findings exist.
 - **Continuous monitoring**: Schedule nightly scans of production registries and IaC sources to
   detect drift or newly disclosed CVEs.
+- **CI security gates (required checks)**:
+  - `Buf Lint / Protocol Buffer Checks`: runs `buf format --diff --exit-code`, `buf lint`, and
+    `buf breaking --against '.git#branch=main'`. The job fails if Protobuf definitions are not
+    formatted, violate linting rules, or introduce backward-incompatible changes. To remediate,
+    run the same commands locally, commit any formatting fixes, and adjust API updates to remain
+    backward compatible. The job is marked as **required** in branch protection for `main` and
+    `develop`, so merges are blocked until the check is green.
+  - `Security Scan / Dynamic Application Security Testing`: provisions ephemeral builds of
+    `apps/web` (Next.js) and `ui/dashboard` (static dashboard bundle) and scans them with the
+    OWASP ZAP baseline profile. Review the uploaded artifacts (`report.html`, `report.json`,
+    `warnings.md`, and `server.log`) to triage findings:
+    - **FAIL**: ZAP reports Medium-or-higher alerts. Block the merge, create an incident ticket,
+      and remediate before re-running the pipeline.
+    - **WARN**: Only Low alerts or passive checks triggered. Document the risk acceptance or fix
+      the underlying issue within the next sprint.
+    - **PASS**: No actionable alerts; merge may proceed once all other checks are green.
+    This job is also a required status check; maintainers must keep it enforced in repository
+    branch protection policies.
+
+Both checks emit machine-readable artifacts. Retain them in incident tickets and release
+checklists to prove due diligence. If either workflow fails in CI, rerun locally, attach logs, and
+obtain approval from the security team before overriding protections.
 
 #### Dynamic Testing & Penetration Testing
 
