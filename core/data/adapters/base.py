@@ -70,7 +70,8 @@ class RetryConfig:
         if self.jitter <= 0:
             return base_delay
         jitter_delta = random.uniform(0, base_delay * self.jitter)
-        return base_delay + jitter_delta
+        delay = base_delay + jitter_delta
+        return min(self.max_backoff, delay)
 
 
 @dataclass(frozen=True)
