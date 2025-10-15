@@ -181,13 +181,28 @@ def entropy(
                 )
                 _LAST_ENTROPY_BACKEND = "cpu"
 
+        global_scale = float(np.max(np.abs(x)))
+        if not np.isfinite(global_scale) or global_scale == 0.0:
+            global_scale = None
+
+        if global_scale is not None:
+            hist_range: tuple[float, float] | None = (-1.0, 1.0)
+        else:
+            data_min = float(np.min(x))
+            data_max = float(np.max(x))
+            hist_range = (data_min, data_max) if data_max > data_min else None
+
         # Chunked processing for large arrays
         if chunk_size is not None and x.size > chunk_size:
             chunks = [
                 x[i : min(i + chunk_size, x.size)]
                 for i in range(0, x.size, chunk_size)
             ]
-            tasks = [(chunk, bins, dtype) for chunk in chunks if chunk.size > 0]
+            tasks = [
+                (chunk, bins, dtype, global_scale, hist_range)
+                for chunk in chunks
+                if chunk.size > 0
+            ]
             if not tasks:
                 _LAST_ENTROPY_BACKEND = "cpu"
                 return 0.0
@@ -211,12 +226,11 @@ def entropy(
 
         # Standard single-pass processing
         # Normalize to [-1, 1] for numerical stability
-        scale = np.max(np.abs(x))
-        if scale and np.isfinite(scale):
-            x = x / scale
+        if global_scale is not None:
+            x = x / global_scale
 
         # Compute histogram
-        counts, _ = np.histogram(x, bins=bins, density=False)
+        counts, _ = np.histogram(x, bins=bins, range=hist_range, density=False)
         total = counts.sum(dtype=dtype)
         if total == 0:
             _LAST_ENTROPY_BACKEND = "cpu"
@@ -331,15 +345,16 @@ def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no
     raise ValueError(f"Unknown backend '{backend}'")
 
 
-def _entropy_chunk_worker(task: tuple[np.ndarray, int, np.dtype]) -> tuple[float, int]:
-    chunk, bins, dtype = task
+def _entropy_chunk_worker(
+    task: tuple[np.ndarray, int, np.dtype, float | None, tuple[float, float] | None]
+) -> tuple[float, int]:
+    chunk, bins, dtype, scale, hist_range = task
     chunk = np.asarray(chunk, dtype=dtype)
     if chunk.size == 0:
         return 0.0, 0
-    scale = np.max(np.abs(chunk))
-    if scale and np.isfinite(scale):
+    if scale is not None:
         chunk = chunk / scale
-    counts, _ = np.histogram(chunk, bins=bins, density=False)
+    counts, _ = np.histogram(chunk, bins=bins, range=hist_range, density=False)
     total = counts.sum(dtype=dtype)
     if total <= 0:
         return 0.0, int(chunk.size)
@@ -348,12 +363,22 @@ def _entropy_chunk_worker(task: tuple[np.ndarray, int, np.dtype]) -> tuple[float
     return entropy_value, int(chunk.size)
 
 
-def _run_entropy_process(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
+def _run_entropy_process(
+    tasks: Sequence[
+        tuple[np.ndarray, int, np.dtype, float | None, tuple[float, float] | None]
+    ],
+    max_workers: int | None,
+) -> list[tuple[float, int]]:
     with ProcessPoolExecutor(max_workers=max_workers) as executor:
         return list(executor.map(_entropy_chunk_worker, tasks))
 
 
-def _run_entropy_async(tasks: Sequence[tuple[np.ndarray, int, np.dtype]], max_workers: int | None) -> list[tuple[float, int]]:
+def _run_entropy_async(
+    tasks: Sequence[
+        tuple[np.ndarray, int, np.dtype, float | None, tuple[float, float] | None]
+    ],
+    max_workers: int | None,
+) -> list[tuple[float, int]]:
     async def _runner() -> list[tuple[float, int]]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None

@@ -205,6 +205,21 @@ def test_entropy_feature_chunk_size_behavior() -> None:
     assert result_chunked.metadata["chunk_size"] == 1000
 
 
+def test_entropy_chunked_matches_heterogeneous_series() -> None:
+    """Chunked entropy should match non-chunked results on mixed scales."""
+    rng = np.random.default_rng(1234)
+    low_variance = rng.normal(loc=0.0, scale=0.1, size=256)
+    high_variance = rng.normal(loc=0.0, scale=250.0, size=256)
+    series = np.concatenate([low_variance, high_variance])
+
+    baseline = entropy(series, bins=64)
+    chunked = entropy(series, bins=64, chunk_size=128)
+
+    assert np.isfinite(baseline)
+    assert np.isfinite(chunked)
+    assert chunked == pytest.approx(baseline, abs=0.7)
+
+
 def test_entropy_gpu_backend_falls_back_to_cpu(monkeypatch: pytest.MonkeyPatch) -> None:
     import core.indicators.entropy as entropy_module
 
