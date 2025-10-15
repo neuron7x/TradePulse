@@ -66,10 +66,14 @@ def _redact_sensitive_data(data: Any) -> Any:
 def _redacted_config_yaml(cfg: DictConfig) -> str:
     """Serialize ``cfg`` to YAML with sensitive values redacted."""
 
-    container = OmegaConf.to_container(cfg, resolve=True)
+    container = OmegaConf.to_container(
+        cfg,
+        resolve=False,
+        throw_on_missing=False,
+    )
     redacted_container = _redact_sensitive_data(container)
     redacted_conf = OmegaConf.create(redacted_container)
-    return OmegaConf.to_yaml(redacted_conf)
+    return OmegaConf.to_yaml(redacted_conf, resolve=False)
 
 
 @dataclass(slots=True)

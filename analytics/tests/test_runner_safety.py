@@ -49,3 +49,23 @@ def test_redacted_config_yaml_masks_sensitive_values() -> None:
     assert "should-not-leak" not in rendered
     assert runner.REDACTED_PLACEHOLDER in rendered
     assert "https://example.test" in rendered
+
+
+def test_redacted_config_yaml_handles_unresolved_interpolations() -> None:
+    """Interpolation placeholders should remain intact instead of erroring."""
+
+    cfg = OmegaConf.create(
+        {
+            "paths": {
+                "base": "${hydra.run.dir}",
+                "artifact": "${paths.base}/artifact.bin",
+            },
+            "credentials": {"api_key": "top-secret"},
+        }
+    )
+
+    rendered = runner._redacted_config_yaml(cfg)
+
+    assert "${hydra.run.dir}" in rendered
+    assert runner.REDACTED_PLACEHOLDER in rendered
+    assert "artifact.bin" in rendered
