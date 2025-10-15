@@ -97,6 +97,39 @@ bandit.update(arm, reward=0.42)
 
 ---
 
+## Strategy Scheduler
+
+For automated experimentation TradePulse ships a deterministic scheduler that
+periodically evaluates strategy bundles. The scheduler deduplicates runtime
+state, applies jitter to avoid thundering herds, and backs off exponentially
+when data sources fail. 【F:core/agent/scheduler.py†L40-L216】【F:core/agent/scheduler.py†L327-L343】
+
+```python
+from core.agent.scheduler import StrategyJob, StrategyScheduler
+from core.agent.strategy import Strategy
+
+scheduler = StrategyScheduler()
+
+job = StrategyJob(
+    name="nightly",
+    strategies=[Strategy(name="mean_revert", params={"lookback": 60})],
+    data_provider=lambda: load_market_snapshot(),
+    interval=3600.0,  # seconds
+    jitter=120.0,
+)
+
+scheduler.add_job(job)
+scheduler.start()
+```
+
+Use `StrategyScheduler.run_pending()` in batch workflows to trigger due jobs
+explicitly, or `StrategyScheduler.start()` to keep evaluations running in a
+background thread. Introspection helpers expose per-job status, last error, and
+evaluation results so operators can build monitoring dashboards or trigger
+alerts. 【F:core/agent/scheduler.py†L200-L370】
+
+---
+
 ## Best Practices
 
 - Keep market feature engineering consistent with `StrategySignature` to ensure
