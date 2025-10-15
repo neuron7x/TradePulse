@@ -292,8 +292,10 @@ class TickFrameIntegrityValidator:
         if frame.empty:
             return frame
 
-        config = self._build_config(frame, timeframe=timeframe, layer=layer)
-        prepared = frame.reset_index().rename(
+        working_frame = frame.copy()
+
+        config = self._build_config(working_frame, timeframe=timeframe, layer=layer)
+        prepared = working_frame.reset_index().rename(
             columns={frame.index.name or "index": self._timestamp_column}
         )
         try:
@@ -316,15 +318,17 @@ class TickFrameIntegrityValidator:
         value_columns: list[ValueColumnConfig] = []
         for column in frame.columns:
             series = frame[column]
-            numeric_values = (
-                series
-                if pd.api.types.is_numeric_dtype(series.dtype)
-                else pd.to_numeric(series, errors="coerce")
-            )
             if series.isna().any():
                 raise DataIntegrityError(f"{column} contains NaN values")
-            if numeric_values.isna().any():
-                raise DataIntegrityError(f"{column} contains non-numeric values")
+
+            if pd.api.types.is_numeric_dtype(series.dtype):
+                numeric_values = series
+            else:
+                numeric_values = pd.to_numeric(series, errors="coerce")
+                if numeric_values.isna().any():
+                    raise DataIntegrityError(f"{column} contains non-numeric values")
+                frame[column] = numeric_values
+
             if not np.isfinite(numeric_values.to_numpy(copy=False)).all():
                 raise DataIntegrityError(f"{column} contains non-finite values")
             value_columns.append(
