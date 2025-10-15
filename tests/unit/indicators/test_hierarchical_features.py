@@ -52,28 +52,28 @@ def test_hierarchical_features_with_benchmarks():
     assert any(key.startswith("microprice") for key in flat)
 
 
-def test_shannon_entropy_float32_precision():
+def test_shannon_entropy_returns_float() -> None:
     rng = np.random.default_rng(42)
-    samples = rng.normal(loc=0.0, scale=1.0, size=256).astype(np.float32)
+    samples = rng.normal(size=512).astype(np.float32)
     entropy = _shannon_entropy(samples)
+
     assert isinstance(entropy, float)
     assert entropy >= 0.0
 
 
-def test_shannon_entropy_matches_manual_float32():
+def test_shannon_entropy_matches_float32_reference() -> None:
     rng = np.random.default_rng(7)
-    samples = rng.uniform(-2.0, 2.0, size=512).astype(np.float32)
+    samples = rng.uniform(-1.0, 1.0, size=256).astype(np.float32)
+
     entropy = _shannon_entropy(samples)
 
     counts, _ = np.histogram(samples, bins=30, density=False)
-    total = counts.sum()
-    assert total > 0
-
     probs = counts[counts > 0].astype(np.float32)
-    probs /= np.float32(total)
-    manual_entropy = -float(np.sum(probs * np.log(probs), dtype=np.float32))
+    probs /= np.float32(counts.sum())
+    reference_probs = probs.astype(np.float64)
+    reference = -float(np.sum(reference_probs * np.log(reference_probs), dtype=np.float64))
 
     assert np.isfinite(entropy)
-    assert np.isfinite(manual_entropy)
-    assert np.isclose(entropy, manual_entropy, rtol=1e-5, atol=1e-6)
+    assert np.isfinite(reference)
+    assert np.isclose(entropy, reference, rtol=1e-5, atol=1e-6)
 

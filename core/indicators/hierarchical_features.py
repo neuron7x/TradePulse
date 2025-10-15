@@ -74,7 +74,8 @@ def _shannon_entropy(series: np.ndarray, bins: int = 30) -> float:
     inv_total = np.float32(1.0) / total
     np.multiply(probs, inv_total, out=probs)
 
-    log_probs = np.log(probs, out=np.empty_like(probs))
+    log_probs = np.empty_like(probs)
+    np.log(probs, out=log_probs)
     np.multiply(probs, log_probs, out=log_probs)
     entropy = np.add.reduce(log_probs, dtype=np.float32)
     return float(-entropy)
