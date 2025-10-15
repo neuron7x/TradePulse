@@ -17,8 +17,6 @@ References:
 """
 from __future__ import annotations
 
-from __future__ import annotations
-
 import asyncio
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import nullcontext
