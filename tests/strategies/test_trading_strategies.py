@@ -94,3 +94,18 @@ def test_edge_cases_kuramoto() -> None:
     signals_nan = strategy.generate_signals(nan_data)
     assert signals_nan["signal"].eq("Hold").all()
     assert ((signals_nan["confidence"] >= 0) & (signals_nan["confidence"] <= 1)).all()
+
+
+def test_kuramoto_strategy_small_window_breakout() -> None:
+    """KuramotoStrategy should produce actionable signals for small windows."""
+
+    data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.5, 104.0, 106.0, 108.5]},
+        index=pd.date_range("2025-01-01", periods=6, freq="h"),
+    )
+    params = {"window": 3, "coupling": 1.0, "sync_threshold": 0.1}
+    strategy = KuramotoStrategy(symbol="TEST", params=params)
+
+    signals = strategy.generate_signals(data)
+
+    assert (signals["signal"] != "Hold").any()

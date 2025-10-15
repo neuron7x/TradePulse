@@ -55,7 +55,7 @@ class KuramotoIndicator:
         complex_phase = np.exp(1j * phases)
         cumulative = np.cumsum(complex_phase)
         result = np.zeros_like(series, dtype=float)
-        min_samples = max(5, min(self.window, 10))
+        min_samples = min(self.window, 10)
         for idx in range(series.size):
             start = max(0, idx - self.window + 1)
             count = idx - start + 1
