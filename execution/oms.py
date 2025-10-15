@@ -331,6 +331,32 @@ class OrderManagementSystem:
         self._persist_state()
         return order
 
+    def sync_remote_state(self, order: Order) -> Order:
+        """Synchronize terminal state reported by the venue without reissuing API calls."""
+
+        if order.order_id is None:
+            raise ValueError("order must include an order_id to sync state")
+
+        stored = self._orders.get(order.order_id)
+        if stored is None:
+            raise LookupError(f"Unknown order_id: {order.order_id}")
+
+        stored.status = OrderStatus(order.status)
+        stored.filled_quantity = float(order.filled_quantity)
+        stored.average_price = (
+            float(order.average_price)
+            if order.average_price is not None
+            else None
+        )
+        stored.rejection_reason = order.rejection_reason
+        stored.updated_at = getattr(order, "updated_at", stored.updated_at)
+
+        if not stored.is_active:
+            self._ack_timestamps.pop(order.order_id, None)
+
+        self._persist_state()
+        return stored
+
     def reload(self) -> None:
         """Reload state from disk (used after restart)."""
 
@@ -386,7 +412,7 @@ class OrderManagementSystem:
         return correlation
 
     def outstanding(self) -> Iterable[Order]:
-        return list(self._orders.values())
+        return [order for order in self._orders.values() if order.is_active]
 
 
 __all__ = [
