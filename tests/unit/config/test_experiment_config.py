@@ -36,9 +36,16 @@ def test_postgres_requires_sslmode(tmp_path: Path) -> None:
         ExperimentConfig.model_validate(payload)
 
 
-def test_postgres_rejects_insecure_sslmode(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "postgresql://user:pass@db/prod?sslmode=prefer",
+        "postgresql://user:pass@db/prod?sslmode=require",
+    ],
+)
+def test_postgres_rejects_insecure_sslmode(tmp_path: Path, uri: str) -> None:
     payload = _base_payload(tmp_path)
-    payload["db_uri"] = "postgresql://user:pass@db/prod?sslmode=prefer"
+    payload["db_uri"] = uri
 
     with pytest.raises(ValidationError):
         ExperimentConfig.model_validate(payload)
