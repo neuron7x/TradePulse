@@ -347,10 +347,15 @@ class OrderManagementSystem:
         local_filled = stored.filled_quantity if stored.filled_quantity is not None else 0.0
         if remote_filled is None:
             remote_filled = local_filled
-        stored.filled_quantity = float(max(local_filled, remote_filled))
+        final_filled = float(max(local_filled, remote_filled))
+        stored.filled_quantity = final_filled
 
         if order.average_price is not None:
             stored.average_price = float(order.average_price)
+        elif stored.average_price is None and final_filled > 0.0:
+            reference_price = order.price if order.price is not None else stored.price
+            if reference_price is not None:
+                stored.average_price = float(reference_price)
         stored.rejection_reason = order.rejection_reason
         stored.updated_at = getattr(order, "updated_at", stored.updated_at)
 

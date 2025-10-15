@@ -490,6 +490,45 @@ def test_oms_sync_remote_state_handles_missing_optional_fields(tmp_path, risk_ma
     assert record["average_price"] == pytest.approx(placed.average_price)
 
 
+def test_oms_sync_remote_state_infers_average_price_from_reference(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_infer_average.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.6, price=21_050, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-infer")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=placed.order_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=placed.quantity,
+        average_price=None,
+        rejection_reason=None,
+        created_at=placed.created_at,
+    )
+    object.__setattr__(remote, "updated_at", datetime.now(timezone.utc))
+
+    synced = oms.sync_remote_state(remote)
+
+    assert synced.status is OrderStatus.FILLED
+    assert synced.filled_quantity == pytest.approx(placed.quantity)
+    assert synced.average_price == pytest.approx(placed.price)
+    assert not list(oms.outstanding())
+
+    payload = json.loads(state_path.read_text())
+    record = next(entry for entry in payload.get("orders", []) if entry["order_id"] == placed.order_id)
+    assert record["average_price"] == pytest.approx(placed.price)
+
+
 def test_oms_sync_remote_state_does_not_reduce_local_fill(tmp_path, risk_manager: RiskManager) -> None:
     state_path = tmp_path / "sync_no_regress.json"
     config = OMSConfig(state_path=state_path)
