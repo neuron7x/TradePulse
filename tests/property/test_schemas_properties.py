@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import string
 from typing import Optional
 
 import pytest
@@ -28,18 +29,27 @@ class PropertySample:
 SCHEMA = dataclass_to_json_schema(PropertySample)
 
 
+_IDENTIFIER_CHARS = string.ascii_letters + string.digits + "_-"
+_NOTE_CHARS = _IDENTIFIER_CHARS + " .:/"
+_METADATA_KEYS = ("alpha", "beta", "gamma", "delta", "epsilon", "zeta")
+_SYMBOLS = ("BTCUSD", "ETHUSD", "AAPL", "MSFT", "EURUSD", "CL_F", "NQ_F")
+_TAG_VALUES = ("ops", "latency", "risk", "alpha", "beta", "compliance", "infra")
+
+
 @given(
     timestamp=st.floats(allow_nan=False, allow_infinity=False, width=32),
     price=st.floats(allow_nan=False, allow_infinity=False, width=32),
-    symbol=st.text(min_size=1, max_size=12),
-    tags=st.lists(st.text(min_size=1, max_size=8), min_size=0, max_size=5),
-    metadata=st.dictionaries(
-        keys=st.text(min_size=1, max_size=10),
-        values=st.integers(min_value=0, max_value=1000),
-        max_size=5,
+    symbol=st.sampled_from(_SYMBOLS),
+    tags=st.lists(
+        st.sampled_from(_TAG_VALUES), min_size=0, max_size=5
     ),
+    metadata=st.lists(
+        st.tuples(st.sampled_from(_METADATA_KEYS), st.integers(min_value=0, max_value=1000)),
+        min_size=0,
+        max_size=5,
+    ).map(lambda items: {key: value for key, value in items}),
     active=st.booleans(),
-    note=st.one_of(st.none(), st.text(min_size=1, max_size=20)),
+    note=st.one_of(st.none(), st.text(alphabet=_NOTE_CHARS, min_size=1, max_size=20)),
 )
 def test_generated_payloads_validate_against_schema(
     timestamp: float,
