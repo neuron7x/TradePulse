@@ -193,7 +193,12 @@ class AdminApiSettings(BaseSettings):
             )
         }
 
-        if self.siem_client_secret is not None or self.siem_client_secret_path is not None:
+        siem_backend_identifier = backend_identifier("siem_client_secret")
+        if (
+            self.siem_client_secret is not None
+            or self.siem_client_secret_path is not None
+            or siem_backend_identifier is not None
+        ):
             fallback: str | None = None
             if self.siem_client_secret is not None:
                 fallback = self.siem_client_secret.get_secret_value()
@@ -202,7 +207,7 @@ class AdminApiSettings(BaseSettings):
                     name="siem_client_secret",
                     path=self.siem_client_secret_path,
                     min_length=12,
-                    backend_identifier=backend_identifier("siem_client_secret"),
+                    backend_identifier=siem_backend_identifier,
                 ),
                 fallback=fallback,
                 refresh_interval_seconds=refresh_interval,
