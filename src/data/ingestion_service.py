@@ -316,11 +316,13 @@ class TickFrameIntegrityValidator:
         value_columns: list[ValueColumnConfig] = []
         for column in frame.columns:
             series = frame[column]
-            if not pd.api.types.is_numeric_dtype(series.dtype):
-                continue
+            numeric_values = (
+                series
+                if pd.api.types.is_numeric_dtype(series.dtype)
+                else pd.to_numeric(series, errors="coerce")
+            )
             if series.isna().any():
                 raise DataIntegrityError(f"{column} contains NaN values")
-            numeric_values = pd.to_numeric(series, errors="coerce")
             if numeric_values.isna().any():
                 raise DataIntegrityError(f"{column} contains non-numeric values")
             if not np.isfinite(numeric_values.to_numpy(copy=False)).all():
@@ -328,7 +330,7 @@ class TickFrameIntegrityValidator:
             value_columns.append(
                 ValueColumnConfig(
                     name=column,
-                    dtype=str(series.dtype),
+                    dtype=str(numeric_values.dtype),
                     nullable=False,
                 )
             )
