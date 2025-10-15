@@ -65,10 +65,10 @@ class MultiScaleResult:
 def _hilbert_phase(series: np.ndarray) -> np.ndarray:
     """Return the instantaneous phase of the provided series.
 
-    The SciPy implementation detrends the input before computing the analytic
-    signal. When SciPy is unavailable we mirror that behaviour so both paths
-    yield numerically consistent phases and downstream Kuramoto metrics remain
-    stable regardless of optional dependencies.
+    Regardless of whether SciPy is installed, we subtract a linear trend before
+    computing the analytic signal so that both code paths generate comparable
+    phases and Kuramoto metrics. This mirrors ``scipy.signal.detrend`` and
+    shields the fallback path from drift on trending inputs.
     """
 
     x = np.asarray(series, dtype=float)
@@ -96,7 +96,7 @@ def _hilbert_phase(series: np.ndarray) -> np.ndarray:
             intercept = x_mean - slope * t_mean
             detrended = x - (slope * t + intercept)
         else:
-            detrended = x - x.mean()
+            detrended = x - float(x.mean())
         X = np.fft.fft(detrended)
         h = np.zeros(n)
         if n % 2 == 0:
