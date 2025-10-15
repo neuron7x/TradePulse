@@ -4,14 +4,22 @@ from collections.abc import Iterator
 from datetime import datetime, timezone
 from typing import Callable
 
+from collections import deque
+from typing import Iterator
+
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.testclient import TestClient
+from starlette.requests import Request as StarletteRequest
+
 
 from execution.risk import RiskLimits, RiskManager
 from src.admin.remote_control import (
     AdminIdentity,
     AdminRateLimiter,
+    AdminRateLimiterSnapshot,
+    _normalize_ip,
+    _resolve_ip,
     create_remote_control_router,
 )
 from src.audit.audit_logger import AuditLogger, AuditRecord
@@ -228,3 +236,47 @@ def test_identity_dependency_errors_are_propagated() -> None:
     client = TestClient(app)
     response = client.post("/admin/kill-switch", json={"reason": "manual"})
     assert response.status_code == 401
+
+
+def _request_from_headers(headers: dict[str, str]) -> Request:
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/admin/kill-switch",
+        "headers": [(key.lower().encode("utf-8"), value.encode("utf-8")) for key, value in headers.items()],
+        "client": ("10.0.0.99", 443),
+    }
+    return StarletteRequest(scope)
+
+
+def test_resolve_ip_prefers_forwarded_header() -> None:
+    request = _request_from_headers(
+        {
+            "X-Forwarded-For": " 203.0.113.7 , 10.0.0.1",
+            "X-Real-IP": "198.51.100.5",
+        }
+    )
+    assert _resolve_ip(request) == "203.0.113.7"
+
+
+def test_normalize_ip_strips_port_and_zone() -> None:
+    assert _normalize_ip("203.0.113.9 malicious") == "203.0.113.9"
+    assert _normalize_ip("[2001:db8::1]") == "2001:db8::1"
+    assert _normalize_ip("[2001:db8::1]:443") is None
+    assert _normalize_ip("fe80::1%eth0") == "fe80::1"
+    assert _normalize_ip("invalid ip") is None
+
+
+@pytest.mark.asyncio
+async def test_admin_rate_limiter_snapshot_reports_saturation() -> None:
+    limiter = AdminRateLimiter(max_attempts=2, interval_seconds=60.0)
+    await limiter.check("alpha")
+    await limiter.check("alpha")
+
+    # Inject a stale bucket to ensure cleanup logic runs
+    limiter._records["stale"] = deque([0.0])  # type: ignore[attr-defined]
+
+    snapshot: AdminRateLimiterSnapshot = await limiter.snapshot()
+    assert snapshot.tracked_identifiers == 1
+    assert snapshot.max_utilization == pytest.approx(1.0)
+    assert snapshot.saturated_identifiers == ["alpha"]

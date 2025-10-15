@@ -44,7 +44,7 @@ jobs:
             --cov=core --cov=backtest --cov=execution \
             --cov-branch \
             --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
-            --cov-fail-under=90 \
+            --cov-fail-under=97 \
             --junitxml=reports/unit-integration-tests.xml \
             --html=reports/unit-integration-report.html --self-contained-html \
             --flaky-report=reports/flaky-tests-skipped.json
