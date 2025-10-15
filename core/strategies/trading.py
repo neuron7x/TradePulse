@@ -59,18 +59,28 @@ class KuramotoStrategy(TradingStrategy):
         if sync_values.size == 0:
             return pd.DataFrame(columns=["timestamp", "symbol", "signal", "confidence"])
         threshold = float(np.clip(self._threshold, 0.0, 1.0))
-        lower_threshold = float(np.clip(1.0 - threshold, 0.0, 1.0))
+        upper_threshold = max(threshold, 1.0 - threshold)
+        lower_threshold = min(threshold, 1.0 - threshold)
         signals = np.full(sync_values.size, "Hold", dtype=object)
-        buy_mask = sync_values >= threshold
-        sell_mask = sync_values <= lower_threshold
+        buy_mask = sync_values >= upper_threshold
+        sell_mask = (sync_values <= lower_threshold) & ~buy_mask
         signals[buy_mask] = "Buy"
         signals[sell_mask] = "Sell"
         confidence = np.zeros_like(sync_values)
         if sync_values.size:
-            buy_range = max(1e-12, 1.0 - threshold)
-            confidence[buy_mask] = np.clip((sync_values[buy_mask] - threshold) / buy_range, 0.0, 1.0)
+            buy_range = max(1e-12, 1.0 - upper_threshold)
+            confidence[buy_mask] = np.clip(
+                (sync_values[buy_mask] - upper_threshold) / buy_range,
+                0.0,
+                1.0,
+            )
             if lower_threshold > 0.0:
-                confidence[sell_mask] = np.clip((lower_threshold - sync_values[sell_mask]) / lower_threshold, 0.0, 1.0)
+                sell_range = max(1e-12, lower_threshold)
+                confidence[sell_mask] = np.clip(
+                    (lower_threshold - sync_values[sell_mask]) / sell_range,
+                    0.0,
+                    1.0,
+                )
             else:
                 confidence[sell_mask] = 1.0
         warmup = max(0, min(getattr(self._indicator, "window", 0), 10) - 1)
