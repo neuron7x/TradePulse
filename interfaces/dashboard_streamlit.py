@@ -1,37 +1,162 @@
 # SPDX-License-Identifier: MIT
-import os
-import streamlit as st
-import pandas as pd
-import numpy as np
-from pathlib import Path
-import streamlit_authenticator as stauth
-from core.indicators.kuramoto import compute_phase, kuramoto_order
-from core.indicators.entropy import entropy, delta_entropy
-from core.indicators.hurst import hurst_exponent
+from __future__ import annotations
 
-# Load environment variables
-try:
-    from dotenv import load_dotenv
-    # Try to load from .env file in project root
-    env_path = Path(__file__).parent.parent / '.env'
-    if env_path.exists():
-        load_dotenv(env_path)
-except ImportError:
-    pass  # dotenv is optional
+import importlib
+import logging
+import os
+from collections.abc import Mapping
+from typing import Any, Callable
+
+import pandas as pd
+import streamlit as st
+import streamlit_authenticator as stauth
+
+from core.indicators.entropy import delta_entropy, entropy
+from core.indicators.hurst import hurst_exponent
+from core.indicators.kuramoto import compute_phase, kuramoto_order
+from interfaces.secrets.manager import SecretManager, SecretManagerError
+
+LOGGER = logging.getLogger(__name__)
+
+_SECRET_MANAGER: SecretManager | None = None
+_SECRET_FIELD_ALIASES = {
+    "USERNAME": "DASHBOARD_ADMIN_USERNAME",
+    "ADMIN_USERNAME": "DASHBOARD_ADMIN_USERNAME",
+    "PASSWORD_HASH": "DASHBOARD_ADMIN_PASSWORD_HASH",
+    "ADMIN_PASSWORD_HASH": "DASHBOARD_ADMIN_PASSWORD_HASH",
+    "COOKIE_NAME": "DASHBOARD_COOKIE_NAME",
+    "COOKIE_KEY": "DASHBOARD_COOKIE_KEY",
+    "COOKIE_SECRET": "DASHBOARD_COOKIE_KEY",
+    "COOKIE_EXPIRY_DAYS": "DASHBOARD_COOKIE_EXPIRY_DAYS",
+}
+
+
+def _import_callable(spec: str) -> Callable[..., Any]:
+    """Return the callable identified by ``spec``."""
+
+    module_path: str
+    attribute: str
+    if ":" in spec:
+        module_path, attribute = spec.split(":", 1)
+    else:
+        module_path, _, attribute = spec.rpartition(".")
+    if not module_path or not attribute:
+        raise ImportError(f"Invalid resolver specification '{spec}'")
+    module = importlib.import_module(module_path)
+    candidate = getattr(module, attribute)
+    if not callable(candidate):
+        raise TypeError(f"Resolver '{spec}' is not callable")
+    return candidate
+
+
+def _get_secret_manager() -> SecretManager | None:
+    """Initialise or reuse the dashboard secret manager."""
+
+    global _SECRET_MANAGER  # noqa: PLW0603 - module level cache for runtime reuse
+    if _SECRET_MANAGER is not None:
+        return _SECRET_MANAGER
+
+    factory_spec = os.getenv("TRADEPULSE_SECRET_MANAGER_FACTORY")
+    manager: SecretManager | None = None
+
+    if factory_spec:
+        try:
+            factory = _import_callable(factory_spec)
+            candidate = factory()  # type: ignore[no-any-return]
+            if isinstance(candidate, SecretManager):
+                manager = candidate
+            else:
+                LOGGER.error(
+                    "Secret manager factory %s returned %r instead of SecretManager",
+                    factory_spec,
+                    candidate,
+                )
+        except Exception:  # pragma: no cover - defensive guard around optional dependency
+            LOGGER.exception("Failed to build secret manager via %s", factory_spec)
+
+    if manager is None:
+        backend_name = os.getenv("DASHBOARD_SECRET_BACKEND")
+        resolver_spec = os.getenv("DASHBOARD_SECRET_RESOLVER")
+        if backend_name and resolver_spec:
+            try:
+                resolver = _import_callable(resolver_spec)
+            except Exception:  # pragma: no cover - defensive guard around optional dependency
+                LOGGER.exception("Failed to import resolver %s", resolver_spec)
+            else:
+                manager = SecretManager({backend_name: resolver})
+        elif resolver_spec and not backend_name:
+            LOGGER.warning(
+                "DASHBOARD_SECRET_RESOLVER is set but DASHBOARD_SECRET_BACKEND is missing",
+            )
+
+    _SECRET_MANAGER = manager
+    return manager
+
+
+def _load_secrets() -> Mapping[str, str]:
+    """Load dashboard credentials from the configured secret backend."""
+
+    backend = os.getenv("DASHBOARD_SECRET_BACKEND")
+    if not backend:
+        return {}
+
+    manager = _get_secret_manager()
+    if manager is None:
+        LOGGER.warning("Secret backend '%s' configured but no resolver is registered", backend)
+        return {}
+
+    path = os.getenv("DASHBOARD_SECRET_PATH")
+    if not path:
+        path_env = os.getenv("DASHBOARD_SECRET_PATH_ENV")
+        if path_env:
+            path = os.getenv(path_env)
+    if not path:
+        LOGGER.warning("Secret backend '%s' configured but no path provided", backend)
+        return {}
+
+    try:
+        payload = manager.resolve(backend, path)
+    except SecretManagerError:
+        LOGGER.exception("Unable to resolve secrets for backend '%s'", backend)
+        return {}
+
+    if not isinstance(payload, Mapping):
+        LOGGER.error(
+            "Secret resolver for backend '%s' must return a mapping, got %s",
+            backend,
+            type(payload).__name__,
+        )
+        return {}
+
+    normalised: dict[str, str] = {}
+    for key, value in payload.items():
+        canonical = _SECRET_FIELD_ALIASES.get(str(key).upper(), str(key).upper())
+        normalised[canonical] = str(value)
+    return normalised
 
 # Authentication configuration from environment variables
 def load_auth_config():
     """Load authentication configuration from environment variables."""
-    username = os.getenv('DASHBOARD_ADMIN_USERNAME', 'admin')
-    password_hash = os.getenv(
+    secrets = _load_secrets()
+
+    username = secrets.get('DASHBOARD_ADMIN_USERNAME') or os.getenv('DASHBOARD_ADMIN_USERNAME', 'admin')
+    password_hash = secrets.get('DASHBOARD_ADMIN_PASSWORD_HASH') or os.getenv(
         'DASHBOARD_ADMIN_PASSWORD_HASH',
         # Default hash for 'admin123' (ONLY for development/example)
         '$2b$12$EixZaYVK1fsbw1ZfbX3OXe.RKjKWbFUZYWbAKpKnvGmcPNW3OL2K6'
     )
-    cookie_name = os.getenv('DASHBOARD_COOKIE_NAME', 'tradepulse_auth')
-    cookie_key = os.getenv('DASHBOARD_COOKIE_KEY', 'default_cookie_key_change_in_production')
-    cookie_expiry_days = int(os.getenv('DASHBOARD_COOKIE_EXPIRY_DAYS', '30'))
-    
+    cookie_name = secrets.get('DASHBOARD_COOKIE_NAME') or os.getenv('DASHBOARD_COOKIE_NAME', 'tradepulse_auth')
+    cookie_key = secrets.get('DASHBOARD_COOKIE_KEY') or os.getenv(
+        'DASHBOARD_COOKIE_KEY',
+        'default_cookie_key_change_in_production'
+    )
+    cookie_expiry_value = secrets.get('DASHBOARD_COOKIE_EXPIRY_DAYS') or os.getenv('DASHBOARD_COOKIE_EXPIRY_DAYS', '30')
+    try:
+        cookie_expiry_days = int(cookie_expiry_value)
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        LOGGER.warning("Invalid cookie expiry '%s', falling back to 30 days", cookie_expiry_value)
+        cookie_expiry_days = 30
+
     return {
         'credentials': {
             'usernames': {
