@@ -58,12 +58,16 @@ class CredentialProvider:
         required_keys: Iterable[str] = ("API_KEY", "API_SECRET"),
         optional_keys: Iterable[str] | None = None,
         vault_resolver: VaultResolver | None = None,
+        vault_path: str | None = None,
+        vault_path_env: str | None = None,
         rotation_hook: RotationHook | None = None,
     ) -> None:
         self.env_prefix = env_prefix
         self.required_keys = tuple(required_keys)
         self.optional_keys = tuple(optional_keys or ())
         self.vault_resolver = vault_resolver
+        self._vault_path = vault_path
+        self._vault_path_env = vault_path_env
         self.rotation_hook = rotation_hook
         self._cache: Mapping[str, str] | None = None
         self._lock = threading.Lock()
@@ -81,10 +85,16 @@ class CredentialProvider:
     def _load_from_vault(self) -> Dict[str, str]:
         if not self.vault_resolver:
             return {}
-        vault_path = os.getenv(f"{self.env_prefix.upper()}_VAULT_PATH")
+        vault_path = self._vault_path
+        if not vault_path:
+            env_name = self._vault_path_env or f"{self.env_prefix.upper()}_VAULT_PATH"
+            vault_path = os.getenv(env_name)
         if not vault_path:
             return {}
-        return {k.upper(): v for k, v in self.vault_resolver(vault_path).items()}
+        payload = self.vault_resolver(vault_path)
+        if not isinstance(payload, Mapping):
+            raise CredentialError("Vault resolver must return a mapping of credential keys to values")
+        return {str(k).upper(): str(v) for k, v in payload.items()}
 
     def load(self, *, force: bool = False) -> Mapping[str, str]:
         with self._lock:
@@ -102,22 +112,22 @@ class CredentialProvider:
             return values
 
     def rotate(self, new_values: Mapping[str, str] | None = None) -> Mapping[str, str]:
-        with self._lock:
-            if new_values:
-                normalized = {k.upper(): v for k, v in new_values.items()}
-                missing = [key for key in self.required_keys if key.upper() not in normalized]
-                if missing:
-                    raise CredentialError(
-                        "Cannot rotate credentials because required keys are missing: "
-                        + ", ".join(missing)
-                    )
+        if new_values is not None:
+            normalized = {k.upper(): v for k, v in new_values.items()}
+            missing = [key for key in self.required_keys if key.upper() not in normalized]
+            if missing:
+                raise CredentialError(
+                    "Cannot rotate credentials because required keys are missing: " + ", ".join(missing)
+                )
+            with self._lock:
                 self._cache = normalized
-            else:
+        else:
+            with self._lock:
                 self._cache = None
-                normalized = self.load(force=True)
-            if self.rotation_hook:
-                self.rotation_hook(normalized)
-            return normalized
+            normalized = self.load(force=True)
+        if self.rotation_hook:
+            self.rotation_hook(normalized)
+        return normalized
 
 
 class HMACSigner:
@@ -272,6 +282,8 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         credential_provider: CredentialProvider | None = None,
         optional_credential_keys: Iterable[str] | None = None,
         vault_resolver: VaultResolver | None = None,
+        vault_path: str | None = None,
+        vault_path_env: str | None = None,
         http_client: httpx.Client | None = None,
         transport: httpx.BaseTransport | None = None,
         backoff: HTTPBackoffController | None = None,
@@ -290,6 +302,8 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
             env_prefix,
             optional_keys=optional_credential_keys,
             vault_resolver=vault_resolver,
+            vault_path=vault_path,
+            vault_path_env=vault_path_env,
         )
         self._http_client = http_client
         self._backoff = backoff or HTTPBackoffController()
@@ -428,6 +442,13 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
     def _refresh_credentials(self) -> None:
         self._credentials = self._credential_provider.rotate()
         self._signer = self._create_signer(self.credentials)
+
+    def set_credential_provider(self, provider: CredentialProvider) -> None:
+        """Inject a pre-configured credential provider used for subsequent rotations."""
+
+        self._credential_provider = provider
+        self._credentials = None
+        self._signer = None
 
     # --- Websocket handling ------------------------------------------
 

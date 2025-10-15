@@ -8,10 +8,18 @@ execution:
         - BTC-USD
         - ETH-USD
       credentials:
-        api_key_env: COINBASE_API_KEY
-        api_secret_env: COINBASE_API_SECRET
-        api_passphrase_env: COINBASE_API_PASSPHRASE
-        vault_path_env: COINBASE_VAULT_PATH
+        env_prefix: COINBASE
+        required:
+          - API_KEY
+          - API_SECRET
+          - PASSPHRASE
+        secret_backend:
+          adapter: kms
+          path: projects/sample/locations/global/keyRings/tradepulse/cryptoKeys/coinbase
+          field_mapping:
+            API_KEY: apiKey
+            API_SECRET: apiSecret
+            PASSPHRASE: passphrase
       rate_limits:
         max_orders_per_second: 5
         max_orders_per_minute: 150

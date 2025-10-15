@@ -5,12 +5,15 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 import signal
 import threading
 from dataclasses import dataclass, fields
 from pathlib import Path
 from types import FrameType
 from typing import Any, Callable, Dict, Iterable, Mapping, Sequence
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 try:  # Python 3.11+
     import tomllib
@@ -22,9 +25,83 @@ from execution.connectors import ExecutionConnector
 from execution.live_loop import LiveExecutionLoop, LiveLoopConfig
 from execution.risk import RiskLimits, RiskManager
 from interfaces.execution.common import CredentialError, CredentialProvider
+from interfaces.secrets.manager import SecretManager, SecretManagerError, VaultResolver
 
 LOGGER = logging.getLogger(__name__)
 DEFAULT_CONFIG_PATH = Path("configs/live/default.toml")
+
+
+@dataclass(slots=True)
+class SecretBackendSettings(BaseModel):
+    """Secret backend configuration mapping to a vault/KMS adapter."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    adapter: str = Field(..., min_length=1)
+    path: str | None = None
+    path_env: str | None = None
+    key: str | None = None
+    field_mapping: Dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    def _normalise_aliases(cls, values: Any) -> Any:
+        if isinstance(values, Mapping):
+            data = dict(values)
+            if "backend" in data and "adapter" not in data:
+                data["adapter"] = data.pop("backend")
+            return data
+        return values
+
+    @model_validator(mode="after")
+    def _validate_and_normalise(self) -> "SecretBackendSettings":
+        if not (self.path or self.path_env):
+            raise ValueError("secret backend requires 'path' or 'path_env'")
+        object.__setattr__(self, "adapter", str(self.adapter).lower())
+        mapping = {str(k).upper(): str(v) for k, v in self.field_mapping.items()}
+        object.__setattr__(self, "field_mapping", mapping)
+        return self
+
+    def resolve_path(self) -> str | None:
+        if self.path:
+            return self.path
+        if self.path_env:
+            value = os.getenv(self.path_env)
+            if value:
+                return value
+        return None
+
+
+class CredentialSettings(BaseModel):
+    """Credential loader configuration for a venue connector."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    env_prefix: str = Field(..., min_length=1)
+    required: tuple[str, ...] = Field(default_factory=lambda: ("API_KEY", "API_SECRET"))
+    optional: tuple[str, ...] = Field(default_factory=tuple)
+    secret_backend: SecretBackendSettings | None = None
+    vault_path_env: str | None = None
+
+    @model_validator(mode="before")
+    def _coerce_sequence(cls, values: Any) -> Any:
+        if isinstance(values, Mapping):
+            data = dict(values)
+            for key in ("required", "optional"):
+                value = data.get(key)
+                if isinstance(value, str):
+                    data[key] = [value]
+            return data
+        return values
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "CredentialSettings":
+        object.__setattr__(self, "env_prefix", str(self.env_prefix).upper())
+        object.__setattr__(self, "required", tuple(str(key).upper() for key in self.required))
+        object.__setattr__(self, "optional", tuple(str(key).upper() for key in self.optional))
+        if self.secret_backend is None and self.vault_path_env:
+            backend = SecretBackendSettings(adapter="vault", path_env=self.vault_path_env)
+            object.__setattr__(self, "secret_backend", backend)
+        return self
 
 
 @dataclass(slots=True)
@@ -34,7 +111,7 @@ class VenueSettings:
     name: str
     class_path: str
     options: Mapping[str, Any]
-    credentials: Mapping[str, Any]
+    credentials: CredentialSettings | None
 
 
 def _load_toml(path: Path) -> Mapping[str, Any]:
@@ -71,6 +148,8 @@ class LiveTradingRunner:
         venues: Sequence[str] | None = None,
         state_dir_override: Path | None = None,
         metrics_port: int | None = None,
+        secret_manager: SecretManager | None = None,
+        secret_backends: Mapping[str, VaultResolver] | None = None,
     ) -> None:
         self._config_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
         if not self._config_path.exists():
@@ -92,7 +171,15 @@ class LiveTradingRunner:
             if requested and name.lower() not in requested:
                 continue
             options = {k: v for k, v in entry.items() if k not in {"name", "class", "credentials"}}
-            credentials = entry.get("credentials", {})
+            credentials_cfg = entry.get("credentials")
+            credentials: CredentialSettings | None = None
+            if credentials_cfg:
+                try:
+                    credentials = CredentialSettings.model_validate(credentials_cfg)
+                except ValidationError as exc:
+                    raise ValueError(
+                        f"Invalid credential configuration for venue '{name}': {exc}"
+                    ) from exc
             self._venue_settings.append(
                 VenueSettings(name=name, class_path=class_path, options=options, credentials=credentials)
             )
@@ -110,6 +197,13 @@ class LiveTradingRunner:
         self._risk_manager: RiskManager | None = None
         self._connectors: Dict[str, ExecutionConnector] = {}
         self._credentials: Dict[str, Mapping[str, str]] = {}
+        self._secret_manager = secret_manager
+        self._inline_secret_backends: Dict[str, VaultResolver] = {
+            str(name).lower(): resolver for name, resolver in (secret_backends or {}).items()
+        }
+        if self._secret_manager is not None:
+            for adapter, resolver in self._inline_secret_backends.items():
+                self._secret_manager.register(adapter, resolver)
         self._stop_event = threading.Event()
         self._signal_handlers: Dict[int, Callable[[int, FrameType | None], None]] = {}
         self._kill_reason: str | None = None
@@ -224,27 +318,80 @@ class LiveTradingRunner:
             connector = connector_cls(**settings.options)
             self._connectors[settings.name] = connector
 
+    def _get_backend_resolver(self, adapter: str) -> VaultResolver:
+        adapter_key = str(adapter).lower()
+        if self._secret_manager is not None:
+            try:
+                return self._secret_manager.get_resolver(adapter_key)
+            except SecretManagerError:
+                pass
+        resolver = self._inline_secret_backends.get(adapter_key)
+        if resolver is None:
+            raise RuntimeError(f"No secret backend registered for adapter '{adapter}'")
+        return resolver
+
+    def _wrap_backend_resolver(self, venue: str, backend: SecretBackendSettings) -> VaultResolver:
+        base_resolver = self._get_backend_resolver(backend.adapter)
+        field_mapping = dict(backend.field_mapping)
+
+        def _resolver(path: str) -> Mapping[str, str]:
+            payload = base_resolver(path)
+            if backend.key:
+                nested = payload.get(backend.key)
+                if not isinstance(nested, Mapping):
+                    raise RuntimeError(
+                        f"Secret backend '{backend.adapter}' for venue '{venue}' did not return a mapping "
+                        f"for key '{backend.key}'"
+                    )
+                payload = nested
+            data = {str(k): v for k, v in payload.items()}
+            normalised = {key.upper(): str(value) for key, value in data.items()}
+            for dest, source in field_mapping.items():
+                if source in data:
+                    normalised[dest] = str(data[source])
+            return normalised
+
+        return _resolver
+
     def _build_credentials(self) -> None:
         for settings in self._venue_settings:
-            credentials_cfg = settings.credentials or {}
-            prefix = credentials_cfg.get("env_prefix")
-            if not prefix:
+            credentials_cfg = settings.credentials
+            if credentials_cfg is None:
                 continue
-            required = credentials_cfg.get("required") or ("API_KEY", "API_SECRET")
-            optional = credentials_cfg.get("optional") or ()
-            if isinstance(required, str):
-                required = [required]
-            if isinstance(optional, str):
-                optional = [optional]
+            provider_kwargs: Dict[str, Any] = {
+                "required_keys": credentials_cfg.required,
+                "optional_keys": credentials_cfg.optional,
+            }
+            backend_cfg = credentials_cfg.secret_backend
+            if backend_cfg is not None:
+                resolver = self._wrap_backend_resolver(settings.name, backend_cfg)
+                resolved_path = backend_cfg.resolve_path()
+                if resolved_path is None:
+                    env_hint = f" from environment variable '{backend_cfg.path_env}'" if backend_cfg.path_env else ""
+                    raise RuntimeError(
+                        f"Secret backend '{backend_cfg.adapter}' for venue '{settings.name}' did not resolve a path"
+                        f"{env_hint}."
+                    )
+                provider_kwargs["vault_resolver"] = resolver
+                provider_kwargs["vault_path"] = resolved_path
+                provider_kwargs["vault_path_env"] = backend_cfg.path_env
             provider = CredentialProvider(
-                str(prefix),
-                required_keys=[str(key) for key in required],
-                optional_keys=[str(key) for key in optional],
+                credentials_cfg.env_prefix,
+                **provider_kwargs,
             )
             try:
                 credentials = provider.load()
             except CredentialError as exc:
                 raise RuntimeError(f"Failed to load credentials for {settings.name}: {exc}") from exc
+            connector = self._connectors.get(settings.name)
+            if connector is not None and hasattr(connector, "set_credential_provider"):
+                try:
+                    connector.set_credential_provider(provider)  # type: ignore[attr-defined]
+                except Exception as exc:  # pragma: no cover - defensive guard
+                    LOGGER.debug(
+                        "Connector did not accept injected credential provider",
+                        extra={"event": "live_runner.credentials", "venue": settings.name, "error": str(exc)},
+                    )
             self._credentials[settings.name] = credentials
 
     def _build_risk_manager(self) -> None:
