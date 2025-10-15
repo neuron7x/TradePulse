@@ -5,22 +5,25 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from json import JSONDecodeError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Awaitable, Callable
-from weakref import WeakKeyDictionary
 
 import numpy as np
 import pandas as pd
-from aiolimiter import AsyncLimiter
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.api.security import get_api_security_settings, verify_request_identity
-from application.settings import AdminApiSettings
+from application.api.rate_limit import SlidingWindowRateLimiter, build_rate_limiter
+from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
 from execution.risk import RiskLimits, RiskManager
@@ -279,12 +282,111 @@ def _hash_payload(prefix: str, payload: BaseModel) -> str:
     return f"{prefix}:{digest}"
 
 
+class PayloadGuardMiddleware(BaseHTTPMiddleware):
+    """Inspect incoming JSON payloads for size and suspicious content."""
+
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        max_body_bytes: int,
+        suspicious_keys: set[str],
+        suspicious_substrings: tuple[str, ...],
+    ) -> None:
+        super().__init__(app)
+        self._max_body_bytes = max_body_bytes
+        self._suspicious_keys = {key.lower() for key in suspicious_keys}
+        self._suspicious_substrings = tuple(sub.lower() for sub in suspicious_substrings)
+
+    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+        if request.method in {"POST", "PUT", "PATCH"}:
+            content_length = request.headers.get("content-length")
+            if content_length is not None:
+                try:
+                    length_value = int(content_length)
+                except ValueError:
+                    return JSONResponse(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        content={"detail": "Invalid Content-Length header."},
+                    )
+                if length_value > self._max_body_bytes:
+                    return JSONResponse(
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                        content={"detail": "Request body exceeds configured limit."},
+                    )
+
+            body = await request.body()
+            if len(body) > self._max_body_bytes:
+                return JSONResponse(
+                    status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                    content={"detail": "Request body exceeds configured limit."},
+                )
+
+            content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+            if content_type in {"application/json", "application/problem+json", ""}:
+                if body:
+                    try:
+                        parsed = json.loads(body)
+                    except JSONDecodeError:
+                        return JSONResponse(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            content={"detail": "Malformed JSON payload."},
+                        )
+                    if not isinstance(parsed, (dict, list)):
+                        return JSONResponse(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            content={"detail": "Unsupported JSON payload structure."},
+                        )
+                    if self._is_suspicious(parsed):
+                        return JSONResponse(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            content={"detail": "Suspicious payload rejected."},
+                        )
+                request._body = body  # type: ignore[attr-defined]
+
+        return await call_next(request)
+
+    def _is_suspicious(self, payload: object) -> bool:
+        if isinstance(payload, dict):
+            for key, value in payload.items():
+                if isinstance(key, str) and key.lower() in self._suspicious_keys:
+                    return True
+                if self._is_suspicious(value):
+                    return True
+            return False
+        if isinstance(payload, list):
+            return any(self._is_suspicious(item) for item in payload)
+        if isinstance(payload, str):
+            lowered = payload.lower()
+            return any(token in lowered for token in self._suspicious_substrings)
+        return False
+
+
+def _resolve_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for")
+    if forwarded_for:
+        for part in forwarded_for.split(","):
+            candidate = part.strip().split()[0]
+            if candidate:
+                return candidate
+
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+
+    if request.client and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
 def create_app(
     *,
-    rate_limiter: AsyncLimiter | None = None,
+    rate_limiter: SlidingWindowRateLimiter | None = None,
     cache: TTLCache | None = None,
     forecaster_factory: Callable[[], OnlineSignalForecaster] | None = None,
     settings: AdminApiSettings | None = None,
+    rate_limit_settings: ApiRateLimitSettings | None = None,
+    security_settings: ApiSecuritySettings | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies.
 
@@ -298,7 +400,8 @@ def create_app(
             environment variables.
     """
 
-    limiter = rate_limiter or AsyncLimiter(max_rate=60, time_period=60)
+    resolved_rate_settings = rate_limit_settings or ApiRateLimitSettings()
+    limiter = rate_limiter or build_rate_limiter(resolved_rate_settings)
     ttl_cache = cache or TTLCache(ttl_seconds=30, max_entries=512)
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
@@ -331,7 +434,7 @@ def create_app(
         ) from exc
 
     try:
-        _ = get_api_security_settings()
+        resolved_security_settings = security_settings or get_api_security_settings()
     except ValidationError as exc:
         alias_map = {
             "oauth2_issuer": "TRADEPULSE_OAUTH2_ISSUER",
@@ -345,6 +448,10 @@ def create_app(
         ]
         joined = ", ".join(sorted(set(missing))) or "OAuth configuration values"
         raise RuntimeError(("Missing required OAuth configuration: {}.").format(joined)) from exc
+    if security_settings is not None:
+        setattr(get_api_security_settings, "_instance", resolved_security_settings)
+    require_bearer = verify_request_identity()
+    require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
     audit_secret_value = resolved_settings.audit_secret.get_secret_value()
     rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
     rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
@@ -359,13 +466,6 @@ def create_app(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),
     )
-
-    require_bearer = verify_request_identity()
-    require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
-
-    limiter_rate = limiter.max_rate
-    limiter_period = limiter.time_period
-    loop_limiters: WeakKeyDictionary[asyncio.AbstractEventLoop, AsyncLimiter] = WeakKeyDictionary()
 
     app = FastAPI(
         title="TradePulse Online Inference API",
@@ -397,6 +497,17 @@ def create_app(
         allow_headers=["*"],
     )
 
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=list(resolved_security_settings.trusted_hosts),
+    )
+    app.add_middleware(
+        PayloadGuardMiddleware,
+        max_body_bytes=int(resolved_security_settings.max_request_bytes),
+        suspicious_keys=set(resolved_security_settings.suspicious_json_keys),
+        suspicious_substrings=tuple(resolved_security_settings.suspicious_json_substrings),
+    )
+
     app.include_router(
         create_remote_control_router(
             risk_manager_facade,
@@ -408,15 +519,16 @@ def create_app(
     app.state.risk_manager = risk_manager_facade.risk_manager
     app.state.audit_logger = audit_logger
     app.state.admin_rate_limiter = admin_rate_limiter
+    app.state.client_rate_limiter = limiter
+    app.state.rate_limit_settings = resolved_rate_settings
 
-    async def enforce_rate_limit() -> None:
-        loop = asyncio.get_running_loop()
-        loop_limiter = loop_limiters.get(loop)
-        if loop_limiter is None:
-            loop_limiter = AsyncLimiter(max_rate=limiter_rate, time_period=limiter_period)
-            loop_limiters[loop] = loop_limiter
-        async with loop_limiter:
-            return None
+    async def enforce_rate_limit(
+        request: Request,
+        identity: AdminIdentity = Depends(require_bearer),
+    ) -> AdminIdentity:
+        ip_address = _resolve_ip(request)
+        await limiter.check(subject=identity.subject, ip_address=ip_address)
+        return identity
 
     def get_forecaster() -> OnlineSignalForecaster:
         return forecaster
@@ -458,8 +570,7 @@ def create_app(
     async def compute_features(
         payload: FeatureRequest,
         response: Response,
-        _: None = Depends(enforce_rate_limit),
-        _identity: AdminIdentity = Depends(require_bearer),
+        _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> FeatureResponse:
         cache_key = _hash_payload("features", payload)
@@ -488,8 +599,7 @@ def create_app(
     async def generate_prediction(
         payload: PredictionRequest,
         response: Response,
-        _: None = Depends(enforce_rate_limit),
-        _identity: AdminIdentity = Depends(require_bearer),
+        _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> PredictionResponse:
         cache_key = _hash_payload("predictions", payload)

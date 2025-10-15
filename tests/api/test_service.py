@@ -18,8 +18,14 @@ os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
 os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
 
 from application.api import security as security_module
+from application.api.rate_limit import InMemorySlidingWindowBackend, SlidingWindowRateLimiter
 from application.api.service import create_app
-from application.settings import AdminApiSettings, ApiSecuritySettings
+from application.settings import (
+    AdminApiSettings,
+    ApiRateLimitSettings,
+    ApiSecuritySettings,
+    RateLimitPolicy,
+)
 
 
 @pytest.fixture()
@@ -37,6 +43,7 @@ def security_context(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
         oauth2_issuer="https://issuer.tradepulse.test",
         oauth2_audience="tradepulse-api",
         oauth2_jwks_uri="https://issuer.tradepulse.test/jwks",
+        trusted_hosts=["testserver", "localhost"],
     )
 
     monkeypatch.setattr(security_module, "_default_settings_loader", lambda: settings)
@@ -244,3 +251,94 @@ def test_admin_endpoint_rejects_wrong_audience(
     headers = _auth_headers(bad_token, client_cert=True)
     response = client.get("/admin/kill-switch", headers=headers)
     assert response.status_code == 401
+
+
+def test_client_rate_limit_is_enforced(security_context: Callable[..., str]) -> None:
+    rate_settings = ApiRateLimitSettings(
+        default_policy=RateLimitPolicy(max_requests=5, window_seconds=60),
+        client_policies={"feature-user": RateLimitPolicy(max_requests=1, window_seconds=60)},
+    )
+    limiter = SlidingWindowRateLimiter(InMemorySlidingWindowBackend(), rate_settings)
+    app = create_app(
+        settings=AdminApiSettings(audit_secret="unit-audit-secret"),
+        rate_limiter=limiter,
+        rate_limit_settings=rate_settings,
+    )
+    client = TestClient(app)
+
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+    response_ok = client.post("/features", json=payload, headers=_auth_headers(token))
+    assert response_ok.status_code == 200
+
+    response_limited = client.post("/features", json=payload, headers=_auth_headers(token))
+    assert response_limited.status_code == 429
+
+    other_token = security_context(subject="different-user")
+    recovery = client.post("/features", json=payload, headers=_auth_headers(other_token))
+    assert recovery.status_code == 200
+
+
+def test_trusted_host_middleware_blocks_unlisted_hosts(
+    monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]
+) -> None:
+    restricted_settings = ApiSecuritySettings(
+        oauth2_issuer="https://issuer.tradepulse.test",
+        oauth2_audience="tradepulse-api",
+        oauth2_jwks_uri="https://issuer.tradepulse.test/jwks",
+        trusted_hosts=["api.tradepulse.test"],
+    )
+    monkeypatch.setattr(security_module, "_default_settings_loader", lambda: restricted_settings)
+    if hasattr(security_module.get_api_security_settings, "_instance"):
+        delattr(security_module.get_api_security_settings, "_instance")
+
+    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"))
+    client = TestClient(app)
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+
+    bad_host_headers = {**_auth_headers(token), "Host": "attacker.example"}
+    denied = client.post("/features", json=payload, headers=bad_host_headers)
+    assert denied.status_code == 400
+
+    good_host_headers = {**_auth_headers(token), "Host": "api.tradepulse.test"}
+    permitted = client.post("/features", json=payload, headers=good_host_headers)
+    assert permitted.status_code == 200
+
+
+def test_payload_guard_rejects_large_and_suspicious_bodies(
+    monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]
+) -> None:
+    tuned_settings = ApiSecuritySettings(
+        oauth2_issuer="https://issuer.tradepulse.test",
+        oauth2_audience="tradepulse-api",
+        oauth2_jwks_uri="https://issuer.tradepulse.test/jwks",
+        trusted_hosts=["testserver"],
+        max_request_bytes=512,
+    )
+    monkeypatch.setattr(security_module, "_default_settings_loader", lambda: tuned_settings)
+    if hasattr(security_module.get_api_security_settings, "_instance"):
+        delattr(security_module.get_api_security_settings, "_instance")
+
+    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"))
+    client = TestClient(app)
+    token = security_context(subject="feature-user")
+
+    oversized_payload = _build_payload()
+    oversized_payload["bars"] *= 20
+    response_large = client.post(
+        "/features",
+        json=oversized_payload,
+        headers=_auth_headers(token),
+    )
+    assert response_large.status_code == 413
+
+    suspicious_payload = _build_payload()
+    suspicious_payload["symbol"] = "<script>alert(1)</script>"
+    suspicious_payload["bars"] = suspicious_payload["bars"][:1]
+    response_suspicious = client.post(
+        "/features",
+        json=suspicious_payload,
+        headers=_auth_headers(token),
+    )
+    assert response_suspicious.status_code == 400
