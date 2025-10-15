@@ -81,9 +81,12 @@ nav:
       - Incident Playbooks: incident_playbooks.md
       - Live Trading Runbook: runbook_live_trading.md
       - Data Incident Runbook: runbook_data_incident.md
-      - Security: ../SECURITY.md
       - Governance and Data Controls: governance.md
       - Deployment: deployment.md
+  - Security:
+      - Program Overview: ../SECURITY.md
+      - Production Security Architecture: security/architecture.md
+      - Rate Limits & Host Protection: rate-limits-and-host-protection.md
   - Governance Records:
       - Architecture Decision Records: adr/index.md
   - Reference:

@@ -48,6 +48,9 @@ environment variables with the `TRADEPULSE_` prefix.
 | `max_request_bytes` | `TRADEPULSE_MAX_REQUEST_BYTES` | Maximum payload size (in bytes) accepted before rejecting with HTTP 413. |
 | `suspicious_json_keys` | `TRADEPULSE_SUSPICIOUS_JSON_KEYS` | JSON array of JSON keys that should trigger a rejection. |
 | `suspicious_json_substrings` | `TRADEPULSE_SUSPICIOUS_JSON_SUBSTRINGS` | JSON array of substrings that, when present in JSON values, cause the WAF to reject the request. |
+| `upstream_waf_request_id_header` | `TRADEPULSE_UPSTREAM_WAF_REQUEST_ID_HEADER` | Header supplied by the external gateway that uniquely identifies the transaction and is copied into audit logs. |
+| `upstream_waf_forwarded_for_header` | `TRADEPULSE_UPSTREAM_WAF_FORWARDED_FOR_HEADER` | Header from the upstream WAF that contains the canonical client IP chain used for rate limiting. |
+| `upstream_waf_event_header` | `TRADEPULSE_UPSTREAM_WAF_EVENT_HEADER` | Header carrying the upstream inspection disposition (e.g., allow, challenged) that is recorded in FastAPI security logs. |
 
 ### Example: tighten ingress for production
 
@@ -61,6 +64,29 @@ export TRADEPULSE_SUSPICIOUS_JSON_SUBSTRINGS='["<script", "javascript:"]'
 Apply the new configuration and verify that your ingress controller forwards the
 correct host headers. Requests originating from unlisted hosts or violating the
 payload rules will be rejected before reaching any route handlers.
+
+### External gateway integration
+
+TradePulse assumes a managed cloud WAF or API gateway performs TLS termination,
+bot mitigation, and deep payload inspection before traffic reaches the
+FastAPI runtime. The `upstream_waf_*` settings document how decision metadata
+is handed off so the in-app WAF can trust the forwarded context.
+
+1. Require the external gateway to populate the request ID and client IP chain
+   headers configured through `TRADEPULSE_UPSTREAM_WAF_REQUEST_ID_HEADER` and
+   `TRADEPULSE_UPSTREAM_WAF_FORWARDED_FOR_HEADER`. The FastAPI WAF relies on
+   these values to coordinate quota enforcement and correlate audit entries
+   with upstream logs.
+2. Propagate the inspection outcome header configured via
+   `TRADEPULSE_UPSTREAM_WAF_EVENT_HEADER`. Persist the value in application logs
+   and forward it to your SIEM so investigations can pivot between gateway and
+   application perspectives.
+3. Offload full body signature scanning and protocol anomaly detection to the
+   cloud WAF while keeping schema-aware JSON validation (key/substring guards)
+   inside the application where domain-specific rules are maintained.
+4. Stream both the upstream WAF logs and the FastAPI audit trail to a shared
+   log aggregation account. Correlate them using the propagated request ID so
+   cross-tier investigations remain deterministic.
 
 ### Operational checklist
 

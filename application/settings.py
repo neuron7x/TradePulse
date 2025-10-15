@@ -133,7 +133,7 @@ class AdminApiSettings(BaseSettings):
 
 
 class ApiSecuritySettings(BaseSettings):
-    """Runtime configuration for OAuth2 and mutual TLS enforcement."""
+    """Runtime configuration for OAuth2, mutual TLS, and upstream WAF hand-off."""
 
     oauth2_issuer: HttpUrl = Field(
         ...,
@@ -185,6 +185,30 @@ class ApiSecuritySettings(BaseSettings):
         description=(
             "Case-insensitive substrings that mark a JSON value as suspicious and cause "
             "the request to be rejected."
+        ),
+    )
+    upstream_waf_request_id_header: str = Field(
+        "X-Request-ID",
+        min_length=1,
+        description=(
+            "Header normalised by the external gateway or cloud WAF that uniquely tags each "
+            "request for downstream log correlation."
+        ),
+    )
+    upstream_waf_forwarded_for_header: str = Field(
+        "X-Forwarded-For",
+        min_length=1,
+        description=(
+            "Header populated by the upstream WAF containing the client IP chain that the "
+            "FastAPI layer trusts for rate-limiting and audit trails."
+        ),
+    )
+    upstream_waf_event_header: str = Field(
+        "X-WAF-Event",
+        min_length=1,
+        description=(
+            "Header propagated from the external gateway describing the inspection decision "
+            "(allow, challenged, mitigated) to be recorded alongside local security logs."
         ),
     )
 
