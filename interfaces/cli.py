@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -31,12 +32,22 @@ from core.phase.detector import composite_transition, phase_flags
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
 
 
-def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
+def signal_from_indicators(
+    prices: np.ndarray,
+    window: int = 200,
+    *,
+    max_workers: int | None = None,
+    ricci_delta: float = 0.005,
+) -> np.ndarray:
     """Derive a regime-aware trading signal from synchrony and entropy features.
 
     Args:
         prices: One-dimensional price series.
         window: Lookback window for phase, entropy, and curvature indicators.
+        max_workers: Optional thread pool size for indicator fan-out. ``None``
+            defaults to three workers covering entropy, delta entropy, and Ricci
+            curvature. Values ``<= 1`` disable parallelism.
+        ricci_delta: Step size used when constructing the Ricci price graph.
 
     Returns:
         np.ndarray: Array of integer signals in ``{-1, 0, 1}`` aligned with
@@ -54,23 +65,47 @@ def signal_from_indicators(prices: np.ndarray, window: int = 200) -> np.ndarray:
     """
     n = len(prices)
     sig = np.zeros(n, dtype=int)
-    for t in range(window, n):
-        p = prices[:t+1]
-        phases = compute_phase(p)
-        R = kuramoto_order(phases[-window:])
-        H = entropy(p[-window:])
-        dH = delta_entropy(p, window=window)
-        G = build_price_graph(p[-window:], delta=0.005)
-        kappa = mean_ricci(G)
-        # basic decision
-        comp = composite_transition(R, dH, kappa, H)
-        # map comp to {-1,0,1}
-        if comp > 0.15 and dH < 0 and kappa < 0:
-            sig[t] = 1
-        elif comp < -0.15 and dH > 0:
-            sig[t] = -1
-        else:
-            sig[t] = sig[t-1]
+    worker_count = max_workers if max_workers is not None else 3
+    executor: ThreadPoolExecutor | None = None
+    if worker_count is not None and worker_count > 1:
+        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="signal-indicators")
+
+    def _compute_ricci(window_prices: np.ndarray) -> float:
+        graph = build_price_graph(window_prices, delta=ricci_delta)
+        return mean_ricci(graph)
+
+    try:
+        for t in range(window, n):
+            prefix = prices[: t + 1]
+            window_prices = prefix[-window:]
+
+            phases = compute_phase(prefix)
+            R = kuramoto_order(phases[-window:])
+
+            if executor is None:
+                H = entropy(window_prices)
+                dH = delta_entropy(prefix, window=window)
+                kappa = _compute_ricci(window_prices)
+            else:
+                futures = {
+                    "entropy": executor.submit(entropy, window_prices),
+                    "delta_entropy": executor.submit(delta_entropy, prefix, window=window),
+                    "ricci": executor.submit(_compute_ricci, window_prices),
+                }
+                H = futures["entropy"].result()
+                dH = futures["delta_entropy"].result()
+                kappa = futures["ricci"].result()
+
+            comp = composite_transition(R, dH, kappa, H)
+            if comp > 0.15 and dH < 0 and kappa < 0:
+                sig[t] = 1
+            elif comp < -0.15 and dH > 0:
+                sig[t] = -1
+            else:
+                sig[t] = sig[t - 1]
+    finally:
+        if executor is not None:
+            executor.shutdown(wait=True)
     return sig
 
 

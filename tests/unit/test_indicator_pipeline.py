@@ -47,6 +47,42 @@ def test_indicator_pipeline_exposes_features_property() -> None:
     assert pipeline.features == (feature,)
 
 
+def test_indicator_pipeline_thread_execution_matches_sequential() -> None:
+    series = np.linspace(0.0, 1.0, num=64, dtype=np.float64)
+    features = [_SumFeature(name="sum_a"), _SumFeature(name="sum_b"), _SumFeature(name="sum_c")]
+
+    sequential = IndicatorPipeline(features)
+    threaded = IndicatorPipeline(features, execution="thread", max_workers=2)
+
+    seq_result = sequential.run(series)
+    thread_result = threaded.run(series)
+
+    assert thread_result.values == seq_result.values
+
+    seq_result.release()
+    thread_result.release()
+    threaded.close()
+
+
+def test_indicator_pipeline_close_reinitialises_executor() -> None:
+    series = np.arange(16, dtype=np.float32)
+    pipeline = IndicatorPipeline([_SumFeature(name="sum")], execution="thread", max_workers=2)
+
+    first = pipeline.run(series)
+    first.release()
+    executor_before = getattr(pipeline, "_executor")
+    assert executor_before is not None
+
+    pipeline.close()
+    assert getattr(pipeline, "_executor") is None
+
+    second = pipeline.run(series)
+    second.release()
+    assert getattr(pipeline, "_executor") is not None
+
+    pipeline.close()
+
+
 def test_parallel_feature_block_thread_executes_all_features() -> None:
     block = ParallelFeatureBlock([_SumFeature(name="sum")], mode="thread")
     outputs = block.run(np.ones(8, dtype=np.float32))
