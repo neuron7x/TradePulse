@@ -63,8 +63,7 @@ class KuramotoIndicator:
                 continue
             total = cumulative[idx] - (cumulative[start - 1] if start > 0 else 0.0)
             order = np.abs(total) / float(count)
-            scaled = 2.0 * (order - 0.5)
-            result[idx] = float(np.clip(self.coupling * scaled, -1.0, 1.0))
+            result[idx] = float(np.clip(self.coupling * order, 0.0, 1.0))
         return result
 
 
