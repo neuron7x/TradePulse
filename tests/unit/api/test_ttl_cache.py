@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "test-token")
-os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-secret-value")
 
 from application.api import service
 from application.api.service import FeatureResponse, TTLCache

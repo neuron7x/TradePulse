@@ -530,9 +530,10 @@ def create_app(
         raise RuntimeError(("Missing required OAuth configuration: {}.").format(joined)) from exc
     if security_settings is not None:
         setattr(get_api_security_settings, "_instance", resolved_security_settings)
+    secret_manager = resolved_settings.build_secret_manager()
     require_bearer = verify_request_identity()
     require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
-    audit_secret_value = resolved_settings.audit_secret.get_secret_value()
+    audit_secret_provider = secret_manager.provider("audit_secret")
     rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
     rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
 
@@ -541,7 +542,7 @@ def create_app(
         audit_sink = HttpAuditSink(str(resolved_settings.audit_webhook_url))
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
-    audit_logger = AuditLogger(secret=audit_secret_value, sink=audit_sink)
+    audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
     admin_rate_limiter = AdminRateLimiter(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),
@@ -598,6 +599,7 @@ def create_app(
     )
     app.state.risk_manager = risk_manager_facade.risk_manager
     app.state.audit_logger = audit_logger
+    app.state.secret_manager = secret_manager
     app.state.admin_rate_limiter = admin_rate_limiter
     app.state.client_rate_limiter = limiter
     app.state.rate_limit_settings = resolved_rate_settings

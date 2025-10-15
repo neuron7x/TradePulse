@@ -22,7 +22,20 @@ class AdminApiSettings(BaseSettings):
 
     audit_secret: SecretStr = Field(
         ...,
+        min_length=16,
         description="Secret used to sign administrative audit records.",
+    )
+    audit_secret_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional filesystem path managed by the platform secret manager that contains "
+            "the audit signing secret. When supplied the application refreshes the key "
+            "periodically to honour rotations."
+        ),
+    )
+    secret_refresh_interval_seconds: PositiveFloat = Field(
+        300.0,
+        description="Minimum interval, in seconds, between managed secret refresh attempts.",
     )
     admin_subject: str = Field(
         "remote-admin",
@@ -57,6 +70,12 @@ class AdminApiSettings(BaseSettings):
             "or mounted secrets directory to avoid embedding credentials in configuration files."
         ),
     )
+    siem_client_secret_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional filesystem path monitored for SIEM client secret rotations."
+        ),
+    )
     siem_scope: str | None = Field(
         default=None,
         description="Optional OAuth2 scope requested when exchanging SIEM credentials for a token.",
@@ -65,11 +84,46 @@ class AdminApiSettings(BaseSettings):
     @model_validator(mode="after")
     def _validate_siem_configuration(self) -> "AdminApiSettings":
         if self.siem_endpoint is not None:
-            if not self.siem_client_id or not self.siem_client_secret:
+            has_secret = self.siem_client_secret is not None or self.siem_client_secret_path is not None
+            if not self.siem_client_id or not has_secret:
                 raise ValueError(
                     "siem_client_id and siem_client_secret must be configured when siem_endpoint is set"
                 )
         return self
+
+    def build_secret_manager(self) -> "SecretManager":
+        """Return a configured secret manager for administrative components."""
+
+        from application.secrets.manager import ManagedSecret, ManagedSecretConfig, SecretManager
+
+        refresh_interval = float(self.secret_refresh_interval_seconds)
+        secrets: dict[str, ManagedSecret] = {
+            "audit_secret": ManagedSecret(
+                config=ManagedSecretConfig(
+                    name="audit_secret",
+                    path=self.audit_secret_path,
+                    min_length=16,
+                ),
+                fallback=self.audit_secret.get_secret_value(),
+                refresh_interval_seconds=refresh_interval,
+            )
+        }
+
+        if self.siem_client_secret is not None or self.siem_client_secret_path is not None:
+            fallback: str | None = None
+            if self.siem_client_secret is not None:
+                fallback = self.siem_client_secret.get_secret_value()
+            secrets["siem_client_secret"] = ManagedSecret(
+                config=ManagedSecretConfig(
+                    name="siem_client_secret",
+                    path=self.siem_client_secret_path,
+                    min_length=12,
+                ),
+                fallback=fallback,
+                refresh_interval_seconds=refresh_interval,
+            )
+
+        return SecretManager(secrets)
 
     model_config = SettingsConfigDict(
         env_prefix="TRADEPULSE_",

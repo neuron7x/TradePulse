@@ -19,7 +19,7 @@ def test_audit_logger_redacts_sensitive_values_from_logs(caplog: pytest.LogCaptu
     }
 
     with caplog.at_level(logging.INFO, logger="tradepulse.audit"):
-        audit = AuditLogger(secret="unit-secret")
+        audit = AuditLogger(secret="unit-secret-value")
         record = audit.log_event(
             event_type="test",
             actor="tester",
