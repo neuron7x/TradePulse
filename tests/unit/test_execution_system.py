@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-from datetime import timedelta
-
-import pytest
+from datetime import datetime, timedelta, timezone
 
 import json
 
-from domain import Order, OrderSide, OrderType
+import pytest
+
+from domain import Order, OrderSide, OrderStatus, OrderType
 from execution.algorithms import POVAlgorithm, TWAPAlgorithm, VWAPAlgorithm, aggregate_fills
 from execution.connectors import BinanceConnector, OrderError
 from execution.compliance import ComplianceMonitor, ComplianceViolation
@@ -290,10 +290,158 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
     assert oms.cancel(placed.order_id) is True
 
     snapshot = list(oms.outstanding())
-    assert snapshot == [placed]
+    assert snapshot == []
 
     oms.reload()
-    assert any(o.order_id == placed.order_id for o in oms.outstanding())
+    assert not list(oms.outstanding())
+
+    payload = json.loads(state_path.read_text())
+    statuses = {entry["status"] for entry in payload.get("orders", [])}
+    assert "cancelled" in statuses
+
+
+@pytest.mark.parametrize(
+    "status,rejection",
+    [
+        (OrderStatus.CANCELLED, None),
+        (OrderStatus.REJECTED, "venue rejected"),
+    ],
+)
+def test_oms_sync_remote_terminal_state(tmp_path, risk_manager: RiskManager, status: OrderStatus, rejection: str | None) -> None:
+    state_path = tmp_path / "sync_state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=20_500, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-1")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=placed.order_id,
+        status=status,
+        filled_quantity=placed.filled_quantity,
+        average_price=placed.average_price,
+        rejection_reason=rejection,
+        created_at=placed.created_at,
+    )
+    object.__setattr__(remote, "updated_at", datetime.now(timezone.utc))
+
+    synced = oms.sync_remote_state(remote)
+
+    assert synced.status is status
+    assert synced.rejection_reason == rejection
+    assert synced.filled_quantity == pytest.approx(placed.filled_quantity)
+    assert not list(oms.outstanding())
+
+    payload = json.loads(state_path.read_text())
+    stored = {entry["order_id"]: entry for entry in payload.get("orders", [])}
+    assert stored[placed.order_id]["status"] == status.value
+
+
+def test_oms_sync_remote_state_requires_identifier(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_missing_id.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=20_000, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-missing-id")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=None,
+        status=OrderStatus.CANCELLED,
+        filled_quantity=placed.filled_quantity,
+        average_price=placed.average_price,
+        rejection_reason=None,
+        created_at=placed.created_at,
+    )
+
+    with pytest.raises(ValueError):
+        oms.sync_remote_state(remote)
+
+
+def test_oms_sync_remote_state_rejects_unknown_order(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_unknown.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    remote = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=20_000,
+        order_type=OrderType.LIMIT,
+        stop_price=None,
+        order_id="missing-order",
+        status=OrderStatus.CANCELLED,
+        filled_quantity=0.0,
+        average_price=None,
+        rejection_reason=None,
+    )
+
+    with pytest.raises(LookupError):
+        oms.sync_remote_state(remote)
+
+
+def test_oms_sync_remote_state_updates_terminal_details(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_terminal_details.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.75, price=19_750, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-terminal")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    # Simulate pending latency tracking populated before remote terminal update is received.
+    oms._ack_timestamps[placed.order_id] = datetime.now(timezone.utc)
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=placed.order_id,
+        status=OrderStatus.FILLED,
+        filled_quantity=placed.quantity,
+        average_price=placed.price,
+        rejection_reason=None,
+        created_at=placed.created_at,
+    )
+    object.__setattr__(remote, "updated_at", datetime.now(timezone.utc))
+
+    synced = oms.sync_remote_state(remote)
+
+    assert synced.status is OrderStatus.FILLED
+    assert synced.filled_quantity == pytest.approx(placed.quantity)
+    assert synced.average_price == pytest.approx(placed.price or 0.0)
+    assert placed.order_id not in oms._ack_timestamps
+    assert not list(oms.outstanding())
+
+    payload = json.loads(state_path.read_text())
+    record = next(entry for entry in payload.get("orders", []) if entry["order_id"] == placed.order_id)
+    assert record["status"] == OrderStatus.FILLED.value
+    assert record["filled_quantity"] == pytest.approx(placed.quantity)
 
 
 def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManager) -> None:
