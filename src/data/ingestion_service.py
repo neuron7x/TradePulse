@@ -5,12 +5,19 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Callable, Iterable, Sequence
 
+import numpy as np
 import pandas as pd
 
 from core.data.backfill import CacheKey, CacheRegistry, normalise_index
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.validation import (
+    TimeSeriesValidationConfig,
+    TimeSeriesValidationError,
+    ValueColumnConfig,
+    validate_timeseries_frame,
+)
 from interfaces.ingestion import DataIngestionService
 
 UTC = timezone.utc
@@ -44,11 +51,13 @@ class DataIngestionCacheService:
         data_ingestor: DataIngestionService | None = None,
         cache_registry: CacheRegistry | None = None,
         clock: Callable[[], datetime] | None = None,
+        integrity_validator: "TickFrameIntegrityValidator" | None = None,
     ) -> None:
         self._ingestor = data_ingestor or DataIngestor()
         self._registry = cache_registry or CacheRegistry()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._metadata: dict[CacheKey, CacheEntrySnapshot] = {}
+        self._integrity_validator = integrity_validator or TickFrameIntegrityValidator()
 
     # ------------------------------------------------------------------
     # Public API
@@ -146,6 +155,13 @@ class DataIngestionCacheService:
             if not isinstance(frame.index, pd.DatetimeIndex):
                 raise TypeError("frame must use a DatetimeIndex")
             normalized = normalise_index(frame, market=market).sort_index()
+            normalized = self._integrity_validator.validate(
+                normalized,
+                layer=layer,
+                symbol=symbol,
+                venue=venue,
+                timeframe=timeframe,
+            )
         key = self._build_key(layer, symbol, venue, timeframe, instrument_type)
         cache = self._registry.cache_for(layer)
         cache.put(key, normalized)
@@ -246,4 +262,98 @@ class DataIngestionCacheService:
         return CacheKey(layer=layer, symbol=canonical_symbol, venue=canonical_venue, timeframe=timeframe)
 
 
-__all__ = ["CacheEntrySnapshot", "DataIngestionCacheService"]
+class DataIntegrityError(ValueError):
+    """Raised when cached datasets fail validation or integrity guarantees."""
+
+
+class TickFrameIntegrityValidator:
+    """Validate tick frames before they are persisted in the ingestion cache."""
+
+    def __init__(
+        self,
+        *,
+        timestamp_column: str = "timestamp",
+        timezone: str = "UTC",
+    ) -> None:
+        self._timestamp_column = timestamp_column
+        self._timezone = timezone
+
+    def validate(
+        self,
+        frame: pd.DataFrame,
+        *,
+        layer: str,
+        symbol: str,
+        venue: str,
+        timeframe: str,
+    ) -> pd.DataFrame:
+        """Validate ``frame`` and return a normalised copy ready for caching."""
+
+        if frame.empty:
+            return frame
+
+        config = self._build_config(frame, timeframe=timeframe, layer=layer)
+        prepared = frame.reset_index().rename(
+            columns={frame.index.name or "index": self._timestamp_column}
+        )
+        try:
+            validated = validate_timeseries_frame(prepared, config)
+        except TimeSeriesValidationError as exc:
+            raise DataIntegrityError(str(exc)) from exc
+
+        validated = validated.set_index(self._timestamp_column)
+        validated.index.name = frame.index.name
+        return validated.sort_index()
+
+    def _build_config(
+        self,
+        frame: pd.DataFrame,
+        *,
+        timeframe: str,
+        layer: str,
+    ) -> TimeSeriesValidationConfig:
+        frequency = None if layer == "raw" else self._parse_frequency(timeframe)
+        value_columns: list[ValueColumnConfig] = []
+        for column in frame.columns:
+            series = frame[column]
+            if not pd.api.types.is_numeric_dtype(series.dtype):
+                continue
+            if series.isna().any():
+                raise DataIntegrityError(f"{column} contains NaN values")
+            numeric_values = pd.to_numeric(series, errors="coerce")
+            if numeric_values.isna().any():
+                raise DataIntegrityError(f"{column} contains non-numeric values")
+            if not np.isfinite(numeric_values.to_numpy(copy=False)).all():
+                raise DataIntegrityError(f"{column} contains non-finite values")
+            value_columns.append(
+                ValueColumnConfig(
+                    name=column,
+                    dtype=str(series.dtype),
+                    nullable=False,
+                )
+            )
+
+        return TimeSeriesValidationConfig(
+            timestamp_column=self._timestamp_column,
+            value_columns=value_columns,
+            frequency=frequency,
+            require_timezone=self._timezone,
+            allow_extra_columns=True,
+        )
+
+    def _parse_frequency(self, timeframe: str) -> pd.Timedelta | None:
+        trimmed = timeframe.strip()
+        if not trimmed:
+            return None
+        try:
+            return pd.to_timedelta(trimmed)
+        except (TypeError, ValueError):
+            return None
+
+
+__all__ = [
+    "CacheEntrySnapshot",
+    "DataIngestionCacheService",
+    "DataIntegrityError",
+    "TickFrameIntegrityValidator",
+]
