@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from core.indicators.trading import KuramotoIndicator
 from core.strategies import HurstVPINStrategy, KuramotoStrategy
 
 
@@ -109,6 +110,30 @@ def test_kuramoto_strategy_small_window_breakout() -> None:
     signals = strategy.generate_signals(data)
 
     assert (signals["signal"] != "Hold").any()
+
+
+def test_kuramoto_strategy_signal_logic(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KuramotoStrategy should classify buy/hold/sell using synchrony levels."""
+
+    data = pd.DataFrame(
+        {"close": [100.0, 101.0, 102.0]},
+        index=pd.date_range("2025-01-01", periods=3, freq="h"),
+    )
+    strategy = KuramotoStrategy(symbol="TEST", params={"sync_threshold": 0.7, "window": 1})
+
+    def fake_compute(self: KuramotoIndicator, _: np.ndarray) -> np.ndarray:
+        return np.array([0.9, 0.1, 0.5])
+
+    monkeypatch.setattr(KuramotoIndicator, "compute", fake_compute)
+
+    signals = strategy.generate_signals(data)
+
+    assert list(signals["signal"]) == ["Buy", "Sell", "Hold"]
+    buy_conf = signals.loc[signals["signal"] == "Buy", "confidence"].iloc[0]
+    sell_conf = signals.loc[signals["signal"] == "Sell", "confidence"].iloc[0]
+    assert buy_conf == pytest.approx((0.9 - 0.7) / 0.3, rel=1e-6)
+    assert sell_conf == pytest.approx((0.3 - 0.1) / 0.3, rel=1e-6)
+    assert (signals.loc[signals["signal"] == "Hold", "confidence"] == 0.0).all()
 
 
 def test_kuramoto_strategy_requires_close_column(sample_data: pd.DataFrame) -> None:
