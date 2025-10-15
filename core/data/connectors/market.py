@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
+import os
 from pathlib import Path
+from threading import Lock
 from typing import Any, AsyncIterator, Deque, Optional
 from uuid import uuid4
 
@@ -34,15 +37,34 @@ class DeadLetterItem:
     context: str
     timestamp: float
 
+    def asdict(self) -> dict[str, Any]:
+        """Return a JSON-serialisable representation of the item."""
+
+        return {
+            "payload": self.payload,
+            "error": self.error,
+            "context": self.context,
+            "timestamp": self.timestamp,
+        }
+
 
 class DeadLetterQueue:
     """In-memory bounded dead-letter queue retaining the latest failures."""
 
-    def __init__(self, max_items: int = 1024) -> None:
+    def __init__(
+        self,
+        max_items: int = 1024,
+        *,
+        persistent_path: str | os.PathLike[str] | None = None,
+    ) -> None:
         if max_items <= 0:
             raise ValueError("max_items must be positive")
         self._items: Deque[DeadLetterItem] = deque(maxlen=max_items)
         self._max_items = max_items
+        self._persistent_path = Path(persistent_path) if persistent_path is not None else None
+        self._lock = Lock()
+        if self._persistent_path is not None:
+            self._persistent_path.parent.mkdir(parents=True, exist_ok=True)
 
     def push(self, payload: Any, error: Exception | str, *, context: str) -> None:
         message = str(error)
@@ -58,6 +80,7 @@ class DeadLetterQueue:
         item = DeadLetterItem(payload=payload, error=message, context=context, timestamp=time.time())
         self._items.append(item)
         logger.debug("dead_letter_enqueued", size=len(self._items), context=context)
+        self._persist_item(item)
 
     def drain(self) -> list[DeadLetterItem]:
         items = list(self._items)
@@ -73,6 +96,50 @@ class DeadLetterQueue:
     @property
     def max_items(self) -> int:  # pragma: no cover - trivial accessor
         return self._max_items
+
+    def persist(
+        self,
+        path: str | os.PathLike[str] | None = None,
+        *,
+        drain: bool = False,
+    ) -> Path:
+        """Persist the queue content to ``path`` for operational triage.
+
+        Args:
+            path: Destination file. When omitted, the queue must have been
+                initialised with ``persistent_path``.
+            drain: When ``True`` the queue is emptied after persisting.
+
+        Returns:
+            The resolved :class:`pathlib.Path` to the persisted payload.
+        """
+
+        target = Path(path) if path is not None else self._persistent_path
+        if target is None:
+            raise ValueError("No persistence path configured for dead-letter queue")
+
+        if drain:
+            items = self.drain()
+        else:
+            items = list(self._items)
+        payload = [item.asdict() for item in items]
+
+        with self._lock:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+                handle.write("\n")
+
+        return target
+
+    def _persist_item(self, item: DeadLetterItem) -> None:
+        if self._persistent_path is None:
+            return
+        record = json.dumps(item.asdict(), sort_keys=True)
+        with self._lock:
+            with self._persistent_path.open("a", encoding="utf-8") as handle:
+                handle.write(record)
+                handle.write("\n")
 
 
 class BaseMarketDataConnector:
