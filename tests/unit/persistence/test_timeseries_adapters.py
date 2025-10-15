@@ -316,3 +316,20 @@ def test_parquet_adapter_round_trip(tmp_path, monkeypatch: pytest.MonkeyPatch) -
     assert len(results) == 1
     assert results[0].values["price"] == 1.23
     assert results[0].tags["symbol"] == "BTCUSDT"
+
+
+def test_parquet_adapter_gracefully_handles_missing_dataset(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store: Dict[str, List[Dict[str, Any]]] = {}
+
+    def fake_loader(self) -> Any:
+        return (
+            _FakePyArrowModule(),
+            _FakeParquetModule(store),
+            _FakeDatasetModule(store),
+        )
+
+    monkeypatch.setattr(parquet_module.ParquetTimeSeriesAdapter, "_load_pyarrow", fake_loader, raising=False)
+
+    adapter = ParquetTimeSeriesAdapter(tmp_path)
+
+    assert list(adapter.read_points("absent")) == []

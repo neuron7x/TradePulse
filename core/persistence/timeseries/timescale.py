@@ -49,7 +49,7 @@ class TimescaleTimeSeriesAdapter(TimeSeriesAdapter):
         with self._connection.cursor() as cursor:
             yield cursor
 
-    def _ensure_table(self, table: str, sample: TimeSeriesPoint) -> None:
+    def _ensure_table(self, table: str) -> None:
         create_stmt = (
             f"CREATE TABLE IF NOT EXISTS {table} ("
             f"{self._time_column} TIMESTAMPTZ NOT NULL,"
@@ -68,7 +68,7 @@ class TimescaleTimeSeriesAdapter(TimeSeriesAdapter):
     def write_points(self, table: str, points: Sequence[TimeSeriesPoint]) -> int:
         if not points:
             return 0
-        self._ensure_table(table, points[0])
+        self._ensure_table(table)
         insert_stmt = (
             f"INSERT INTO {table} ({self._time_column}, tags, values) "
             "VALUES (%s, %s::jsonb, %s::jsonb) "
