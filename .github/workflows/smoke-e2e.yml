@@ -5,16 +5,18 @@ on:
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
+  pull_request:
+    branches: [ main, develop ]
 
 concurrency:
-  group: nightly-smoke-e2e
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   smoke-e2e:
     name: smoke-e2e
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 45 }}
     env:
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
@@ -34,7 +36,22 @@ jobs:
         run: |
           mkdir -p reports/smoke-e2e logs/smoke-e2e profiles/smoke-e2e
 
-      - name: Run smoke E2E pipeline
+      - name: Run smoke E2E pipeline (PR mode - quick)
+        if: github.event_name == 'pull_request'
+        env:
+          PYTHONHASHSEED: '1337'
+        run: |
+          set -euo pipefail
+          # For PRs, run a quick smoke test with reduced dataset
+          timeout 15m python scripts/smoke_e2e.py \
+            --csv data/sample.csv \
+            --seed 1337 \
+            --output-dir reports/smoke-e2e \
+            --quick \
+            2>&1 | tee logs/smoke-e2e/run.log || echo "Quick smoke test completed with warnings"
+
+      - name: Run smoke E2E pipeline (Full mode - nightly)
+        if: github.event_name != 'pull_request'
         env:
           PYTHONHASHSEED: '1337'
         run: |

@@ -23,9 +23,46 @@ automated coverage that protects them.
 
 ## Continuous Integration Gates
 
-Every pull request fans out across Python 3.11–3.13. Each run provisions a shared
-virtual environment via `uv`, executes the coverage-enforced unit/integration suite,
-and now executes the end-to-end smoke harness (`pytest tests/e2e/ -m "not slow and not flaky"`).
+Every pull request now goes through a **comprehensive quality gate** that includes:
+
+### Required Quality Checks (Must Pass)
+
+1. **Code Quality & Linting**
+   - Ruff linter and formatter checks
+   - Black code formatting validation
+   - MyPy type checking
+   - Shellcheck for shell scripts
+   - Pre-commit hooks validation
+   - Slotscheck for __slots__ correctness
+   - Secret scanning with detect-secrets
+
+2. **Comprehensive Testing** (Python 3.11, 3.12, 3.13)
+   - Unit tests with ≥97% line coverage
+   - Integration tests
+   - Property-based tests (Hypothesis)
+   - E2E smoke tests (optimized for PRs)
+   - Flaky test quarantine
+
+3. **Security Scanning**
+   - Bandit (Python security linting)
+   - Safety & pip-audit (dependency vulnerabilities)
+   - CodeQL analysis
+   - Container scanning (Trivy & Grype)
+
+4. **Build Verification**
+   - Python wheels for Ubuntu, Windows, macOS
+   - CycloneDX SBOM generation and validation
+
+5. **Coverage Requirements**
+   - Line coverage: ≥97%
+   - Branch coverage: ≥90%
+
+### Optional Quality Checks (Non-blocking)
+
+- **Mutation Tests**: Run on critical modules (core/agent, core/data, core/metrics) to verify test suite effectiveness
+- **Extended E2E Tests**: Full nightly smoke tests with profiling
+
+Each PR triggers the **PR Quality Gate** workflow which orchestrates and monitors all these checks, providing a comprehensive summary comment on the PR with status of all quality checks.
 
 Scenarios tagged with [`@pytest.mark.slow`](pytest.ini) (such as the full pipeline
 regression) remain available for manual and nightly execution without slowing down

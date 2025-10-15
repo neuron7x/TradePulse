@@ -43,6 +43,11 @@ def parse_args() -> argparse.Namespace:
         default=12,
         help="Lookback window for deterministic momentum signal construction.",
     )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Run in quick mode for PR validation (reduced dataset processing).",
+    )
     return parser.parse_args()
 
 
@@ -68,12 +73,15 @@ def run_cli_analyze(csv_path: Path, seed: int) -> Dict[str, Any]:
     return payload
 
 
-def ingest_prices(csv_path: Path) -> list[Ticker]:
+def ingest_prices(csv_path: Path, quick_mode: bool = False) -> list[Ticker]:
     ingestor = DataIngestor(allowed_roots=[csv_path.resolve().parent])
     ticks: list[Ticker] = []
     ingestor.historical_csv(str(csv_path), ticks.append, required_fields=("ts", "price", "volume"))
     if not ticks:
         raise RuntimeError("No ticks ingested from CSV")
+    # In quick mode, only process first 20% of data for faster validation
+    if quick_mode and len(ticks) > 100:
+        ticks = ticks[:max(100, len(ticks) // 5)]
     return ticks
 
 
@@ -148,13 +156,14 @@ def main() -> None:
     seed_everything(args.seed)
 
     metrics = run_cli_analyze(csv_path, args.seed)
-    ticks = ingest_prices(csv_path)
+    ticks = ingest_prices(csv_path, quick_mode=args.quick)
     prices = np.array([float(t.price) for t in ticks], dtype=float)
     signal_fn = build_signal_function(metrics, window=args.momentum_window)
     result = run_backtest(prices, signal_fn, fee=args.fee)
 
     summary = summarise_result(result, ticks, metrics)
     summary["seed"] = args.seed
+    summary["quick_mode"] = args.quick
 
     write_artifacts(summary, args.output_dir)
     print(json.dumps(summary, indent=2))

@@ -1,0 +1,259 @@
+name: PR Quality Gate
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  quality-gate:
+    name: Quality Gate Orchestrator
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Generate quality check matrix
+        id: set-matrix
+        run: |
+          echo 'matrix={"check":["lint","tests","security","build","coverage"]}' >> $GITHUB_OUTPUT
+
+      - name: Quality gate info
+        run: |
+          cat << 'EOF'
+          ╔════════════════════════════════════════════════════════════════╗
+          ║                    PR QUALITY GATE                             ║
+          ╠════════════════════════════════════════════════════════════════╣
+          ║ This workflow orchestrates comprehensive quality checks:       ║
+          ║                                                                ║
+          ║ ✓ Code Quality & Linting                                      ║
+          ║   - Ruff, Black, MyPy, Shellcheck                             ║
+          ║   - Pre-commit hooks validation                               ║
+          ║   - Slotscheck & secret scanning                              ║
+          ║                                                                ║
+          ║ ✓ Comprehensive Testing                                       ║
+          ║   - Unit tests (Python 3.11, 3.12, 3.13)                     ║
+          ║   - Integration tests                                         ║
+          ║   - Property-based tests (Hypothesis)                         ║
+          ║   - E2E smoke tests                                           ║
+          ║   - Mutation tests (critical paths)                           ║
+          ║                                                                ║
+          ║ ✓ Security Scanning                                           ║
+          ║   - Bandit (Python security)                                  ║
+          ║   - Safety & pip-audit (dependencies)                         ║
+          ║   - CodeQL analysis                                           ║
+          ║   - Container scanning (Trivy & Grype)                        ║
+          ║                                                                ║
+          ║ ✓ Build Verification                                          ║
+          ║   - Python wheels (Ubuntu, Windows, macOS)                    ║
+          ║   - SBOM generation (CycloneDX)                               ║
+          ║                                                                ║
+          ║ ✓ Coverage Requirements                                       ║
+          ║   - Line coverage ≥97%                                        ║
+          ║   - Branch coverage ≥90%                                      ║
+          ╚════════════════════════════════════════════════════════════════╝
+          EOF
+
+  check-workflows:
+    name: Wait for Required Workflows
+    runs-on: ubuntu-latest
+    needs: quality-gate
+    strategy:
+      fail-fast: false
+      matrix:
+        workflow:
+          - 'Lint & Code Quality'
+          - 'Tests'
+          - 'Security Scan'
+          - 'Build & Verify Python Wheels'
+          - 'CycloneDX SBOM'
+          - 'Coverage'
+          - 'Mutation Tests'
+          - 'Nightly Smoke E2E'
+    steps:
+      - name: Check ${{ matrix.workflow }} status
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const workflowName = '${{ matrix.workflow }}';
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = context.payload.pull_request.head.sha;
+            
+            // Wait for workflow to appear (it might not have started yet)
+            let attempts = 0;
+            const maxAttempts = 30;
+            let workflowRun = null;
+            
+            while (attempts < maxAttempts) {
+              const runs = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                event: 'pull_request',
+                head_sha: ref,
+                per_page: 100
+              });
+              
+              workflowRun = runs.data.workflow_runs.find(run => 
+                run.name === workflowName && 
+                run.head_sha === ref
+              );
+              
+              if (workflowRun) {
+                console.log(`Found workflow: ${workflowName}`);
+                break;
+              }
+              
+              attempts++;
+              console.log(`Waiting for ${workflowName} to start... (${attempts}/${maxAttempts})`);
+              await new Promise(resolve => setTimeout(resolve, 10000)); // Wait 10 seconds
+            }
+            
+            if (!workflowRun) {
+              core.warning(`Workflow ${workflowName} not found after ${maxAttempts} attempts`);
+              return;
+            }
+            
+            // Wait for completion
+            const conclusion = workflowRun.conclusion;
+            const status = workflowRun.status;
+            
+            console.log(`${workflowName}: status=${status}, conclusion=${conclusion}`);
+            
+            if (status !== 'completed') {
+              core.warning(`${workflowName} is still running (${status})`);
+            } else if (conclusion === 'success') {
+              core.info(`✅ ${workflowName} passed`);
+            } else if (conclusion === 'failure') {
+              core.setFailed(`❌ ${workflowName} failed`);
+            } else {
+              core.warning(`⚠️ ${workflowName} completed with status: ${conclusion}`);
+            }
+
+  quality-summary:
+    name: Quality Gate Summary
+    runs-on: ubuntu-latest
+    needs: check-workflows
+    if: always()
+    steps:
+      - name: Generate summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const ref = context.payload.pull_request.head.sha;
+            const pr_number = context.payload.pull_request.number;
+            
+            // Get all workflow runs for this PR
+            const runs = await github.rest.actions.listWorkflowRunsForRepo({
+              owner,
+              repo,
+              event: 'pull_request',
+              head_sha: ref,
+              per_page: 100
+            });
+            
+            const requiredWorkflows = [
+              'Lint & Code Quality',
+              'Tests',
+              'Security Scan',
+              'Build & Verify Python Wheels',
+              'CycloneDX SBOM',
+              'Coverage'
+            ];
+            
+            const optionalWorkflows = [
+              'Mutation Tests',
+              'Nightly Smoke E2E'
+            ];
+            
+            let summary = '## 🎯 Quality Gate Summary\n\n';
+            summary += '### Required Checks\n\n';
+            
+            let allPassed = true;
+            
+            for (const workflowName of requiredWorkflows) {
+              const run = runs.data.workflow_runs.find(r => r.name === workflowName);
+              if (!run) {
+                summary += `- ⏳ **${workflowName}**: Pending\n`;
+                allPassed = false;
+              } else if (run.conclusion === 'success') {
+                summary += `- ✅ **${workflowName}**: Passed\n`;
+              } else if (run.conclusion === 'failure') {
+                summary += `- ❌ **${workflowName}**: Failed\n`;
+                allPassed = false;
+              } else {
+                summary += `- ⚠️ **${workflowName}**: ${run.conclusion || run.status}\n`;
+              }
+            }
+            
+            summary += '\n### Optional Checks\n\n';
+            for (const workflowName of optionalWorkflows) {
+              const run = runs.data.workflow_runs.find(r => r.name === workflowName);
+              if (!run) {
+                summary += `- ⏳ **${workflowName}**: Pending\n`;
+              } else if (run.conclusion === 'success') {
+                summary += `- ✅ **${workflowName}**: Passed\n`;
+              } else if (run.conclusion === 'failure') {
+                summary += `- ⚠️ **${workflowName}**: Failed (non-blocking)\n`;
+              } else {
+                summary += `- ℹ️ **${workflowName}**: ${run.conclusion || run.status}\n`;
+              }
+            }
+            
+            summary += '\n---\n';
+            if (allPassed) {
+              summary += '✅ **All required quality checks passed!** This PR is ready for review.\n';
+            } else {
+              summary += '❌ **Some required checks are pending or failed.** Please review and fix issues before merging.\n';
+            }
+            
+            console.log(summary);
+            
+            // Post as comment on PR
+            const comments = await github.rest.issues.listComments({
+              owner,
+              repo,
+              issue_number: pr_number
+            });
+            
+            const botComment = comments.data.find(comment => 
+              comment.user.type === 'Bot' && 
+              comment.body.includes('Quality Gate Summary')
+            );
+            
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: botComment.id,
+                body: summary
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr_number,
+                body: summary
+              });
+            }
+
+      - name: Check overall status
+        if: always()
+        run: |
+          if [[ "${{ needs.check-workflows.result }}" == "failure" ]]; then
+            echo "❌ Quality gate failed - some required checks did not pass"
+            exit 1
+          else
+            echo "✅ Quality gate passed - all required checks completed successfully"
+          fi

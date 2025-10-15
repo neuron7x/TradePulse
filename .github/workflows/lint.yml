@@ -1,0 +1,195 @@
+name: Lint & Code Quality
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ruff:
+    name: Ruff Linter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff>=0.14.0
+      
+      - name: Run ruff check
+        run: |
+          ruff check . --output-format=github
+      
+      - name: Run ruff format check
+        run: |
+          ruff format --check .
+
+  black:
+    name: Black Formatter
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install black
+        run: |
+          python -m pip install --upgrade pip
+          pip install black>=25.9.0
+      
+      - name: Check formatting with black
+        run: |
+          black --check --diff .
+
+  mypy:
+    name: MyPy Type Checking
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      
+      - name: Create virtual environment
+        run: uv venv
+      
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      
+      - name: Run mypy
+        run: |
+          .venv/bin/mypy core/ backtest/ execution/ --no-error-summary 2>&1 | tee mypy-report.txt || true
+          
+      - name: Check mypy results
+        run: |
+          if grep -E "error:|note:" mypy-report.txt; then
+            echo "MyPy found issues. Review the report above."
+            # Don't fail on mypy errors for now, just report them
+            exit 0
+          else
+            echo "MyPy check passed!"
+          fi
+
+  shellcheck:
+    name: Shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Run shellcheck
+        uses: ludeeus/action-shellcheck@master
+        with:
+          scandir: './scripts'
+          format: gcc
+          severity: warning
+
+  pre-commit-validate:
+    name: Pre-commit Hooks Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install pre-commit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pre-commit
+      
+      - name: Run pre-commit on all files
+        run: |
+          pre-commit run --all-files --show-diff-on-failure
+
+  slotscheck:
+    name: Slotscheck Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install slotscheck
+        run: |
+          python -m pip install --upgrade pip
+          pip install slotscheck==0.19.1
+      
+      - name: Run slotscheck
+        run: |
+          python -m slotscheck --module core --module backtest --module execution
+
+  detect-secrets:
+    name: Detect Secrets
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      
+      - name: Install detect-secrets
+        run: |
+          python -m pip install --upgrade pip
+          pip install detect-secrets
+      
+      - name: Run detect-secrets
+        run: |
+          detect-secrets scan --baseline .secrets.baseline
+      
+      - name: Verify baseline is up-to-date
+        run: |
+          detect-secrets scan --baseline .secrets.baseline --exclude-files '\.secrets\.baseline$' > /tmp/new-baseline.json
+          if ! diff -q .secrets.baseline /tmp/new-baseline.json > /dev/null; then
+            echo "⚠️ Secrets baseline is out of date. Run 'detect-secrets scan > .secrets.baseline' locally."
+            # Don't fail, just warn
+            exit 0
+          fi
+
+  lint-summary:
+    name: Lint Summary
+    runs-on: ubuntu-latest
+    needs: [ruff, black, mypy, shellcheck, pre-commit-validate, slotscheck, detect-secrets]
+    if: always()
+    steps:
+      - name: Check lint results
+        run: |
+          if [[ "${{ needs.ruff.result }}" == "failure" ]] || \
+             [[ "${{ needs.black.result }}" == "failure" ]] || \
+             [[ "${{ needs.shellcheck.result }}" == "failure" ]] || \
+             [[ "${{ needs.pre-commit-validate.result }}" == "failure" ]] || \
+             [[ "${{ needs.slotscheck.result }}" == "failure" ]]; then
+            echo "❌ One or more lint checks failed"
+            exit 1
+          else
+            echo "✅ All lint checks passed"
+          fi

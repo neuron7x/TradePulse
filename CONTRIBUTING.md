@@ -182,6 +182,20 @@ python -m scripts lint  # Full lint suite
 - Include screenshots for UI changes
 - Fill out the PR template completely
 
+**Important: Every PR goes through comprehensive quality gates:**
+
+1. **Code Quality Checks** - Automated linting, formatting, and type checking
+2. **Test Suite** - Unit, integration, property-based, and E2E tests across Python 3.11-3.13
+3. **Security Scans** - Bandit, Safety, pip-audit, CodeQL, and container scanning
+4. **Build Verification** - Multi-platform wheel builds and SBOM generation
+5. **Coverage Requirements** - Must meet ≥97% line coverage and ≥90% branch coverage
+6. **Mutation Tests** - Validates test suite effectiveness on critical modules
+7. **Smoke E2E** - Quick end-to-end validation of core workflows
+
+The **PR Quality Gate** workflow will post a summary comment on your PR showing the status of all checks. All required checks must pass before the PR can be merged.
+
+See [TESTING.md](TESTING.md) for detailed information about all quality checks.
+
 ---
 
 ## Coverage job та Codecov інтеграція

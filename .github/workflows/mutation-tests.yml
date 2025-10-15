@@ -2,6 +2,8 @@ name: Mutation Tests
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [ main, develop ]
   schedule:
     - cron: '0 3 * * 1'
 
@@ -31,7 +33,16 @@ jobs:
           uv pip install -r requirements-dev.lock
       - name: Prepare mutation report directory
         run: mkdir -p reports/mutmut
-      - name: Run mutation tests
+      - name: Run mutation tests (PR mode - fast subset)
+        if: github.event_name == 'pull_request'
+        run: |
+          # For PRs, run mutation tests on critical modules only
+          .venv/bin/mutmut run --paths-to-mutate=core/agent,core/data,core/metrics --use-coverage --runner="pytest -x tests/unit/ tests/integration/" || true
+          .venv/bin/mutmut results | tee reports/mutmut/results.txt
+          # Don't fail PR on mutation test failures, just report
+          echo "Mutation testing completed. Review results in artifact."
+      - name: Run mutation tests (Full mode - scheduled)
+        if: github.event_name != 'pull_request'
         run: |
           .venv/bin/mutmut run --use-coverage
           .venv/bin/mutmut results | tee reports/mutmut/results.txt
