@@ -10,6 +10,7 @@ import random
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import re
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +23,68 @@ from omegaconf import DictConfig, OmegaConf
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
+
+
+REDACTED_PLACEHOLDER = "***REDACTED***"
+SENSITIVE_TOKENS = (
+    "password",
+    "secret",
+    "token",
+    "apikey",
+    "api_key",
+    "credential",
+    "auth",
+    "key",
+)
+
+
+_CAMELCASE_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def _iter_key_tokens(key: str) -> list[str]:
+    """Return normalized tokens extracted from a configuration key."""
+
+    normalized = _CAMELCASE_BOUNDARY.sub(r"\1_\2", key)
+    normalized = normalized.lower()
+    return [token for token in re.split(r"[^0-9a-z]+", normalized) if token]
+
+
+def _is_sensitive_key(key: str) -> bool:
+    """Return ``True`` when the provided configuration key is sensitive."""
+
+    return any(token in SENSITIVE_TOKENS for token in _iter_key_tokens(key))
+
+
+def _redact_sensitive_data(data: Any) -> Any:
+    """Return a copy of ``data`` with sensitive keys masked."""
+
+    if isinstance(data, dict):
+        return {
+            key: (
+                REDACTED_PLACEHOLDER
+                if _is_sensitive_key(str(key))
+                else _redact_sensitive_data(value)
+            )
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [_redact_sensitive_data(item) for item in data]
+    if isinstance(data, tuple):
+        return tuple(_redact_sensitive_data(item) for item in data)
+    return data
+
+
+def _redacted_config_yaml(cfg: DictConfig) -> str:
+    """Serialize ``cfg`` to YAML with sensitive values redacted."""
+
+    container = OmegaConf.to_container(
+        cfg,
+        resolve=False,
+        throw_on_missing=False,
+    )
+    redacted_container = _redact_sensitive_data(container)
+    redacted_conf = OmegaConf.create(redacted_container)
+    return OmegaConf.to_yaml(redacted_conf, resolve=False)
 
 
 @dataclass(slots=True)
@@ -177,7 +240,16 @@ def main(cfg: DictConfig) -> None:
     original_cwd = Path(get_original_cwd())
     metadata = collect_run_metadata(run_dir, original_cwd, cfg)
 
-    logging.getLogger(__name__).info("Running with configuration:\n%s", OmegaConf.to_yaml(cfg))
+    logger = logging.getLogger(__name__)
+    try:
+        safe_yaml = _redacted_config_yaml(cfg)
+    except Exception:
+        logger.warning(
+            "Unable to serialize configuration for safe logging; output suppressed.",
+            exc_info=True,
+        )
+    else:
+        logger.info("Running with configuration:\n%s", safe_yaml)
 
     results = run_pipeline(cfg)
     _write_metadata(metadata)
@@ -188,3 +260,4 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
+
