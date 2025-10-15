@@ -128,3 +128,67 @@ def test_live_loop_emits_reconnect_on_heartbeat_failure(live_loop_config: LiveLo
     assert venue == "binance"
     assert attempt >= 1
     assert connector.reconnects >= 1
+
+
+def test_live_loop_cancel_and_kill_switch_flushes_orders(live_loop_config: LiveLoopConfig) -> None:
+    connector = RecoveryConnector()
+    risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
+    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+
+    loop.start(cold_start=True)
+
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.15,
+        price=19_500,
+        order_type=OrderType.LIMIT,
+    )
+    loop.submit_order("binance", order, correlation_id="ord-cancel-1")
+
+    def _wait_for_order_id() -> str:
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            outstanding = [
+                o for o in loop._contexts["binance"].oms.outstanding() if o.order_id is not None
+            ]
+            if outstanding:
+                order_id = outstanding[0].order_id
+                assert order_id is not None
+                return order_id
+            time.sleep(0.05)
+        raise AssertionError("order was not acknowledged in time")
+
+    first_order_id = _wait_for_order_id()
+    assert loop.cancel_order(first_order_id)
+    assert all(o.order_id != first_order_id for o in loop._contexts["binance"].oms.outstanding())
+    assert not connector.fetch_order(first_order_id).is_active
+    assert loop.cancel_order("missing", venue="binance") is False
+
+    replacement = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        quantity=0.05,
+        price=20_050,
+        order_type=OrderType.LIMIT,
+    )
+    loop.submit_order("binance", replacement, correlation_id="ord-kill-1")
+    replacement_id = _wait_for_order_id()
+
+    risk_manager.kill_switch.trigger("panic-stop")
+
+    def _no_outstanding() -> bool:
+        return not any(loop._contexts["binance"].oms.outstanding())
+
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        if _no_outstanding() and loop._stop.is_set():
+            break
+        time.sleep(0.05)
+
+    assert loop._kill_notified is True
+    assert loop._stop.is_set()
+    assert _no_outstanding()
+    assert not connector.fetch_order(replacement_id).is_active
+
+    loop.shutdown()
