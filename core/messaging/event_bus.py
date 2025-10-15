@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Awaitable, Callable, Dict, MutableMapping, Optional
 
 from .idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore, current_timestamp
@@ -104,6 +106,13 @@ class EventBusConfig:
     enable_idempotence: bool = True
     retry_attempts: int = 5
     retry_backoff_ms: int = 250
+    security_protocol: str = "SSL"
+    ssl_cafile: Optional[str] = None
+    ssl_certfile: Optional[str] = None
+    ssl_keyfile: Optional[str] = None
+    sasl_mechanism: Optional[str] = "PLAIN"
+    sasl_username: Optional[str] = None
+    sasl_password: Optional[str] = None
 
 
 class BaseEventBus:
@@ -137,12 +146,14 @@ class KafkaEventBus(BaseEventBus):
         super().__init__(config, idempotency_store=idempotency_store)
         self._producer = None
         self._consumer_tasks: Dict[str, asyncio.Task[None]] = {}
+        self._security_kwargs: Dict[str, object] | None = None
 
     async def start(self) -> None:
         from aiokafka import AIOKafkaProducer
 
         if not self._config.bootstrap_servers:
             raise ValueError("bootstrap_servers must be configured for Kafka backend")
+        security_kwargs = self._get_security_kwargs()
         self._producer = AIOKafkaProducer(
             bootstrap_servers=self._config.bootstrap_servers,
             client_id=self._config.client_id,
@@ -150,6 +161,7 @@ class KafkaEventBus(BaseEventBus):
             acks="all",
             retry_backoff_ms=self._config.retry_backoff_ms,
             linger_ms=5,
+            **security_kwargs,
         )
         await self._producer.start()
 
@@ -177,12 +189,14 @@ class KafkaEventBus(BaseEventBus):
         from aiokafka import AIOKafkaConsumer
 
         group_id = durable_name or self._config.consumer_group
+        security_kwargs = self._get_security_kwargs()
         consumer = AIOKafkaConsumer(
             topic.metadata.name,
             bootstrap_servers=self._config.bootstrap_servers,
             group_id=group_id,
             enable_auto_commit=False,
             auto_offset_reset="earliest",
+            **security_kwargs,
         )
         await consumer.start()
 
@@ -205,6 +219,60 @@ class KafkaEventBus(BaseEventBus):
 
         task = asyncio.create_task(_consume(), name=f"kafka-consumer-{topic.metadata.name}")
         self._consumer_tasks[topic.metadata.name] = task
+
+    def _get_security_kwargs(self) -> Dict[str, object]:
+        if self._security_kwargs is None:
+            self._security_kwargs = self._build_security_kwargs()
+        return dict(self._security_kwargs)
+
+    def _build_security_kwargs(self) -> Dict[str, object]:
+        protocol = (self._config.security_protocol or "").upper()
+        if protocol not in {"SSL", "SASL_SSL"}:
+            raise ValueError(
+                "Kafka security_protocol must be 'SSL' or 'SASL_SSL' to enforce encrypted transport"
+            )
+
+        cafile = self._config.ssl_cafile
+        if not cafile:
+            raise ValueError("ssl_cafile must be configured for secure Kafka connections")
+        cafile_path = Path(cafile)
+        if not cafile_path.is_file():
+            raise FileNotFoundError(f"ssl_cafile not found at {cafile}")
+
+        certfile = self._config.ssl_certfile
+        keyfile = self._config.ssl_keyfile
+        if (certfile and not keyfile) or (keyfile and not certfile):
+            raise ValueError("ssl_certfile and ssl_keyfile must be provided together when using mutual TLS")
+
+        for name, file_path in {"ssl_certfile": certfile, "ssl_keyfile": keyfile}.items():
+            if file_path is None:
+                continue
+            path = Path(file_path)
+            if not path.is_file():
+                raise FileNotFoundError(f"{name} not found at {file_path}")
+
+        ssl_context = ssl.create_default_context(cafile=cafile)
+        if certfile and keyfile:
+            ssl_context.load_cert_chain(certfile=certfile, keyfile=keyfile)
+
+        kwargs: Dict[str, object] = {
+            "security_protocol": protocol,
+            "ssl_context": ssl_context,
+        }
+
+        if protocol == "SASL_SSL":
+            if not self._config.sasl_username or not self._config.sasl_password:
+                raise ValueError("SASL credentials must be supplied for SASL_SSL protocol")
+            mechanism = self._config.sasl_mechanism or "PLAIN"
+            kwargs.update(
+                {
+                    "sasl_mechanism": mechanism,
+                    "sasl_plain_username": self._config.sasl_username,
+                    "sasl_plain_password": self._config.sasl_password,
+                }
+            )
+
+        return kwargs
 
     async def _publish_retry_or_dlq(self, topic: EventTopic, envelope: EventEnvelope) -> None:
         if self._producer is None:

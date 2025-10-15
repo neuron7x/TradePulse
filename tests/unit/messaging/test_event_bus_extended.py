@@ -97,6 +97,30 @@ def stub_aiokafka(monkeypatch):
         monkeypatch.delitem(sys.modules, "aiokafka", raising=False)
 
 
+@pytest.fixture
+def kafka_tls(monkeypatch, tmp_path):
+    cafile = tmp_path / "ca.pem"
+    cafile.write_text("dummy ca")
+    contexts: list[Any] = []
+
+    class DummySSLContext:
+        def __init__(self) -> None:
+            self.cafile: Optional[str] = None
+            self.cert_chain: tuple[Optional[str], Optional[str]] = (None, None)
+
+        def load_cert_chain(self, *, certfile: str, keyfile: str) -> None:
+            self.cert_chain = (certfile, keyfile)
+
+    def fake_create_default_context(*, cafile: Optional[str] = None) -> DummySSLContext:
+        ctx = DummySSLContext()
+        ctx.cafile = cafile
+        contexts.append(ctx)
+        return ctx
+
+    monkeypatch.setattr("core.messaging.event_bus.ssl.create_default_context", fake_create_default_context)
+    return {"cafile": str(cafile), "contexts": contexts}
+
+
 @pytest.fixture(autouse=True)
 def stub_nats(monkeypatch):
     """Inject a lightweight NATS stub for NATSEventBus tests."""
@@ -184,21 +208,31 @@ def stub_nats(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_kafka_start_and_stop_initialises_producer(stub_aiokafka) -> None:
-    config = EventBusConfig(backend=EventBusBackend.KAFKA, bootstrap_servers="kafka:9092")
+async def test_kafka_start_and_stop_initialises_producer(stub_aiokafka, kafka_tls) -> None:
+    config = EventBusConfig(
+        backend=EventBusBackend.KAFKA,
+        bootstrap_servers="kafka:9092",
+        ssl_cafile=kafka_tls["cafile"],
+    )
     bus = KafkaEventBus(config)
     await bus.start()
     producer = stub_aiokafka.AIOKafkaProducer.instances[-1]
     assert producer.started is True
     assert producer.kwargs["bootstrap_servers"] == "kafka:9092"
+    assert producer.kwargs["security_protocol"] == "SSL"
+    assert producer.kwargs["ssl_context"] is kafka_tls["contexts"][0]
 
     await bus.stop()
     assert producer.started is False
 
 
 @pytest.mark.asyncio
-async def test_kafka_subscribe_processes_message_and_commits(stub_aiokafka) -> None:
-    config = EventBusConfig(backend=EventBusBackend.KAFKA, bootstrap_servers="kafka:9092")
+async def test_kafka_subscribe_processes_message_and_commits(stub_aiokafka, kafka_tls) -> None:
+    config = EventBusConfig(
+        backend=EventBusBackend.KAFKA,
+        bootstrap_servers="kafka:9092",
+        ssl_cafile=kafka_tls["cafile"],
+    )
     store = InMemoryEventIdempotencyStore(ttl_seconds=30)
     bus = KafkaEventBus(config, idempotency_store=store)
 
@@ -231,6 +265,8 @@ async def test_kafka_subscribe_processes_message_and_commits(stub_aiokafka) -> N
     consumer = stub_aiokafka.AIOKafkaConsumer.instances[-1]
     assert consumer._commits == 1
     assert consumer._stopped is True
+    assert consumer.kwargs["security_protocol"] == "SSL"
+    assert consumer.kwargs["ssl_context"] is kafka_tls["contexts"][0]
 
     await bus.stop()
 
@@ -259,6 +295,69 @@ async def test_kafka_retry_and_dlq_routing(stub_aiokafka) -> None:
     await bus._publish_retry_or_dlq(EventTopic.MARKET_TICKS, envelope)
     dlq_call = producer.sent[-1]
     assert dlq_call["topic"] == EventTopic.MARKET_TICKS.metadata.dlq_topic
+
+
+@pytest.mark.asyncio
+async def test_kafka_start_requires_tls_files(tmp_path) -> None:
+    cafile = tmp_path / "missing_ca.pem"
+    config = EventBusConfig(
+        backend=EventBusBackend.KAFKA,
+        bootstrap_servers="kafka:9092",
+        ssl_cafile=str(cafile),
+    )
+    bus = KafkaEventBus(config)
+
+    with pytest.raises(FileNotFoundError):
+        await bus.start()
+
+
+@pytest.mark.asyncio
+async def test_kafka_start_rejects_insecure_protocol(tmp_path) -> None:
+    cafile = tmp_path / "ca.pem"
+    cafile.write_text("dummy")
+    config = EventBusConfig(
+        backend=EventBusBackend.KAFKA,
+        bootstrap_servers="kafka:9092",
+        security_protocol="PLAINTEXT",
+        ssl_cafile=str(cafile),
+    )
+    bus = KafkaEventBus(config)
+
+    with pytest.raises(ValueError):
+        await bus.start()
+
+
+@pytest.mark.asyncio
+async def test_kafka_start_configures_sasl(stub_aiokafka, kafka_tls, tmp_path) -> None:
+    certfile = tmp_path / "client.pem"
+    keyfile = tmp_path / "client.key"
+    certfile.write_text("cert")
+    keyfile.write_text("key")
+
+    config = EventBusConfig(
+        backend=EventBusBackend.KAFKA,
+        bootstrap_servers="kafka:9092",
+        security_protocol="SASL_SSL",
+        ssl_cafile=kafka_tls["cafile"],
+        ssl_certfile=str(certfile),
+        ssl_keyfile=str(keyfile),
+        sasl_username="user",
+        sasl_password="secret",
+        sasl_mechanism="SCRAM-SHA-512",
+    )
+
+    bus = KafkaEventBus(config)
+    await bus.start()
+    producer = stub_aiokafka.AIOKafkaProducer.instances[-1]
+
+    assert producer.kwargs["security_protocol"] == "SASL_SSL"
+    assert producer.kwargs["sasl_mechanism"] == "SCRAM-SHA-512"
+    assert producer.kwargs["sasl_plain_username"] == "user"
+    assert producer.kwargs["sasl_plain_password"] == "secret"
+    assert producer.kwargs["ssl_context"] is kafka_tls["contexts"][0]
+    assert kafka_tls["contexts"][0].cert_chain == (str(certfile), str(keyfile))
+
+    await bus.stop()
 
 
 @pytest.mark.asyncio
