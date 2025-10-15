@@ -583,14 +583,20 @@ def _solve_transport_vam(
             basis[entering] = True
             basis = _ensure_transport_basis(allocation, cost_matrix)
             continue
+        # `_find_transport_cycle` returns the starting cell as the final element
+        # of the cycle. Iterating over that full list would apply the entering
+        # adjustment twice (once at the start and once at the duplicated end),
+        # leaving the allocation imbalanced by one ``theta`` step. Work with
+        # the simple cycle instead to keep the mass updates balanced.
+        cycle_path = cycle[:-1]
         theta_candidates = [
             allocation[i, j]
-            for idx, (i, j) in enumerate(cycle)
+            for idx, (i, j) in enumerate(cycle_path)
             if idx % 2 == 1
         ]
         positive_candidates = [val for val in theta_candidates if val > _TRANSPORT_TOL]
         theta = min(positive_candidates) if positive_candidates else min(theta_candidates, default=0.0)
-        for idx, (i, j) in enumerate(cycle):
+        for idx, (i, j) in enumerate(cycle_path):
             if idx % 2 == 0:
                 allocation[i, j] += theta
             else:
