@@ -200,7 +200,7 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
     return G
 
 def local_distribution(
-    G: nx.Graph, node: int, radius: int = 1
+    G: nx.Graph, node: Any, radius: int = 1
 ) -> tuple[np.ndarray, np.ndarray]:
     """Return neighbour identifiers and their normalised transition mass.
 
@@ -223,9 +223,9 @@ def local_distribution(
         vector always sums to one within floating-point tolerance.
     """
 
-    neigh = [int(n) for n in G.neighbors(node)]
+    neigh = list(G.neighbors(node))
     if not neigh:  # pragma: no cover - defensive guard for isolated nodes
-        return (np.array([int(node)], dtype=int), np.array([1.0], dtype=float))
+        return (np.array([node], dtype=object), np.array([1.0], dtype=float))
 
     weights = []
     for n in neigh:
@@ -240,9 +240,10 @@ def local_distribution(
         probs = np.full(len(neigh), 1.0 / len(neigh))
     else:
         probs = w_arr / total
-    return np.asarray(neigh, dtype=int), probs
+    return np.asarray(neigh, dtype=object), probs
 
-def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
+
+def ricci_curvature_edge(G: nx.Graph, x: Any, y: Any) -> float:
     """Evaluate the Ollivier–Ricci curvature for a specific edge.
 
     Args:
@@ -275,7 +276,7 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     finite_mask = np.zeros_like(cost_matrix, dtype=bool)
     for i, src in enumerate(neigh_x):
         for j, dst in enumerate(neigh_y):
-            dist = _shortest_path_length_safe(G, int(src), int(dst))
+            dist = _shortest_path_length_safe(G, src, dst)
             if np.isfinite(dist):
                 cost_matrix[i, j] = float(dist)
                 finite_mask[i, j] = True
@@ -296,7 +297,7 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     return float(1.0 - transport_cost / d_xy)
 
 
-def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
+def _shortest_path_length_safe(G: nx.Graph, x: Any, y: Any) -> float:
     """Return a robust shortest-path distance tolerant to malformed weights.
 
     Args:
@@ -409,7 +410,7 @@ def mean_ricci(
 
 def _run_ricci_async(
     G: nx.Graph,
-    edges: list[tuple[int, int]],
+    edges: list[tuple[Any, Any]],
     max_workers: int | None,
 ) -> list[float]:
     """Evaluate curvature across edges concurrently using asyncio threads."""
@@ -420,7 +421,7 @@ def _run_ricci_async(
             if max_workers is not None:
                 executor = ThreadPoolExecutor(max_workers=max_workers)
             futures = [
-                loop.run_in_executor(executor, ricci_curvature_edge, G, int(u), int(v))
+                loop.run_in_executor(executor, ricci_curvature_edge, G, u, v)
                 for u, v in edges
             ]
             return await asyncio.gather(*futures)
