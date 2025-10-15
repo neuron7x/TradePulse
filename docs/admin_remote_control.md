@@ -27,6 +27,8 @@ Set the following environment variables before starting the FastAPI application:
 | Variable | Description |
 | --- | --- |
 | `TRADEPULSE_AUDIT_SECRET` | Secret used to sign audit records for integrity verification. |
+| `TRADEPULSE_AUDIT_SECRET_PATH` | Optional file path populated by your secret manager. When provided the service refreshes the signing key without restarts. |
+| `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS` | Interval in seconds between secret refresh attempts (default `300`). |
 | `TRADEPULSE_OAUTH2_ISSUER` | OAuth2/OpenID Connect issuer expected in bearer token `iss` claims. |
 | `TRADEPULSE_OAUTH2_AUDIENCE` | Audience that must be present in validated JWT access tokens. |
 | `TRADEPULSE_OAUTH2_JWKS_URI` | HTTPS JWKS endpoint used to resolve signing keys. |
@@ -34,10 +36,13 @@ Set the following environment variables before starting the FastAPI application:
 | `TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS` | Maximum administrative attempts allowed within the rate-limit window (default `5`). |
 | `TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS` | Rolling window in seconds for the administrative rate limiter (default `60`). |
 | `TRADEPULSE_AUDIT_WEBHOOK_URL` | Optional HTTPS endpoint that receives a JSON copy of every administrative audit event. |
+| `TRADEPULSE_SIEM_CLIENT_SECRET_PATH` | Optional file path containing the SIEM API client secret. Can be used instead of `TRADEPULSE_SIEM_CLIENT_SECRET`. |
 | `TRADEPULSE_MTLS_TRUSTED_CA_PATH` | Filesystem path to the trusted client CA bundle used for mutual TLS handshakes. |
 | `TRADEPULSE_MTLS_REVOCATION_LIST_PATH` | Optional path to a PEM encoded certificate revocation list enforced during mTLS validation. |
 
 > **Important:** Development defaults are provided for the audit logger to simplify local testing. Always supply production OAuth2 credentials and TLS assets before deploying.
+
+> **Note:** `TRADEPULSE_AUDIT_SECRET` must contain at least 16 characters. When mounting file-based secrets ensure your secret manager renews them before expiry so the runtime refresh (controlled by `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS`) picks up the rotation.
 
 ### TLS and client certificates
 

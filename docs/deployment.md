@@ -34,6 +34,8 @@ TradePulse loads sensitive credentials exclusively from environment variables or
 3. **Distribution** – Inject credentials during deployment (e.g., Kubernetes secrets, HashiCorp Vault Agent) and expose them as environment variables such as `BINANCE_API_KEY` and `COINBASE_API_SECRET` as documented in [Configuration](configuration.md#exchange-connector-credentials).
 4. **Audit** – Enable secret manager audit trails and configure alerts for unusual access patterns.
 
+The administrative FastAPI surface consumes the `TRADEPULSE_AUDIT_SECRET` via a managed file watcher that honours rotations at runtime. When you mount `TRADEPULSE_AUDIT_SECRET_PATH` (and, optionally, `TRADEPULSE_SIEM_CLIENT_SECRET_PATH`) into the container, the service refreshes the keys according to `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS` without restarts. Ensure your secret manager agent keeps the files up to date and enforces length policies that satisfy the defaults (16+ characters for audit signatures).
+
 ## Configuring the Live Trading Runner
 
 The live runner is implemented in [`execution/live_loop.py`](../execution/live_loop.py) and orchestrates connectors, the order management system, and risk controls.

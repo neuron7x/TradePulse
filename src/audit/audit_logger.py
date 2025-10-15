@@ -102,16 +102,24 @@ class AuditLogger:
 
     def __init__(
         self,
-        secret: str,
+        secret: str | None = None,
         *,
+        secret_resolver: Callable[[], str] | None = None,
         logger: logging.Logger | None = None,
         sink: AuditSink | None = None,
         store: AuditRecordStore | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not secret:
-            raise ValueError("secret must be provided for audit logging")
-        self._key = secret.encode("utf-8")
+        if (secret is None) == (secret_resolver is None):
+            raise ValueError("Provide exactly one of secret or secret_resolver")
+        if secret_resolver is not None:
+            provider = secret_resolver
+        else:
+            assert secret is not None
+            if not secret:
+                raise ValueError("secret must be provided for audit logging")
+            provider = lambda secret=secret: secret
+        self._secret_provider: Callable[[], str] = provider
         self._logger = logger or logging.getLogger("tradepulse.audit")
         self._sink = sink
         self._store = store
@@ -121,7 +129,10 @@ class AuditLogger:
         """Return an HMAC signature for the payload."""
 
         message = _canonical_json(payload).encode("utf-8")
-        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+        key = self._secret_provider()
+        if not key:
+            raise ValueError("Audit secret cannot be empty")
+        return hmac.new(key.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
     def log_event(
         self,
