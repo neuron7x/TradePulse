@@ -109,7 +109,6 @@ class SlidingWindowRateLimiter:
 
         if isinstance(records, dict):
             utilisation_values: list[float] = []
-            keys_to_remove: list[str] = []
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
@@ -123,30 +122,33 @@ class SlidingWindowRateLimiter:
                 policy = self._policy_for_storage_key(storage_key)
                 if policy.max_requests <= 0:
                     continue
-                bucket_length: int | None = None
+                active_count: int | None = None
                 if isinstance(bucket, deque):
-                    if policy.window_seconds > 0:
+                    snapshot_bucket = tuple(bucket)
+                    bucket_length = len(snapshot_bucket)
+                    if policy.window_seconds > 0 and bucket_length:
                         threshold = current_time - policy.window_seconds
-                        while bucket and bucket[0] <= threshold:
-                            bucket.popleft()
-                    bucket_length = len(bucket)
-                    if bucket_length == 0:
-                        keys_to_remove.append(storage_key)
-                        continue
+                        expired = 0
+                        for timestamp in snapshot_bucket:
+                            if timestamp <= threshold:
+                                expired += 1
+                            else:
+                                break
+                        active_count = bucket_length - expired
+                    else:
+                        active_count = bucket_length
                 else:
-                    bucket_length = len(bucket)
-                    if bucket_length == 0:
-                        continue
+                    active_count = len(bucket)
 
-                utilisation = bucket_length / float(policy.max_requests)
+                if not active_count:
+                    continue
+
+                tracked_keys += 1
+                utilisation = active_count / float(policy.max_requests)
                 utilisation_values.append(utilisation)
                 if utilisation >= 1.0:
                     saturated.append(storage_key)
 
-            for storage_key in keys_to_remove:
-                records.pop(storage_key, None)
-
-            tracked_keys = len(records)
             if utilisation_values:
                 max_utilization = max(utilisation_values)
 
