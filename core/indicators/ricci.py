@@ -22,8 +22,10 @@ coordinate with the governance guardrails documented in ``docs/monitoring.md``.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import warnings
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Iterable, Literal
 
@@ -147,10 +149,10 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
 
     nx = _NXModule()  # type: ignore[assignment]
 
-try:  # pragma: no cover - SciPy optional
-    from scipy.spatial.distance import wasserstein_distance as W1
-except Exception:  # pragma: no cover
-    W1 = None
+_scipy_linprog = None
+_scipy_optimize_spec = importlib.util.find_spec("scipy.optimize")
+if _scipy_optimize_spec is not None:  # pragma: no cover - SciPy optional
+    from scipy.optimize import linprog as _scipy_linprog
 
 
 def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
@@ -197,8 +199,10 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
             G.add_edge(int(levels[i - 1]), int(lv), weight=weight)
     return G
 
-def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
-    """Return the degree-weighted probability mass over a node's neighbourhood.
+def local_distribution(
+    G: nx.Graph, node: Any, radius: int = 1
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return neighbour identifiers and their normalised transition mass.
 
     Args:
         G: Graph produced by :func:`build_price_graph` or a compatible structure.
@@ -207,17 +211,22 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
             multi-hop neighbourhoods.
 
     Returns:
-        np.ndarray: Probability vector whose elements sum to one and correspond
-        to the relative transition weights from ``node``.
+        tuple[np.ndarray, np.ndarray]: Pair of arrays ``(indices, weights)``
+        where ``indices`` contains neighbour node identifiers and ``weights``
+        contains the corresponding transition probabilities. When ``node`` has
+        no neighbours, the function returns ``([node], [1.0])`` to represent a
+        self-stay mass.
 
     Notes:
-        When ``node`` is isolated a single mass ``[1.0]`` is returned to avoid
-        downstream NaNs. Edge weights are sanitised to remain finite, matching
-        the governance requirements of ``docs/quality_gates.md``.
+        Edge weights are sanitised to remain finite, matching the governance
+        requirements of ``docs/quality_gates.md``. The returned probability
+        vector always sums to one within floating-point tolerance.
     """
-    neigh = [n for n in G.neighbors(node)]
+
+    neigh = list(G.neighbors(node))
     if not neigh:  # pragma: no cover - defensive guard for isolated nodes
-        return np.array([1.0])
+        return (np.array([node], dtype=object), np.array([1.0], dtype=float))
+
     weights = []
     for n in neigh:
         data = G.get_edge_data(node, n, default={"weight": 1.0})
@@ -228,10 +237,13 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     w_arr = np.asarray(weights, dtype=float)
     total = w_arr.sum()
     if total == 0:  # pragma: no cover - degenerate weights
-        return np.full(len(neigh), 1.0 / len(neigh))
-    return w_arr / total
+        probs = np.full(len(neigh), 1.0 / len(neigh))
+    else:
+        probs = w_arr / total
+    return np.asarray(neigh, dtype=object), probs
 
-def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
+
+def ricci_curvature_edge(G: nx.Graph, x: Any, y: Any) -> float:
     """Evaluate the Ollivier–Ricci curvature for a specific edge.
 
     Args:
@@ -244,34 +256,48 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
         denote dispersion and positive values indicate clustering.
 
     Notes:
-        The implementation normalises discrete neighbourhood measures and uses
-        SciPy's Wasserstein distance when available, falling back to a cumulative
-        distribution approximation otherwise. Shortest-path calculations are
-        hardened through :func:`_shortest_path_length_safe`, aligning with the
-        numerical stability guidance in ``docs/monitoring.md``.
+        The implementation normalises discrete neighbourhood measures and solves
+        the resulting optimal transport problem over their shared support using
+        a SciPy linear programme when available or an internal min-cost flow
+        fallback otherwise. Shortest-path calculations are hardened through
+        :func:`_shortest_path_length_safe`, aligning with the numerical stability
+        guidance in ``docs/monitoring.md``.
     """
     if not G.has_edge(x, y):  # pragma: no cover - caller ensures edge exists
         return 0.0
-    mu_x = local_distribution(G, x)
-    mu_y = local_distribution(G, y)
-    # for simple comparison, map distributions to common support by padding
-    m = max(len(mu_x), len(mu_y))
-    a = np.pad(mu_x, (0, m-len(mu_x)))
-    b = np.pad(mu_y, (0, m-len(mu_y)))
+    neigh_x, mass_x = local_distribution(G, x)
+    neigh_y, mass_y = local_distribution(G, y)
+    if neigh_x.size == 0 or neigh_y.size == 0:
+        return 0.0
     d_xy = _shortest_path_length_safe(G, x, y)
     if not np.isfinite(d_xy) or d_xy <= 0:
         return 0.0
-    if W1 is None:
-        warnings.warn(
-            "SciPy unavailable; using discrete Wasserstein approximation for Ricci curvature",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    dist = W1(a, b) if W1 is not None else _w1_fallback(a, b)
-    return float(1.0 - dist / d_xy)
+    cost_matrix = np.empty((neigh_x.size, neigh_y.size), dtype=float)
+    finite_mask = np.zeros_like(cost_matrix, dtype=bool)
+    for i, src in enumerate(neigh_x):
+        for j, dst in enumerate(neigh_y):
+            dist = _shortest_path_length_safe(G, src, dst)
+            if np.isfinite(dist):
+                cost_matrix[i, j] = float(dist)
+                finite_mask[i, j] = True
+            else:
+                cost_matrix[i, j] = np.inf
+    if not finite_mask.any(axis=1).all() or not finite_mask.any(axis=0).all():
+        return 0.0
+    finite_values = cost_matrix[finite_mask]
+    if finite_values.size == 0:
+        return 0.0
+    max_cost = float(np.max(finite_values))
+    if not np.isfinite(max_cost) or max_cost <= 0.0:
+        fill_value = 1.0
+    else:
+        fill_value = max(1.0, max_cost * 10.0)
+    cost_matrix = np.where(finite_mask, cost_matrix, fill_value)
+    transport_cost = _optimal_transport_distance(cost_matrix, mass_x, mass_y)
+    return float(1.0 - transport_cost / d_xy)
 
 
-def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
+def _shortest_path_length_safe(G: nx.Graph, x: Any, y: Any) -> float:
     """Return a robust shortest-path distance tolerant to malformed weights.
 
     Args:
@@ -384,7 +410,7 @@ def mean_ricci(
 
 def _run_ricci_async(
     G: nx.Graph,
-    edges: list[tuple[int, int]],
+    edges: list[tuple[Any, Any]],
     max_workers: int | None,
 ) -> list[float]:
     """Evaluate curvature across edges concurrently using asyncio threads."""
@@ -395,7 +421,7 @@ def _run_ricci_async(
             if max_workers is not None:
                 executor = ThreadPoolExecutor(max_workers=max_workers)
             futures = [
-                loop.run_in_executor(executor, ricci_curvature_edge, G, int(u), int(v))
+                loop.run_in_executor(executor, ricci_curvature_edge, G, u, v)
                 for u, v in edges
             ]
             return await asyncio.gather(*futures)
@@ -417,30 +443,269 @@ def _run_ricci_async(
             new_loop.close()
 
 
-def _w1_fallback(a, b):
-    """Approximate the Wasserstein-1 distance without SciPy dependencies.
+def _optimal_transport_distance(
+    cost_matrix: np.ndarray, supply: np.ndarray, demand: np.ndarray
+) -> float:
+    """Compute the optimal transport cost between two discrete measures."""
 
-    Args:
-        a: First probability mass function.
-        b: Second probability mass function.
+    supply = np.asarray(supply, dtype=float)
+    demand = np.asarray(demand, dtype=float)
+    supply = np.clip(supply, 0.0, None)
+    demand = np.clip(demand, 0.0, None)
+    if supply.sum() == 0 or demand.sum() == 0:
+        return 0.0
+    supply = supply / supply.sum()
+    demand = demand / demand.sum()
 
-    Returns:
-        float: Approximation of the 1-Wasserstein distance.
+    if _scipy_linprog is not None:
+        result = _solve_transport_scipy(cost_matrix, supply, demand)
+        if result is not None:
+            return result
+        warnings.warn(
+            "SciPy linear programming solver failed; using internal min-cost transport",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    return _solve_transport_vam(cost_matrix, supply, demand)
 
-    Notes:
-        The method uses cumulative sums on normalised arrays and mirrors the
-        fallback described in ``docs/indicators.md`` for low-dependency builds.
-    """
 
-    import numpy as _np
+def _solve_transport_scipy(
+    cost_matrix: np.ndarray, supply: np.ndarray, demand: np.ndarray
+) -> float | None:
+    """Solve the transport problem with SciPy's linear programming solver."""
 
-    a = _np.asarray(a, dtype=float)
-    b = _np.asarray(b, dtype=float)
-    a = a / (a.sum() + 1e-12)
-    b = b / (b.sum() + 1e-12)
-    cdfa = _np.cumsum(a)
-    cdfb = _np.cumsum(b)
-    return float(_np.abs(cdfa - cdfb).sum()) / len(a)
+    if _scipy_linprog is None:
+        return None
+    m, n = cost_matrix.shape
+    c = cost_matrix.reshape(m * n)
+    A_eq = np.zeros((m + n, m * n), dtype=float)
+    for i in range(m):
+        A_eq[i, i * n : (i + 1) * n] = 1.0
+    for j in range(n):
+        A_eq[m + j, j::n] = 1.0
+    b_eq = np.concatenate([supply, demand])
+    bounds = [(0.0, None)] * (m * n)
+    try:
+        result = _scipy_linprog(c, A_eq=A_eq, b_eq=b_eq, bounds=bounds, method="highs")
+    except Exception:  # pragma: no cover - SciPy solver edge cases
+        return None
+    if result.success:
+        return float(result.fun)
+    return None
+
+
+_TRANSPORT_TOL = 1e-12
+
+
+def _solve_transport_vam(
+    cost_matrix: np.ndarray, supply: np.ndarray, demand: np.ndarray
+) -> float:
+    """Solve the transport problem via VAM + MODI heuristics."""
+
+    supply_rem = supply.copy()
+    demand_rem = demand.copy()
+    m, n = cost_matrix.shape
+    allocation = np.zeros((m, n), dtype=float)
+    active_rows = {i for i in range(m) if supply_rem[i] > _TRANSPORT_TOL}
+    active_cols = {j for j in range(n) if demand_rem[j] > _TRANSPORT_TOL}
+
+    while active_rows and active_cols:
+        penalties: list[tuple[float, str, int, int]] = []
+        for i in list(active_rows):
+            candidates = [
+                (cost_matrix[i, j], j)
+                for j in active_cols
+                if demand_rem[j] > _TRANSPORT_TOL
+            ]
+            if not candidates:
+                continue
+            candidates.sort()
+            penalty = (candidates[1][0] - candidates[0][0]) if len(candidates) > 1 else candidates[0][0]
+            penalties.append((penalty, "row", i, candidates[0][1]))
+        for j in list(active_cols):
+            candidates = [
+                (cost_matrix[i, j], i)
+                for i in active_rows
+                if supply_rem[i] > _TRANSPORT_TOL
+            ]
+            if not candidates:
+                continue
+            candidates.sort()
+            penalty = (candidates[1][0] - candidates[0][0]) if len(candidates) > 1 else candidates[0][0]
+            penalties.append((penalty, "col", j, candidates[0][1]))
+        if not penalties:
+            break
+        _, axis, idx, partner = max(penalties, key=lambda entry: (entry[0], entry[1] == "row"))
+        if axis == "row":
+            i, j = idx, partner
+        else:
+            j, i = idx, partner
+        amount = min(supply_rem[i], demand_rem[j])
+        allocation[i, j] += amount
+        supply_rem[i] -= amount
+        demand_rem[j] -= amount
+        if supply_rem[i] <= _TRANSPORT_TOL:
+            active_rows.discard(i)
+        if demand_rem[j] <= _TRANSPORT_TOL:
+            active_cols.discard(j)
+
+    for i in range(m):
+        if supply_rem[i] > _TRANSPORT_TOL:
+            j = int(np.argmin(cost_matrix[i]))
+            amount = supply_rem[i]
+            allocation[i, j] += amount
+            supply_rem[i] = 0.0
+            demand_rem[j] = max(demand_rem[j] - amount, 0.0)
+    for j in range(n):
+        if demand_rem[j] > _TRANSPORT_TOL:
+            i = int(np.argmin(cost_matrix[:, j]))
+            amount = demand_rem[j]
+            allocation[i, j] += amount
+            demand_rem[j] = 0.0
+            supply_rem[i] = max(supply_rem[i] - amount, 0.0)
+
+    basis = _ensure_transport_basis(allocation, cost_matrix)
+
+    while True:
+        u, v = _compute_transport_potentials(cost_matrix, basis)
+        reduced = cost_matrix - (u[:, None] + v[None, :])
+        mask = ~basis
+        if not np.any(mask):
+            break
+        min_val = float(np.min(np.where(mask, reduced, np.inf)))
+        if not np.isfinite(min_val) or min_val >= -_TRANSPORT_TOL:
+            break
+        entering = np.unravel_index(
+            int(np.argmin(np.where(mask, reduced, np.inf))), cost_matrix.shape
+        )
+        cycle = _find_transport_cycle(basis, entering)
+        if cycle is None:
+            basis[entering] = True
+            basis = _ensure_transport_basis(allocation, cost_matrix)
+            continue
+        theta_candidates = [
+            allocation[i, j]
+            for idx, (i, j) in enumerate(cycle)
+            if idx % 2 == 1
+        ]
+        positive_candidates = [val for val in theta_candidates if val > _TRANSPORT_TOL]
+        theta = min(positive_candidates) if positive_candidates else min(theta_candidates, default=0.0)
+        for idx, (i, j) in enumerate(cycle):
+            if idx % 2 == 0:
+                allocation[i, j] += theta
+            else:
+                allocation[i, j] -= theta
+                if allocation[i, j] <= _TRANSPORT_TOL:
+                    allocation[i, j] = 0.0
+                    if (i, j) != entering:
+                        basis[i, j] = False
+        basis[entering] = True
+        basis = _ensure_transport_basis(allocation, cost_matrix)
+
+    return float(np.sum(allocation * cost_matrix))
+
+
+def _ensure_transport_basis(allocation: np.ndarray, cost_matrix: np.ndarray) -> np.ndarray:
+    """Ensure the set of basic variables spans all rows and columns."""
+
+    basis = allocation > _TRANSPORT_TOL
+    m, n = allocation.shape
+    for i in range(m):
+        if not basis[i].any():
+            j = int(np.argmin(cost_matrix[i]))
+            basis[i, j] = True
+    for j in range(n):
+        if not basis[:, j].any():
+            i = int(np.argmin(cost_matrix[:, j]))
+            basis[i, j] = True
+    while basis.sum() < (m + n - 1):
+        mask = np.where(basis, np.inf, cost_matrix)
+        idx = np.unravel_index(int(np.argmin(mask)), allocation.shape)
+        basis[idx] = True
+    return basis
+
+
+def _compute_transport_potentials(
+    cost_matrix: np.ndarray, basis: np.ndarray
+) -> tuple[np.ndarray, np.ndarray]:
+    """Compute dual potentials for the transport problem."""
+
+    m, n = cost_matrix.shape
+    u = np.full(m, np.nan)
+    v = np.full(n, np.nan)
+    u[0] = 0.0
+    queue: deque[tuple[str, int]] = deque([("row", 0)])
+    while queue:
+        axis, idx = queue.popleft()
+        if axis == "row":
+            i = idx
+            for j in range(n):
+                if basis[i, j]:
+                    if np.isnan(v[j]):
+                        v[j] = cost_matrix[i, j] - u[i]
+                        queue.append(("col", j))
+        else:
+            j = idx
+            for i in range(m):
+                if basis[i, j]:
+                    if np.isnan(u[i]):
+                        u[i] = cost_matrix[i, j] - v[j]
+                        queue.append(("row", i))
+    u = np.nan_to_num(u, nan=0.0)
+    v = np.nan_to_num(v, nan=0.0)
+    return u, v
+
+
+def _find_transport_cycle(basis: np.ndarray, start: tuple[int, int]) -> list[tuple[int, int]] | None:
+    """Construct the alternating cycle created by introducing ``start``."""
+
+    m, n = basis.shape
+    i0, j0 = start
+    adjacency: dict[tuple[str, int], list[tuple[str, int]]] = {}
+    for i in range(m):
+        adjacency[("row", i)] = []
+    for j in range(n):
+        adjacency[("col", j)] = []
+    for i in range(m):
+        for j in range(n):
+            if basis[i, j]:
+                adjacency[("row", i)].append(("col", j))
+                adjacency[("col", j)].append(("row", i))
+
+    start_node = ("row", int(i0))
+    target_node = ("col", int(j0))
+    queue: deque[tuple[str, int]] = deque([start_node])
+    prev: dict[tuple[str, int], tuple[str, int] | None] = {start_node: None}
+    found = False
+    while queue:
+        node = queue.popleft()
+        if node == target_node:
+            found = True
+            break
+        for neigh in adjacency[node]:
+            if neigh not in prev:
+                prev[neigh] = node
+                queue.append(neigh)
+    if not found:
+        return None
+
+    path: list[tuple[str, int]] = []
+    node = target_node
+    while node is not None:
+        path.append(node)
+        node = prev[node]
+    path.reverse()
+
+    cycle: list[tuple[int, int]] = [start]
+    for idx in range(len(path) - 1):
+        a = path[idx]
+        b = path[idx + 1]
+        if a[0] == "row" and b[0] == "col":
+            cycle.append((a[1], b[1]))
+        elif a[0] == "col" and b[0] == "row":
+            cycle.append((b[1], a[1]))
+    cycle.append(start)
+    return cycle
 
 
 class MeanRicciFeature(BaseFeature):

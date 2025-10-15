@@ -15,8 +15,14 @@ Tests verify:
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
+
+import core.indicators.ricci as ricci
+
+nx = pytest.importorskip("networkx")
 
 from core.indicators.ricci import (
     MeanRicciFeature,
@@ -40,7 +46,8 @@ def test_local_distribution_normalizes_probabilities() -> None:
     edges = list(graph.edges())
     assert edges, "Graph must have edges for distribution test"
     node = edges[0][0]
-    probs = local_distribution(graph, node)
+    neigh, probs = local_distribution(graph, node)
+    assert neigh.size == probs.size
     assert abs(probs.sum() - 1.0) < 1e-9
 
 
@@ -51,6 +58,41 @@ def test_ricci_curvature_bounded_between_minus_one_and_one() -> None:
     for u, v in edges:
         kappa = ricci_curvature_edge(graph, u, v)
         assert -1.0 <= kappa <= 1.0, f"Curvature {kappa} outside bounds"
+
+
+def test_ricci_curvature_path_graph_is_flat() -> None:
+    graph = nx.Graph()
+    graph.add_edge(0, 1, weight=1.0)
+    graph.add_edge(1, 2, weight=1.0)
+    curvature = ricci_curvature_edge(graph, 0, 1)
+    assert curvature == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ricci_curvature_triangle_positive() -> None:
+    graph = nx.Graph()
+    graph.add_edge(0, 1, weight=1.0)
+    graph.add_edge(1, 2, weight=1.0)
+    graph.add_edge(0, 2, weight=1.0)
+    curvature = ricci_curvature_edge(graph, 0, 1)
+    assert curvature == pytest.approx(0.5, abs=1e-9)
+
+
+def test_ricci_curvature_transport_solvers_agree(monkeypatch: pytest.MonkeyPatch) -> None:
+    graph = nx.Graph()
+    graph.add_edge(0, 1, weight=1.0)
+    graph.add_edge(1, 2, weight=2.0)
+    graph.add_edge(2, 3, weight=1.5)
+    graph.add_edge(0, 3, weight=2.5)
+    graph.add_edge(1, 3, weight=1.2)
+
+    expected = ricci_curvature_edge(graph, 1, 3)
+
+    monkeypatch.setattr(ricci, "_scipy_linprog", None, raising=False)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        fallback = ricci_curvature_edge(graph, 1, 3)
+
+    assert fallback == pytest.approx(expected, rel=1e-6, abs=1e-6)
 
 
 def test_mean_ricci_feature_matches_function() -> None:
