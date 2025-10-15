@@ -86,6 +86,7 @@ nav:
   - Security:
       - Program Overview: ../SECURITY.md
       - Production Security Architecture: security/architecture.md
+      - Identity and Access Management: security/iam.md
       - Rate Limits & Host Protection: rate-limits-and-host-protection.md
   - Governance Records:
       - Architecture Decision Records: adr/index.md
