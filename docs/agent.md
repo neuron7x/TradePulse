@@ -127,11 +127,13 @@ Use `StrategyScheduler.run_pending()` in batch workflows to trigger due jobs
 explicitly, or `StrategyScheduler.start()` to keep evaluations running in a
 background thread. Pass `wait=False` to `run_pending()` when you want to
 dispatch work but immediately return to other orchestration logic—the scheduler
-tracks completion asynchronously and keeps retry/backoff semantics intact.
-When shutting down long-lived services call `StrategyScheduler.shutdown()` so
-worker threads drain gracefully. Introspection helpers expose per-job status,
-last error, and evaluation results so operators can build monitoring dashboards
-or trigger alerts. 【F:core/agent/scheduler.py†L208-L402】
+still returns any jobs that completed since the previous call so results can be
+streamed to downstream services without blocking. Pair this with
+`StrategyScheduler.drain_failures()` to surface exceptions captured from
+background workers. When shutting down long-lived services call
+`StrategyScheduler.shutdown()` so worker threads drain gracefully. Introspection
+helpers expose per-job status, last error, and evaluation results so operators
+can build monitoring dashboards or trigger alerts. 【F:core/agent/scheduler.py†L208-L420】
 
 ---
 

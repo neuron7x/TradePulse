@@ -7,9 +7,10 @@ import logging
 import random
 import threading
 import time
+from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Sequence
+from typing import Any, Callable, Deque, Dict, Sequence, Tuple
 
 from .evaluator import EvaluationResult, StrategyBatchEvaluator
 from .strategy import Strategy
@@ -154,6 +155,8 @@ class StrategyScheduler:
         self._lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._completed: Deque[Tuple[str, tuple[EvaluationResult, ...]]] = deque()
+        self._failures: Deque[Tuple[str, BaseException]] = deque()
 
     # ------------------------------------------------------------------
     # Registration & lifecycle management
@@ -214,8 +217,9 @@ class StrategyScheduler:
 
         Returns:
             Mapping of job name to a list of :class:`EvaluationResult` objects
-            produced during this invocation. The mapping is empty when
-            ``wait=False`` because work continues in the background.
+            that finished since the previous call. When ``wait=False`` the
+            scheduler still returns jobs that completed in the background while
+            new work continues executing asynchronously.
         """
 
         now = self._time()
@@ -234,17 +238,14 @@ class StrategyScheduler:
             future = self._submit_job(state)
             futures.append((state, future))
 
-        if not wait:
-            return {}
+        if wait:
+            for state, future in futures:
+                try:
+                    future.result()
+                except Exception:  # pragma: no cover - callback already recorded failure
+                    continue
 
-        results: Dict[str, list[EvaluationResult]] = {}
-        for state, future in futures:
-            try:
-                outcome = future.result()
-            except Exception:  # pragma: no cover - callback already recorded failure
-                continue
-            results[state.job.name] = list(outcome)
-        return results
+        return self._drain_completed()
 
     def start(self, *, daemon: bool = True) -> None:
         """Start the background scheduling loop."""
@@ -302,6 +303,16 @@ class StrategyScheduler:
                 return None
             return tuple(state.last_results)
 
+    def drain_failures(self) -> dict[str, BaseException]:
+        """Return and clear any failures recorded since the last drain."""
+
+        errors: dict[str, BaseException] = {}
+        with self._lock:
+            while self._failures:
+                job_name, error = self._failures.popleft()
+                errors[job_name] = error
+        return errors
+
     # ------------------------------------------------------------------
     # Internal helpers
     def _snapshot(self, state: _JobState) -> StrategyJobStatus:
@@ -354,6 +365,7 @@ class StrategyScheduler:
             state.in_flight = False
             state.future = None
             state.schedule_next(base=completed_at, rng=self._rng)
+            self._completed.append((job.name, results))
 
         if job.on_complete is not None:
             try:
@@ -377,6 +389,7 @@ class StrategyScheduler:
                 self._max_backoff,
             )
             state.schedule_next(base=failed_at, rng=self._rng, interval=backoff)
+            self._failures.append((job.name, error))
 
         if job.on_error is not None:
             try:
@@ -406,6 +419,14 @@ class StrategyScheduler:
         next_run = min(next_times)
         delay = max(0.0, next_run - now)
         return min(delay if delay > 0 else 0.0, self._max_sleep)
+
+    def _drain_completed(self) -> Dict[str, list[EvaluationResult]]:
+        results: Dict[str, list[EvaluationResult]] = {}
+        with self._lock:
+            while self._completed:
+                job_name, completed = self._completed.popleft()
+                results[job_name] = list(completed)
+        return results
 
 
 __all__ = ["StrategyJob", "StrategyJobStatus", "StrategyScheduler"]

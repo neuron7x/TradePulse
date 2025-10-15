@@ -141,6 +141,10 @@ def test_scheduler_applies_backoff_on_failure() -> None:
     assert status.result_count == 0
     first_backoff = status.next_run_at - clock.now()
     assert pytest.approx(first_backoff) == 4.0
+    errors = scheduler.drain_failures()
+    assert list(errors) == ["failing"]
+    assert isinstance(errors["failing"], RuntimeError)
+    assert scheduler.drain_failures() == {}
 
     clock.advance(first_backoff)
     scheduler.run_pending()
@@ -310,3 +314,7 @@ def test_run_pending_can_dispatch_without_waiting() -> None:
         pytest.fail("job never completed")
 
     assert status.result_count == 1
+    last_results = scheduler.get_last_results("async-job")
+    assert last_results is not None
+    drained = scheduler.run_pending()
+    assert drained == {"async-job": list(last_results)}
