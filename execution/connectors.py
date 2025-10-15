@@ -12,9 +12,16 @@ from domain import Order
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 
 try:  # pragma: no cover - optional import for live connectors
-    from execution.adapters import BinanceRESTConnector, CoinbaseRESTConnector
+    from execution.adapters import (
+        BinanceFuturesRESTConnector,
+        BinanceRESTConnector,
+        BybitRESTConnector,
+        CoinbaseRESTConnector,
+    )
 except Exception:  # pragma: no cover - adapters may not be available in minimal installs
     BinanceRESTConnector = None  # type: ignore[assignment]
+    BinanceFuturesRESTConnector = None  # type: ignore[assignment]
+    BybitRESTConnector = None  # type: ignore[assignment]
     CoinbaseRESTConnector = None  # type: ignore[assignment]
 
 
@@ -208,5 +215,7 @@ __all__ = [
     "KrakenConnector",
     "CoinbaseConnector",
     "BinanceRESTConnector",
+    "BinanceFuturesRESTConnector",
+    "BybitRESTConnector",
     "CoinbaseRESTConnector",
 ]

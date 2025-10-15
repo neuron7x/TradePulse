@@ -1,0 +1,30 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    jsonData:
+      timeInterval: 15s
+  - name: TimescaleDB
+    type: postgres
+    url: timescaledb:5432
+    access: proxy
+    user: tradepulse
+    secureJsonData:
+      password: tradepulse
+    jsonData:
+      database: tradepulse
+      sslmode: disable
+      timescaledb: true
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    access: proxy
+    url: http://clickhouse:8123
+    jsonData:
+      defaultDatabase: tradepulse
+      username: tradepulse
+    secureJsonData:
+      password: tradepulse

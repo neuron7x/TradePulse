@@ -3,10 +3,87 @@ version: '3.9'
 services:
   tradepulse:
     build: .
+    environment:
+      - TIMESCALEDB_DSN=postgresql://tradepulse:tradepulse@timescaledb:5432/tradepulse
+      - CLICKHOUSE_HOST=clickhouse
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
     ports: ["8001:8001"]
     restart: unless-stopped
+    depends_on:
+      - timescaledb
+      - clickhouse
+      - otel-collector
   prometheus:
     image: prom/prometheus
     volumes:
       - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
     ports: ["9090:9090"]
+    depends_on:
+      - otel-collector
+  grafana:
+    image: grafana/grafana:10.4.3
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning
+      - grafana-data:/var/lib/grafana
+    ports: ["3000:3000"]
+    depends_on:
+      - prometheus
+      - timescaledb
+      - clickhouse
+  timescaledb:
+    image: timescale/timescaledb-ha:pg16-latest
+    environment:
+      - POSTGRES_DB=tradepulse
+      - POSTGRES_USER=tradepulse
+      - POSTGRES_PASSWORD=tradepulse
+    ports: ["5432:5432"]
+    volumes:
+      - timescaledb-data:/var/lib/postgresql/data
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    environment:
+      - CLICKHOUSE_DB=tradepulse
+      - CLICKHOUSE_USER=tradepulse
+      - CLICKHOUSE_PASSWORD=tradepulse
+    ports: ["8123:8123", "9000:9000"]
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./observability/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "4318:4318"
+      - "9464:9464"
+  traefik:
+    image: traefik:3.2
+    command:
+      - --providers.docker=true
+      - --entrypoints.web.address=:80
+    ports: ["80:80"]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - tradepulse
+      - grafana
+      - prometheus
+    labels:
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`)"
+      - "traefik.http.routers.grafana.service=grafana"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.localhost`)"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.tradepulse.rule=Host(`tradepulse.localhost`)"
+      - "traefik.http.services.tradepulse.loadbalancer.server.port=8001"
+
+volumes:
+  grafana-data:
+  timescaledb-data:
+  clickhouse-data:
