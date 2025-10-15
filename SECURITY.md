@@ -158,6 +158,58 @@ The helper script wraps `pip-audit` with consistent flags, emits a human-readabl
 and optionally writes a JSON report (see `python scripts/dependency_audit.py --help`). Use
 `--include-dev` to cover development tooling as well.
 
+#### Encryption & Key Management
+
+- **In transit**: Terminate all external-facing services with **TLS 1.3** using modern cipher
+  suites (e.g., `TLS_AES_256_GCM_SHA384`). Redirect plaintext HTTP traffic to HTTPS and enable
+  HSTS.
+- **At rest**: Encrypt storage volumes, S3 buckets, databases, and message queues with
+  **AES-256** or stronger. Confirm that managed services (RDS, S3, EBS, etc.) have encryption
+  toggled on by default.
+- **Key management**: Store encryption keys in a dedicated KMS or HSM (e.g., AWS KMS, Vault).
+  Enforce automated key rotation at least annually, grant least-privilege access to keys, and
+  audit key usage via centralized logging.
+
+#### Automated Security Scanning
+
+- **Infrastructure as Code (IaC)**: Integrate tools such as `terraform validate`, `checkov`, or
+  `tfsec` into CI to evaluate Terraform/CloudFormation manifests on every merge request.
+- **Container image scanning**: Scan images during build and before deployment with
+  `trivy`/`grype`, and block promotion when high/critical findings exist.
+- **Continuous monitoring**: Schedule nightly scans of production registries and IaC sources to
+  detect drift or newly disclosed CVEs.
+
+#### Dynamic Testing & Penetration Testing
+
+- **DAST**: Run authenticated dynamic scans (e.g., OWASP ZAP) against staging environments as
+  part of the release pipeline. Ensure scans cover core APIs, web UI, and critical workflows.
+- **Penetration testing**: Commission manual testing for every major release or at least twice
+  per year. Scope should include application, APIs, and supporting infrastructure.
+- **Remediation SLAs**: Resolve critical findings within **7 days**, high severity within
+  **30 days**, and medium severity within **90 days**. Track remediation status in the security
+  backlog and verify fixes with re-tests.
+
+#### Centralized Logging, Monitoring, and Response
+
+- **SIEM/SOAR**: Forward application, infrastructure, authentication, and audit logs to the
+  central SIEM (e.g., Splunk, ELK, Sentinel) with retention policies that meet compliance needs.
+- **Alerting**: Define alert rules for authentication anomalies, privileged changes, network
+  anomalies, and critical application errors. Route alerts to the on-call rotation with clear
+  severity classifications.
+- **Response playbooks**: Maintain SOAR automation and manual runbooks for credential compromise,
+  suspicious deployments, data exfiltration, and availability incidents. Review and exercise
+  playbooks quarterly.
+
+#### Backup & Disaster Recovery
+
+- **Backups**: Automate encrypted (AES-256) backups for databases, configuration stores, and
+  object storage. Store backups in separate accounts/regions with immutable retention policies.
+- **RPO/RTO targets**: Document Recovery Point Objective (**RPO**) and Recovery Time Objective
+  (**RTO**) for each tiered service (e.g., Tier 0: RPO ≤ 15 min, RTO ≤ 1 hr) and align backup
+  frequency accordingly.
+- **Testing**: Perform disaster recovery tests at least annually, validating restore procedures,
+  failover automation, and communication plans. Capture lessons learned and update runbooks.
+
 ```bash
 # Direct invocation if you prefer to call pip-audit yourself
 pip-audit -r requirements.txt --no-deps
