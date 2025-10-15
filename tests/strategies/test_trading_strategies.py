@@ -109,3 +109,13 @@ def test_kuramoto_strategy_small_window_breakout() -> None:
     signals = strategy.generate_signals(data)
 
     assert (signals["signal"] != "Hold").any()
+
+
+def test_kuramoto_strategy_requires_close_column(sample_data: pd.DataFrame) -> None:
+    """KuramotoStrategy should enforce presence of the close column."""
+
+    strategy = KuramotoStrategy(symbol="TEST", params={})
+    incomplete = sample_data.drop(columns="close")
+
+    with pytest.raises(ValueError, match="DataFrame must contain 'close' column"):
+        strategy.generate_signals(incomplete)
