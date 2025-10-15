@@ -9,7 +9,11 @@ import pytest
 
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick as Ticker
-from src.data.ingestion_service import CacheEntrySnapshot, DataIngestionCacheService
+from src.data.ingestion_service import (
+    CacheEntrySnapshot,
+    DataIngestionCacheService,
+    DataIntegrityError,
+)
 
 
 def _tick(ts: datetime, price: float, *, symbol: str = "BTCUSD", venue: str = "BINANCE") -> Ticker:
@@ -59,6 +63,62 @@ def test_cache_ticks_validates_symbol_and_venue() -> None:
 
     with pytest.raises(ValueError):
         service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+
+
+def test_cache_frame_rejects_nan_values() -> None:
+    index = pd.DatetimeIndex(
+        [
+            datetime(2024, 1, 1, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, minute=1, tzinfo=timezone.utc),
+        ]
+    )
+    frame = pd.DataFrame({"price": [100.0, float("nan")], "volume": [1.0, 2.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    with pytest.raises(DataIntegrityError, match="NaN"):
+        service.cache_frame(
+            frame,
+            layer="raw",
+            symbol="BTCUSD",
+            venue="BINANCE",
+            timeframe="1min",
+        )
+
+
+def test_cache_frame_rejects_duplicate_timestamps() -> None:
+    ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    index = pd.DatetimeIndex([ts, ts])
+    frame = pd.DataFrame({"price": [100.0, 101.0], "volume": [1.0, 2.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    with pytest.raises(DataIntegrityError, match="duplicate"):
+        service.cache_frame(
+            frame,
+            layer="raw",
+            symbol="BTCUSD",
+            venue="BINANCE",
+            timeframe="1min",
+        )
+
+
+def test_cache_frame_rejects_frequency_mismatch() -> None:
+    index = pd.DatetimeIndex(
+        [
+            datetime(2024, 1, 1, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, minute=2, tzinfo=timezone.utc),
+        ]
+    )
+    frame = pd.DataFrame({"price": [100.0, 101.0], "volume": [1.0, 2.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    with pytest.raises(DataIntegrityError, match="frequency"):
+        service.cache_frame(
+            frame,
+            layer="features",
+            symbol="BTCUSD",
+            venue="BINANCE",
+            timeframe="1min",
+        )
 
 
 def test_get_cached_frame_supports_ranges() -> None:
@@ -118,7 +178,8 @@ def test_cache_snapshot_returns_sorted_entries() -> None:
     )
     service = DataIngestionCacheService(clock=clock)
     service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
-    service.cache_ticks(ticks, layer="features", symbol="BTCUSD", venue="BINANCE", timeframe="5min")
+    feature_ticks = [_tick(base.replace(minute=i * 5), 100.0 + i) for i in range(2)]
+    service.cache_ticks(feature_ticks, layer="features", symbol="BTCUSD", venue="BINANCE", timeframe="5min")
 
     snapshot = service.cache_snapshot()
 
