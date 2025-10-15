@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import AsyncIterator, Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import (
+    AsyncIterator,
+    Callable,
+    Iterable,
+    Mapping,
+    MutableMapping,
+    Sequence,
+)
 
 import numpy as np
 import pandas as pd
@@ -152,6 +159,20 @@ class TradePulseSystem:
         """Return the canonical names of configured connectors."""
 
         return tuple(sorted(self._connectors.keys()))
+
+    def get_connector(self, venue: str) -> ExecutionConnector:
+        """Return the connector registered for ``venue``."""
+
+        key = venue.lower()
+        try:
+            return self._connectors[key]
+        except KeyError as exc:
+            raise LookupError(f"Unknown execution venue: {venue}") from exc
+
+    def connector_credentials(self, venue: str) -> Mapping[str, str] | None:
+        """Return credentials associated with ``venue`` if configured."""
+
+        return self._credentials.get(venue.lower())
 
     # ------------------------------------------------------------------
     # Data ingestion & feature engineering
