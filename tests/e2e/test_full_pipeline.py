@@ -5,6 +5,7 @@ import json
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from cli.tradepulse_cli import _load_prices, _resolve_strategy, _run_backtest, _write_frame
 from core.config.cli_models import (
@@ -20,6 +21,7 @@ from core.reporting import generate_markdown_report, render_markdown_to_html, re
 from tests.tolerances import FLOAT_ABS_TOL
 
 
+@pytest.mark.slow
 def test_pipeline_from_scratch(tmp_path) -> None:
     """Validate the complete analytics pipeline on synthetic data."""
     timestamps = pd.date_range("2024-01-01", periods=240, freq="1min")

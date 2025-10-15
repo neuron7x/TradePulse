@@ -21,6 +21,17 @@ For a capability-to-suite traceability view, consult the
 [regression test matrix](tests/TEST_PLAN.md) which links major product behaviours to the
 automated coverage that protects them.
 
+## Continuous Integration Gates
+
+Every pull request fans out across Python 3.11–3.13. Each run provisions a shared
+virtual environment via `uv`, executes the coverage-enforced unit/integration suite,
+and now executes the end-to-end smoke harness (`pytest tests/e2e/ -m "not slow and not flaky"`).
+
+Scenarios tagged with [`@pytest.mark.slow`](pytest.ini) (such as the full pipeline
+regression) remain available for manual and nightly execution without slowing down
+PR feedback, while the smoke path still guards against regressions in CLI wiring
+and reporting.
+
 ## Test Structure
 
 ```
@@ -137,7 +148,13 @@ bandit -r tests/utils tests/scripts -ll
 
 **E2E smoke tests (pytest harness):**
 ```bash
-pytest tests/e2e/
+pytest tests/e2e/ -m "not slow and not flaky"
+```
+
+Include slow scenarios (e.g., `test_full_pipeline.py`) when you need full pipeline
+confidence:
+```bash
+pytest tests/e2e/ -m slow
 ```
 
 **Cross-architecture indicator parity (CPU/GPU/ARM simulacrum):**
