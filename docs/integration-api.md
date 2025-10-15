@@ -571,6 +571,61 @@ class Strategy(ABC):
 
 See [Extending TradePulse](extending.md) for detailed strategy implementation examples.
 
+### End-to-end orchestration helper
+
+TradePulse ships with :class:`TradePulseOrchestrator`, a high-level façade that
+assembles ingestion, feature engineering, strategy execution, and live order
+submission behind a single interface. This makes it straightforward to stitch
+the Python analytics loop to UI or API layers without rewriting the wiring in
+every service.
+
+```python
+from pathlib import Path
+import numpy as np
+
+from application.system_orchestrator import (
+    ExecutionRequest,
+    MarketDataSource,
+    TradePulseOrchestrator,
+    build_tradepulse_system,
+)
+
+data_root = Path("data")
+system = build_tradepulse_system(allowed_data_roots=[data_root])
+orchestrator = TradePulseOrchestrator(system)
+
+source = MarketDataSource(
+    path=data_root / "sample.csv",
+    symbol="BTCUSDT",
+    venue="BINANCE",
+)
+
+def momentum_strategy(prices: np.ndarray) -> np.ndarray:
+    window = 10
+    rolling = np.convolve(prices, np.ones(window) / window, mode="valid")
+    padded = np.concatenate([np.repeat(rolling[0], window - 1), rolling])
+    return np.where(prices >= padded, 1.0, -1.0)
+
+run = orchestrator.run_strategy(source, strategy=momentum_strategy)
+
+# Forward the latest signal to the simulated Binance connector
+orchestrator.ensure_live_loop()
+order = orchestrator.submit_signal(
+    ExecutionRequest(
+        signal=run.signals[-1],
+        venue="binance",
+        quantity=0.1,
+        price=float(run.feature_frame[system.feature_pipeline.config.price_col].iloc[-1]),
+    )
+)
+
+print(order.order_id, order.side, order.quantity)
+```
+
+The orchestrator exposes the resulting pandas frames and signal payloads so
+callers can pipe analytics into dashboards, persistence layers, or downstream
+services using the documented integration contracts.
+
 ---
 
 ## Metrics API
