@@ -12,7 +12,9 @@ from fastapi import HTTPException
 
 # Ensure module import does not attempt to build the FastAPI app during tests.
 os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "test-admin-token")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
 
 from application.api.service import OnlineSignalForecaster, PredictionResponse
 from application.trading import signal_to_dto

@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
 
 from application.api.service import (  # noqa: E402  - environment variables must be set before import
     FeatureRequest,

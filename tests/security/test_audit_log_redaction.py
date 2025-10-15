@@ -6,8 +6,15 @@ import pytest
 
 from src.audit.audit_logger import AuditLogger
 
+from tests.fixtures.conftest import SecretManagerHarness
 
-def test_audit_logger_redacts_sensitive_values_from_logs(caplog: pytest.LogCaptureFixture) -> None:
+AUDIT_SECRET_ID = "tests/security/audit-secret"
+AUDIT_SECRET_VALUE = "UnitTest-AuditSecret-555!"
+
+
+def test_audit_logger_redacts_sensitive_values_from_logs(
+    caplog: pytest.LogCaptureFixture, secret_manager_harness: SecretManagerHarness
+) -> None:
     sensitive_details = {
         "api_key": "s3cr3t-token",
         "nested": {"refreshToken": "refresh-123"},
@@ -19,7 +26,9 @@ def test_audit_logger_redacts_sensitive_values_from_logs(caplog: pytest.LogCaptu
     }
 
     with caplog.at_level(logging.INFO, logger="tradepulse.audit"):
-        audit = AuditLogger(secret="unit-secret")
+        harness = secret_manager_harness
+        harness.provider.set_secret(AUDIT_SECRET_ID, AUDIT_SECRET_VALUE)
+        audit = AuditLogger(secret_manager=harness.manager, secret_id=AUDIT_SECRET_ID)
         record = audit.log_event(
             event_type="test",
             actor="tester",
@@ -33,7 +42,7 @@ def test_audit_logger_redacts_sensitive_values_from_logs(caplog: pytest.LogCaptu
     assert "refresh-123" not in caplog.text
     assert "top-secret" not in caplog.text
 
-    record_entry = caplog.records[0]
+    record_entry = next(rec for rec in caplog.records if hasattr(rec, "audit"))
     redacted_details = record_entry.audit["details"]
 
     assert redacted_details["api_key"] == "[REDACTED]"

@@ -15,6 +15,7 @@ from jwt.algorithms import RSAAlgorithm
 from starlette.requests import Request
 
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
 os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
 os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")

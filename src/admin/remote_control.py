@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.audit.audit_logger import AuditLogger
+from src.security.token_authenticator import TokenAuthenticator
 from src.risk.risk_manager import KillSwitchState, RiskManagerFacade
 
 __all__ = [
@@ -152,6 +153,7 @@ def create_remote_control_router(
     identity_dependency: Callable[..., AdminIdentity | Awaitable[AdminIdentity]],
     *,
     rate_limiter: AdminRateLimiter | None = None,
+    token_authenticator: TokenAuthenticator | None = None,
 ) -> APIRouter:
     """Create a router exposing secure administrative endpoints."""
 
@@ -169,6 +171,16 @@ def create_remote_control_router(
 
     limiter = rate_limiter or AdminRateLimiter()
 
+    def enforce_admin_token(request: Request) -> None:
+        if token_authenticator is None:
+            return
+        provided = request.headers.get("X-Admin-Token") or ""
+        if not token_authenticator.authenticate(provided):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid administrative token.",
+            )
+
     async def enforce_admin_rate_limit(request: Request) -> None:
         identifier = _resolve_ip(request)
         await limiter.check(identifier)
@@ -184,6 +196,7 @@ def create_remote_control_router(
         payload: KillSwitchRequest,
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
+        __: None = Depends(enforce_admin_token),
         identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
@@ -215,6 +228,7 @@ def create_remote_control_router(
     async def read_kill_switch_state(
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
+        __: None = Depends(enforce_admin_token),
         identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),

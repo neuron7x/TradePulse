@@ -99,9 +99,18 @@ except ImportError:  # pragma: no cover - Python <3.9 fallback
 
 import pytest
 
+from src.security import SecretNotFoundError, get_secret_manager
+
 from core.utils.determinism import apply_thread_determinism
 
 apply_thread_determinism(os.environ)
+
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "DevAuditSecret-ChangeMe123!")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "DevAdminToken-ChangeMe456!")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_TTL_SECONDS", "86400")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_TTL_SECONDS", "3600")
 
 ROOT = pathlib.Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
@@ -294,6 +303,50 @@ def pytest_pyfunc_call(pyfuncitem):  # type: ignore[override]
             asyncio.set_event_loop(None)
             loop.close()
     return True
+
+
+_SECRET_POLICY_CONFIG: dict[str, timedelta] = {
+    "TRADEPULSE_AUDIT_SECRET_ID": timedelta(hours=1),
+    "TRADEPULSE_ADMIN_TOKEN_ID": timedelta(minutes=30),
+}
+_MIN_SECRET_LENGTH = 16
+
+
+def _is_complex_secret(secret: str) -> bool:
+    has_upper = any(char.isupper() for char in secret)
+    has_lower = any(char.islower() for char in secret)
+    has_digit = any(char.isdigit() for char in secret)
+    has_symbol = any(not char.isalnum() for char in secret)
+    return len(secret) >= _MIN_SECRET_LENGTH and sum((has_upper, has_lower, has_digit, has_symbol)) >= 3
+
+
+def _enforce_secret_policies() -> None:
+    manager = get_secret_manager()
+    now = datetime.now(timezone.utc)
+    violations: list[str] = []
+    for env_var, min_ttl in _SECRET_POLICY_CONFIG.items():
+        secret_id = os.environ.get(env_var)
+        if not secret_id:
+            violations.append(f"{env_var} is not set; configure the secret identifier")
+            continue
+        try:
+            secret = manager.get_secret(secret_id)
+        except SecretNotFoundError:
+            violations.append(f"{secret_id} (configured via {env_var}) is missing from the secret manager")
+            continue
+        if not _is_complex_secret(secret.value):
+            violations.append(f"{secret_id} does not meet complexity requirements")
+        if secret.ttl(now=now) < min_ttl:
+            violations.append(
+                f"{secret_id} TTL below required minimum of {int(min_ttl.total_seconds())} seconds"
+            )
+    if violations:
+        message = "Secret policy validation failed:\n - " + "\n - ".join(sorted(set(violations)))
+        raise RuntimeError(message)
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:  # type: ignore[override]
+    _enforce_secret_policies()
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

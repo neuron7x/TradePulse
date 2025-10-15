@@ -6,11 +6,14 @@ import hashlib
 import hmac
 import json
 import logging
+from threading import RLock
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Protocol
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
+
+from src.security.secret_manager import SecretManager, SecretValue
 
 __all__ = ["AuditLogger", "AuditRecord", "AuditSink", "HttpAuditSink"]
 
@@ -72,6 +75,7 @@ class AuditRecord(BaseModel):
         default_factory=dict, description="Additional structured context for the event."
     )
     signature: str = Field(..., description="HMAC-SHA256 signature of the event payload.")
+    key_version: str = Field(..., description="Identifier for the signing secret version.")
 
     model_config = ConfigDict(frozen=True)
 
@@ -88,24 +92,25 @@ class AuditLogger:
 
     def __init__(
         self,
-        secret: str,
+        secret_manager: SecretManager,
         *,
+        secret_id: str,
         logger: logging.Logger | None = None,
         sink: AuditSink | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not secret:
-            raise ValueError("secret must be provided for audit logging")
-        self._key = secret.encode("utf-8")
+        if not secret_id:
+            raise ValueError("secret_id must be provided for audit logging")
+        self._secret_manager = secret_manager
+        self._secret_id = secret_id
         self._logger = logger or logging.getLogger("tradepulse.audit")
         self._sink = sink
         self._clock = clock or (lambda: datetime.now(timezone.utc))
-
-    def _sign(self, payload: Mapping[str, Any]) -> str:
-        """Return an HMAC signature for the payload."""
-
-        message = _canonical_json(payload).encode("utf-8")
-        return hmac.new(self._key, message, hashlib.sha256).hexdigest()
+        self._lock = RLock()
+        self._keys_by_version: dict[str, bytes] = {}
+        self._current_version: str | None = None
+        self._load_secret()
+        self._secret_manager.subscribe(secret_id, self._on_secret_rotation)
 
     def log_event(
         self,
@@ -125,8 +130,9 @@ class AuditLogger:
             "timestamp": timestamp,
             "details": dict(details or {}),
         }
-        signature = self._sign(payload)
-        record = AuditRecord(**payload, signature=signature)
+        key, version = self._current_key()
+        signature = hmac.new(key, _canonical_json(payload).encode("utf-8"), hashlib.sha256).hexdigest()
+        record = AuditRecord(**payload, signature=signature, key_version=version)
         self._log_record(record)
         if self._sink is not None:
             self._sink(record)
@@ -142,13 +148,57 @@ class AuditLogger:
             "timestamp": _ensure_utc(record.timestamp),
             "details": dict(record.details),
         }
-        expected = self._sign(payload)
+        key = self._key_for_version(record.key_version)
+        if key is None:
+            return False
+        message = _canonical_json(payload).encode("utf-8")
+        expected = hmac.new(key, message, hashlib.sha256).hexdigest()
         return hmac.compare_digest(expected, record.signature)
 
     def _log_record(self, record: AuditRecord) -> None:
         audit_payload = record.model_dump()
         audit_payload["details"] = _redact_sensitive_payload(audit_payload["details"])
         self._logger.info("audit.event", extra={"audit": audit_payload})
+
+    def _current_key(self) -> tuple[bytes, str]:
+        with self._lock:
+            version = self._current_version
+            key = self._keys_by_version.get(version or "")
+        if version is None or key is None:
+            secret = self._load_secret()
+            with self._lock:
+                version = self._current_version
+                key = self._keys_by_version[version]
+        return key, version  # type: ignore[arg-type]
+
+    def _key_for_version(self, version: str) -> bytes | None:
+        with self._lock:
+            key = self._keys_by_version.get(version)
+        return key
+
+    def _load_secret(self) -> SecretValue:
+        secret = self._secret_manager.get_secret(self._secret_id)
+        self._store_secret(secret)
+        return secret
+
+    def _store_secret(self, secret: SecretValue) -> None:
+        key_bytes = secret.value.encode("utf-8")
+        with self._lock:
+            self._keys_by_version[secret.version] = key_bytes
+            self._current_version = secret.version
+        self._logger.info(
+            "audit.secret.loaded",
+            extra={
+                "audit_secret": {
+                    "id": self._secret_id,
+                    "version": secret.version,
+                    "expires_at": secret.expires_at.isoformat(),
+                }
+            },
+        )
+
+    def _on_secret_rotation(self, secret: SecretValue) -> None:
+        self._store_secret(secret)
 
 
 class HttpAuditSink:

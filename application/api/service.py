@@ -30,6 +30,7 @@ from execution.risk import RiskLimits, RiskManager
 from src.admin.remote_control import AdminIdentity, AdminRateLimiter, create_remote_control_router
 from src.audit.audit_logger import AuditLogger, HttpAuditSink
 from src.risk.risk_manager import RiskManagerFacade
+from src.security import SecretNotFoundError, TokenAuthenticator, get_secret_manager
 
 
 @dataclass(slots=True)
@@ -410,8 +411,10 @@ def create_app(
         resolved_settings = settings or AdminApiSettings()
     except ValidationError as exc:  # pragma: no cover - defensive branch
         alias_map = {
-            "audit_secret": "TRADEPULSE_AUDIT_SECRET",
-            "AUDIT_SECRET": "TRADEPULSE_AUDIT_SECRET",
+            "audit_secret_id": "TRADEPULSE_AUDIT_SECRET_ID",
+            "AUDIT_SECRET_ID": "TRADEPULSE_AUDIT_SECRET_ID",
+            "admin_token_id": "TRADEPULSE_ADMIN_TOKEN_ID",
+            "ADMIN_TOKEN_ID": "TRADEPULSE_ADMIN_TOKEN_ID",
             "admin_subject": "TRADEPULSE_ADMIN_SUBJECT",
             "ADMIN_SUBJECT": "TRADEPULSE_ADMIN_SUBJECT",
             "admin_rate_limit_max_attempts": "TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS",
@@ -452,7 +455,27 @@ def create_app(
         setattr(get_api_security_settings, "_instance", resolved_security_settings)
     require_bearer = verify_request_identity()
     require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
-    audit_secret_value = resolved_settings.audit_secret.get_secret_value()
+    secret_manager = get_secret_manager()
+    audit_secret_id = resolved_settings.audit_secret_id
+    try:
+        secret_manager.register_secret(audit_secret_id)
+    except SecretNotFoundError as exc:  # pragma: no cover - environment misconfiguration
+        raise RuntimeError(
+            f"Missing required secret material for {audit_secret_id}. Configure TRADEPULSE_AUDIT_SECRET_ID correctly."
+        ) from exc
+    admin_token_id = resolved_settings.admin_token_id
+    token_authenticator: TokenAuthenticator | None = None
+    if admin_token_id:
+        try:
+            secret_manager.register_secret(admin_token_id)
+        except SecretNotFoundError as exc:  # pragma: no cover - environment misconfiguration
+            raise RuntimeError(
+                (
+                    f"Missing required administrative token secret for {admin_token_id}. Configure "
+                    "TRADEPULSE_ADMIN_TOKEN_ID correctly."
+                )
+            ) from exc
+        token_authenticator = TokenAuthenticator(secret_manager, admin_token_id)
     rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
     rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
 
@@ -461,7 +484,11 @@ def create_app(
         audit_sink = HttpAuditSink(str(resolved_settings.audit_webhook_url))
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
-    audit_logger = AuditLogger(secret=audit_secret_value, sink=audit_sink)
+    audit_logger = AuditLogger(
+        secret_manager=secret_manager,
+        secret_id=audit_secret_id,
+        sink=audit_sink,
+    )
     admin_rate_limiter = AdminRateLimiter(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),
@@ -514,10 +541,14 @@ def create_app(
             audit_logger,
             identity_dependency=require_bearer_with_mtls,
             rate_limiter=admin_rate_limiter,
+            token_authenticator=token_authenticator,
         )
     )
     app.state.risk_manager = risk_manager_facade.risk_manager
     app.state.audit_logger = audit_logger
+    app.state.secret_manager = secret_manager
+    if token_authenticator is not None:
+        app.state.token_authenticator = token_authenticator
     app.state.admin_rate_limiter = admin_rate_limiter
     app.state.client_rate_limiter = limiter
     app.state.rate_limit_settings = resolved_rate_settings

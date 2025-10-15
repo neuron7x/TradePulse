@@ -12,7 +12,10 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "test-admin-token")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
 os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
 os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
@@ -88,15 +91,23 @@ def configured_app(
     security_context: Callable[..., str],
 ) -> FastAPI:
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
+    monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET_ID", raising=False)
+    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN_ID", raising=False)
+    monkeypatch.setenv("TRADEPULSE_AUDIT_SECRET", "unit-audit-secret-value")
+    monkeypatch.setenv("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
+    monkeypatch.setenv("TRADEPULSE_ADMIN_TOKEN", "unit-admin-token-value")
+    monkeypatch.setenv("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
     settings = AdminApiSettings(
-        audit_secret="unit-audit-secret",
+        audit_secret_id="TRADEPULSE_AUDIT_SECRET",
+        admin_token_id="TRADEPULSE_ADMIN_TOKEN",
     )
     return create_app(settings=settings)
 
 
 def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]) -> None:
-    monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
-    with pytest.raises(RuntimeError, match="TRADEPULSE_AUDIT_SECRET"):
+    monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET_ID", raising=False)
+    with pytest.raises(RuntimeError, match="TRADEPULSE_AUDIT_SECRET_ID"):
         create_app()
 
 
@@ -215,7 +226,7 @@ def test_admin_endpoints_require_client_certificate(
 ) -> None:
     client = TestClient(configured_app)
     token = security_context(subject="admin-user")
-    headers = _auth_headers(token)
+    headers = {**_auth_headers(token), "X-Admin-Token": "unit-admin-token-value"}
     response = client.get("/admin/kill-switch", headers=headers)
     assert response.status_code == 401
 
@@ -225,7 +236,7 @@ def test_admin_endpoints_accept_jwt_and_certificate(
 ) -> None:
     client = TestClient(configured_app)
     token = security_context(subject="admin-user")
-    headers = _auth_headers(token, client_cert=True)
+    headers = {**_auth_headers(token, client_cert=True), "X-Admin-Token": "unit-admin-token-value"}
 
     response = client.get("/admin/kill-switch", headers=headers)
     assert response.status_code == 200
@@ -248,7 +259,7 @@ def test_admin_endpoint_rejects_wrong_audience(
 ) -> None:
     client = TestClient(configured_app)
     bad_token = security_context(audience="different-audience")
-    headers = _auth_headers(bad_token, client_cert=True)
+    headers = {**_auth_headers(bad_token, client_cert=True), "X-Admin-Token": "unit-admin-token-value"}
     response = client.get("/admin/kill-switch", headers=headers)
     assert response.status_code == 401
 
@@ -260,7 +271,10 @@ def test_client_rate_limit_is_enforced(security_context: Callable[..., str]) -> 
     )
     limiter = SlidingWindowRateLimiter(InMemorySlidingWindowBackend(), rate_settings)
     app = create_app(
-        settings=AdminApiSettings(audit_secret="unit-audit-secret"),
+        settings=AdminApiSettings(
+            audit_secret_id="TRADEPULSE_AUDIT_SECRET",
+            admin_token_id="TRADEPULSE_ADMIN_TOKEN",
+        ),
         rate_limiter=limiter,
         rate_limit_settings=rate_settings,
     )
@@ -292,7 +306,12 @@ def test_trusted_host_middleware_blocks_unlisted_hosts(
     if hasattr(security_module.get_api_security_settings, "_instance"):
         delattr(security_module.get_api_security_settings, "_instance")
 
-    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"))
+    app = create_app(
+        settings=AdminApiSettings(
+            audit_secret_id="TRADEPULSE_AUDIT_SECRET",
+            admin_token_id="TRADEPULSE_ADMIN_TOKEN",
+        )
+    )
     client = TestClient(app)
     payload = _build_payload()
     token = security_context(subject="feature-user")
@@ -320,7 +339,12 @@ def test_payload_guard_rejects_large_and_suspicious_bodies(
     if hasattr(security_module.get_api_security_settings, "_instance"):
         delattr(security_module.get_api_security_settings, "_instance")
 
-    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"))
+    app = create_app(
+        settings=AdminApiSettings(
+            audit_secret_id="TRADEPULSE_AUDIT_SECRET",
+            admin_token_id="TRADEPULSE_ADMIN_TOKEN",
+        )
+    )
     client = TestClient(app)
     token = security_context(subject="feature-user")
 

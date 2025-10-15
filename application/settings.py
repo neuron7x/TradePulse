@@ -4,24 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import (
-    AnyUrl,
-    BaseModel,
-    Field,
-    HttpUrl,
-    PositiveFloat,
-    PositiveInt,
-    SecretStr,
-)
+from pydantic import AnyUrl, BaseModel, Field, HttpUrl, PositiveFloat, PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class AdminApiSettings(BaseSettings):
     """Configuration governing administrative controls and audit logging."""
 
-    audit_secret: SecretStr = Field(
+    audit_secret_id: str = Field(
         ...,
-        description="Secret used to sign administrative audit records.",
+        description="Identifier resolved by the secret manager for audit signing.",
+    )
+    admin_token_id: str | None = Field(
+        default=None,
+        description="Optional identifier for the shared administrative token secret.",
     )
     admin_subject: str = Field(
         "remote-admin",

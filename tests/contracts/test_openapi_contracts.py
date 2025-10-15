@@ -10,6 +10,9 @@ os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.tes
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
 os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET_ID", "TRADEPULSE_AUDIT_SECRET")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
+os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN_ID", "TRADEPULSE_ADMIN_TOKEN")
 
 from application.api.service import create_app  # noqa: E402  - env vars must be set before import
 from application.settings import AdminApiSettings
@@ -21,7 +24,8 @@ BASELINE = Path("interfaces/http/openapi/1.0.0.json")
 @pytest.fixture()
 def fastapi_app():
     settings = AdminApiSettings(
-        audit_secret="import-audit-secret",
+        audit_secret_id="TRADEPULSE_AUDIT_SECRET",
+        admin_token_id="TRADEPULSE_ADMIN_TOKEN",
     )
     return create_app(settings=settings)
 

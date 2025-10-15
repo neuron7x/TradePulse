@@ -17,11 +17,16 @@ spec:
           image: ghcr.io/neuron7x/tradepulse:latest
           imagePullPolicy: IfNotPresent
           env:
-            - name: TRADEPULSE_AUDIT_SECRET
+            - name: TRADEPULSE_AUDIT_SECRET_ID
               valueFrom:
                 secretKeyRef:
                   name: tradepulse-secrets
-                  key: audit-secret
+                  key: audit-secret-id
+            - name: TRADEPULSE_ADMIN_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: admin-token-id
             - name: TRADEPULSE_OAUTH2_ISSUER
               valueFrom:
                 secretKeyRef:
@@ -57,6 +62,6 @@ spec:
 # provisioned outside of source control. The deployment references the
 # following secrets, which should be created via your preferred secret
 # management workflow (kubectl, ExternalSecrets, etc.):
-#   * tradepulse-secrets with keys: audit-secret, oauth2-issuer,
-#     oauth2-audience, oauth2-jwks-uri
+#   * tradepulse-secrets with keys: audit-secret-id, admin-token-id,
+#     oauth2-issuer, oauth2-audience, oauth2-jwks-uri
 #   * tradepulse-mtls-client with keys: client-ca.pem, client.crl
