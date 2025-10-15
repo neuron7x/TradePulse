@@ -342,12 +342,16 @@ class OrderManagementSystem:
             raise LookupError(f"Unknown order_id: {order.order_id}")
 
         stored.status = OrderStatus(order.status)
-        stored.filled_quantity = float(order.filled_quantity)
-        stored.average_price = (
-            float(order.average_price)
-            if order.average_price is not None
-            else None
-        )
+
+        remote_filled = order.filled_quantity
+        if remote_filled is None:
+            remote_filled = stored.filled_quantity
+        stored.filled_quantity = float(remote_filled)
+
+        if order.average_price is None:
+            stored.average_price = None
+        else:
+            stored.average_price = float(order.average_price)
         stored.rejection_reason = order.rejection_reason
         stored.updated_at = getattr(order, "updated_at", stored.updated_at)
 

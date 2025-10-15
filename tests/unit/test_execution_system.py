@@ -444,6 +444,52 @@ def test_oms_sync_remote_state_updates_terminal_details(tmp_path, risk_manager: 
     assert record["filled_quantity"] == pytest.approx(placed.quantity)
 
 
+def test_oms_sync_remote_state_handles_missing_optional_fields(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_optional.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.25, price=20_750, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-optional")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    # Register a fill so local state contains non-default values.
+    oms.register_fill(placed.order_id, 0.25, 20_750)
+    assert placed.filled_quantity == pytest.approx(0.25)
+    assert placed.average_price == pytest.approx(20_750)
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=placed.order_id,
+        status=OrderStatus.CANCELLED,
+        filled_quantity=placed.filled_quantity,
+        average_price=placed.average_price,
+        rejection_reason=None,
+        created_at=placed.created_at,
+    )
+    object.__setattr__(remote, "filled_quantity", None)
+    object.__setattr__(remote, "average_price", None)
+
+    synced = oms.sync_remote_state(remote)
+
+    assert synced.status is OrderStatus.CANCELLED
+    assert synced.filled_quantity == pytest.approx(placed.filled_quantity)
+    assert synced.average_price == pytest.approx(placed.average_price)
+    assert not list(oms.outstanding())
+
+    payload = json.loads(state_path.read_text())
+    record = next(entry for entry in payload.get("orders", []) if entry["order_id"] == placed.order_id)
+    assert record["filled_quantity"] == pytest.approx(placed.filled_quantity)
+    assert record["average_price"] == pytest.approx(placed.average_price)
+
+
 def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManager) -> None:
     state_path = tmp_path / "recovery_state.json"
     config = OMSConfig(state_path=state_path)
