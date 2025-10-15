@@ -45,9 +45,12 @@ class InMemorySlidingWindowBackend:
     def __init__(self) -> None:
         self._records: dict[str, deque[float]] = {}
         self._lock = asyncio.Lock()
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     async def hit(self, key: str, *, limit: int, window_seconds: float) -> int:
         loop = asyncio.get_running_loop()
+        if self._loop is None:
+            self._loop = loop
         now = loop.time()
         async with self._lock:
             bucket = self._records.setdefault(key, deque())
@@ -167,7 +170,9 @@ class SlidingWindowRateLimiter:
                 if loop is not None:
                     loop.create_task(cleanup_coro)
                 else:
-                    asyncio.run(cleanup_coro)
+                    backend_loop = getattr(self._backend, "_loop", None)
+                    if backend_loop is not None and backend_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(cleanup_coro, backend_loop)
 
         return RateLimiterSnapshot(
             backend=backend_name,
