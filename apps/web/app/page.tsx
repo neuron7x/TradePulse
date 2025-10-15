@@ -1,6 +1,6 @@
 'use client'
 
-import type { ChangeEvent, CSSProperties } from 'react'
+import type { ChangeEvent } from 'react'
 import { useMemo, useState } from 'react'
 
 type ScenarioField = 'initialBalance' | 'riskPerTrade' | 'maxPositions' | 'timeframe'
@@ -28,6 +28,15 @@ type FieldMeta = {
   placeholder: string
   inputMode?: 'decimal' | 'numeric' | 'text'
   type?: 'number' | 'text'
+}
+
+type ScenarioHealthStatus = 'Production-ready' | 'Needs review' | 'High risk' | 'Resolve errors'
+
+type ScenarioHealth = {
+  status: ScenarioHealthStatus
+  score: number
+  summary: string
+  checklist: string[]
 }
 
 const FIELD_META: Record<ScenarioField, FieldMeta> = {
@@ -108,27 +117,6 @@ const SCENARIO_TEMPLATES: ScenarioTemplate[] = [
 ]
 
 type FieldErrors = Record<ScenarioField, string | null>
-
-const helperStyle: CSSProperties = {
-  color: '#94a3b8',
-  fontSize: '0.85rem',
-  marginTop: '0.35rem',
-}
-
-const errorStyle: CSSProperties = {
-  color: '#f97316',
-  fontSize: '0.85rem',
-  marginTop: '0.35rem',
-  fontWeight: 600,
-}
-
-const panelStyle: CSSProperties = {
-  backgroundColor: '#1e293b',
-  borderRadius: '1rem',
-  padding: '1.75rem',
-  boxShadow: '0 30px 60px -35px rgba(15, 23, 42, 0.7)',
-  border: '1px solid rgba(148, 163, 184, 0.12)',
-}
 
 function parseNumber(value: string): number {
   const trimmed = value.replace(/,/g, '').trim()
@@ -226,12 +214,189 @@ function computeWarnings(config: ScenarioConfig): string[] {
   return warnings
 }
 
-function buildPreview(config: ScenarioConfig) {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
+function convertTimeframeToMinutes(timeframe: string): number | null {
+  const match = timeframe.match(/^(\d+)([smhdw])$/i)
+  if (!match) {
+    return null
+  }
+  const amount = Number(match[1])
+  const unit = match[2].toLowerCase()
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return null
+  }
+  const multipliers: Record<string, number> = {
+    s: 1 / 60,
+    m: 1,
+    h: 60,
+    d: 1440,
+    w: 10080,
+  }
+  const multiplier = multipliers[unit]
+  if (multiplier === undefined) {
+    return null
+  }
+  return amount * multiplier
+}
+
+function describeTimeframe(timeframe: string): string | null {
+  const match = timeframe.match(/^(\d+)([smhdw])$/i)
+  if (!match) {
+    return null
+  }
+  const amount = Number(match[1])
+  if (!Number.isFinite(amount)) {
+    return null
+  }
+  const unit = match[2].toLowerCase()
+  const labels: Record<string, string> = {
+    s: 'second',
+    m: 'minute',
+    h: 'hour',
+    d: 'day',
+    w: 'week',
+  }
+  const label = labels[unit]
+  if (!label) {
+    return null
+  }
+  return `${amount} ${amount === 1 ? label : `${label}s`}`
+}
+
+function buildTimeframeInsights(timeframe: string): string[] {
+  const minutes = convertTimeframeToMinutes(timeframe)
+  if (minutes === null) {
+    return []
+  }
+  const insights: string[] = []
+  const description = describeTimeframe(timeframe)
+  if (description) {
+    insights.push(`Expect data refresh at least every ${description} to keep signals aligned.`)
+  }
+  if (minutes > 0) {
+    const barsPerDay = Math.round((24 * 60) / minutes)
+    if (barsPerDay >= 1200) {
+      insights.push('Expect well over 1,200 bars per day—ensure streaming analytics and log aggregation are in place.')
+    } else if (barsPerDay > 0) {
+      insights.push(`Roughly ${barsPerDay.toLocaleString()} bars per day—size Monte Carlo samples accordingly.`)
+    }
+  }
+  if (minutes <= 5) {
+    insights.push('Execution cadence is fast; confirm order routing and slippage controls are tuned for low latency.')
+  } else if (minutes <= 60) {
+    insights.push('Mid-frequency cadence allows session-based monitoring. Prepare intraday review checklists.')
+  } else if (minutes >= 720 && minutes < 1440) {
+    insights.push('Plan for daily risk syncs—the cadence spans multiple sessions, so overnight gaps matter.')
+  } else if (minutes >= 1440) {
+    insights.push('Slow cadence—capture macro or fundamental catalysts between bars to avoid stale positioning.')
+  }
+  return insights
+}
+
+function evaluateScenario(
+  config: ScenarioConfig,
+  warnings: string[],
+  hasErrors: boolean,
+): ScenarioHealth {
+  const checklist: string[] = []
+
+  if (hasErrors) {
+    checklist.push('Resolve the highlighted fields above to calculate a deployable scenario.')
+    if (warnings.length > 0) {
+      checklist.push('Revisit the risk warnings once validation errors are cleared.')
+    }
+    return {
+      status: 'Resolve errors',
+      score: 25,
+      summary: 'Fix validation errors to unlock export actions and a reliable health score.',
+      checklist,
+    }
+  }
+
+  const { initialBalance, riskPerTrade, maxPositions, timeframe } = config
+
+  if (
+    !Number.isFinite(initialBalance) ||
+    !Number.isFinite(riskPerTrade) ||
+    !Number.isFinite(maxPositions) ||
+    !timeframe
+  ) {
+    checklist.push('Populate every input so health checks can benchmark risk exposure.')
+    return {
+      status: 'Needs review',
+      score: 45,
+      summary: 'Complete the remaining fields to benchmark the scenario and surface optimisation ideas.',
+      checklist,
+    }
+  }
+
+  let score = 95
+
+  if (warnings.length > 0) {
+    score -= Math.min(45, warnings.length * 12)
+    checklist.push('Address the risk snapshot warnings to tighten the scenario envelope.')
+  }
+
+  if (initialBalance < 5000) {
+    score -= 12
+    checklist.push('Increase the initial balance towards ≥ 5k to stabilise Monte Carlo paths.')
+  }
+
+  if (riskPerTrade > 2) {
+    score -= 10
+    checklist.push('Keep risk per trade at or below 2% to stay within resilient drawdown tolerances.')
+  } else if (riskPerTrade < 0.25) {
+    score -= 6
+    checklist.push('Confirm commissions remain negligible when risking under 0.25% per trade.')
+  }
+
+  if (maxPositions > 6) {
+    score -= 8
+    checklist.push('Limit concurrent positions to ≤ 6 unless execution is heavily automated.')
+  }
+
+  const riskDollars = (initialBalance * riskPerTrade) / 100
+  const portfolioRisk = riskDollars * maxPositions
+  if (portfolioRisk > initialBalance * 0.25) {
+    score -= 10
+    checklist.push('Trim portfolio risk below 25% of equity to avoid cascading losses.')
+  }
+
+  const minutes = convertTimeframeToMinutes(timeframe)
+  if (minutes !== null) {
+    if (minutes <= 5) {
+      score -= 6
+      checklist.push('Verify data infrastructure supports sub-five-minute execution cadence.')
+    } else if (minutes >= 720) {
+      checklist.push('Document overnight gap handling for higher timeframe execution.')
+    }
+  }
+
+  const boundedScore = Math.round(clamp(score, 20, 100))
+
+  let status: ScenarioHealthStatus
+  let summary: string
+  if (boundedScore >= 80) {
+    status = 'Production-ready'
+    summary = 'Risk controls look balanced. Document execution assumptions before promotion.'
+  } else if (boundedScore >= 55) {
+    status = 'Needs review'
+    summary = 'Scenario is workable but tighten the highlighted levers before automation.'
+  } else {
+    status = 'High risk'
+    summary = 'Risk envelope is stretched. Reduce concentration before running the strategy in staging.'
+  }
+
+  const uniqueChecklist = Array.from(new Set(checklist))
+
   return {
-    initialBalance: Number.isFinite(config.initialBalance) ? Number(config.initialBalance.toFixed(2)) : null,
-    riskPerTrade: Number.isFinite(config.riskPerTrade) ? Number(config.riskPerTrade.toFixed(2)) : null,
-    maxPositions: Number.isFinite(config.maxPositions) ? config.maxPositions : null,
-    timeframe: config.timeframe || null,
+    status,
+    score: boundedScore,
+    summary,
+    checklist: uniqueChecklist,
   }
 }
 
@@ -250,6 +415,8 @@ export default function Home() {
   const hasErrors = useMemo(() => Object.values(errors).some((item) => item !== null), [errors])
   const warnings = useMemo(() => computeWarnings(parsedConfig), [parsedConfig])
   const preview = useMemo(() => JSON.stringify(buildPreview(parsedConfig), null, 2), [parsedConfig])
+  const timeframeInsights = useMemo(() => buildTimeframeInsights(parsedConfig.timeframe), [parsedConfig.timeframe])
+  const scenarioHealth = useMemo(() => evaluateScenario(parsedConfig, warnings, hasErrors), [parsedConfig, warnings, hasErrors])
 
   const riskDollars = useMemo(() => {
     if (!Number.isFinite(parsedConfig.initialBalance) || !Number.isFinite(parsedConfig.riskPerTrade)) {
@@ -264,6 +431,28 @@ export default function Home() {
     }
     return riskDollars * parsedConfig.maxPositions
   }, [parsedConfig, riskDollars])
+
+  const riskPercentOfEquity = useMemo(() => {
+    if (
+      riskDollars === null ||
+      !Number.isFinite(parsedConfig.initialBalance) ||
+      parsedConfig.initialBalance === 0
+    ) {
+      return null
+    }
+    return (riskDollars / parsedConfig.initialBalance) * 100
+  }, [parsedConfig, riskDollars])
+
+  const portfolioRiskPercent = useMemo(() => {
+    if (
+      aggregateRisk === null ||
+      !Number.isFinite(parsedConfig.initialBalance) ||
+      parsedConfig.initialBalance === 0
+    ) {
+      return null
+    }
+    return (aggregateRisk / parsedConfig.initialBalance) * 100
+  }, [aggregateRisk, parsedConfig])
 
   const handleChange = (field: ScenarioField) => (event: ChangeEvent<HTMLInputElement>) => {
     const value = event.target.value
@@ -327,28 +516,23 @@ export default function Home() {
     }
   }
 
+  const templateHelperId = 'template-description'
+
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        background: 'radial-gradient(circle at top, #0f172a 0%, #020617 65%)',
-        color: '#e2e8f0',
-        padding: '2.5rem 1.5rem',
-      }}
-    >
-      <section style={{ maxWidth: '960px', margin: '0 auto', display: 'grid', gap: '2.5rem' }}>
-        <header style={{ textAlign: 'left' }}>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: 700, marginBottom: '0.75rem' }}>Scenario Studio</h1>
-          <p style={{ color: '#cbd5f5', lineHeight: 1.6 }}>
+    <main className="scenario-main">
+      <section className="scenario-container">
+        <header className="scenario-hero">
+          <h1>Scenario Studio</h1>
+          <p>
             Sanity-check strategy inputs before pushing them into execution. Select a template, adjust the levers, and review
             automatic hints about risk concentration and timeframe hygiene.
           </p>
         </header>
 
-        <section style={panelStyle}>
-          <div style={{ display: 'grid', gap: '1.5rem' }}>
-            <div>
-              <label htmlFor="template" style={{ display: 'block', fontWeight: 600, marginBottom: '0.5rem' }}>
+        <div className="scenario-grid">
+          <section className="panel panel-form" aria-labelledby="scenario-form-heading">
+            <div className="template-select">
+              <label htmlFor="template" id="scenario-form-heading">
                 Scenario template
               </label>
               <select
@@ -363,14 +547,8 @@ export default function Home() {
                     setDraft(toDraft(template.defaults))
                   }
                 }}
-                style={{
-                  width: '100%',
-                  padding: '0.65rem 0.75rem',
-                  backgroundColor: '#0f172a',
-                  borderRadius: '0.75rem',
-                  border: '1px solid rgba(148, 163, 184, 0.3)',
-                  color: '#e2e8f0',
-                }}
+                className="tp-select"
+                aria-describedby={templateHelperId}
               >
                 {SCENARIO_TEMPLATES.map((template) => (
                   <option key={template.id} value={template.id}>
@@ -378,25 +556,27 @@ export default function Home() {
                   </option>
                 ))}
               </select>
-              <p style={{ ...helperStyle, marginTop: '0.6rem' }}>{selectedTemplate.description}</p>
-              <ul style={{ marginTop: '0.75rem', paddingLeft: '1.2rem', color: '#cbd5f5', display: 'grid', gap: '0.35rem' }}>
+              <p id={templateHelperId} className="template-description">
+                {selectedTemplate.description}
+              </p>
+              <ul className="template-notes">
                 {selectedTemplate.notes.map((note) => (
-                  <li key={note} style={{ fontSize: '0.9rem', lineHeight: 1.4 }}>
-                    {note}
-                  </li>
+                  <li key={note}>{note}</li>
                 ))}
               </ul>
             </div>
 
-            <form style={{ display: 'grid', gap: '1.4rem' }}>
+            <form className="field-grid" noValidate>
               {(Object.keys(FIELD_META) as ScenarioField[]).map((field) => {
                 const meta = FIELD_META[field]
                 const inputId = `field-${field}`
+                const helperId = `${inputId}-helper`
+                const errorId = `${inputId}-error`
+                const hasError = Boolean(errors[field])
+                const describedBy = hasError ? `${helperId} ${errorId}` : helperId
                 return (
-                  <div key={field} style={{ display: 'grid', gap: '0.35rem' }}>
-                    <label htmlFor={inputId} style={{ fontWeight: 600 }}>
-                      {meta.label}
-                    </label>
+                  <div key={field} className="field">
+                    <label htmlFor={inputId}>{meta.label}</label>
                     <input
                       id={inputId}
                       name={field}
@@ -405,50 +585,33 @@ export default function Home() {
                       placeholder={meta.placeholder}
                       inputMode={meta.inputMode}
                       type={meta.type}
-                      style={{
-                        width: '100%',
-                        padding: '0.7rem 0.85rem',
-                        borderRadius: '0.75rem',
-                        border: '1px solid rgba(148, 163, 184, 0.3)',
-                        backgroundColor: '#0f172a',
-                        color: '#e2e8f0',
-                        fontSize: '1rem',
-                      }}
+                      className="tp-input"
+                      aria-invalid={hasError}
+                      aria-describedby={describedBy}
+                      autoComplete="off"
+                      step={meta.type === 'number' ? 'any' : undefined}
                     />
-                    <p style={helperStyle}>{meta.helper}</p>
-                    {errors[field] ? <p style={errorStyle}>{errors[field]}</p> : null}
+                    <p id={helperId} className="tp-helper">
+                      {meta.helper}
+                    </p>
+                    {hasError ? (
+                      <p id={errorId} className="tp-error">
+                        {errors[field]}
+                      </p>
+                    ) : null}
                   </div>
                 )
               })}
 
-              <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={resetTemplate}
-                  style={{
-                    backgroundColor: '#0f172a',
-                    border: '1px solid rgba(148, 163, 184, 0.4)',
-                    color: '#e2e8f0',
-                    padding: '0.55rem 1rem',
-                    borderRadius: '0.65rem',
-                    cursor: 'pointer',
-                  }}
-                >
+              <div className="button-row">
+                <button type="button" onClick={resetTemplate} className="tp-button tp-button--ghost">
                   Reset to template defaults
                 </button>
                 <button
                   type="button"
                   onClick={handleCopy}
                   disabled={hasErrors}
-                  style={{
-                    backgroundColor: hasErrors ? 'rgba(15, 23, 42, 0.6)' : '#38bdf8',
-                    border: '1px solid rgba(148, 163, 184, 0.4)',
-                    color: hasErrors ? '#94a3b8' : '#0f172a',
-                    padding: '0.55rem 1rem',
-                    borderRadius: '0.65rem',
-                    cursor: hasErrors ? 'not-allowed' : 'pointer',
-                    fontWeight: 600,
-                  }}
+                  className="tp-button tp-button--primary"
                 >
                   Copy to clipboard
                 </button>
@@ -456,15 +619,7 @@ export default function Home() {
                   type="button"
                   onClick={handleDownload}
                   disabled={hasErrors}
-                  style={{
-                    backgroundColor: hasErrors ? 'rgba(15, 23, 42, 0.6)' : '#22d3ee',
-                    border: '1px solid rgba(148, 163, 184, 0.4)',
-                    color: hasErrors ? '#94a3b8' : '#0f172a',
-                    padding: '0.55rem 1rem',
-                    borderRadius: '0.65rem',
-                    cursor: hasErrors ? 'not-allowed' : 'pointer',
-                    fontWeight: 600,
-                  }}
+                  className="tp-button tp-button--secondary"
                 >
                   Download JSON
                 </button>
@@ -472,88 +627,128 @@ export default function Home() {
               {actionMessage ? (
                 <p
                   role="status"
-                  style={{
-                    marginTop: '0.5rem',
-                    color: actionMessage.kind === 'success' ? '#4ade80' : '#f97316',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                  }}
+                  aria-live="polite"
+                  className={`tp-status ${actionMessage.kind === 'success' ? 'tp-status--success' : 'tp-status--error'}`}
                 >
                   {actionMessage.text}
                 </p>
               ) : null}
             </form>
-          </div>
-        </section>
+          </section>
 
-        <section style={{ display: 'grid', gap: '1.5rem' }}>
-          <article style={panelStyle}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem' }}>Risk snapshot</h2>
-            <div style={{ display: 'grid', gap: '0.85rem' }}>
-              <div style={{ display: 'flex', gap: '1.5rem', flexWrap: 'wrap' }}>
-                <div>
-                  <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Risk per trade</span>
-                  <p style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.3rem' }}>
-                    {riskDollars === null ? '—' : `$${riskDollars.toFixed(2)}`}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Max portfolio risk</span>
-                  <p style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.3rem' }}>
-                    {aggregateRisk === null ? '—' : `$${aggregateRisk.toFixed(2)}`}
-                  </p>
-                </div>
-                <div>
-                  <span style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Timeframe</span>
-                  <p style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.3rem' }}>
-                    {parsedConfig.timeframe || '—'}
-                  </p>
-                </div>
+          <div className="side-panels">
+            <article className="panel health-panel">
+              <h2>Scenario health</h2>
+              <div
+                className={`health-status ${
+                  scenarioHealth.status === 'Production-ready'
+                    ? 'health-status--ready'
+                    : scenarioHealth.status === 'Needs review'
+                    ? 'health-status--review'
+                    : scenarioHealth.status === 'Resolve errors'
+                    ? 'health-status--blocked'
+                    : 'health-status--risk'
+                }`}
+              >
+                <span>{scenarioHealth.status}</span>
               </div>
-
-              {warnings.length > 0 ? (
-                <ul style={{ marginTop: '0.5rem', paddingLeft: '1.2rem', display: 'grid', gap: '0.4rem' }}>
-                  {warnings.map((warning) => (
-                    <li key={warning} style={{ color: '#facc15', fontSize: '0.95rem', lineHeight: 1.5 }}>
-                      {warning}
-                    </li>
+              <p className="health-score">Score: {scenarioHealth.score} / 100</p>
+              <div
+                className="health-meter"
+                role="meter"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={scenarioHealth.score}
+                aria-valuetext={`${scenarioHealth.score} out of 100`}
+              >
+                <span className="health-meter__fill" style={{ width: `${scenarioHealth.score}%` }} />
+              </div>
+              <p className="health-summary">{scenarioHealth.summary}</p>
+              {scenarioHealth.checklist.length > 0 ? (
+                <ul className="health-checklist">
+                  {scenarioHealth.checklist.map((item) => (
+                    <li key={item}>{item}</li>
                   ))}
                 </ul>
-              ) : (
-                <p style={{ ...helperStyle, marginTop: '0.5rem' }}>
-                  Risk controls look balanced for the selected template. Stress test transaction costs before live execution.
-                </p>
-              )}
-
-              {hasErrors ? (
-                <p style={{ ...errorStyle, marginTop: '0.75rem' }}>
-                  Resolve the highlighted fields above to unlock export-ready scenario JSON.
-                </p>
               ) : null}
-            </div>
-          </article>
+            </article>
 
-          <article style={panelStyle}>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem' }}>Scenario JSON template</h2>
-            <p style={{ ...helperStyle, marginBottom: '0.75rem' }}>
-              Drop this snippet into <code>docs/scenarios.md</code> or configuration files as a starting point for backtests.
-            </p>
-            <pre
-              style={{
-                backgroundColor: '#0f172a',
-                padding: '1rem',
-                borderRadius: '0.75rem',
-                border: '1px solid rgba(148, 163, 184, 0.25)',
-                overflowX: 'auto',
-                fontSize: '0.9rem',
-                lineHeight: 1.5,
-              }}
-            >
-              {preview}
-            </pre>
-          </article>
-        </section>
+            <article className="panel">
+              <h2>Risk snapshot</h2>
+              <div className="metric-grid">
+                <div className="metric-tiles">
+                  <div className="metric-tile">
+                    <span>Risk per trade</span>
+                    <p>{riskDollars === null ? '—' : `$${riskDollars.toFixed(2)}`}</p>
+                    {riskPercentOfEquity !== null ? (
+                      <span>{riskPercentOfEquity.toFixed(2)}% of equity</span>
+                    ) : null}
+                  </div>
+                  <div className="metric-tile">
+                    <span>Max portfolio risk</span>
+                    <p>{aggregateRisk === null ? '—' : `$${aggregateRisk.toFixed(2)}`}</p>
+                    {portfolioRiskPercent !== null ? (
+                      <span>{portfolioRiskPercent.toFixed(2)}% of equity</span>
+                    ) : null}
+                  </div>
+                  <div className="metric-tile">
+                    <span>Timeframe</span>
+                    <p>{parsedConfig.timeframe || '—'}</p>
+                  </div>
+                </div>
+
+                {warnings.length > 0 ? (
+                  <ul className="warning-list">
+                    {warnings.map((warning) => (
+                      <li key={warning}>{warning}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="warning-placeholder">
+                    Risk controls look balanced for the selected template. Stress test transaction costs before live execution.
+                  </p>
+                )}
+
+                {hasErrors ? (
+                  <p className="tp-error tp-error-inline">
+                    Resolve the highlighted fields above to unlock export-ready scenario JSON.
+                  </p>
+                ) : null}
+
+                {timeframeInsights.length > 0 ? (
+                  <div className="timeframe-insights">
+                    <h3>Timeframe insights</h3>
+                    <ul>
+                      {timeframeInsights.map((insight) => (
+                        <li key={insight}>{insight}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+
+            <article className="panel">
+              <h2>Scenario JSON template</h2>
+              <p className="tp-helper tp-helper-spaced">
+                Drop this snippet into <code>docs/scenarios.md</code> or configuration files as a starting point for backtests.
+              </p>
+              <pre className="code-preview" aria-label="Scenario JSON preview">
+                {preview}
+              </pre>
+            </article>
+          </div>
+        </div>
       </section>
     </main>
   )
+}
+
+function buildPreview(config: ScenarioConfig) {
+  return {
+    initialBalance: Number.isFinite(config.initialBalance) ? Number(config.initialBalance.toFixed(2)) : null,
+    riskPerTrade: Number.isFinite(config.riskPerTrade) ? Number(config.riskPerTrade.toFixed(2)) : null,
+    maxPositions: Number.isFinite(config.maxPositions) ? config.maxPositions : null,
+    timeframe: config.timeframe || null,
+  }
 }
