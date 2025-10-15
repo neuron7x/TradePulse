@@ -39,8 +39,8 @@ mypy-extensions==1.1.0
 networkx==3.5
 numpy==2.3.3
 omegaconf==2.3.0
-psycopg==3.2.1
-psycopg-binary==3.2.1
+psycopg==3.2.10
+psycopg-binary==3.2.10
 opentelemetry-api==1.37.0
 opentelemetry-exporter-otlp==1.37.0
 opentelemetry-exporter-otlp-proto-common==1.37.0
