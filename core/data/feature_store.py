@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from datetime import UTC
 import hashlib
 import hmac
 import math
 from io import BytesIO
+import os
 import shutil
 import sqlite3
 from pathlib import Path
-from typing import Any, Callable, Literal, Protocol
+import ssl
+from typing import Any, Callable, Literal, Mapping, Protocol
+from urllib.parse import urlparse
 
 import pandas as pd
 from pandas.api import types as pd_types
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from core.utils.dataframe_io import (
     purge_dataframe_artifacts,
@@ -23,9 +27,18 @@ from core.utils.dataframe_io import (
     write_dataframe,
 )
 
+try:  # pragma: no cover - optional dependency shim for real Redis connections
+    import redis
+except Exception:  # pragma: no cover - redis is optional during testing
+    redis = None  # type: ignore[assignment]
+
 
 class FeatureStoreIntegrityError(RuntimeError):
     """Raised when integrity invariants fail for feature store payloads."""
+
+
+class FeatureStoreConfigurationError(RuntimeError):
+    """Raised when feature store configuration violates security requirements."""
 
 
 @dataclass(frozen=True)
@@ -137,6 +150,55 @@ def _deserialize_frame(payload: bytes) -> pd.DataFrame:
     return pd.read_json(BytesIO(payload), orient="table")
 
 
+@dataclass(frozen=True)
+class RedisClientConfig:
+    """Configuration for creating TLS-enabled Redis clients."""
+
+    url: str
+    username: str | None = None
+    password: str | None = None
+    ssl_context: ssl.SSLContext | None = None
+
+    def create_client(self) -> KeyValueClient:
+        """Instantiate a Redis client enforcing TLS connectivity."""
+
+        parsed = urlparse(self.url)
+        if parsed.scheme != "rediss":
+            raise FeatureStoreConfigurationError(
+                "Redis client URLs must use rediss:// when TLS is required"
+            )
+
+        if redis is None:  # pragma: no cover - executed only without redis dependency
+            raise FeatureStoreConfigurationError(
+                "redis package is required to build TLS-enabled clients"
+            )
+
+        context = self.ssl_context or ssl.create_default_context()
+        kwargs: dict[str, Any] = {"ssl_context": context}
+        if self.username is not None:
+            kwargs["username"] = self.username
+        if self.password is not None:
+            kwargs["password"] = self.password
+        return redis.Redis.from_url(self.url, **kwargs)
+
+
+def _redis_client_uses_tls(client: KeyValueClient) -> bool:
+    """Best-effort detection to confirm that a Redis client is TLS-enabled."""
+
+    pool = getattr(client, "connection_pool", None)
+    if pool is None:
+        return True
+
+    connection_kwargs = getattr(pool, "connection_kwargs", None)
+    if not isinstance(connection_kwargs, dict):
+        return True
+
+    if connection_kwargs.get("ssl") or connection_kwargs.get("ssl_context"):
+        return True
+
+    return False
+
+
 class RedisOnlineFeatureStore:
     """Redis-backed feature store with TTL-aware retention policies."""
 
@@ -144,10 +206,26 @@ class RedisOnlineFeatureStore:
         self,
         client: KeyValueClient | None = None,
         *,
+        client_config: RedisClientConfig | None = None,
         retention_policy: RetentionPolicy | None = None,
         clock: Callable[[], pd.Timestamp] | None = None,
     ) -> None:
-        self._client = client or InMemoryKeyValueClient()
+        if client is not None and client_config is not None:
+            raise FeatureStoreConfigurationError(
+                "Provide either a Redis client or a TLS client configuration, not both"
+            )
+
+        if client_config is not None:
+            self._client = client_config.create_client()
+        elif client is not None:
+            if not _redis_client_uses_tls(client):
+                raise FeatureStoreConfigurationError(
+                    "Redis clients must be configured with TLS. Provide a rediss:// URL "
+                    "or an SSL context via RedisClientConfig."
+                )
+            self._client = client
+        else:
+            self._client = InMemoryKeyValueClient()
         self._retention = _RetentionManager(retention_policy, clock=clock)
 
     def purge(self, feature_view: str) -> None:
@@ -222,6 +300,172 @@ class RedisOnlineFeatureStore:
         self._client.set(feature_view, payload)
 
 
+_ENVELOPE_PREFIX = b"TPENC1"
+_NONCE_SIZE = 12
+
+
+def _derive_aes_key(material: bytes | str) -> bytes:
+    """Normalize user-provided key material for AES-GCM usage."""
+
+    if isinstance(material, str):
+        material_bytes = material.encode("utf-8")
+    else:
+        material_bytes = material
+
+    if not material_bytes:
+        raise FeatureStoreConfigurationError("Encryption key material cannot be empty")
+
+    if len(material_bytes) in {16, 24, 32}:
+        return material_bytes
+
+    return hashlib.sha256(material_bytes).digest()
+
+
+@dataclass(frozen=True)
+class SQLiteEncryptionConfig:
+    """Key management configuration for encrypted SQLite payloads."""
+
+    key_id: str
+    key_material: bytes | str
+    fallback_keys: Mapping[str, bytes | str] = field(default_factory=dict)
+    allow_plaintext_fallback: bool = False
+
+    def __post_init__(self) -> None:
+        key_id_bytes = self.key_id.encode("utf-8")
+        if not key_id_bytes:
+            raise ValueError("key_id must be provided for encrypted payloads")
+        if len(key_id_bytes) > 255:
+            raise ValueError("key_id must not exceed 255 bytes when encoded as UTF-8")
+
+        # Validate fallback key identifiers are within the supported range.
+        for fallback_id in self.fallback_keys:
+            encoded = fallback_id.encode("utf-8")
+            if not encoded:
+                raise ValueError("fallback key identifiers cannot be empty")
+            if len(encoded) > 255:
+                raise ValueError(
+                    "fallback key identifiers must not exceed 255 bytes when encoded"
+                )
+
+
+class _SQLiteEncryptionEnvelope:
+    """Encrypt and decrypt SQLite payloads with authenticated envelopes."""
+
+    def __init__(self, config: SQLiteEncryptionConfig) -> None:
+        self._config = config
+        self._primary_key = AESGCM(_derive_aes_key(config.key_material))
+        self._key_id_bytes = config.key_id.encode("utf-8")
+        self._fallback: dict[str, AESGCM] = {
+            key_id: AESGCM(_derive_aes_key(material))
+            for key_id, material in config.fallback_keys.items()
+        }
+        self._allow_plaintext = config.allow_plaintext_fallback
+
+    def encrypt(self, payload: bytes) -> bytes:
+        nonce = os.urandom(_NONCE_SIZE)
+        ciphertext = self._primary_key.encrypt(nonce, payload, self._key_id_bytes)
+        header = _ENVELOPE_PREFIX + bytes([len(self._key_id_bytes)]) + self._key_id_bytes
+        return header + nonce + ciphertext
+
+    def decrypt(self, payload: bytes, *, allow_plaintext: bool | None = None) -> bytes:
+        allow_plaintext = self._allow_plaintext if allow_plaintext is None else allow_plaintext
+        if payload.startswith(_ENVELOPE_PREFIX):
+            cursor = len(_ENVELOPE_PREFIX)
+            if cursor >= len(payload):
+                raise FeatureStoreConfigurationError("Encrypted payload header is truncated")
+
+            key_id_length = payload[cursor]
+            cursor += 1
+            key_id_bytes = payload[cursor : cursor + key_id_length]
+            if len(key_id_bytes) != key_id_length:
+                raise FeatureStoreConfigurationError("Encrypted payload missing key identifier")
+            cursor += key_id_length
+
+            if len(payload) < cursor + _NONCE_SIZE:
+                raise FeatureStoreConfigurationError("Encrypted payload missing nonce")
+            nonce = payload[cursor : cursor + _NONCE_SIZE]
+            ciphertext = payload[cursor + _NONCE_SIZE :]
+
+            key_id = key_id_bytes.decode("utf-8")
+            aead = self._resolve_key(key_id)
+            try:
+                return aead.decrypt(nonce, ciphertext, key_id_bytes)
+            except Exception as exc:  # pragma: no cover - cryptography provides context
+                raise FeatureStoreConfigurationError(
+                    f"Failed to decrypt payload with key identifier {key_id!r}"
+                ) from exc
+
+        if allow_plaintext:
+            return payload
+
+        raise FeatureStoreConfigurationError(
+            "Encountered plaintext payload but encryption keys are mandatory"
+        )
+
+    def _resolve_key(self, key_id: str) -> AESGCM:
+        if key_id == self._config.key_id:
+            return self._primary_key
+        fallback = self._fallback.get(key_id)
+        if fallback is not None:
+            return fallback
+        raise FeatureStoreConfigurationError(
+            f"No encryption key material available for identifier {key_id!r}"
+        )
+
+
+def reencrypt_sqlite_payloads(
+    path: Path,
+    *,
+    current_encryption: SQLiteEncryptionConfig | None,
+    target_encryption: SQLiteEncryptionConfig,
+    backup: bool = True,
+) -> None:
+    """Re-encrypt all payloads stored in the SQLite feature store."""
+
+    db_path = Path(path)
+    if not db_path.exists():
+        raise FileNotFoundError(f"SQLite feature store {db_path} does not exist")
+
+    if backup:
+        backup_path = db_path.with_suffix(db_path.suffix + ".bak")
+        shutil.copy2(db_path, backup_path)
+
+    source_envelope = (
+        _SQLiteEncryptionEnvelope(current_encryption)
+        if current_encryption is not None
+        else None
+    )
+    target_envelope = _SQLiteEncryptionEnvelope(target_encryption)
+
+    with sqlite3.connect(db_path) as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS feature_views (name TEXT PRIMARY KEY, payload BLOB)"
+        )
+        cursor = connection.execute("SELECT name, payload FROM feature_views")
+        rows = cursor.fetchall()
+
+    transformed: list[tuple[str, bytes]] = []
+    for name, payload in rows:
+        if not isinstance(payload, (bytes, bytearray)):
+            raise FeatureStoreConfigurationError("Stored payload must be bytes for migration")
+        raw: bytes
+        if source_envelope is None:
+            raw = bytes(payload)
+        else:
+            raw = source_envelope.decrypt(bytes(payload), allow_plaintext=True)
+        transformed.append((name, target_envelope.encrypt(raw)))
+
+    with sqlite3.connect(db_path) as connection:
+        with connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS feature_views (name TEXT PRIMARY KEY, payload BLOB)"
+            )
+            connection.executemany(
+                "REPLACE INTO feature_views (name, payload) VALUES (?, ?)",
+                transformed,
+            )
+
+
 class SQLiteOnlineFeatureStore:
     """SQLite-backed online feature store with retention controls."""
 
@@ -229,11 +473,17 @@ class SQLiteOnlineFeatureStore:
         self,
         path: Path,
         *,
+        encryption: "SQLiteEncryptionConfig",
         retention_policy: RetentionPolicy | None = None,
         clock: Callable[[], pd.Timestamp] | None = None,
     ) -> None:
+        if encryption is None:
+            raise FeatureStoreConfigurationError(
+                "SQLiteOnlineFeatureStore requires encryption key material"
+            )
         self._path = Path(path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        self._encryption = _SQLiteEncryptionEnvelope(encryption)
         self._connection = sqlite3.connect(self._path)
         self._connection.execute(
             "CREATE TABLE IF NOT EXISTS feature_views (name TEXT PRIMARY KEY, payload BLOB)"
@@ -252,7 +502,8 @@ class SQLiteOnlineFeatureStore:
         row = cursor.fetchone()
         if row is None:
             return pd.DataFrame()
-        frame = _deserialize_frame(row[0])
+        decrypted = self._encryption.decrypt(row[0])
+        frame = _deserialize_frame(decrypted)
         retained = self._retention.apply(frame)
         if not retained.equals(frame):
             self._persist(feature_view, retained)
@@ -305,7 +556,8 @@ class SQLiteOnlineFeatureStore:
         return prepared.reset_index(drop=True)
 
     def _persist(self, feature_view: str, frame: pd.DataFrame) -> None:
-        payload = _serialize_frame(frame)
+        plaintext = _serialize_frame(frame)
+        payload = self._encryption.encrypt(plaintext)
         with self._connection:
             self._connection.execute(
                 "REPLACE INTO feature_views (name, payload) VALUES (?, ?)",
@@ -640,6 +892,7 @@ class OnlineFeatureStore:
 
 __all__ = [
     "DeltaLakeSource",
+    "FeatureStoreConfigurationError",
     "FeatureStoreIntegrityError",
     "IcebergSource",
     "InMemoryKeyValueClient",
@@ -647,7 +900,10 @@ __all__ = [
     "IntegritySnapshot",
     "OfflineStoreValidator",
     "OnlineFeatureStore",
+    "RedisClientConfig",
     "RedisOnlineFeatureStore",
     "RetentionPolicy",
+    "SQLiteEncryptionConfig",
     "SQLiteOnlineFeatureStore",
+    "reencrypt_sqlite_payloads",
 ]

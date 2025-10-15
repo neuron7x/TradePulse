@@ -94,6 +94,26 @@ teams can reach production readiness without tribal knowledge.
   before syncing to the online store. Pair these jobs with the retention policies
   inside the feature store module to prevent stale partitions from lingering.
 
+## Online Feature Store Security Controls
+
+- **Redis TLS and ACLs** – The `RedisOnlineFeatureStore` now enforces TLS for all
+  connections. Operators must provision `rediss://` endpoints or inject a
+  pre-configured SSL context when instantiating the store. Grant the Redis ACL
+  user only `GET`, `SET`, `DEL`, `PEXPIRE`, and `PTTL` permissions; append-only
+  commands (`APPEND`, scripting, or `KEYS`) remain prohibited. The TLS
+  certificate bundle should be rotated alongside the ACL password on a
+  quarterly cadence, ensuring cached credential material in the services is
+  refreshed via rolling restarts.
+- **SQLite encryption keys** – The `SQLiteOnlineFeatureStore` now requires
+  explicit encryption keys and refuses to start without them. Store teams must
+  supply unique `key_id` identifiers for each deployment and rotate the primary
+  key by updating the configuration and invoking
+  `core.data.feature_store.reencrypt_sqlite_payloads` with the previous key as a
+  fallback. This migration rewraps all payloads in AES-GCM envelopes and can
+  execute in place after a filesystem snapshot is taken. Retain the prior key
+  in the configuration’s `fallback_keys` map for at least one release cycle to
+  allow blue/green deploys to read data materialised with the previous key.
+
 ## Arrow/Parquet Caching Strategy
 
 - **Indicator cache** – `FileSystemIndicatorCache` persists feature batches to
