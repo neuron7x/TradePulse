@@ -25,6 +25,20 @@ _STATUS_MAP = {
     "EXPIRED": OrderStatus.CANCELLED,
 }
 
+_TYPE_ALIASES: dict[str, OrderType] = {
+    "market": OrderType.MARKET,
+    "limit": OrderType.LIMIT,
+    "limit_maker": OrderType.LIMIT,
+    "stop": OrderType.STOP,
+    "stop_loss": OrderType.STOP,
+    "stop_market": OrderType.STOP,
+    "take_profit": OrderType.STOP,
+    "trailing_stop_market": OrderType.STOP,
+    "stop_limit": OrderType.STOP_LIMIT,
+    "stop_loss_limit": OrderType.STOP_LIMIT,
+    "take_profit_limit": OrderType.STOP_LIMIT,
+}
+
 
 class BinanceRESTConnector(RESTWebSocketConnector):
     """Authenticated connector covering core Binance spot order flows."""
@@ -113,7 +127,10 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         if not symbol:
             raise ValueError("Order payload did not include symbol")
         side = str(payload.get("side") or payload.get("S") or (original.side.value if original else "buy")).lower()
-        order_type = str(payload.get("type") or payload.get("o") or (original.order_type.value if original else "market")).lower()
+        order_type = self._coerce_order_type(
+            str(payload.get("type") or payload.get("o") or (original.order_type.value if original else "market")),
+            original,
+        )
         order_id = str(payload.get("orderId") or payload.get("i") or payload.get("order_id") or "")
         if not order_id:
             raise ValueError("Order payload missing identifier")
@@ -140,7 +157,7 @@ class BinanceRESTConnector(RESTWebSocketConnector):
             side=OrderSide(side),
             quantity=quantity if quantity > 0 else (original.quantity if original else 0.0),
             price=price,
-            order_type=OrderType(order_type),
+            order_type=order_type,
             order_id=order_id,
             status=status,
             filled_quantity=filled,
@@ -214,6 +231,16 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         if order is None:
             raise ValueError(f"Symbol unknown for order_id={order_id}")
         return order.symbol
+
+    def _coerce_order_type(self, value: str, original: Order | None) -> OrderType:
+        raw = value.replace("-", "_").replace(" ", "_").strip().lower()
+        mapped = _TYPE_ALIASES.get(raw)
+        if mapped is not None:
+            return mapped
+        try:
+            return OrderType(raw)
+        except ValueError:
+            return original.order_type if original is not None else OrderType.MARKET
 
 
 __all__ = ["BinanceRESTConnector"]

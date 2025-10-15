@@ -28,6 +28,17 @@ _STATUS_MAP = {
     "PARTIALLY_FILLED": OrderStatus.PARTIALLY_FILLED,
 }
 
+_TYPE_ALIASES: dict[str, OrderType] = {
+    "market": OrderType.MARKET,
+    "market_market_ioc": OrderType.MARKET,
+    "limit": OrderType.LIMIT,
+    "limit_limit_gtc": OrderType.LIMIT,
+    "limit_limit_gtc_post_only": OrderType.LIMIT,
+    "stop": OrderType.STOP,
+    "stop_limit": OrderType.STOP_LIMIT,
+    "stop_limit_stop_limit_gtc": OrderType.STOP_LIMIT,
+}
+
 
 class CoinbaseRESTConnector(RESTWebSocketConnector):
     """Authenticated connector for Coinbase Advanced Trade API."""
@@ -144,7 +155,10 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         if not symbol:
             raise ValueError("Order payload missing product identifier")
         side = str(payload.get("side") or (original.side.value if original else "buy")).lower()
-        order_type = str(payload.get("order_type") or payload.get("type") or (original.order_type.value if original else "market")).lower()
+        order_type = self._coerce_order_type(
+            str(payload.get("order_type") or payload.get("type") or (original.order_type.value if original else "market")),
+            original,
+        )
         order_id = str(payload.get("order_id") or payload.get("id") or payload.get("orderId") or "")
         if not order_id:
             raise ValueError("Order payload missing identifier")
@@ -166,7 +180,7 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
             side=OrderSide(side),
             quantity=quantity if quantity > 0 else (original.quantity if original else 0.0),
             price=price,
-            order_type=OrderType(order_type),
+            order_type=order_type,
             order_id=order_id,
             status=status,
             filled_quantity=filled,
@@ -218,6 +232,16 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         with self._lock:
             if order.order_id:
                 self._orders[order.order_id] = order
+
+    def _coerce_order_type(self, value: str, original: Order | None) -> OrderType:
+        raw = value.replace("-", "_").replace(" ", "_").strip().lower()
+        mapped = _TYPE_ALIASES.get(raw)
+        if mapped is not None:
+            return mapped
+        try:
+            return OrderType(raw)
+        except ValueError:
+            return original.order_type if original is not None else OrderType.MARKET
 
 
 __all__ = ["CoinbaseRESTConnector"]

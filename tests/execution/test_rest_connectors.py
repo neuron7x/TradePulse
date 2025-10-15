@@ -115,7 +115,7 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
                         "orderId": "101",
                         "status": "NEW",
                         "side": "SELL",
-                        "type": "LIMIT",
+                        "type": "LIMIT_MAKER",
                         "origQty": "0.1",
                         "executedQty": "0.0",
                         "price": "21000.0",
@@ -153,6 +153,7 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     )
     submitted = connector.place_order(order, idempotency_key="abc-123")
     assert submitted.order_id == "100"
+    assert submitted.order_type is OrderType.LIMIT
     asyncio.run(
         ws_factory.queue.put(
             json.dumps(
@@ -165,6 +166,7 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
                     "q": "0.5",
                     "ap": "20500.0",
                     "S": "BUY",
+                    "o": "TAKE_PROFIT_LIMIT",
                 }
             )
         )
@@ -173,6 +175,7 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     assert cached is not None
     assert cached.filled_quantity == pytest.approx(0.25)
     assert cached.average_price == pytest.approx(20500.0)
+    assert cached.order_type is OrderType.STOP_LIMIT
 
     fetched = connector.fetch_order("100")
     assert fetched.status == OrderStatus.FILLED
@@ -181,6 +184,7 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     open_orders = connector.open_orders()
     assert len(open_orders) == 1
     assert open_orders[0].order_id == "101"
+    assert open_orders[0].order_type is OrderType.LIMIT
 
     positions = connector.get_positions()
     assert any(pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.5) for pos in positions)
@@ -210,7 +214,7 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
                         "order_id": "cb-1",
                         "product_id": "BTC-USD",
                         "side": "BUY",
-                        "order_type": "LIMIT",
+                        "order_type": "LIMIT_LIMIT_GTC",
                         "size": "0.1",
                         "filled_size": "0.0",
                         "status": "OPEN",
@@ -242,7 +246,7 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
                         "order_id": "cb-2",
                         "product_id": "BTC-USD",
                         "side": "SELL",
-                        "order_type": "LIMIT",
+                        "order_type": "LIMIT_LIMIT_GTC",
                         "size": "0.1",
                         "filled_size": "0.0",
                         "status": "OPEN",
@@ -283,6 +287,7 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
     )
     submitted = connector.place_order(order, idempotency_key="cb-order")
     assert submitted.order_id == "cb-1"
+    assert submitted.order_type is OrderType.LIMIT
 
     asyncio.run(
         ws_factory.queue.put(
@@ -293,7 +298,7 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
                         "order_id": "cb-1",
                         "product_id": "BTC-USD",
                         "side": "BUY",
-                        "order_type": "LIMIT",
+                        "order_type": "MARKET_MARKET_IOC",
                         "size": "0.1",
                         "filled_size": "0.05",
                         "status": "PARTIALLY_FILLED",
@@ -306,12 +311,14 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
     cached = _await_cache(connector, "cb-1", lambda o: o.filled_quantity >= 0.05)
     assert cached is not None
     assert cached.status == OrderStatus.PARTIALLY_FILLED
+    assert cached.order_type is OrderType.MARKET
 
     fetched = connector.fetch_order("cb-1")
     assert fetched.status == OrderStatus.FILLED
 
     open_orders = connector.open_orders()
     assert any(order.order_id == "cb-2" for order in open_orders)
+    assert any(order.order_id == "cb-2" and order.order_type is OrderType.LIMIT for order in open_orders)
 
     positions = connector.get_positions()
     assert any(pos["symbol"] == "BTC" and pos["qty"] == pytest.approx(0.4) for pos in positions)
