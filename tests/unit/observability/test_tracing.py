@@ -14,7 +14,7 @@ class _FakeSamplingResult:
 def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in list(sys.modules):
         if name == "opentelemetry" or name.startswith("opentelemetry."):
-            sys.modules.pop(name)
+            monkeypatch.delitem(sys.modules, name, raising=False)
 
     context_mod = types.ModuleType("opentelemetry.context")
     context_mod._current = None  # type: ignore[attr-defined]
@@ -33,7 +33,7 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     context_mod.attach = attach  # type: ignore[attr-defined]
     context_mod.detach = detach  # type: ignore[attr-defined]
     context_mod.get_current = get_current  # type: ignore[attr-defined]
-    sys.modules["opentelemetry.context"] = context_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.context", context_mod)
 
     class StatusCode:
         OK = "OK"
@@ -94,7 +94,7 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     trace_mod.set_tracer_provider = set_tracer_provider
     trace_mod.get_tracer = get_tracer
-    sys.modules["opentelemetry.trace"] = trace_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.trace", trace_mod)
 
     propagate_mod = types.ModuleType("opentelemetry.propagate")
     propagate_state = {"propagator": object()}
@@ -107,7 +107,7 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     propagate_mod.get_global_textmap = get_global_textmap
     propagate_mod.set_global_textmap = set_global_textmap
-    sys.modules["opentelemetry.propagate"] = propagate_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.propagate", propagate_mod)
 
     class TraceContextTextMapPropagator:
         def inject(self, carrier, setter):
@@ -127,7 +127,11 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     tracecontext_mod = types.ModuleType("opentelemetry.trace.propagation.tracecontext")
     tracecontext_mod.TraceContextTextMapPropagator = TraceContextTextMapPropagator
-    sys.modules["opentelemetry.trace.propagation.tracecontext"] = tracecontext_mod
+    monkeypatch.setitem(
+        sys.modules,
+        "opentelemetry.trace.propagation.tracecontext",
+        tracecontext_mod,
+    )
 
     class Resource:
         def __init__(self, attributes):
@@ -139,7 +143,7 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     resources_mod = types.ModuleType("opentelemetry.sdk.resources")
     resources_mod.Resource = Resource
-    sys.modules["opentelemetry.sdk.resources"] = resources_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.sdk.resources", resources_mod)
 
     class SpanProcessor:
         def __init__(self):
@@ -167,12 +171,12 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
 
     trace_sdk_mod = types.ModuleType("opentelemetry.sdk.trace")
     trace_sdk_mod.TracerProvider = TracerProvider
-    sys.modules["opentelemetry.sdk.trace"] = trace_sdk_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.sdk.trace", trace_sdk_mod)
 
     export_mod = types.ModuleType("opentelemetry.sdk.trace.export")
     export_mod.BatchSpanProcessor = BatchSpanProcessor
     export_mod.SpanProcessor = SpanProcessor
-    sys.modules["opentelemetry.sdk.trace.export"] = export_mod
+    monkeypatch.setitem(sys.modules, "opentelemetry.sdk.trace.export", export_mod)
 
     class Sampler:
         pass
@@ -201,7 +205,11 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     sampling_mod.Sampler = Sampler
     sampling_mod.TraceIdRatioBased = TraceIdRatioBased
     sampling_mod.SamplingResult = SamplingResult
-    sys.modules["opentelemetry.sdk.trace.sampling"] = sampling_mod
+    monkeypatch.setitem(
+        sys.modules,
+        "opentelemetry.sdk.trace.sampling",
+        sampling_mod,
+    )
 
     class OTLPSpanExporter:
         instances = []
@@ -217,25 +225,36 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     grpc_mod = types.ModuleType("opentelemetry.exporter.otlp.proto.grpc")
     trace_exporter_mod = types.ModuleType("opentelemetry.exporter.otlp.proto.grpc.trace_exporter")
     trace_exporter_mod.OTLPSpanExporter = OTLPSpanExporter
-    sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = trace_exporter_mod
-    sys.modules["opentelemetry.exporter.otlp.proto.grpc"] = grpc_mod
-    sys.modules["opentelemetry.exporter.otlp.proto"] = proto_mod
-    sys.modules["opentelemetry.exporter.otlp"] = otlp_mod
-    sys.modules["opentelemetry.exporter"] = exporter_mod
+    monkeypatch.setitem(
+        sys.modules,
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter",
+        trace_exporter_mod,
+    )
+    monkeypatch.setitem(
+        sys.modules, "opentelemetry.exporter.otlp.proto.grpc", grpc_mod
+    )
+    monkeypatch.setitem(sys.modules, "opentelemetry.exporter.otlp.proto", proto_mod)
+    monkeypatch.setitem(sys.modules, "opentelemetry.exporter.otlp", otlp_mod)
+    monkeypatch.setitem(sys.modules, "opentelemetry.exporter", exporter_mod)
 
     otel_module = types.ModuleType("opentelemetry")
     otel_module.context = context_mod
     otel_module.trace = trace_mod
-    sys.modules["opentelemetry"] = otel_module
+    monkeypatch.setitem(sys.modules, "opentelemetry", otel_module)
 
 
 @pytest.fixture
 def tracing_module(monkeypatch: pytest.MonkeyPatch):
-    _install_stub_opentelemetry(monkeypatch)
-    import observability.tracing as tracing
+    with monkeypatch.context() as stub_patch:
+        _install_stub_opentelemetry(stub_patch)
+        import observability.tracing as tracing
 
-    tracing = importlib.reload(tracing)
-    yield tracing
+        tracing = importlib.reload(tracing)
+        yield tracing
+
+    sys.modules.pop("observability.tracing", None)
+    real_tracing = importlib.import_module("observability.tracing")
+    importlib.reload(real_tracing)
 
 
 def test_selective_sampler_routes_hot_spans(tracing_module):
