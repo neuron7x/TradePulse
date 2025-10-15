@@ -53,31 +53,10 @@ spec:
           secret:
             secretName: tradepulse-mtls-client
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: tradepulse-secrets
-  labels:
-    app: tradepulse-api
-type: Opaque
-stringData:
-  audit-secret: "change-me"
-  oauth2-issuer: "https://auth.example.com/realms/tradepulse"
-  oauth2-audience: "tradepulse-api"
-  oauth2-jwks-uri: "https://auth.example.com/realms/tradepulse/protocol/openid-connect/certs"
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: tradepulse-mtls-client
-  labels:
-    app: tradepulse-api
-stringData:
-  client-ca.pem: |
-    -----BEGIN CERTIFICATE-----
-    MIIB...REDACTED...IDAQAB
-    -----END CERTIFICATE-----
-  client.crl: |
-    -----BEGIN X509 CRL-----
-    MIIB...REDACTED...IDAQAB
-    -----END X509 CRL-----
+# Secrets that provide OAuth credentials and mTLS trust bundles must be
+# provisioned outside of source control. The deployment references the
+# following secrets, which should be created via your preferred secret
+# management workflow (kubectl, ExternalSecrets, etc.):
+#   * tradepulse-secrets with keys: audit-secret, oauth2-issuer,
+#     oauth2-audience, oauth2-jwks-uri
+#   * tradepulse-mtls-client with keys: client-ca.pem, client.crl
