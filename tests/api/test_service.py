@@ -2,37 +2,98 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Callable
 
+import jwt
+from jwt.algorithms import RSAAlgorithm
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "import-admin-token")
-os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
+os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
+os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
+os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
+os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
 
+from application.api import security as security_module
 from application.api.service import create_app
-from application.settings import AdminApiSettings
+from application.settings import AdminApiSettings, ApiSecuritySettings
 
 
 @pytest.fixture()
-def configured_app(monkeypatch: pytest.MonkeyPatch) -> FastAPI:
-    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+def security_context(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
+    if hasattr(security_module.get_api_security_settings, "_instance"):
+        delattr(security_module.get_api_security_settings, "_instance")
+
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    jwk_dict = RSAAlgorithm.to_jwk(public_key, as_dict=True)
+    kid = "unit-test-key"
+    jwk_dict.update({"kid": kid, "alg": "RS256", "use": "sig"})
+
+    settings = ApiSecuritySettings(
+        oauth2_issuer="https://issuer.tradepulse.test",
+        oauth2_audience="tradepulse-api",
+        oauth2_jwks_uri="https://issuer.tradepulse.test/jwks",
+    )
+
+    monkeypatch.setattr(security_module, "_default_settings_loader", lambda: settings)
+
+    async def fake_get_key(uri: str, request_kid: str) -> dict[str, str] | None:
+        assert uri == str(settings.oauth2_jwks_uri)
+        if request_kid == kid:
+            return jwk_dict
+        return None
+
+    monkeypatch.setattr(security_module._jwks_resolver, "get_key", fake_get_key)
+
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+    def mint_token(
+        *,
+        subject: str = "unit-user",
+        audience: str | None = None,
+        issuer: str | None = None,
+        lifetime: timedelta = timedelta(minutes=5),
+    ) -> str:
+        now = datetime.now(timezone.utc)
+        payload = {
+            "iss": issuer or str(settings.oauth2_issuer),
+            "aud": audience or settings.oauth2_audience,
+            "sub": subject,
+            "iat": int(now.timestamp()),
+            "exp": int((now + lifetime).timestamp()),
+        }
+        return jwt.encode(payload, private_pem, algorithm="RS256", headers={"kid": kid})
+
+    return mint_token
+
+
+@pytest.fixture()
+def configured_app(
+    monkeypatch: pytest.MonkeyPatch,
+    security_context: Callable[..., str],
+) -> FastAPI:
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
     settings = AdminApiSettings(
-        admin_token="unit-admin-token",
         audit_secret="unit-audit-secret",
     )
     return create_app(settings=settings)
 
 
-def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("TRADEPULSE_ADMIN_TOKEN", raising=False)
+def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]) -> None:
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
-    with pytest.raises(RuntimeError, match="TRADEPULSE_ADMIN_TOKEN"):
+    with pytest.raises(RuntimeError, match="TRADEPULSE_AUDIT_SECRET"):
         create_app()
 
 
-def _build_payload() -> dict:
+def _build_payload() -> dict[str, object]:
     base = datetime(2024, 12, 1, 12, 0, tzinfo=timezone.utc)
     bars = []
     price = 100.0
@@ -55,12 +116,31 @@ def _build_payload() -> dict:
     return {"symbol": "TEST-USD", "bars": bars}
 
 
-def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> None:
+def _auth_headers(token: str, *, client_cert: bool = False) -> dict[str, str]:
+    headers = {"Authorization": f"Bearer {token}"}
+    if client_cert:
+        headers["X-Client-Cert"] = "test-cert"
+    return headers
+
+
+def test_feature_endpoint_rejects_missing_token(configured_app: FastAPI) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    response = client.post("/features", json=payload)
+    assert response.status_code == 401
+
+
+def test_feature_endpoint_computes_latest_vector(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
     app = configured_app
     client = TestClient(app)
 
     payload = _build_payload()
-    response = client.post("/features", json=payload)
+    token = security_context(subject="feature-user")
+    headers = _auth_headers(token)
+
+    response = client.post("/features", json=payload, headers=headers)
     assert response.status_code == 200
     body = response.json()
     assert body["symbol"] == "TEST-USD"
@@ -79,20 +159,23 @@ def test_feature_endpoint_computes_latest_vector(configured_app: FastAPI) -> Non
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
 
-    # Second call should be served from the cache.
-    cached_response = client.post("/features", json=payload)
+    cached_response = client.post("/features", json=payload, headers=headers)
     assert cached_response.headers["X-Cache-Status"] == "hit"
     assert cached_response.json() == body
 
 
-def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
+def test_prediction_endpoint_returns_signal(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
     app = configured_app
     client = TestClient(app)
 
     payload = _build_payload()
     payload["horizon_seconds"] = 900
+    token = security_context(subject="prediction-user")
+    headers = _auth_headers(token)
 
-    response = client.post("/predictions", json=payload)
+    response = client.post("/predictions", json=payload, headers=headers)
     assert response.status_code == 200
     body = response.json()
     assert body["symbol"] == "TEST-USD"
@@ -105,20 +188,59 @@ def test_prediction_endpoint_returns_signal(configured_app: FastAPI) -> None:
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
 
-    cached = client.post("/predictions", json=payload)
+    cached = client.post("/predictions", json=payload, headers=headers)
     assert cached.headers["X-Cache-Status"] == "hit"
     assert cached.json() == body
 
 
-def test_admin_endpoints_set_strict_cache_headers(configured_app: FastAPI) -> None:
-    app = configured_app
-    client = TestClient(app)
-    headers = {"X-Admin-Token": "unit-admin-token"}
+def test_invalid_token_is_rejected(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    invalid_headers = _auth_headers("malformed-token")
+    response = client.post("/features", json=payload, headers=invalid_headers)
+    assert response.status_code == 401
+
+
+def test_admin_endpoints_require_client_certificate(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    token = security_context(subject="admin-user")
+    headers = _auth_headers(token)
+    response = client.get("/admin/kill-switch", headers=headers)
+    assert response.status_code == 401
+
+
+def test_admin_endpoints_accept_jwt_and_certificate(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    token = security_context(subject="admin-user")
+    headers = _auth_headers(token, client_cert=True)
 
     response = client.get("/admin/kill-switch", headers=headers)
     assert response.status_code == 200
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["Pragma"] == "no-cache"
     vary_header = response.headers.get("Vary", "")
-    assert "X-Admin-Token" in vary_header
+    assert "Authorization" in vary_header
     assert "Accept" in vary_header
+
+    payload = {"reason": "manual intervention"}
+    response = client.post("/admin/kill-switch", headers=headers, json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["kill_switch_engaged"] is True
+    assert body["already_engaged"] is False
+
+
+def test_admin_endpoint_rejects_wrong_audience(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    bad_token = security_context(audience="different-audience")
+    headers = _auth_headers(bad_token, client_cert=True)
+    response = client.get("/admin/kill-switch", headers=headers)
+    assert response.status_code == 401

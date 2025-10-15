@@ -14,7 +14,7 @@ paths:
       summary: Inspect the kill-switch state
       operationId: getKillSwitchState
       security:
-        - AdminToken: []
+        - OAuth2Bearer: []
       responses:
         "200":
           description: Current kill-switch status.
@@ -26,7 +26,7 @@ paths:
       summary: Engage the kill-switch
       operationId: engageKillSwitch
       security:
-        - AdminToken: []
+        - OAuth2Bearer: []
       requestBody:
         required: true
         content:
@@ -44,7 +44,7 @@ paths:
       summary: Reset the kill-switch
       operationId: resetKillSwitch
       security:
-        - AdminToken: []
+        - OAuth2Bearer: []
       responses:
         "200":
           description: Result of the reset operation (idempotent).
@@ -54,11 +54,13 @@ paths:
                 $ref: '#/components/schemas/KillSwitchResponse'
 components:
   securitySchemes:
-    AdminToken:
-      type: apiKey
-      in: header
-      name: X-Admin-Token
-      description: Static administrative token required for remote control operations.
+    OAuth2Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: >-
+        OAuth2 access token with the TradePulse API audience. Mutual TLS is enforced
+        at the ingress layer using the configured client CA bundle.
   schemas:
     KillSwitchRequest:
       type: object

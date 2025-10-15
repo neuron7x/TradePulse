@@ -19,15 +19,12 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
+from application.api.security import get_api_security_settings, verify_request_identity
 from application.settings import AdminApiSettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
 from execution.risk import RiskLimits, RiskManager
-from src.admin.remote_control import (
-    AdminRateLimiter,
-    TokenAuthenticator,
-    create_remote_control_router,
-)
+from src.admin.remote_control import AdminIdentity, AdminRateLimiter, create_remote_control_router
 from src.audit.audit_logger import AuditLogger, HttpAuditSink
 from src.risk.risk_manager import RiskManagerFacade
 
@@ -310,8 +307,6 @@ def create_app(
         resolved_settings = settings or AdminApiSettings()
     except ValidationError as exc:  # pragma: no cover - defensive branch
         alias_map = {
-            "admin_token": "TRADEPULSE_ADMIN_TOKEN",
-            "ADMIN_TOKEN": "TRADEPULSE_ADMIN_TOKEN",
             "audit_secret": "TRADEPULSE_AUDIT_SECRET",
             "AUDIT_SECRET": "TRADEPULSE_AUDIT_SECRET",
             "admin_subject": "TRADEPULSE_ADMIN_SUBJECT",
@@ -335,9 +330,22 @@ def create_app(
             ).format(joined)
         ) from exc
 
-    admin_token_value = resolved_settings.admin_token.get_secret_value()
+    try:
+        _ = get_api_security_settings()
+    except ValidationError as exc:
+        alias_map = {
+            "oauth2_issuer": "TRADEPULSE_OAUTH2_ISSUER",
+            "oauth2_audience": "TRADEPULSE_OAUTH2_AUDIENCE",
+            "oauth2_jwks_uri": "TRADEPULSE_OAUTH2_JWKS_URI",
+        }
+        missing = [
+            alias_map.get(error["loc"][0], error["loc"][0])
+            for error in exc.errors()
+            if error.get("type") == "missing"
+        ]
+        joined = ", ".join(sorted(set(missing))) or "OAuth configuration values"
+        raise RuntimeError(("Missing required OAuth configuration: {}.").format(joined)) from exc
     audit_secret_value = resolved_settings.audit_secret.get_secret_value()
-    admin_subject = resolved_settings.admin_subject
     rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
     rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
 
@@ -347,11 +355,13 @@ def create_app(
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
     audit_logger = AuditLogger(secret=audit_secret_value, sink=audit_sink)
-    authenticator = TokenAuthenticator(token=admin_token_value, subject=admin_subject)
     admin_rate_limiter = AdminRateLimiter(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),
     )
+
+    require_bearer = verify_request_identity()
+    require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
 
     limiter_rate = limiter.max_rate
     limiter_period = limiter.time_period
@@ -391,7 +401,7 @@ def create_app(
         create_remote_control_router(
             risk_manager_facade,
             audit_logger,
-            authenticator,
+            identity_dependency=require_bearer_with_mtls,
             rate_limiter=admin_rate_limiter,
         )
     )
@@ -429,7 +439,7 @@ def create_app(
         if path.startswith("/admin") or response.status_code >= 400:
             response.headers["Cache-Control"] = "no-store"
             response.headers.setdefault("Pragma", "no-cache")
-            _append_vary_header(response, "X-Admin-Token")
+            _append_vary_header(response, "Authorization")
         else:
             response.headers["Cache-Control"] = f"private, max-age={ttl_cache.ttl_seconds}"
         _append_vary_header(response, "Accept")
@@ -449,6 +459,7 @@ def create_app(
         payload: FeatureRequest,
         response: Response,
         _: None = Depends(enforce_rate_limit),
+        _identity: AdminIdentity = Depends(require_bearer),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> FeatureResponse:
         cache_key = _hash_payload("features", payload)
@@ -478,6 +489,7 @@ def create_app(
         payload: PredictionRequest,
         response: Response,
         _: None = Depends(enforce_rate_limit),
+        _identity: AdminIdentity = Depends(require_bearer),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> PredictionResponse:
         cache_key = _hash_payload("predictions", payload)

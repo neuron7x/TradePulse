@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import Field, HttpUrl, PositiveFloat, PositiveInt, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -9,10 +11,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class AdminApiSettings(BaseSettings):
     """Configuration governing administrative controls and audit logging."""
 
-    admin_token: SecretStr = Field(
-        ...,
-        description="Static bearer token for administrative access.",
-    )
     audit_secret: SecretStr = Field(
         ...,
         description="Secret used to sign administrative audit records.",
@@ -38,4 +36,37 @@ class AdminApiSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TRADEPULSE_", extra="ignore")
 
 
-__all__ = ["AdminApiSettings"]
+class ApiSecuritySettings(BaseSettings):
+    """Runtime configuration for OAuth2 and mutual TLS enforcement."""
+
+    oauth2_issuer: HttpUrl = Field(
+        ...,
+        description="Expected issuer claim for incoming OAuth2 JWT bearer tokens.",
+    )
+    oauth2_audience: str = Field(
+        ...,
+        min_length=1,
+        description="Audience that must be present within validated JWT access tokens.",
+    )
+    oauth2_jwks_uri: HttpUrl = Field(
+        ...,
+        description="JWKS endpoint used to discover signing keys for JWT validation.",
+    )
+    mtls_trusted_ca_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional path to a PEM bundle containing certificate authorities trusted for "
+            "mutual TLS client authentication."
+        ),
+    )
+    mtls_revocation_list_path: Path | None = Field(
+        default=None,
+        description=(
+            "Optional path to a certificate revocation list checked during mTLS handshakes."
+        ),
+    )
+
+    model_config = SettingsConfigDict(env_prefix="TRADEPULSE_", extra="ignore")
+
+
+__all__ = ["AdminApiSettings", "ApiSecuritySettings"]

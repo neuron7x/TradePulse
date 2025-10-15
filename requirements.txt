@@ -38,6 +38,7 @@ streamlit>=1.31.0
 streamlit-authenticator>=0.3.1
 
 # Security: Pin secure versions of common transitive dependencies
+PyJWT[crypto]>=2.9.0
 requests>=2.32.5
 urllib3>=2.5.0
 idna>=3.11

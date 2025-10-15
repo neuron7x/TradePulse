@@ -314,6 +314,12 @@
         "title": "ValidationError",
         "type": "object"
       }
+    },
+    "securitySchemes": {
+      "OAuth2Bearer": {
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -335,33 +341,6 @@
       "delete": {
         "description": "Reset the kill-switch in an idempotent manner and preserve an audit trail.",
         "operationId": "reset_kill_switch_admin_kill_switch_delete",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Admin-Token",
-            "required": true,
-            "schema": {
-              "title": "X-Admin-Token",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Admin-Subject",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Admin-Subject"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -375,18 +354,13 @@
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
         "summary": "Reset the global kill-switch",
         "tags": [
           "admin"
@@ -395,33 +369,6 @@
       "get": {
         "description": "Inspect the kill-switch state and append an immutable audit record.",
         "operationId": "read_kill_switch_state_admin_kill_switch_get",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Admin-Token",
-            "required": true,
-            "schema": {
-              "title": "X-Admin-Token",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Admin-Subject",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Admin-Subject"
-            }
-          }
-        ],
         "responses": {
           "200": {
             "content": {
@@ -435,18 +382,13 @@
           },
           "401": {
             "description": "Unauthorized"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
         "summary": "Read the global kill-switch state",
         "tags": [
           "admin"
@@ -455,33 +397,6 @@
       "post": {
         "description": "Engage or reaffirm the kill-switch and emit a signed audit log entry.",
         "operationId": "engage_kill_switch_admin_kill_switch_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "X-Admin-Token",
-            "required": true,
-            "schema": {
-              "title": "X-Admin-Token",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "X-Admin-Subject",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Admin-Subject"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -517,6 +432,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
         "summary": "Engage the global kill-switch",
         "tags": [
           "admin"
@@ -558,6 +478,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
         "summary": "Generate the latest engineered feature vector",
         "tags": [
           "features"
@@ -624,6 +549,11 @@
             "description": "Validation Error"
           }
         },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
         "summary": "Produce a trading signal for the latest bar",
         "tags": [
           "predictions"

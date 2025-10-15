@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import ipaddress
 from collections import deque
-from typing import Deque
+from typing import Awaitable, Callable, Deque
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from src.audit.audit_logger import AuditLogger
@@ -18,7 +17,6 @@ __all__ = [
     "AdminIdentity",
     "KillSwitchRequest",
     "KillSwitchResponse",
-    "TokenAuthenticator",
     "AdminRateLimiter",
     "create_remote_control_router",
 ]
@@ -64,36 +62,6 @@ def _build_kill_switch_response(status: str, state: KillSwitchState) -> KillSwit
         reason=state.reason,
         already_engaged=state.already_engaged,
     )
-
-
-class TokenAuthenticator:
-    """Validate administrative requests using a static token."""
-
-    def __init__(
-        self,
-        token: str,
-        *,
-        subject: str = "remote-admin",
-    ) -> None:
-        if not token:
-            raise ValueError("token must be provided for remote control authentication")
-        self._token = token
-        self._subject = subject
-
-    def __call__(
-        self,
-        provided: str = Header(..., alias="X-Admin-Token"),
-        subject_override: str | None = Header(default=None, alias="X-Admin-Subject"),
-    ) -> AdminIdentity:
-        """Authenticate the incoming request and return the administrator identity."""
-
-        if not provided or not hmac.compare_digest(provided, self._token):
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid administrative token",
-            )
-        subject = subject_override or self._subject
-        return AdminIdentity(subject=subject)
 
 
 class AdminRateLimiter:
@@ -181,7 +149,7 @@ def _normalize_ip(raw: str | None) -> str | None:
 def create_remote_control_router(
     risk_manager: RiskManagerFacade,
     audit_logger: AuditLogger,
-    authenticator: TokenAuthenticator,
+    identity_dependency: Callable[..., AdminIdentity | Awaitable[AdminIdentity]],
     *,
     rate_limiter: AdminRateLimiter | None = None,
 ) -> APIRouter:
@@ -216,7 +184,7 @@ def create_remote_control_router(
         payload: KillSwitchRequest,
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
-        identity: AdminIdentity = Depends(authenticator),
+        identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
     ) -> KillSwitchResponse:
@@ -247,7 +215,7 @@ def create_remote_control_router(
     async def read_kill_switch_state(
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
-        identity: AdminIdentity = Depends(authenticator),
+        identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
     ) -> KillSwitchResponse:
@@ -277,7 +245,7 @@ def create_remote_control_router(
     async def reset_kill_switch(
         request: Request,
         _: None = Depends(enforce_admin_rate_limit),
-        identity: AdminIdentity = Depends(authenticator),
+        identity: AdminIdentity = Depends(identity_dependency),
         manager: RiskManagerFacade = Depends(get_risk_manager),
         logger: AuditLogger = Depends(get_audit_logger),
     ) -> KillSwitchResponse:
