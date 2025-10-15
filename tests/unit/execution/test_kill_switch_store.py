@@ -30,3 +30,22 @@ def test_kill_switch_reset_persists_clear_state(tmp_path) -> None:
     reloaded = KillSwitch(store=store)
     assert reloaded.is_triggered() is False
     assert reloaded.reason == ""
+
+
+def test_kill_switch_refreshes_from_store_between_instances(tmp_path) -> None:
+    store = SQLiteKillSwitchStateStore(tmp_path / "shared.sqlite")
+    primary = KillSwitch(store=store)
+    secondary = KillSwitch(store=store)
+
+    assert primary.is_triggered() is False
+    assert secondary.is_triggered() is False
+
+    secondary.trigger("other worker engaged")
+
+    assert primary.is_triggered() is True
+    assert primary.reason == "other worker engaged"
+
+    secondary.reset()
+
+    assert primary.is_triggered() is False
+    assert primary.reason == ""

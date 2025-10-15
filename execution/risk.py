@@ -157,11 +157,21 @@ class KillSwitch:
         self._triggered = False
         self._reason = ""
         if self._store is not None:
-            persisted = self._store.load()
-            if persisted is not None:
-                engaged, reason = persisted
-                self._triggered = bool(engaged)
-                self._reason = reason
+            self._refresh_from_store()
+
+    def _refresh_from_store(self) -> None:
+        if self._store is None:
+            return
+
+        persisted = self._store.load()
+        if persisted is None:
+            self._triggered = False
+            self._reason = ""
+            return
+
+        engaged, reason = persisted
+        self._triggered = bool(engaged)
+        self._reason = reason or ""
 
     def trigger(self, reason: str) -> None:
         """Engage the kill-switch with an explanatory ``reason``."""
@@ -183,16 +193,22 @@ class KillSwitch:
     def reason(self) -> str:
         """Return the human-readable explanation for the last trigger."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         return self._reason
 
     def is_triggered(self) -> bool:
         """Indicate whether the kill-switch is currently engaged."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         return self._triggered
 
     def guard(self) -> None:
         """Raise :class:`RiskError` if the kill-switch is active."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         if self._triggered:
             raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
 
