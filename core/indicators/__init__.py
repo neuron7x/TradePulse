@@ -16,6 +16,7 @@ from .kuramoto import (
     kuramoto_order,
     multi_asset_kuramoto,
 )
+from .trading import HurstIndicator, KuramotoIndicator, VPINIndicator
 from .hierarchical_features import (
     FeatureBufferCache,
     HierarchicalFeatureResult,
@@ -45,6 +46,9 @@ __all__ = [
     "multi_asset_kuramoto",
     "KuramotoOrderFeature",
     "MultiAssetKuramotoFeature",
+    "KuramotoIndicator",
+    "HurstIndicator",
+    "VPINIndicator",
     "FeatureBufferCache",
     "HierarchicalFeatureResult",
     "TimeFrameSpec",
