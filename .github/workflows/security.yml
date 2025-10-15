@@ -135,17 +135,54 @@ jobs:
 
     - name: Install OSV-Scanner
       env:
-        OSV_VERSION: "1.7.4"
+        # Override this if a specific OSV release is required. Either `2.2.3` or `v2.2.3` is accepted.
+        OSV_VERSION: ""
       run: |
         set -euo pipefail
+
         tmpdir="$(mktemp -d)"
         trap 'rm -rf "$tmpdir"' EXIT
-        archive="osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz"
-        url="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/${archive}"
-        echo "Downloading OSV-Scanner from $url"
-        curl -sSfL "$url" -o "$tmpdir/$archive"
-        tar -xzf "$tmpdir/$archive" -C "$tmpdir"
-        sudo install -m 0755 "$tmpdir/osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
+
+        if [ -z "${OSV_VERSION:-}" ]; then
+          echo "OSV_VERSION not provided; discovering the latest release tag"
+          latest_tag=$(curl -sSfL https://api.github.com/repos/google/osv-scanner/releases/latest | jq -r '.tag_name // empty')
+          if [ -z "$latest_tag" ]; then
+            echo "Failed to determine the latest OSV-Scanner release tag" >&2
+            exit 1
+          fi
+          OSV_VERSION="$latest_tag"
+        fi
+
+        # Strip an optional leading `v` so we can construct the asset name, but keep it for the tag path.
+        clean_version="${OSV_VERSION#v}"
+        release_tag="v${clean_version}"
+
+        archive_tar="osv-scanner_${clean_version}_linux_amd64.tar.gz"
+        archive_bin="osv-scanner_linux_amd64"
+        tar_url="https://github.com/google/osv-scanner/releases/download/${release_tag}/${archive_tar}"
+        bin_url="https://github.com/google/osv-scanner/releases/download/${release_tag}/${archive_bin}"
+
+        echo "Attempting to download OSV-Scanner ${clean_version} tarball from ${tar_url}"
+        if curl -sSfL --retry 5 --retry-delay 2 "$tar_url" -o "$tmpdir/$archive_tar"; then
+          tar -xzf "$tmpdir/$archive_tar" -C "$tmpdir"
+          binary_path="$tmpdir/osv-scanner_${clean_version}_linux_amd64/osv-scanner"
+        else
+          echo "Tarball unavailable; falling back to raw binary from ${bin_url}"
+          if curl -sSfL --retry 5 --retry-delay 2 "$bin_url" -o "$tmpdir/$archive_bin"; then
+            chmod +x "$tmpdir/$archive_bin"
+            binary_path="$tmpdir/$archive_bin"
+          else
+            echo "Failed to download OSV-Scanner release from either ${tar_url} or ${bin_url}" >&2
+            exit 1
+          fi
+        fi
+
+        if [ ! -x "$binary_path" ]; then
+          echo "Expected OSV-Scanner binary not found at $binary_path" >&2
+          exit 1
+        fi
+
+        sudo install -m 0755 "$binary_path" /usr/local/bin/osv-scanner
     - name: Run OSV-Scanner on project manifests
       run: |
         set -euo pipefail

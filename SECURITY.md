@@ -191,7 +191,7 @@ safety check
 #### 5. CI/CD Security Gates
 
 - Every push, pull request, and weekly schedule runs Semgrep with the `p/ci` policy set. Any blocking rule will fail the workflow and must be remediated or waived via a documented suppression.
-- OSV-Scanner enforces software composition analysis across Python (`requirements*.txt`), Go (`go.mod`/`go.sum`), and Rust (`Cargo.toml`/`Cargo.lock`). Detected vulnerabilities block merges until resolved.
+- OSV-Scanner enforces software composition analysis across Python (`requirements*.txt`), Go (`go.mod`/`go.sum`), and Rust (`Cargo.toml`/`Cargo.lock`). The workflow auto-discovers the latest supported OSV-Scanner release (or honors an explicit `OSV_VERSION`), installs either the tarball or raw binary asset as required, and blocks merges until all detected vulnerabilities are resolved.
 - Existing Python-focused checks (`safety` and `pip-audit`) remain in place to provide detailed remediation guidance and JSON artifacts for tracking.
 - Security reports are published as workflow artifacts for traceability. Reference them during release reviews and post-incident analysis.
 
