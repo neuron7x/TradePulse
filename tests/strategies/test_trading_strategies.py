@@ -57,6 +57,28 @@ def test_hurst_vpin_strategy(sample_data: pd.DataFrame) -> None:
     assert ((signals["confidence"] >= 0) & (signals["confidence"] <= 1)).all()
 
 
+def test_hurst_vpin_missing_volume_column(sample_data: pd.DataFrame) -> None:
+    """HurstVPINStrategy should validate required volume columns."""
+
+    strategy = HurstVPINStrategy(symbol="TEST", params={})
+    incomplete = sample_data.drop(columns="buy_volume")
+
+    with pytest.raises(ValueError):
+        strategy.generate_signals(incomplete)
+
+
+def test_hurst_vpin_empty_dataframe(sample_data: pd.DataFrame) -> None:
+    """HurstVPINStrategy should return an empty frame for empty input."""
+
+    strategy = HurstVPINStrategy(symbol="TEST", params={})
+    empty_data = sample_data.head(0)
+
+    signals = strategy.generate_signals(empty_data)
+
+    assert signals.empty
+    assert list(signals.columns) == ["timestamp", "symbol", "signal", "confidence"]
+
+
 def test_edge_cases_kuramoto() -> None:
     """Test KuramotoStrategy with edge cases (NaN, empty data)."""
 
