@@ -490,6 +490,44 @@ def test_oms_sync_remote_state_handles_missing_optional_fields(tmp_path, risk_ma
     assert record["average_price"] == pytest.approx(placed.average_price)
 
 
+def test_oms_sync_remote_state_does_not_reduce_local_fill(tmp_path, risk_manager: RiskManager) -> None:
+    state_path = tmp_path / "sync_no_regress.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.5, price=21_250, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="sync-no-regress")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    # Local fill recorded prior to receiving terminal remote update.
+    oms.register_fill(placed.order_id, 0.4, 21_200)
+
+    remote = Order(
+        symbol=placed.symbol,
+        side=placed.side,
+        quantity=placed.quantity,
+        price=placed.price,
+        order_type=placed.order_type,
+        stop_price=placed.stop_price,
+        order_id=placed.order_id,
+        status=OrderStatus.CANCELLED,
+        filled_quantity=0.1,
+        average_price=None,
+        rejection_reason="venue cancelled",
+        created_at=placed.created_at,
+    )
+    object.__setattr__(remote, "updated_at", datetime.now(timezone.utc))
+
+    synced = oms.sync_remote_state(remote)
+
+    assert synced.status is OrderStatus.CANCELLED
+    assert synced.filled_quantity == pytest.approx(0.4)
+    assert synced.average_price == pytest.approx(21_200)
+    assert synced.rejection_reason == "venue cancelled"
+    assert not list(oms.outstanding())
+
 def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManager) -> None:
     state_path = tmp_path / "recovery_state.json"
     config = OMSConfig(state_path=state_path)

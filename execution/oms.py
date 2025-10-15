@@ -344,9 +344,10 @@ class OrderManagementSystem:
         stored.status = OrderStatus(order.status)
 
         remote_filled = order.filled_quantity
+        local_filled = stored.filled_quantity if stored.filled_quantity is not None else 0.0
         if remote_filled is None:
-            remote_filled = stored.filled_quantity
-        stored.filled_quantity = float(remote_filled)
+            remote_filled = local_filled
+        stored.filled_quantity = float(max(local_filled, remote_filled))
 
         if order.average_price is not None:
             stored.average_price = float(order.average_price)
@@ -355,6 +356,9 @@ class OrderManagementSystem:
 
         if not stored.is_active:
             self._ack_timestamps.pop(order.order_id, None)
+            correlation = self._correlations.get(order.order_id)
+            if correlation is not None:
+                self._pending.pop(correlation, None)
 
         self._persist_state()
         return stored
