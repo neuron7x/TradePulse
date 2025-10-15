@@ -15,10 +15,13 @@ attributable—an explicit requirement in ``docs/quality_gates.md``.
 
 from __future__ import annotations
 
+import sqlite3
+import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, Mapping, MutableMapping
+from pathlib import Path
+from typing import Callable, Dict, Iterable, Mapping, MutableMapping, Protocol
 
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
@@ -78,44 +81,134 @@ class RiskLimits:
             self.kill_switch_rate_limit_threshold = 1
 
 
+class KillSwitchStateStore(Protocol):
+    """Persistence backend for kill-switch state."""
+
+    def load(self) -> tuple[bool, str] | None:
+        """Return the last persisted state, if any."""
+
+    def save(self, engaged: bool, reason: str) -> None:
+        """Persist the supplied state atomically."""
+
+
+class SQLiteKillSwitchStateStore(KillSwitchStateStore):
+    """SQLite-backed store used to persist kill-switch state across restarts."""
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+        self._lock = threading.Lock()
+        self._initialise()
+
+    def _initialise(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self._path) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS kill_switch_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    engaged INTEGER NOT NULL CHECK (engaged IN (0, 1)),
+                    reason TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+    def load(self) -> tuple[bool, str] | None:
+        with sqlite3.connect(self._path) as connection:
+            cursor = connection.execute(
+                "SELECT engaged, reason FROM kill_switch_state WHERE id = 1"
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        engaged, reason = row
+        return bool(engaged), reason or ""
+
+    def save(self, engaged: bool, reason: str) -> None:
+        payload_reason = reason or ""
+        with self._lock:
+            with sqlite3.connect(self._path) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
+                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(id) DO UPDATE SET
+                        engaged = excluded.engaged,
+                        reason = excluded.reason,
+                        updated_at = CURRENT_TIMESTAMP
+                    """,
+                    (1, int(bool(engaged)), payload_reason),
+                )
+
+
 class KillSwitch:
-    """Global kill-switch toggled on critical failures.
+    """Global kill-switch toggled on critical failures with optional persistence.
 
     The kill-switch mirrors the operational blueprint in
     ``docs/admin_remote_control.md`` and is surfaced via CLI and observability
-    tooling for rapid operator response.
+    tooling for rapid operator response. When supplied with a
+    :class:`KillSwitchStateStore` it reloads the persisted state during
+    initialisation to preserve operator intent across restarts.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, store: KillSwitchStateStore | None = None) -> None:
+        self._store = store
         self._triggered = False
         self._reason = ""
+        if self._store is not None:
+            self._refresh_from_store()
+
+    def _refresh_from_store(self) -> None:
+        if self._store is None:
+            return
+
+        persisted = self._store.load()
+        if persisted is None:
+            self._triggered = False
+            self._reason = ""
+            return
+
+        engaged, reason = persisted
+        self._triggered = bool(engaged)
+        self._reason = reason or ""
 
     def trigger(self, reason: str) -> None:
         """Engage the kill-switch with an explanatory ``reason``."""
 
         self._triggered = True
         self._reason = reason
+        if self._store is not None:
+            self._store.save(True, reason)
 
     def reset(self) -> None:
         """Clear the kill-switch state."""
 
         self._triggered = False
         self._reason = ""
+        if self._store is not None:
+            self._store.save(False, "")
 
     @property
     def reason(self) -> str:
         """Return the human-readable explanation for the last trigger."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         return self._reason
 
     def is_triggered(self) -> bool:
         """Indicate whether the kill-switch is currently engaged."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         return self._triggered
 
     def guard(self) -> None:
         """Raise :class:`RiskError` if the kill-switch is active."""
 
+        if self._store is not None:
+            self._refresh_from_store()
         if self._triggered:
             raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
 
@@ -135,9 +228,10 @@ class RiskManager(RiskController):
         *,
         time_source: Callable[[], float] | None = None,
         audit_logger: ExecutionAuditLogger | None = None,
+        kill_switch_store: KillSwitchStateStore | None = None,
     ) -> None:
         self.limits = limits
-        self._kill_switch = KillSwitch()
+        self._kill_switch = KillSwitch(store=kill_switch_store)
         self._time = time_source or time.time
         self._positions: MutableMapping[str, float] = {}
         self._last_notional: MutableMapping[str, float] = {}
@@ -525,6 +619,8 @@ __all__ = [
     "LimitViolation",
     "OrderRateExceeded",
     "RiskLimits",
+    "KillSwitchStateStore",
+    "SQLiteKillSwitchStateStore",
     "KillSwitch",
     "RiskManager",
     "DefaultPortfolioRiskAnalyzer",

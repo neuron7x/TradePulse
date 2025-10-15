@@ -6,7 +6,16 @@ from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecifica
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .oms import OMSConfig, OrderManagementSystem
 from .live_loop import LiveExecutionLoop, LiveLoopConfig
-from .risk import IdempotentRetryExecutor, KillSwitch, LimitViolation, OrderRateExceeded, RiskLimits, RiskManager
+from .risk import (
+    IdempotentRetryExecutor,
+    KillSwitch,
+    KillSwitchStateStore,
+    LimitViolation,
+    OrderRateExceeded,
+    RiskLimits,
+    RiskManager,
+    SQLiteKillSwitchStateStore,
+)
 
 __all__ = [
     "CanaryConfig",
@@ -28,6 +37,8 @@ __all__ = [
     "RiskLimits",
     "RiskManager",
     "KillSwitch",
+    "KillSwitchStateStore",
+    "SQLiteKillSwitchStateStore",
     "LimitViolation",
     "OrderRateExceeded",
     "IdempotentRetryExecutor",

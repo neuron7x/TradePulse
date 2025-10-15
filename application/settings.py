@@ -58,6 +58,10 @@ class AdminApiSettings(BaseSettings):
         default=None,
         description="Optional HTTP endpoint that receives signed audit records for external storage.",
     )
+    kill_switch_store_path: Path = Field(
+        Path("state/kill_switch_state.sqlite"),
+        description="Filesystem path used to persist the risk kill-switch state.",
+    )
     siem_endpoint: HttpUrl | None = Field(
         default=None,
         description="Optional SIEM API endpoint that receives replicated audit records.",
