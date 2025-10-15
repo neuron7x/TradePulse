@@ -108,7 +108,31 @@ Audit events include the following fields:
 - `details`: Structured metadata containing the provided reason and whether the switch was already active
 - `signature`: HMAC-SHA256 signature computed with `TRADEPULSE_AUDIT_SECRET`
 
-Use `AuditLogger.verify(record)` to validate stored entries if tampering is suspected.
+Signed entries are written through to an append-only audit ledger before they are mirrored to external sinks. The default
+implementation persists JSON Lines entries (one record per line) and performs an `fsync` after every write to guarantee
+durability. Downstream forwarding to the security information and event management (SIEM) endpoint uses a durable spool
+directory with exponential backoff; failed deliveries are retried automatically and exhausted attempts land in a
+dead-letter queue for manual intervention.
+
+Use `AuditLogger.verify(record)` to validate stored entries if tampering is suspected. The verification flow should be
+scheduled as part of your compliance checks:
+
+1. Export the append-only ledger and reconstitute each JSON object.
+2. Instantiate `AuditLogger` with the signing secret (for example via `TRADEPULSE_AUDIT_SECRET`).
+3. Call `verify` on every record and alert if any signature fails.
+
+### Retention and SIEM Configuration
+
+- **Retention** – Store the append-only files (or database table) on immutable storage with your standard retention
+  policy. Replicate or snapshot the ledger at least daily to cold storage. Keep the SIEM dead-letter directory under the
+  same retention window so failures remain auditable.
+- **SIEM forwarding** – Configure the endpoint and credentials through the following settings:
+  - `TRADEPULSE_SIEM_ENDPOINT`
+  - `TRADEPULSE_SIEM_CLIENT_ID`
+  - `TRADEPULSE_SIEM_CLIENT_SECRET` (inject via `/run/secrets` or your secret manager)
+  - `TRADEPULSE_SIEM_SCOPE` (optional)
+- **Verification drills** – Review the dead-letter queue during weekly operations reviews and requeue items after the
+  upstream outage is resolved.
 
 ## Testing
 
@@ -123,6 +147,9 @@ The suite validates authentication, kill-switch semantics, and audit logging int
 ## Production Recommendations
 
 - Integrate with your organisation's OAuth2/OpenID Connect provider and rotate credentials regularly. Access tokens should be short-lived with refresh performed by trusted automation.
-- Persist audit records to an append-only datastore (for example, write-through to SIEM or immutable storage).
+- Persist audit records to an append-only datastore (JSON Lines ledger, immutable object store, or database table with
+  `INSERT`-only trigger protections).
+- Monitor the SIEM spool and dead-letter directories; alerts should fire if the queue size grows unexpectedly or records
+  remain in dead-letter beyond your defined service-level objective.
 - Configure alerts on the `kill_switch_reaffirmed` and `kill_switch_reset_noop` events to avoid unnoticed overrides or repeated ineffective resets.
 - Integrate the kill-switch status into your incident response runbooks so that restarts include a reset step if appropriate, using the `DELETE /admin/kill-switch` endpoint for consistency with audit trails.

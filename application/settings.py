@@ -12,6 +12,7 @@ from pydantic import (
     PositiveFloat,
     PositiveInt,
     SecretStr,
+    model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -40,8 +41,41 @@ class AdminApiSettings(BaseSettings):
         default=None,
         description="Optional HTTP endpoint that receives signed audit records for external storage.",
     )
+    siem_endpoint: HttpUrl | None = Field(
+        default=None,
+        description="Optional SIEM API endpoint that receives replicated audit records.",
+    )
+    siem_client_id: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Client identifier used when authenticating against the SIEM ingest API.",
+    )
+    siem_client_secret: SecretStr | None = Field(
+        default=None,
+        description=(
+            "Client secret used for SIEM authentication. Provide via environment variable "
+            "or mounted secrets directory to avoid embedding credentials in configuration files."
+        ),
+    )
+    siem_scope: str | None = Field(
+        default=None,
+        description="Optional OAuth2 scope requested when exchanging SIEM credentials for a token.",
+    )
 
-    model_config = SettingsConfigDict(env_prefix="TRADEPULSE_", extra="ignore")
+    @model_validator(mode="after")
+    def _validate_siem_configuration(self) -> "AdminApiSettings":
+        if self.siem_endpoint is not None:
+            if not self.siem_client_id or not self.siem_client_secret:
+                raise ValueError(
+                    "siem_client_id and siem_client_secret must be configured when siem_endpoint is set"
+                )
+        return self
+
+    model_config = SettingsConfigDict(
+        env_prefix="TRADEPULSE_",
+        extra="ignore",
+        secrets_dir=Path("/run/secrets"),
+    )
 
 
 class ApiSecuritySettings(BaseSettings):
