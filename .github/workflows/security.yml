@@ -187,6 +187,7 @@ jobs:
       run: |
         set -euo pipefail
         files=()
+        targets=()
         if [ -f go.sum ]; then files+=("--lockfile=go.sum"); fi
         if [ -f go.mod ]; then files+=("--lockfile=go.mod"); fi
         if [ -f requirements.txt ]; then files+=("--lockfile=requirements.txt"); fi
@@ -194,15 +195,21 @@ jobs:
         if [ -f requirements.lock ]; then files+=("--lockfile=requirements.lock"); fi
         if [ -f requirements-dev.lock ]; then files+=("--lockfile=requirements-dev.lock"); fi
         if [ -f rust/tradepulse-accel/Cargo.lock ]; then files+=("--lockfile=rust/tradepulse-accel/Cargo.lock"); fi
-        if [ -f rust/tradepulse-accel/Cargo.toml ]; then files+=("--manifest=rust/tradepulse-accel/Cargo.toml"); fi
+        if [ ! -f rust/tradepulse-accel/Cargo.lock ] && [ -f rust/tradepulse-accel/Cargo.toml ]; then
+          # Fallback to scanning the crate directory if only the manifest is present.
+          targets+=("rust/tradepulse-accel")
+        fi
 
-        if [ ${#files[@]} -eq 0 ]; then
+        if [ ${#files[@]} -eq 0 ] && [ ${#targets[@]} -eq 0 ]; then
           echo "No manifest or lock files were detected for OSV scanning."
           exit 0
         fi
 
-        echo "Scanning with OSV-Scanner using: ${files[*]}"
-        osv-scanner "${files[@]}"
+        args=("${files[@]}")
+        args+=("${targets[@]}")
+
+        echo "Scanning with OSV-Scanner using: ${args[*]}"
+        osv-scanner "${args[@]}"
 
   semgrep-sast:
     name: Semgrep SAST Scan
