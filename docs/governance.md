@@ -43,7 +43,7 @@ This guide defines the governance guardrails for TradePulse across access manage
 
 ### Service-Level Access Policies
 
-1. **Zero trust mesh** – mTLS enforced between services with SPIFFE identities, limiting service-to-service calls to declared intents (e.g., ingestion services cannot call execution write endpoints).
+1. **Zero trust mesh** – mTLS enforced between services with SPIFFE identities, limiting service-to-service calls to declared intents (e.g., ingestion services cannot call execution write endpoints). Operational procedures live in the [Zero Trust Service Mesh Runbook](security/zero_trust_runbook.md).
 2. **Environment segregation** – staging and production namespaces enforce namespace-level network policies; execution services only accept traffic from approved front doors.
 3. **Secrets governance** – HashiCorp Vault policies scoped per role; dynamic secrets for databases expire within 1 hour; audited secret rotation via CI workflows.
 4. **Least privilege automation** – Terraform modules expose role bindings as code with review requirements and automated drift detection (weekly `terraform plan` reports).
