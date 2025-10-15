@@ -15,7 +15,7 @@ This guide outlines the production deployment requirements for TradePulse, inclu
 ### Networking & Security
 
 - Restrict inbound access to OMS and connector hosts using security groups or firewall rules.
-- Enforce mTLS between strategy services and Kafka/Postgres where supported.
+- Enforce mTLS between strategy services and Kafka/Postgres where supported (see the [Zero Trust Service Mesh Runbook](security/zero_trust_runbook.md) for mesh identities and policy templates).
 - Mirror Prometheus metrics to your SIEM for long-term incident investigations.
 
 ### Kafka Broker Security Configuration
