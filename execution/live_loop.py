@@ -387,6 +387,17 @@ class LiveExecutionLoop:
                         )
 
                     if not remote.is_active:
+                        try:
+                            context.oms.sync_remote_state(remote)
+                        except LookupError:
+                            self._logger.warning(
+                                "Remote order missing from OMS during sync",
+                                extra={
+                                    "event": "live_loop.sync_missing",
+                                    "venue": context.name,
+                                    "order_id": order.order_id,
+                                },
+                            )
                         self._order_connector.pop(order.order_id, None)
                         self._last_reported_fill.pop(order.order_id, None)
 
