@@ -6,13 +6,27 @@ import hashlib
 import hmac
 import json
 import logging
+import os
+import threading
+import time
 from datetime import datetime, timezone
+from pathlib import Path
+from queue import Empty, PriorityQueue
 from typing import Any, Callable, Mapping, Protocol
+from uuid import uuid4
 
 import httpx
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["AuditLogger", "AuditRecord", "AuditSink", "HttpAuditSink"]
+from .stores import AuditRecordStore
+
+__all__ = [
+    "AuditLogger",
+    "AuditRecord",
+    "AuditSink",
+    "HttpAuditSink",
+    "SiemAuditSink",
+]
 
 
 _REDACTED_VALUE = "[REDACTED]"
@@ -92,6 +106,7 @@ class AuditLogger:
         *,
         logger: logging.Logger | None = None,
         sink: AuditSink | None = None,
+        store: AuditRecordStore | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not secret:
@@ -99,6 +114,7 @@ class AuditLogger:
         self._key = secret.encode("utf-8")
         self._logger = logger or logging.getLogger("tradepulse.audit")
         self._sink = sink
+        self._store = store
         self._clock = clock or (lambda: datetime.now(timezone.utc))
 
     def _sign(self, payload: Mapping[str, Any]) -> str:
@@ -128,6 +144,7 @@ class AuditLogger:
         signature = self._sign(payload)
         record = AuditRecord(**payload, signature=signature)
         self._log_record(record)
+        self._persist_record(record)
         if self._sink is not None:
             self._sink(record)
         return record
@@ -149,6 +166,23 @@ class AuditLogger:
         audit_payload = record.model_dump()
         audit_payload["details"] = _redact_sensitive_payload(audit_payload["details"])
         self._logger.info("audit.event", extra={"audit": audit_payload})
+
+    def _persist_record(self, record: AuditRecord) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.append(record)
+        except Exception as exc:  # pragma: no cover - failure is logged for SRE triage
+            self._logger.error(
+                "Failed to persist signed audit record",
+                exc_info=exc,
+                extra={
+                    "audit": {
+                        "event_type": record.event_type,
+                        "signature": record.signature,
+                    }
+                },
+            )
 
 
 class HttpAuditSink:
@@ -202,3 +236,204 @@ class HttpAuditSink:
                     }
                 },
             )
+
+
+class SiemAuditSink:
+    """Durably forward audit records to a SIEM endpoint with retries."""
+
+    def __init__(
+        self,
+        endpoint: str,
+        spool_dir: Path,
+        *,
+        http_client: httpx.Client | None = None,
+        timeout: float = 5.0,
+        max_retries: int = 5,
+        base_backoff_seconds: float = 1.0,
+        max_backoff_seconds: float = 60.0,
+        dead_letter_dir: Path | None = None,
+        logger: logging.Logger | None = None,
+        sleep: Callable[[float], None] | None = None,
+    ) -> None:
+        if not endpoint:
+            raise ValueError("endpoint must be provided for the SIEM sink")
+        self._endpoint = endpoint
+        self._spool_dir = spool_dir
+        self._spool_dir.mkdir(parents=True, exist_ok=True)
+        self._dead_letter_dir = dead_letter_dir or (self._spool_dir / "dead-letter")
+        self._dead_letter_dir.mkdir(parents=True, exist_ok=True)
+        self._logger = logger or logging.getLogger("tradepulse.audit.siem_sink")
+        self._timeout = timeout
+        self._max_retries = max(0, max_retries)
+        self._base_backoff = max(0.0, base_backoff_seconds)
+        self._max_backoff = max_backoff_seconds
+        self._sleep = sleep or time.sleep
+        self._owns_client = http_client is None
+        self._client = http_client or httpx.Client()
+        self._queue: PriorityQueue[tuple[float, Path | None]] = PriorityQueue()
+        self._stop = threading.Event()
+        self._lock = threading.Lock()
+        self._load_existing_spool()
+        self._worker = threading.Thread(target=self._run, name="siem-sink", daemon=True)
+        self._worker.start()
+
+    def __call__(self, record: AuditRecord) -> None:
+        envelope = {
+            "record": record.model_dump(mode="json"),
+            "attempts": 0,
+        }
+        path = self._write_envelope(envelope)
+        self._schedule(path, ready_at=time.monotonic())
+
+    def close(self) -> None:
+        self._stop.set()
+        self._queue.put((time.monotonic(), None))
+        self._worker.join()
+        if self._owns_client:
+            self._client.close()
+
+    def __enter__(self) -> "SiemAuditSink":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def _load_existing_spool(self) -> None:
+        for path in sorted(self._spool_dir.glob("*.json")):
+            self._schedule(path, ready_at=time.monotonic())
+
+    def _schedule(self, path: Path, *, ready_at: float) -> None:
+        self._queue.put((ready_at, path))
+
+    def _write_envelope(self, envelope: Mapping[str, Any]) -> Path:
+        identifier = uuid4().hex
+        tmp_path = self._spool_dir / f".{identifier}.json.tmp"
+        final_path = self._spool_dir / f"{identifier}.json"
+        payload = json.dumps(envelope, sort_keys=True)
+        with self._lock:
+            with tmp_path.open("w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(tmp_path, final_path)
+        return final_path
+
+    def _run(self) -> None:
+        while True:
+            try:
+                ready_at, path = self._queue.get(timeout=0.5)
+            except Empty:
+                if self._stop.is_set():
+                    continue
+                continue
+            if path is None:
+                break
+            delay = max(0.0, ready_at - time.monotonic())
+            if delay:
+                self._sleep(delay)
+            if self._stop.is_set():
+                break
+            try:
+                envelope = self._read_envelope(path)
+            except Exception as exc:  # pragma: no cover - defensive logging path
+                self._logger.error(
+                    "Failed to load persisted audit envelope", exc_info=exc, extra={"envelope_path": str(path)}
+                )
+                self._move_to_dead_letter(path, reason="invalid-envelope")
+                continue
+            record = envelope.get("record")
+            attempts = int(envelope.get("attempts", 0))
+            try:
+                model = AuditRecord.model_validate(record)
+                self._send(model)
+            except Exception as exc:  # pragma: no cover - retry path exercises
+                self._handle_failure(path, envelope, attempts, exc)
+            else:
+                self._acknowledge(path)
+
+    def _read_envelope(self, path: Path) -> dict[str, Any]:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def _send(self, record: AuditRecord) -> None:
+        payload = record.model_dump(mode="json")
+        response: httpx.Response | None = None
+        try:
+            response = self._client.post(self._endpoint, json=payload, timeout=self._timeout)
+            response.raise_for_status()
+        except Exception as exc:
+            status_code = None
+            if isinstance(exc, httpx.HTTPStatusError):
+                status_code = exc.response.status_code
+            elif response is not None:
+                status_code = response.status_code
+            raise RuntimeError(
+                f"SIEM delivery failed (status={status_code})"
+            ) from exc
+
+    def _acknowledge(self, path: Path) -> None:
+        try:
+            path.unlink()
+        except FileNotFoundError:  # pragma: no cover - already removed
+            return
+
+    def _handle_failure(
+        self,
+        path: Path,
+        envelope: Mapping[str, Any],
+        attempts: int,
+        exc: Exception,
+    ) -> None:
+        attempts += 1
+        updated = dict(envelope)
+        updated["attempts"] = attempts
+        self._logger.warning(
+            "SIEM delivery attempt failed",
+            exc_info=exc,
+            extra={
+                "siem_sink": {
+                    "path": str(path),
+                    "attempt": attempts,
+                }
+            },
+        )
+        if attempts > self._max_retries:
+            self._move_to_dead_letter(path, reason="max-retries", envelope=updated)
+            return
+        retry_delay = self._compute_backoff(attempts)
+        self._rewrite_envelope(path, updated)
+        self._schedule(path, ready_at=time.monotonic() + retry_delay)
+
+    def _rewrite_envelope(self, path: Path, envelope: Mapping[str, Any]) -> None:
+        payload = json.dumps(envelope, sort_keys=True)
+        with self._lock:
+            with path.open("w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+
+    def _move_to_dead_letter(
+        self,
+        path: Path,
+        *,
+        reason: str,
+        envelope: Mapping[str, Any] | None = None,
+    ) -> None:
+        target = self._dead_letter_dir / path.name
+        if envelope is not None:
+            self._rewrite_envelope(path, envelope)
+        try:
+            os.replace(path, target)
+        except FileNotFoundError:  # pragma: no cover - already moved
+            return
+        self._logger.error(
+            "Moved audit record to SIEM dead-letter store",
+            extra={"siem_sink": {"path": str(target), "reason": reason}},
+        )
+
+    def _compute_backoff(self, attempts: int) -> float:
+        if self._base_backoff == 0:
+            return 0.0
+        exponent = max(0, attempts - 1)
+        delay = self._base_backoff * (2**exponent)
+        return min(delay, self._max_backoff)
