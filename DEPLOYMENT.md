@@ -73,6 +73,38 @@ services:
 
 Prometheus is preconfigured to scrape the TradePulse metrics endpoint on port 8001, so a failing health check will surface quickly in dashboards.【F:deploy/prometheus.yml†L2-L7】
 
+## Systemd Application Server Deployment
+
+When you need a lightweight, single-node deployment, run the FastAPI server
+directly on a Linux host under `systemd`. The repository provides a service
+unit and launch script under `deploy/systemd/` that harden the runtime with
+automatic restarts and process supervision.【F:deploy/systemd/tradepulse.service†L1-L23】【F:deploy/systemd/start-tradepulse.sh†L1-L34】
+
+1. Copy the helper script and unit file to their final locations and adjust the
+   ownership so only root can modify them:
+   ```bash
+   sudo install -o root -g root -m 755 deploy/systemd/start-tradepulse.sh /usr/local/bin/start-tradepulse.sh
+   sudo install -o root -g root -m 644 deploy/systemd/tradepulse.service /etc/systemd/system/tradepulse.service
+   ```
+2. Render a production-ready environment file from `.env.example` and place it
+   at `/etc/tradepulse/tradepulse.env` with `0640` permissions so the service can
+   read secrets without exposing them in process listings.【F:deploy/systemd/README.md†L26-L41】
+3. Reload `systemd` and start the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now tradepulse.service
+   ```
+4. Validate runtime health before connecting upstream clients:
+   ```bash
+   curl -sf http://127.0.0.1:8001/readyz
+   ```
+   The `/readyz` endpoint returns a machine-readable status document assembled by
+   the embedded `HealthServer`, making it trivial to integrate into external
+   monitoring.【F:observability/health.py†L41-L117】
+
+See `deploy/systemd/README.md` for the full hardening checklist, including user
+and directory provisioning, log inspection, and blue/green upgrade workflows.【F:deploy/systemd/README.md†L1-L87】
+
 ## Kubernetes Deployment with Helm
 
 Although the repository does not include a packaged chart, you can scaffold one under `deploy/helm/tradepulse` using:
