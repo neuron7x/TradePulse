@@ -298,15 +298,27 @@ The CI enforces both line and branch coverage thresholds using `pytest-cov`:
 pytest --cov=core --cov=backtest --cov=execution --cov=analytics \
        --cov-branch \
        --cov-report=term-missing \
-       --cov-fail-under=90
+       --cov-fail-under=97
 ```
 
 To test locally with the same threshold:
 ```bash
-pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-fail-under=90
+pytest tests/ --cov=core --cov=backtest --cov=execution --cov=analytics --cov-branch --cov-fail-under=97
 ```
 
 Additionally, the CI workflow parses `coverage.xml` and fails early if total branch coverage drops below 90%.
+
+#### Coverage Milestones
+
+The end-state target remains 98 % line coverage for the core execution stack. We are incrementally tightening the guardrail to
+avoid destabilising developer velocity:
+
+- **Current step (97 %)** – Enabled by the new ingestion, execution, observability, and strategy edge-path tests added in this
+  iteration. This clears historical gaps around async ingestion failures, simulated connector retries, Prometheus exporters, and
+  AMM strategy decision boundaries.
+- **Final step (98 %)** – Scheduled once execution adapters and data catalog write paths reach ≥97.5 % in nightly coverage.
+  Remaining scenarios (e.g., live exchange REST fallbacks, delayed materialisation retries) will be exercised through follow-up
+  integration suites before we raise the CI threshold again.
 
 ### Flaky Test Quarantine
 

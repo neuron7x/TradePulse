@@ -171,3 +171,38 @@ def test_kuramoto_order_feature_float32_metadata(monkeypatch: pytest.MonkeyPatch
     result = feature.transform(signal)
     assert result.metadata == {"use_float32": True}
     assert 0.0 <= result.value <= 1.0
+
+
+def test_compute_phase_emits_operation_logging_when_debug_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyContext:
+        def __init__(self, logger: "DummyLogger") -> None:
+            self.logger = logger
+
+        def __enter__(self) -> None:
+            self.logger.entered += 1
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            self.logger.exited += 1
+
+    class DummyLogger:
+        def __init__(self) -> None:
+            self.logger = SimpleNamespace(isEnabledFor=lambda level: True)
+            self.calls: list[tuple[str, dict]] = []
+            self.entered = 0
+            self.exited = 0
+
+        def operation(self, name: str, **kwargs) -> DummyContext:
+            self.calls.append((name, kwargs))
+            return DummyContext(self)
+
+    dummy = DummyLogger()
+    monkeypatch.setattr(kuramoto, "_logger", dummy, raising=False)
+    monkeypatch.setattr(kuramoto, "_scipy_fft", None, raising=False)
+    monkeypatch.setattr(kuramoto, "hilbert", None, raising=False)
+
+    samples = np.sin(np.linspace(0, 2 * np.pi, 16, endpoint=False))
+    phases = kuramoto.compute_phase(samples)
+
+    assert phases.shape == samples.shape
+    assert dummy.calls and dummy.calls[0][0] == "compute_phase"
+    assert dummy.entered == 1 and dummy.exited == 1
