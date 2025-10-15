@@ -53,11 +53,17 @@ def test_factory_passes_tls_parameters(fake_psycopg: _FakePsycopgModule, tmp_pat
     assert fake_psycopg.kwargs["application_name"] == "tradepulse"
 
 
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "postgresql://user:pass@db/prod?sslmode=prefer",
+        "postgresql://user:pass@db/prod?sslmode=require",
+    ],
+)
 def test_factory_rejects_insecure_sslmode(
-    fake_psycopg: _FakePsycopgModule, tmp_path_factory: pytest.TempPathFactory
+    uri: str, fake_psycopg: _FakePsycopgModule, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
     tls = _tls(tmp_path_factory)
-    uri = "postgresql://user:pass@db/prod?sslmode=prefer"
 
     with pytest.raises(ValueError):
         create_postgres_connection(uri, tls)
@@ -66,7 +72,7 @@ def test_factory_rejects_insecure_sslmode(
 def test_factory_requires_tls(
     fake_psycopg: _FakePsycopgModule, tmp_path_factory: pytest.TempPathFactory
 ) -> None:
-    uri = "postgresql://user:pass@db/prod?sslmode=require"
+    uri = "postgresql://user:pass@db/prod?sslmode=verify-full"
 
     with pytest.raises(ValueError):
         create_postgres_connection(uri, None)

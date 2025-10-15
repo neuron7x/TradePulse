@@ -12,7 +12,7 @@ __all__ = [
 ]
 
 
-ALLOWED_POSTGRES_SSLMODES = frozenset({"require", "verify-ca", "verify-full"})
+ALLOWED_POSTGRES_SSLMODES = frozenset({"verify-ca", "verify-full"})
 
 
 def is_postgres_uri(uri: str) -> bool:
