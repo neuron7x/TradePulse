@@ -29,6 +29,7 @@ py-spy>=0.4.1
 # Security scanning
 bandit==1.8.6
 pip-audit==2.9.0
+pip>=25.2
 
 # Protocol buffers tooling
 protobuf==6.32.1

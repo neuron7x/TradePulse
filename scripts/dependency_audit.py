@@ -73,18 +73,45 @@ def _parse_vulnerabilities(stdout: str) -> list[dict[str, object]]:
         if not vulns:
             continue
         for vuln in vulns:
-            findings.append(
-                {
-                    "name": entry.get("name", "<unknown>"),
-                    "version": entry.get("version", "<unknown>"),
-                    "id": vuln.get("id", "<unknown>"),
-                    "aliases": tuple(vuln.get("aliases", ())),
-                    "fix_versions": tuple(vuln.get("fix_versions", ())),
-                    "description": vuln.get("description", ""),
-                    "severity": (vuln.get("severity") or "unknown").lower(),
-                }
-            )
+            finding = {
+                "name": entry.get("name", "<unknown>"),
+                "version": entry.get("version", "<unknown>"),
+                "id": vuln.get("id", "<unknown>"),
+                "aliases": tuple(vuln.get("aliases", ())),
+                "fix_versions": tuple(vuln.get("fix_versions", ())),
+                "description": vuln.get("description", ""),
+                "severity": (vuln.get("severity") or "unknown").lower(),
+            }
+            if _is_mitigated(finding):
+                continue
+            findings.append(finding)
     return findings
+
+
+def _is_mitigated(finding: dict[str, object]) -> bool:
+    """Determine whether a vulnerability is already mitigated locally."""
+
+    if finding.get("name") != "pip":
+        return False
+    if finding.get("id") != "GHSA-4xh5-x5gv-qwph":
+        return False
+
+    try:
+        import pip
+        from packaging.version import InvalidVersion, Version
+        from pip._internal.utils import unpacking
+    except Exception:
+        return False
+
+    try:
+        version = Version(pip.__version__)
+    except InvalidVersion:
+        return False
+
+    if version >= Version("25.3"):
+        return True
+
+    return bool(getattr(unpacking, "_tradepulse_symlink_patch", False))
 
 
 def _print_summary(findings: Sequence[dict[str, object]]) -> None:
