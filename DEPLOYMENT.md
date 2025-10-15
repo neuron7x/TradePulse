@@ -132,6 +132,47 @@ helm upgrade --install tradepulse deploy/helm/tradepulse \
   Reference the secret with `envFrom` in your Deployment so that the application receives identical configuration in every environment.
 - Rotate API keys and credentials regularly. Update the Secret object and restart the workloads (`kubectl rollout restart deployment tradepulse`).
 
+### Vault/KMS-backed exchange credentials
+
+Define a `secret_backend` block inside each venue credential stanza to source API keys from Vault or a managed KMS instead of long-lived environment variables. The adapter selects the backend implementation while `path` or `path_env` points to the credential bundle. Optional `field_mapping` entries let you translate the payload into the uppercase keys expected by the connectors:
+
+```toml
+[[venues]]
+name = "binance"
+class = "execution.adapters.BinanceRESTConnector"
+
+  [venues.credentials]
+  env_prefix = "BINANCE"
+  required = ["API_KEY", "API_SECRET"]
+
+    [venues.credentials.secret_backend]
+    adapter = "vault"
+    path_env = "BINANCE_VAULT_PATH"
+
+      [venues.credentials.secret_backend.field_mapping]
+      API_KEY = "api_key"
+      API_SECRET = "api_secret"
+```
+
+At runtime register backend resolvers on the `LiveTradingRunner`. For example, when HashiCorp Vault agents render JSON secrets locally you can expose a resolver that reads and parses the file, while a cloud KMS adapter might call the vendor SDK and return a decoded dictionary:
+
+```python
+import json
+from pathlib import Path
+
+from interfaces.live_runner import LiveTradingRunner
+
+def resolve_vault(path: str) -> dict[str, str]:
+    return json.loads(Path(path).read_text())
+
+runner = LiveTradingRunner(
+    config_path=Path("configs/live/default.toml"),
+    secret_backends={"vault": resolve_vault},
+)
+```
+
+Connectors inheriting from `AuthenticatedRESTExecutionConnector` automatically reuse the resolver for credential rotations so a Vault/KMS rotation triggers a fresh fetch before the next REST call.【F:configs/live/default.toml†L8-L36】【F:interfaces/live_runner.py†L73-L140】【F:interfaces/execution/common.py†L52-L147】
+
 ## Health Checks and Observability
 
 - **HTTP probes** – reuse the metrics endpoint for readiness and liveness, or expose a lightweight `/healthz` endpoint that validates downstream dependencies before returning `200`.

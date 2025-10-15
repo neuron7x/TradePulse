@@ -29,6 +29,15 @@ sandbox = true
   required = ["API_KEY", "API_SECRET"]
   optional = ["RECV_WINDOW"]
 
+    [venues.credentials.secret_backend]
+    adapter = "vault"
+    path_env = "BINANCE_VAULT_PATH"
+
+      [venues.credentials.secret_backend.field_mapping]
+      API_KEY = "api_key"
+      API_SECRET = "api_secret"
+      RECV_WINDOW = "recv_window"
+
 [[venues]]
 name = "coinbase"
 class = "execution.adapters.CoinbaseRESTConnector"
@@ -37,3 +46,12 @@ sandbox = true
   [venues.credentials]
   env_prefix = "COINBASE"
   required = ["API_KEY", "API_SECRET", "PASSPHRASE"]
+
+    [venues.credentials.secret_backend]
+    adapter = "kms"
+    path = "projects/sample/locations/global/keyRings/tradepulse/cryptoKeys/coinbase"
+
+      [venues.credentials.secret_backend.field_mapping]
+      API_KEY = "apiKey"
+      API_SECRET = "apiSecret"
+      PASSPHRASE = "passphrase"
