@@ -18,6 +18,13 @@ This guide outlines the production deployment requirements for TradePulse, inclu
 - Enforce mTLS between strategy services and Kafka/Postgres where supported.
 - Mirror Prometheus metrics to your SIEM for long-term incident investigations.
 
+### Kafka Broker Security Configuration
+
+- TradePulse expects Kafka clusters to expose TLS endpoints (`security_protocol` of `SSL` or `SASL_SSL`). Provide the CA bundle path via `EventBusConfig.ssl_cafile` and, when using mutual TLS, supply the signed client certificate and key files.
+- Rotate broker and client certificates on a fixed cadence (e.g., quarterly). Deploy new files alongside the old ones, then restart services to reload credentials before revoking the previous certificates.
+- When SASL is enabled, configure ACLs per topic and per consumer group. Bind the SASL principal used by TradePulse to the event topics defined in `core/messaging/event_bus.py` and deny wild-card access to minimise blast radius.
+- Document the certificate and ACL owners in your runbooks so incident responders know who to contact when a rotation or ACL change is required.
+
 ## Secret Management Expectations
 
 TradePulse loads sensitive credentials exclusively from environment variables or injected secret files.
