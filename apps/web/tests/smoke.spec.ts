@@ -1,5 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
+import type { Page as PlaywrightPage } from 'playwright-core';
 
 test.describe('Scenario Studio smoke', () => {
   test('renders the primary dashboard layout', async ({ page }) => {
@@ -49,7 +50,7 @@ test.describe('Scenario Studio smoke', () => {
 
   test('has no critical accessibility regressions', async ({ page }) => {
     await page.goto('/');
-    const scanResults = await new AxeBuilder({ page }).analyze();
+    const scanResults = await new AxeBuilder({ page: page as unknown as PlaywrightPage }).analyze();
     const severeViolations = scanResults.violations.filter((violation) =>
       ['critical', 'serious'].includes(violation.impact ?? '')
     );
