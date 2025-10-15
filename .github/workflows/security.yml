@@ -138,12 +138,14 @@ jobs:
         OSV_VERSION: "1.7.4"
       run: |
         set -euo pipefail
-        curl -sSfL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz" \
-          -o osv-scanner.tar.gz
-        tar -xzf osv-scanner.tar.gz
-        sudo install -m 0755 "osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
-        rm -rf "osv-scanner_${OSV_VERSION}_linux_amd64" osv-scanner.tar.gz
-
+        tmpdir="$(mktemp -d)"
+        trap 'rm -rf "$tmpdir"' EXIT
+        archive="osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz"
+        url="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/${archive}"
+        echo "Downloading OSV-Scanner from $url"
+        curl -sSfL "$url" -o "$tmpdir/$archive"
+        tar -xzf "$tmpdir/$archive" -C "$tmpdir"
+        sudo install -m 0755 "$tmpdir/osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
     - name: Run OSV-Scanner on project manifests
       run: |
         set -euo pipefail
