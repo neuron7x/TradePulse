@@ -63,7 +63,12 @@ class MultiScaleResult:
 
 
 def _hilbert_phase(series: np.ndarray) -> np.ndarray:
-    """Return the instantaneous phase of the provided series."""
+    """Return the instantaneous phase of the provided series.
+
+    The NumPy fallback mirrors SciPy's detrended analytic signal to guarantee
+    consistent phase and Kuramoto order outputs regardless of dependency
+    availability.
+    """
 
     x = np.asarray(series, dtype=float)
     if x.size == 0:
@@ -78,7 +83,14 @@ def _hilbert_phase(series: np.ndarray) -> np.ndarray:
     if _signal is None:
         # fallback: leverage FFT-based analytic signal
         n = x.size
-        X = np.fft.fft(x)
+        if n > 1:
+            idx = np.arange(n, dtype=float)
+            coeffs = np.polyfit(idx, x, deg=1)
+            trend = np.polyval(coeffs, idx)
+            detrended = x - trend
+        else:
+            detrended = x - float(x.mean())
+        X = np.fft.fft(detrended)
         h = np.zeros(n)
         if n % 2 == 0:
             h[0] = h[n // 2] = 1
