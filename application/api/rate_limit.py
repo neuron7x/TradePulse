@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import deque
+from dataclasses import dataclass
 from typing import Protocol
 
 from fastapi import HTTPException, status
@@ -16,8 +17,19 @@ __all__ = [
     "InMemorySlidingWindowBackend",
     "RedisSlidingWindowBackend",
     "SlidingWindowRateLimiter",
+    "RateLimiterSnapshot",
     "build_rate_limiter",
 ]
+
+
+@dataclass(slots=True)
+class RateLimiterSnapshot:
+    """Point-in-time utilisation view of a :class:`SlidingWindowRateLimiter`."""
+
+    backend: str
+    tracked_keys: int
+    max_utilization: float | None
+    saturated_keys: list[str]
 
 
 class RateLimiterBackend(Protocol):
@@ -86,6 +98,38 @@ class SlidingWindowRateLimiter:
                 detail="Rate limit exceeded for this client.",
             )
 
+    def snapshot(self) -> RateLimiterSnapshot:
+        """Return utilisation metrics for observability and health checks."""
+
+        backend_name = type(self._backend).__name__
+        records = getattr(self._backend, "_records", None)
+        tracked_keys = 0
+        max_utilization: float | None = None
+        saturated: list[str] = []
+
+        if isinstance(records, dict):
+            tracked_keys = len(records)
+            utilisation_values: list[float] = []
+            for storage_key, bucket in records.items():
+                if not hasattr(bucket, "__len__"):
+                    continue
+                policy = self._policy_for_storage_key(storage_key)
+                if policy.max_requests <= 0:
+                    continue
+                utilisation = len(bucket) / float(policy.max_requests)
+                utilisation_values.append(utilisation)
+                if utilisation >= 1.0:
+                    saturated.append(storage_key)
+            if utilisation_values:
+                max_utilization = max(utilisation_values)
+
+        return RateLimiterSnapshot(
+            backend=backend_name,
+            tracked_keys=tracked_keys,
+            max_utilization=max_utilization,
+            saturated_keys=saturated,
+        )
+
     def _resolve_policy(self, subject: str | None, ip_address: str | None) -> tuple[RateLimitPolicy, str]:
         if subject:
             specific = self._settings.client_policies.get(subject)
@@ -96,6 +140,20 @@ class SlidingWindowRateLimiter:
             policy = self._settings.unauthenticated_policy or self._settings.default_policy
             return policy, f"ip:{ip_address}"
         return self._settings.default_policy, "anonymous"
+
+    def _policy_for_storage_key(self, storage_key: str) -> RateLimitPolicy:
+        """Infer the governing policy for the stored key."""
+
+        if storage_key.startswith("subject:"):
+            subject = storage_key.split(":", 1)[1]
+            policy, _ = self._resolve_policy(subject, None)
+            return policy
+        if storage_key.startswith("ip:"):
+            ip = storage_key.split(":", 1)[1]
+            policy, _ = self._resolve_policy(None, ip)
+            return policy
+        policy, _ = self._resolve_policy(None, None)
+        return policy
 
 
 def build_rate_limiter(settings: ApiRateLimitSettings) -> SlidingWindowRateLimiter:

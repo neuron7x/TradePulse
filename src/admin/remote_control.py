@@ -5,7 +5,8 @@ from __future__ import annotations
 import asyncio
 import ipaddress
 from collections import deque
-from typing import Awaitable, Callable, Deque
+from dataclasses import dataclass
+from typing import Awaitable, Callable, Deque, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -18,8 +19,20 @@ __all__ = [
     "KillSwitchRequest",
     "KillSwitchResponse",
     "AdminRateLimiter",
+    "AdminRateLimiterSnapshot",
     "create_remote_control_router",
 ]
+
+
+@dataclass(slots=True)
+class AdminRateLimiterSnapshot:
+    """Point-in-time view of the administrative rate limiter state."""
+
+    tracked_identifiers: int
+    max_attempts: int
+    interval_seconds: float
+    max_utilization: float
+    saturated_identifiers: list[str]
 
 
 class AdminIdentity(BaseModel):
@@ -92,6 +105,38 @@ class AdminRateLimiter:
                     detail="Too many administrative requests from this source",
                 )
             bucket.append(now)
+
+    async def snapshot(self) -> AdminRateLimiterSnapshot:
+        """Return utilisation metrics for observability checks."""
+
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        async with self._lock:
+            cleaned: Dict[str, Deque[float]] = {}
+            for identifier, bucket in list(self._records.items()):
+                while bucket and now - bucket[0] >= self._interval:
+                    bucket.popleft()
+                if bucket:
+                    cleaned[identifier] = deque(bucket)
+                else:
+                    self._records.pop(identifier, None)
+
+        max_utilization = 0.0
+        saturated: list[str] = []
+        for identifier, bucket in cleaned.items():
+            utilisation = len(bucket) / float(self._max_attempts)
+            if utilisation > max_utilization:
+                max_utilization = utilisation
+            if utilisation >= 1.0:
+                saturated.append(identifier)
+
+        return AdminRateLimiterSnapshot(
+            tracked_identifiers=len(cleaned),
+            max_attempts=self._max_attempts,
+            interval_seconds=self._interval,
+            max_utilization=max_utilization,
+            saturated_identifiers=saturated,
+        )
 
 
 def _resolve_ip(request: Request) -> str:

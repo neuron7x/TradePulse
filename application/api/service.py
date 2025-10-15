@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import json
 from json import JSONDecodeError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from time import perf_counter
+from typing import Any, Awaitable, Callable, Mapping, Literal
 
 import numpy as np
 import pandas as pd
@@ -22,12 +24,18 @@ from starlette.types import ASGIApp
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
 from application.api.security import get_api_security_settings, verify_request_identity
-from application.api.rate_limit import SlidingWindowRateLimiter, build_rate_limiter
+from application.api.rate_limit import RateLimiterSnapshot, SlidingWindowRateLimiter, build_rate_limiter
 from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
 from execution.risk import RiskLimits, RiskManager
-from src.admin.remote_control import AdminIdentity, AdminRateLimiter, create_remote_control_router
+from observability.health import HealthServer
+from src.admin.remote_control import (
+    AdminIdentity,
+    AdminRateLimiter,
+    AdminRateLimiterSnapshot,
+    create_remote_control_router,
+)
 from src.audit.audit_logger import AuditLogger, HttpAuditSink
 from src.risk.risk_manager import RiskManagerFacade
 
@@ -39,6 +47,15 @@ class _CacheEntry:
     payload: BaseModel
     expires_at: datetime
     etag: str
+
+
+@dataclass(slots=True)
+class CacheSnapshot:
+    """Observability snapshot of :class:`TTLCache` occupancy."""
+
+    entries: int
+    max_entries: int
+    ttl_seconds: int
 
 
 class TTLCache:
@@ -73,6 +90,66 @@ class TTLCache:
                 self._entries.pop(oldest_key, None)
             expires = datetime.now(timezone.utc) + timedelta(seconds=self._ttl)
             self._entries[key] = _CacheEntry(payload=payload, expires_at=expires, etag=etag)
+
+    async def snapshot(self) -> CacheSnapshot:
+        """Return cache occupancy metrics for readiness probes."""
+
+        async with self._lock:
+            now = datetime.now(timezone.utc)
+            expired = [key for key, entry in self._entries.items() if entry.expires_at <= now]
+            for key in expired:
+                self._entries.pop(key, None)
+            return CacheSnapshot(
+                entries=len(self._entries),
+                max_entries=self._max_entries,
+                ttl_seconds=self._ttl,
+            )
+
+
+@dataclass(slots=True)
+class DependencyProbeResult:
+    """Normalised representation of dependency readiness."""
+
+    healthy: bool
+    detail: str | None = None
+    data: dict[str, Any] | None = None
+
+
+class ComponentHealth(BaseModel):
+    """Health status for an individual subsystem."""
+
+    healthy: bool
+    status: Literal["operational", "degraded", "failed"]
+    detail: str | None = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+
+
+class HealthResponse(BaseModel):
+    """Structured response for the readiness probe."""
+
+    status: Literal["ready", "degraded", "failed"]
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    components: dict[str, ComponentHealth]
+
+
+DependencyProbe = Callable[[], Awaitable[DependencyProbeResult | bool | dict[str, Any]] | DependencyProbeResult | bool | dict[str, Any]]
+
+
+def _coerce_dependency_result(value: DependencyProbeResult | bool | dict[str, Any]) -> DependencyProbeResult:
+    """Normalise supported dependency probe return values."""
+
+    if isinstance(value, DependencyProbeResult):
+        return value
+    if isinstance(value, dict):
+        healthy = bool(value.get("healthy", False))
+        detail = value.get("detail") or value.get("message")
+        data = {
+            key: payload
+            for key, payload in value.items()
+            if key not in {"healthy", "detail", "message"}
+        }
+        return DependencyProbeResult(healthy=healthy, detail=detail, data=data or None)
+    return DependencyProbeResult(healthy=bool(value))
 
 
 def _ensure_timezone(ts: datetime) -> datetime:
@@ -387,6 +464,8 @@ def create_app(
     settings: AdminApiSettings | None = None,
     rate_limit_settings: ApiRateLimitSettings | None = None,
     security_settings: ApiSecuritySettings | None = None,
+    dependency_probes: Mapping[str, DependencyProbe] | None = None,
+    health_server: HealthServer | None = None,
 ) -> FastAPI:
     """Build the FastAPI application with configured dependencies.
 
@@ -405,6 +484,7 @@ def create_app(
     ttl_cache = cache or TTLCache(ttl_seconds=30, max_entries=512)
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
+    dependency_probe_map: dict[str, DependencyProbe] = dict(dependency_probes or {})
 
     try:
         resolved_settings = settings or AdminApiSettings()
@@ -521,6 +601,9 @@ def create_app(
     app.state.admin_rate_limiter = admin_rate_limiter
     app.state.client_rate_limiter = limiter
     app.state.rate_limit_settings = resolved_rate_settings
+    app.state.ttl_cache = ttl_cache
+    app.state.dependency_probes = dependency_probe_map
+    app.state.health_server = health_server
 
     async def enforce_rate_limit(
         request: Request,
@@ -557,9 +640,134 @@ def create_app(
         _append_vary_header(response, "Accept")
         return response
 
-    @app.get("/health", tags=["health"], summary="Health probe")
-    async def health_check() -> dict[str, str]:
-        return {"status": "ok", "timestamp": datetime.now(timezone.utc).isoformat()}
+    @app.get("/health", tags=["health"], summary="Health probe", response_model=HealthResponse)
+    async def health_check(response: Response) -> HealthResponse:
+        components: dict[str, ComponentHealth] = {}
+
+        risk_manager: RiskManager = app.state.risk_manager
+        kill_switch = risk_manager.kill_switch
+        kill_engaged = kill_switch.is_triggered()
+        kill_metrics = {"kill_switch_engaged": kill_engaged}
+        if kill_switch.reason:
+            kill_metrics["reason"] = kill_switch.reason
+        kill_detail = kill_switch.reason if kill_engaged and kill_switch.reason else None
+        components["risk_manager"] = ComponentHealth(
+            healthy=not kill_engaged,
+            status="operational" if not kill_engaged else "failed",
+            detail=kill_detail,
+            metrics=kill_metrics,
+        )
+
+        cache_snapshot = await ttl_cache.snapshot()
+        cache_utilisation = (
+            cache_snapshot.entries / cache_snapshot.max_entries if cache_snapshot.max_entries else 0.0
+        )
+        cache_metrics = {
+            "entries": cache_snapshot.entries,
+            "max_entries": cache_snapshot.max_entries,
+            "ttl_seconds": cache_snapshot.ttl_seconds,
+            "utilization": round(cache_utilisation, 4),
+        }
+        cache_healthy = cache_snapshot.entries < cache_snapshot.max_entries
+        components["inference_cache"] = ComponentHealth(
+            healthy=cache_healthy,
+            status="operational" if cache_healthy else "degraded",
+            metrics=cache_metrics,
+        )
+
+        client_snapshot: RateLimiterSnapshot = limiter.snapshot()
+        client_metrics = {
+            "backend": client_snapshot.backend,
+            "tracked_keys": client_snapshot.tracked_keys,
+            "max_utilization": (
+                round(client_snapshot.max_utilization, 4) if client_snapshot.max_utilization is not None else None
+            ),
+            "saturated_keys": list(client_snapshot.saturated_keys),
+            "default_policy": {
+                "max_requests": resolved_rate_settings.default_policy.max_requests,
+                "window_seconds": resolved_rate_settings.default_policy.window_seconds,
+            },
+        }
+        client_healthy = True
+        client_status = "operational"
+        if client_snapshot.max_utilization is not None and client_snapshot.max_utilization >= 0.9:
+            client_healthy = False
+            client_status = "degraded"
+        if client_snapshot.saturated_keys:
+            client_healthy = False
+            client_status = "degraded"
+        components["client_rate_limiter"] = ComponentHealth(
+            healthy=client_healthy,
+            status=client_status,
+            metrics=client_metrics,
+        )
+
+        admin_snapshot: AdminRateLimiterSnapshot = await admin_rate_limiter.snapshot()
+        admin_metrics = {
+            "tracked_identifiers": admin_snapshot.tracked_identifiers,
+            "max_attempts": admin_snapshot.max_attempts,
+            "interval_seconds": admin_snapshot.interval_seconds,
+            "max_utilization": round(admin_snapshot.max_utilization, 4),
+            "saturated_identifiers": list(admin_snapshot.saturated_identifiers),
+        }
+        admin_healthy = admin_snapshot.max_utilization < 1.0 and not admin_snapshot.saturated_identifiers
+        components["admin_rate_limiter"] = ComponentHealth(
+            healthy=admin_healthy,
+            status="operational" if admin_healthy else "degraded",
+            metrics=admin_metrics,
+        )
+
+        dependency_failures = False
+        for name, probe in dependency_probe_map.items():
+            start = perf_counter()
+            try:
+                result = probe()
+                if inspect.isawaitable(result):
+                    result = await result
+                elapsed_ms = (perf_counter() - start) * 1000
+            except Exception as exc:  # pragma: no cover - defensive
+                elapsed_ms = (perf_counter() - start) * 1000
+                dependency_failures = True
+                components[f"dependency:{name}"] = ComponentHealth(
+                    healthy=False,
+                    status="failed",
+                    detail=str(exc),
+                    metrics={"latency_ms": round(elapsed_ms, 2)},
+                )
+                continue
+
+            normalised = _coerce_dependency_result(result)
+            metrics = dict(normalised.data or {})
+            metrics["latency_ms"] = round(elapsed_ms, 2)
+            status_value = "operational" if normalised.healthy else "failed"
+            if not normalised.healthy:
+                dependency_failures = True
+            components[f"dependency:{name}"] = ComponentHealth(
+                healthy=normalised.healthy,
+                status=status_value,
+                detail=normalised.detail,
+                metrics=metrics,
+            )
+
+        severity = "ready"
+        if any(component.status == "failed" for component in components.values()) or dependency_failures or kill_engaged:
+            severity = "failed"
+        elif any(component.status == "degraded" for component in components.values()):
+            severity = "degraded"
+
+        health_payload = HealthResponse(status=severity, components=components)
+
+        probe_status = status.HTTP_200_OK if severity == "ready" else status.HTTP_503_SERVICE_UNAVAILABLE
+        response.status_code = probe_status
+
+        health_state: HealthServer | None = app.state.health_server
+        if health_state is not None:
+            health_state.set_live(True)
+            health_state.set_ready(severity == "ready")
+            for name, component in components.items():
+                health_state.update_component(name, component.healthy, component.detail)
+
+        return health_payload
 
     @app.post(
         "/features",
@@ -653,4 +861,9 @@ __all__ = [
     "PredictionResponse",
     "OnlineSignalForecaster",
     "TTLCache",
+    "CacheSnapshot",
+    "ComponentHealth",
+    "HealthResponse",
+    "DependencyProbe",
+    "DependencyProbeResult",
 ]
