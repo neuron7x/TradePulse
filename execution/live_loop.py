@@ -185,12 +185,78 @@ class LiveExecutionLoop:
         )
         return submitted
 
+    def cancel_order(self, order_id: str, *, venue: str | None = None) -> bool:
+        """Cancel an order and update local lifecycle tracking."""
+
+        context = self._resolve_context_for_order(order_id, venue=venue)
+        if context is None:
+            self._logger.warning(
+                "Cancel requested for unknown order",
+                extra={"event": "live_loop.cancel_unknown", "order_id": order_id, "venue": venue},
+            )
+            return False
+
+        try:
+            cancelled = context.oms.cancel(order_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            self._logger.exception(
+                "Failed to cancel order",
+                extra={
+                    "event": "live_loop.cancel_error",
+                    "venue": context.name,
+                    "order_id": order_id,
+                    "error": str(exc),
+                },
+            )
+            return False
+
+        if cancelled:
+            self._order_connector.pop(order_id, None)
+            self._last_reported_fill.pop(order_id, None)
+            self._logger.info(
+                "Order cancelled",
+                extra={
+                    "event": "live_loop.order_cancelled",
+                    "venue": context.name,
+                    "order_id": order_id,
+                },
+            )
+        else:
+            self._logger.warning(
+                "Order cancellation rejected by venue",
+                extra={
+                    "event": "live_loop.cancel_rejected",
+                    "venue": context.name,
+                    "order_id": order_id,
+                },
+            )
+        return cancelled
+
     # ------------------------------------------------------------------
     # Internal helpers
     def _spawn_worker(self, target: Callable[[], None], *, name: str) -> None:
         thread = threading.Thread(target=target, name=f"live-loop-{name}", daemon=True)
         thread.start()
         self._threads.append(thread)
+
+    def _resolve_context_for_order(
+        self, order_id: str, *, venue: str | None = None
+    ) -> _VenueContext | None:
+        if venue is not None:
+            return self._contexts.get(venue)
+
+        mapped = self._order_connector.get(order_id)
+        if mapped is not None:
+            context = self._contexts.get(mapped)
+            if context is not None:
+                return context
+
+        for context in self._contexts.values():
+            for order in context.oms.outstanding():
+                if order.order_id == order_id:
+                    self._order_connector[order_id] = context.name
+                    return context
+        return None
 
     def _initialise_connector(self, context: _VenueContext) -> None:
         credentials = None
@@ -415,6 +481,7 @@ class LiveExecutionLoop:
                 )
                 self.on_kill_switch.emit(reason)
                 self._kill_notified = True
+                self._cancel_all_outstanding(reason="kill-switch")
                 self._stop.set()
                 break
 
@@ -470,6 +537,52 @@ class LiveExecutionLoop:
 
             if self._stop.wait(self._config.heartbeat_interval):
                 return
+
+    def _cancel_all_outstanding(self, *, reason: str | None = None) -> None:
+        """Best-effort cancellation sweep for all active orders."""
+
+        for context in self._contexts.values():
+            outstanding = list(context.oms.outstanding())
+            for order in outstanding:
+                if order.order_id is None:
+                    continue
+                try:
+                    cancelled = context.oms.cancel(order.order_id)
+                except Exception as exc:  # pragma: no cover - defensive
+                    self._logger.exception(
+                        "Failed to cancel order during sweep",
+                        extra={
+                            "event": "live_loop.cancel_sweep_error",
+                            "venue": context.name,
+                            "order_id": order.order_id,
+                            "reason": reason,
+                            "error": str(exc),
+                        },
+                    )
+                    continue
+
+                if cancelled:
+                    self._order_connector.pop(order.order_id, None)
+                    self._last_reported_fill.pop(order.order_id, None)
+                    self._logger.warning(
+                        "Outstanding order cancelled",
+                        extra={
+                            "event": "live_loop.cancel_sweep",
+                            "venue": context.name,
+                            "order_id": order.order_id,
+                            "reason": reason,
+                        },
+                    )
+                else:
+                    self._logger.warning(
+                        "Cancellation sweep rejected order",
+                        extra={
+                            "event": "live_loop.cancel_sweep_rejected",
+                            "venue": context.name,
+                            "order_id": order.order_id,
+                            "reason": reason,
+                        },
+                    )
 
     def _emit_position_snapshot(self, venue: str, positions: Iterable[Mapping[str, object]]) -> None:
         positions_list = list(positions)
