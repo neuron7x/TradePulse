@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Sequence
 
+import core.indicators.multiscale_kuramoto as kuramoto_mod
 import numpy as np
 import pandas as pd
 import pytest
@@ -29,6 +30,28 @@ def _synth_dataframe(periods: int = 4096) -> pd.DataFrame:
         + 0.25 * np.random.default_rng(0).normal(size=periods)
     )
     return pd.DataFrame({"close": price}, index=idx)
+
+
+@pytest.mark.skipif(kuramoto_mod._signal is None, reason="SciPy not installed")
+def test_hilbert_phase_fallback_matches_scipy_on_sloped_signal(monkeypatch: pytest.MonkeyPatch) -> None:
+    t = np.linspace(0, 4 * np.pi, 1024)
+    sloped_signal = np.sin(t) + 0.01 * np.arange(t.size)
+
+    phases_scipy = kuramoto_mod._hilbert_phase(sloped_signal)
+
+    monkeypatch.setattr(kuramoto_mod, "_signal", None)
+    phases_fft = kuramoto_mod._hilbert_phase(sloped_signal)
+
+    assert np.allclose(
+        np.unwrap(phases_fft),
+        np.unwrap(phases_scipy),
+        rtol=1e-5,
+        atol=1e-5,
+    )
+
+    order_fft, _ = kuramoto_mod._kuramoto(phases_fft)
+    order_scipy, _ = kuramoto_mod._kuramoto(phases_scipy)
+    assert order_fft == pytest.approx(order_scipy, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
 def test_timeframe_properties_expose_human_friendly_metadata() -> None:
