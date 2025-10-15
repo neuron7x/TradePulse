@@ -12,14 +12,32 @@ Before deploying, install the following tools:
 
 ## Configuration Management
 
-1. Copy the sample environment file and adjust it for your target environment:
+TradePulse reads runtime configuration exclusively from environment variables. The `.env.example` file documents the required keys and safe placeholder values but should not be copied or populated directly. Instead:
+
+1. Mirror the keys that carry sensitive data (`POSTGRES_*`, `BINANCE_*`, `COINBASE_*`, `KRAKEN_*`, `ALPHA_VANTAGE_API_KEY`, `IEX_CLOUD_API_KEY`, etc.) inside your Vault/KMS hierarchy. For Vault KV v2 this typically resembles:
    ```bash
-   cp .env.example .env
+   vault kv put secret/tradepulse/workstation \
+     POSTGRES_PASSWORD=s3cr3t \
+     BINANCE_API_KEY=... \
+     BINANCE_API_SECRET=...
    ```
-2. Populate the `.env` file with database settings, exchange API credentials, and provider keys (`POSTGRES_*`, `BINANCE_*`, `COINBASE_*`, `KRAKEN_*`, `ALPHA_VANTAGE_API_KEY`, `IEX_CLOUD_API_KEY`, etc.).【F:.env.example†L19-L64】
-3. Set observability and logging configuration so that metrics and logs are exposed on the expected ports (`METRICS_PORT`, `PROMETHEUS_PORT`, `LOG_*`).【F:.env.example†L103-L133】
-4. Replace placeholder application secrets (`SECRET_KEY`, `JWT_SECRET`, OAuth tokens, SMTP/Slack/Telegram credentials) with secure values before deploying anywhere outside of local development.【F:.env.example†L135-L183】
-5. Never commit populated `.env` files—store them in your secret manager or CI/CD vault and inject them during deployment.
+2. Store non-secret toggles (metrics ports, feature flags, sandbox switches) in ConfigMaps or parameter stores so they can be reviewed and rotated independently of secrets.【F:.env.example†L103-L183】
+3. Surface dashboard credentials through the same backend by providing `DASHBOARD_ADMIN_USERNAME`, `DASHBOARD_ADMIN_PASSWORD_HASH`, and cookie parameters. The Streamlit interface automatically resolves these values via the configured `SecretManager` or Vault resolver, falling back to environment variables only when no backend is defined.【F:interfaces/dashboard_streamlit.py†L1-L154】
+
+### Injecting Secrets from Vault/KMS
+
+There are two common ways to inject secrets at runtime:
+
+1. **Sidecar/agent templates** – run a Vault agent or cloud secret-sync sidecar that renders key/value data to an in-memory file (e.g., `/run/secrets/tradepulse.env`). Point Compose (`--env-file`) or your Kubernetes Secret manifest at this path. The agent keeps the file fresh so rotations propagate without restarts.
+2. **Ephemeral CLI renders** – for CI/CD pipelines, export the secret bundle just-in-time and feed it directly to the orchestrator:
+   ```bash
+   vault kv get -mount=secret -field=data -format=json tradepulse/workstation \
+     | jq -r 'to_entries[] | "\(.key)=\(.value)"' > /tmp/tradepulse.env
+   docker compose --env-file /tmp/tradepulse.env up -d
+   shred -u /tmp/tradepulse.env
+   ```
+
+For Kubernetes, the rendered file can be uploaded as a Secret (`kubectl create secret generic tradepulse --from-env-file=/tmp/tradepulse.env --dry-run=client -o yaml | kubectl apply -f -`). The application code transparently consumes the same variables both locally and in clusters.
 
 ### Secure Database Connectivity
 
@@ -41,9 +59,9 @@ The repository ships with a lightweight Compose stack that builds the TradePulse
    ```bash
    docker compose build tradepulse
    ```
-2. **Start the stack** using your `.env` file:
+2. **Start the stack** using a rendered secret bundle from Vault/KMS (for example, a Vault agent template or CLI export saved to `/tmp/tradepulse.env`):
    ```bash
-   docker compose --env-file .env up -d
+   docker compose --env-file /tmp/tradepulse.env up -d
    ```
 3. **Verify runtime state**:
    ```bash
@@ -122,11 +140,11 @@ helm upgrade --install tradepulse deploy/helm/tradepulse \
 
 ## Managing Secrets
 
-- **Docker Compose** – export sensitive values via a `.env` file stored outside of version control. In production automation, load them from your CI/CD vault (`docker compose --env-file /path/to/rendered.env up`).
-- **Kubernetes** – create Secrets straight from the same environment file:
+- **Docker Compose** – render secrets to a temporary `.env` file via your Vault/KMS tooling (`vault kv get -format=json ... | jq ... > /tmp/tradepulse.env`) and pass it to Compose (`docker compose --env-file /tmp/tradepulse.env up`). Clean up the file after startup or mount it as an in-memory volume during CI/CD runs.
+- **Kubernetes** – create Secrets straight from the rendered environment bundle so containers receive the same variables regardless of platform:
   ```bash
   kubectl create secret generic tradepulse-secrets \
-    --from-env-file=.env \
+    --from-env-file=/tmp/tradepulse.env \
     --namespace tradepulse
   ```
   Reference the secret with `envFrom` in your Deployment so that the application receives identical configuration in every environment.
