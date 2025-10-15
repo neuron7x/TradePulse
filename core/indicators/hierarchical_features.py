@@ -55,17 +55,29 @@ def _shannon_entropy(series: np.ndarray, bins: int = 30) -> float:
     if values.size == 0:
         return 0.0
 
+    values = np.asarray(values, dtype=np.float32)
+
     max_abs = float(np.max(np.abs(values)))
     if max_abs and np.isfinite(max_abs):
         values = values / max_abs
 
     counts, _ = np.histogram(values, bins=bins, density=False)
-    total = float(counts.sum())
+    total = counts.sum()
     if total <= 0:
         return 0.0
 
-    probs = counts[counts > 0].astype(np.float32) / total
-    return float(-(probs * np.log(probs, dtype=np.float32)).sum(dtype=np.float32))
+    probs = counts[counts > 0].astype(np.float32, copy=False)
+    if probs.size == 0:
+        return 0.0
+
+    total = np.float32(total)
+    inv_total = np.float32(1.0) / total
+    np.multiply(probs, inv_total, out=probs)
+
+    log_probs = np.log(probs, out=np.empty_like(probs))
+    np.multiply(probs, log_probs, out=log_probs)
+    entropy = np.add.reduce(log_probs, dtype=np.float32)
+    return float(-entropy)
 
 
 @dataclass
