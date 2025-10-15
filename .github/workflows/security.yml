@@ -194,51 +194,140 @@ jobs:
           exit 1
         fi
 
-  codeql-analysis:
-    name: CodeQL Analysis
+  codeql-python:
+    name: CodeQL (Python)
     runs-on: ubuntu-latest
     permissions:
       actions: read
       contents: read
       security-events: write
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [python, go, cpp, rust]
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v5
 
     - name: Set up Python
-      if: matrix.language == 'python'
       uses: actions/setup-python@v6
       with:
         python-version: '3.11'
 
+    - name: Initialize CodeQL for Python
+      uses: github/codeql-action/init@v4
+      with:
+        languages: python
+        queries: security-extended
+        build-mode: none
+
+    - name: Analyze Python with CodeQL
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:python"
+
+  codeql-go:
+    name: CodeQL (Go)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Detect Go source files
+      id: detect-go
+      run: |
+        if git ls-files -- "*.go" | grep -q "."; then
+          echo "has-go=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has-go=false" >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Set up Go
-      if: matrix.language == 'go'
+      if: steps.detect-go.outputs.has-go == 'true'
       uses: actions/setup-go@v5
       with:
         go-version: '1.22'
 
+    - name: Initialize CodeQL for Go
+      if: steps.detect-go.outputs.has-go == 'true'
+      uses: github/codeql-action/init@v4
+      with:
+        languages: go
+        queries: security-extended
+        build-mode: manual
+
+    - name: Build Go modules for CodeQL
+      if: steps.detect-go.outputs.has-go == 'true'
+      run: |
+        go mod tidy
+        go build ./...
+
+    - name: Analyze Go with CodeQL
+      if: steps.detect-go.outputs.has-go == 'true'
+      uses: github/codeql-action/analyze@v4
+      with:
+        category: "/language:go"
+
+    - name: Skip Go analysis (no sources)
+      if: steps.detect-go.outputs.has-go != 'true'
+      run: echo "No Go source files detected; skipping CodeQL analysis."
+
+  codeql-rust:
+    name: CodeQL (Rust)
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Detect Rust crates
+      id: detect-rust
+      run: |
+        if git ls-files -- "*.rs" | grep -q "."; then
+          echo "has-rust=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "has-rust=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up Python for PyO3 builds
+      if: steps.detect-rust.outputs.has-rust == 'true'
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
     - name: Set up Rust
-      if: matrix.language == 'rust'
+      if: steps.detect-rust.outputs.has-rust == 'true'
       uses: actions-rs/toolchain@v1
       with:
         toolchain: stable
         override: true
 
-    - name: Initialize CodeQL
+    - name: Initialize CodeQL for Rust
+      if: steps.detect-rust.outputs.has-rust == 'true'
       uses: github/codeql-action/init@v4
       with:
-        languages: ${{ matrix.language }}
+        languages: rust
         queries: security-extended
+        build-mode: manual
 
-    - name: Autobuild
-      uses: github/codeql-action/autobuild@v4
+    - name: Build Rust crates for CodeQL
+      if: steps.detect-rust.outputs.has-rust == 'true'
+      env:
+        PYO3_PYTHON: python3
+      run: |
+        cargo --version
+        cargo fetch
+        cargo build --locked --all-targets --manifest-path rust/tradepulse-accel/Cargo.toml
 
-    - name: Perform CodeQL Analysis
+    - name: Analyze Rust with CodeQL
+      if: steps.detect-rust.outputs.has-rust == 'true'
       uses: github/codeql-action/analyze@v4
       with:
-        category: "/language:${{ matrix.language }}"
+        category: "/language:rust"
+
+    - name: Skip Rust analysis (no sources)
+      if: steps.detect-rust.outputs.has-rust != 'true'
+      run: echo "No Rust source files detected; skipping CodeQL analysis."

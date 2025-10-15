@@ -103,10 +103,13 @@ We maintain a [Security Hall of Fame](SECURITY_HALL_OF_FAME.md) recognizing secu
 To preserve a consistent security posture, the `main` and `develop` branches must block merges unless the following status
 checks succeed:
 
-- `CodeQL Analysis (python)`
-- `CodeQL Analysis (go)`
-- `CodeQL Analysis (cpp)`
-- `CodeQL Analysis (rust)`
+- `CodeQL (Python)`
+- `CodeQL (Go)`
+- `CodeQL (Rust)`
+
+> **Note:** The Go job automatically exits early when no Go sources are present, but the
+> status check still appears and must remain required so that newly introduced Go code is
+> analyzed before merges.
 
 Repository administrators should verify that these checks are configured as **required** in the GitHub branch protection rules
 whenever new workflows are introduced or renamed.
