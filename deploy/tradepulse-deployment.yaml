@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradepulse-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: tradepulse-api
+  template:
+    metadata:
+      labels:
+        app: tradepulse-api
+    spec:
+      containers:
+        - name: tradepulse-api
+          image: ghcr.io/neuron7x/tradepulse:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TRADEPULSE_AUDIT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: audit-secret
+            - name: TRADEPULSE_OAUTH2_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-issuer
+            - name: TRADEPULSE_OAUTH2_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-audience
+            - name: TRADEPULSE_OAUTH2_JWKS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-jwks-uri
+            - name: TRADEPULSE_MTLS_TRUSTED_CA_PATH
+              value: /etc/tradepulse/tls/client-ca.pem
+            - name: TRADEPULSE_MTLS_REVOCATION_LIST_PATH
+              value: /etc/tradepulse/tls/client.crl
+          ports:
+            - containerPort: 8080
+              name: http
+          volumeMounts:
+            - name: tls-client-ca
+              mountPath: /etc/tradepulse/tls
+              readOnly: true
+      volumes:
+        - name: tls-client-ca
+          secret:
+            secretName: tradepulse-mtls-client
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tradepulse-secrets
+  labels:
+    app: tradepulse-api
+type: Opaque
+stringData:
+  audit-secret: "change-me"
+  oauth2-issuer: "https://auth.example.com/realms/tradepulse"
+  oauth2-audience: "tradepulse-api"
+  oauth2-jwks-uri: "https://auth.example.com/realms/tradepulse/protocol/openid-connect/certs"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tradepulse-mtls-client
+  labels:
+    app: tradepulse-api
+stringData:
+  client-ca.pem: |
+    -----BEGIN CERTIFICATE-----
+    MIIB...REDACTED...IDAQAB
+    -----END CERTIFICATE-----
+  client.crl: |
+    -----BEGIN X509 CRL-----
+    MIIB...REDACTED...IDAQAB
+    -----END X509 CRL-----

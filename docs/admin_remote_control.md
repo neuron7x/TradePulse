@@ -8,7 +8,7 @@ TradePulse exposes a protected FastAPI surface at `/admin/kill-switch` that lets
 
 Key properties:
 
-- **Token-protected** – a shared secret token is required in every request (production deployments should upgrade to SSO or JWT).
+- **OAuth2 + mTLS protected** – OAuth2 bearer tokens are validated against the configured issuer and JWKS, and mutual TLS client certificates are required for state-changing operations.
 - **Audited** – every action is recorded through the structured audit logger with a tamper-evident HMAC signature.
 - **Idempotent** – repeated requests while the switch is active are acknowledged and logged as reaffirmations, and resets that find the switch already clear are logged as no-ops.
 
@@ -26,41 +26,47 @@ Set the following environment variables before starting the FastAPI application:
 
 | Variable | Description |
 | --- | --- |
-| `TRADEPULSE_ADMIN_TOKEN` | Static bearer token required in the `X-Admin-Token` header. |
 | `TRADEPULSE_AUDIT_SECRET` | Secret used to sign audit records for integrity verification. |
-| `TRADEPULSE_ADMIN_SUBJECT` | Default subject recorded for audit events when no `X-Admin-Subject` header is provided. |
+| `TRADEPULSE_OAUTH2_ISSUER` | OAuth2/OpenID Connect issuer expected in bearer token `iss` claims. |
+| `TRADEPULSE_OAUTH2_AUDIENCE` | Audience that must be present in validated JWT access tokens. |
+| `TRADEPULSE_OAUTH2_JWKS_URI` | HTTPS JWKS endpoint used to resolve signing keys. |
+| `TRADEPULSE_ADMIN_SUBJECT` | Default subject recorded for audit events when the identity provider omits the `sub` claim. |
 | `TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS` | Maximum administrative attempts allowed within the rate-limit window (default `5`). |
 | `TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS` | Rolling window in seconds for the administrative rate limiter (default `60`). |
 | `TRADEPULSE_AUDIT_WEBHOOK_URL` | Optional HTTPS endpoint that receives a JSON copy of every administrative audit event. |
+| `TRADEPULSE_MTLS_TRUSTED_CA_PATH` | Filesystem path to the trusted client CA bundle used for mutual TLS handshakes. |
+| `TRADEPULSE_MTLS_REVOCATION_LIST_PATH` | Optional path to a PEM encoded certificate revocation list enforced during mTLS validation. |
 
-> **Important:** Development defaults are provided (`dev-admin-token`, `dev-audit-secret`) to simplify local testing. Always override them in production.
+> **Important:** Development defaults are provided for the audit logger to simplify local testing. Always supply production OAuth2 credentials and TLS assets before deploying.
 
-### Optional Headers
+### TLS and client certificates
 
-- `X-Admin-Subject`: Overrides the default administrator subject stored in audit logs. Use it to provide the operator's username or SSO principal.
+- Terminate TLS with a certificate issued by an internal or commercial CA.
+- Configure the ingress or ASGI server with the trusted client CA bundle referenced by `TRADEPULSE_MTLS_TRUSTED_CA_PATH` and optional CRL at `TRADEPULSE_MTLS_REVOCATION_LIST_PATH`.
+- Ensure the server forwards validated client certificate details (for example, by populating the `X-Client-Cert` header or the ASGI `client_cert` scope entry).
 
 ## Request Flow
 
 1. **Inspect state:**
    ```bash
-   curl -H "X-Admin-Token: $TRADEPULSE_ADMIN_TOKEN" \
-        -H "X-Admin-Subject: $(whoami)" \
+   curl -H "Authorization: Bearer $OAUTH_ACCESS_TOKEN" \
+        --cert client.pem --key client.key \
         https://risk.tradepulse.example.com/admin/kill-switch
    ```
 2. **Engage / reaffirm:**
    ```bash
    curl -X POST \
         -H "Content-Type: application/json" \
-        -H "X-Admin-Token: $TRADEPULSE_ADMIN_TOKEN" \
-        -H "X-Admin-Subject: $(whoami)" \
+        -H "Authorization: Bearer $OAUTH_ACCESS_TOKEN" \
+        --cert client.pem --key client.key \
         -d '{"reason": "manual intervention after monitoring alert"}' \
         https://risk.tradepulse.example.com/admin/kill-switch
    ```
 3. **Reset:**
    ```bash
    curl -X DELETE \
-        -H "X-Admin-Token: $TRADEPULSE_ADMIN_TOKEN" \
-        -H "X-Admin-Subject: $(whoami)" \
+        -H "Authorization: Bearer $OAUTH_ACCESS_TOKEN" \
+        --cert client.pem --key client.key \
         https://risk.tradepulse.example.com/admin/kill-switch
    ```
 
@@ -116,7 +122,7 @@ The suite validates authentication, kill-switch semantics, and audit logging int
 
 ## Production Recommendations
 
-- Replace the static token with your organisation's SSO or JWT solution by extending `TokenAuthenticator`.
+- Integrate with your organisation's OAuth2/OpenID Connect provider and rotate credentials regularly. Access tokens should be short-lived with refresh performed by trusted automation.
 - Persist audit records to an append-only datastore (for example, write-through to SIEM or immutable storage).
 - Configure alerts on the `kill_switch_reaffirmed` and `kill_switch_reset_noop` events to avoid unnoticed overrides or repeated ineffective resets.
 - Integrate the kill-switch status into your incident response runbooks so that restarts include a reset step if appropriate, using the `DELETE /admin/kill-switch` endpoint for consistency with audit trails.
