@@ -5,6 +5,10 @@ from fractions import Fraction
 from pathlib import Path
 
 import math
+import sqlite3
+import ssl
+from typing import Any
+
 import pandas as pd
 import pytest
 from decimal import Decimal
@@ -12,16 +16,20 @@ from datetime import UTC
 
 from core.data.feature_store import (
     DeltaLakeSource,
+    FeatureStoreConfigurationError,
     FeatureStoreIntegrityError,
     IcebergSource,
     IntegrityReport,
     OfflineStoreValidator,
     OnlineFeatureStore,
+    RedisClientConfig,
     RedisOnlineFeatureStore,
     RetentionPolicy,
+    SQLiteEncryptionConfig,
     SQLiteOnlineFeatureStore,
     _RetentionManager,
     _format_numeric_value,
+    reencrypt_sqlite_payloads,
 )
 from core.utils.dataframe_io import read_dataframe, write_dataframe
 
@@ -102,6 +110,11 @@ def sample_frame() -> pd.DataFrame:
     )
 
 
+@pytest.fixture
+def sqlite_encryption_config() -> SQLiteEncryptionConfig:
+    return SQLiteEncryptionConfig(key_id="v1", key_material="primary-secret")
+
+
 def test_retention_manager_ttl_seconds_handles_absent_policy() -> None:
     manager = _RetentionManager(None)
     assert manager.ttl_seconds() is None
@@ -129,6 +142,53 @@ def test_redis_persist_with_plain_client_uses_set(sample_frame: pd.DataFrame) ->
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
 
     assert client.calls == ["demo.view"]
+
+
+def test_redis_rejects_non_tls_client() -> None:
+    class _PlainRedisClient:
+        def __init__(self) -> None:
+            self.connection_pool = type(
+                "Pool", (), {"connection_kwargs": {"ssl": False, "ssl_context": None}}
+            )()
+
+    with pytest.raises(FeatureStoreConfigurationError):
+        RedisOnlineFeatureStore(client=_PlainRedisClient())
+
+
+def test_redis_tls_client_config(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Client:
+        connection_pool = None
+
+    def fake_from_url(url: str, **kwargs: Any) -> Any:
+        captured["url"] = url
+        captured.update(kwargs)
+        return _Client()
+
+    redis_module = pytest.importorskip("redis")
+    monkeypatch.setattr(redis_module.Redis, "from_url", fake_from_url)
+    monkeypatch.setattr("core.data.feature_store.redis", redis_module, raising=False)
+
+    context = ssl.create_default_context()
+    config = RedisClientConfig(
+        url="rediss://example.com:6380/0",
+        username="app-user",
+        password="s3cret",
+        ssl_context=context,
+    )
+    store = RedisOnlineFeatureStore(client_config=config)
+    assert isinstance(store, RedisOnlineFeatureStore)
+    assert captured["url"] == "rediss://example.com:6380/0"
+    assert captured["username"] == "app-user"
+    assert captured["password"] == "s3cret"
+    assert captured["ssl_context"] is context
+
+
+def test_redis_tls_url_required(monkeypatch) -> None:
+    monkeypatch.setattr("core.data.feature_store.redis", object(), raising=False)
+    with pytest.raises(FeatureStoreConfigurationError):
+        RedisClientConfig(url="redis://example.com:6379/0").create_client()
 
 
 def test_redis_sync_detects_column_mismatch(sample_frame: pd.DataFrame) -> None:
@@ -312,19 +372,30 @@ def test_online_store_purge_removes_artifacts(tmp_path: Path, sample_frame: pd.D
     assert store.load("demo.view").empty
 
 
-def test_sqlite_store_purge_and_missing_load(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_store_purge_and_missing_load(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     assert store.load("missing").empty
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     store.purge("demo.view")
     assert store.load("demo.view").empty
 
 
-def test_sqlite_load_reapplies_retention_and_persists(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+def test_sqlite_load_reapplies_retention_and_persists(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
     clock = _TestClock(pd.Timestamp("2024-01-01T12:00:00", tz=UTC))
     policy = RetentionPolicy(ttl=pd.Timedelta(minutes=30))
     store = SQLiteOnlineFeatureStore(
-        tmp_path / "retained.db", retention_policy=policy, clock=clock.now
+        tmp_path / "retained.db",
+        encryption=sqlite_encryption_config,
+        retention_policy=policy,
+        clock=clock.now,
     )
     historical = sample_frame.copy()
     historical.loc[:, "ts"] = [clock.now() - pd.Timedelta(hours=1), clock.now() - pd.Timedelta(minutes=10)]
@@ -343,24 +414,118 @@ def test_sqlite_load_reapplies_retention_and_persists(tmp_path: Path, sample_fra
     assert recorded and recorded[0].empty
 
 
-def test_sqlite_sync_rejects_invalid_mode(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_sync_rejects_invalid_mode(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     with pytest.raises(ValueError, match="mode"):
         store.sync("demo.view", sample_frame, mode="invalid", validate=False)  # type: ignore[arg-type]
 
 
-def test_sqlite_append_without_existing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_append_without_existing(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     report = store.sync("demo.view", sample_frame, mode="append", validate=False)
     assert report.offline_rows == sample_frame.shape[0]
 
 
-def test_sqlite_append_empty_delta(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_append_empty_delta(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
     empty = sample_frame.iloc[0:0]
     report = store.sync("demo.view", empty, mode="append", validate=False)
     assert report.online_rows == 0
+
+
+def test_sqlite_store_requires_encryption(tmp_path: Path) -> None:
+    with pytest.raises(FeatureStoreConfigurationError):
+        SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=None)  # type: ignore[arg-type]
+
+
+def test_sqlite_payload_is_encrypted(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
+    store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
+    with sqlite3.connect(tmp_path / "store.db") as connection:
+        payload = connection.execute(
+            "SELECT payload FROM feature_views WHERE name = ?",
+            ("demo.view",),
+        ).fetchone()[0]
+    assert isinstance(payload, bytes)
+    assert payload.startswith(b"TPENC1")
+
+
+def test_sqlite_store_fallback_key(
+    tmp_path: Path,
+    sample_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
+    store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
+
+    rotated = SQLiteEncryptionConfig(
+        key_id="v2",
+        key_material="rotated-secret",
+        fallback_keys={"v1": "primary-secret"},
+    )
+    reopened = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=rotated)
+    loaded = reopened.load("demo.view")
+    assert not loaded.empty
+
+
+def test_sqlite_reencrypt_payloads(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+    original = SQLiteEncryptionConfig(key_id="v1", key_material="alpha")
+    rotated = SQLiteEncryptionConfig(key_id="v2", key_material="beta")
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=original)
+    store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
+
+    reencrypt_sqlite_payloads(
+        tmp_path / "store.db",
+        current_encryption=original,
+        target_encryption=rotated,
+        backup=False,
+    )
+
+    reopened = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=rotated)
+    loaded = reopened.load("demo.view")
+    pd.testing.assert_frame_equal(loaded, sample_frame.reset_index(drop=True))
+
+
+def test_sqlite_reencrypt_from_plaintext(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+    path = tmp_path / "store.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS feature_views (name TEXT PRIMARY KEY, payload BLOB)"
+        )
+        payload = sample_frame.to_json(orient="table", index=False, date_unit="ns").encode("utf-8")
+        connection.execute(
+            "REPLACE INTO feature_views (name, payload) VALUES (?, ?)",
+            ("demo.view", payload),
+        )
+
+    rotated = SQLiteEncryptionConfig(key_id="v2", key_material="beta")
+    reencrypt_sqlite_payloads(
+        path,
+        current_encryption=None,
+        target_encryption=rotated,
+        backup=False,
+    )
+
+    reopened = SQLiteOnlineFeatureStore(path, encryption=rotated)
+    loaded = reopened.load("demo.view")
+    pd.testing.assert_frame_equal(loaded, sample_frame.reset_index(drop=True))
 
 
 def test_offline_validator_non_enforcing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:

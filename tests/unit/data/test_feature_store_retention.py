@@ -13,6 +13,7 @@ from core.data.feature_store import (
     OnlineFeatureStore,
     RedisOnlineFeatureStore,
     RetentionPolicy,
+    SQLiteEncryptionConfig,
     SQLiteOnlineFeatureStore,
 )
 from core.utils.dataframe_io import write_dataframe
@@ -65,6 +66,11 @@ def base_frame() -> pd.DataFrame:
     )
 
 
+@pytest.fixture
+def sqlite_encryption_config() -> SQLiteEncryptionConfig:
+    return SQLiteEncryptionConfig(key_id="v1", key_material="primary-secret")
+
+
 def test_redis_ttl_retention(base_frame: pd.DataFrame) -> None:
     clock = _MutableClock(pd.Timestamp("2024-01-01 00:00:00", tz=UTC))
     policy = RetentionPolicy(ttl=pd.Timedelta(hours=1))
@@ -86,9 +92,15 @@ def test_redis_ttl_uses_native_expiry(base_frame: pd.DataFrame) -> None:
     assert client.expiries["demo.fv"] == 90
 
 
-def test_sqlite_max_versions(tmp_path, base_frame: pd.DataFrame) -> None:
+def test_sqlite_max_versions(
+    tmp_path,
+    base_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
     policy = RetentionPolicy(max_versions=1)
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", retention_policy=policy)
+    store = SQLiteOnlineFeatureStore(
+        tmp_path / "store.db", encryption=sqlite_encryption_config, retention_policy=policy
+    )
 
     store.sync("demo.fv", base_frame, mode="overwrite", validate=False)
     newer = base_frame.copy()
@@ -232,16 +244,24 @@ def test_empty_payload_round_trip() -> None:
     assert loaded.empty
 
 
-def test_sqlite_append_validates_schema(tmp_path, base_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_append_validates_schema(
+    tmp_path,
+    base_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     store.sync("demo.fv", base_frame, mode="overwrite")
 
     with pytest.raises(ValueError):
         store.sync("demo.fv", base_frame.drop(columns=["value"]), mode="append")
 
 
-def test_sqlite_append_combines_rows(tmp_path, base_frame: pd.DataFrame) -> None:
-    store = SQLiteOnlineFeatureStore(tmp_path / "store.db")
+def test_sqlite_append_combines_rows(
+    tmp_path,
+    base_frame: pd.DataFrame,
+    sqlite_encryption_config: SQLiteEncryptionConfig,
+) -> None:
+    store = SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=sqlite_encryption_config)
     initial = store.sync("demo.fv", base_frame, mode="overwrite")
     assert initial.offline_rows == base_frame.shape[0]
 
