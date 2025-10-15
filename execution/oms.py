@@ -348,9 +348,7 @@ class OrderManagementSystem:
             remote_filled = stored.filled_quantity
         stored.filled_quantity = float(remote_filled)
 
-        if order.average_price is None:
-            stored.average_price = None
-        else:
+        if order.average_price is not None:
             stored.average_price = float(order.average_price)
         stored.rejection_reason = order.rejection_reason
         stored.updated_at = getattr(order, "updated_at", stored.updated_at)

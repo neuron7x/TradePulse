@@ -368,14 +368,15 @@ class LiveExecutionLoop:
                         )
                         continue
 
+                    remote_filled = remote.filled_quantity or 0.0
                     last = self._last_reported_fill.get(order.order_id, 0.0)
-                    delta = max(0.0, remote.filled_quantity - last)
+                    delta = max(0.0, remote_filled - last)
                     if delta > 0:
                         price = remote.average_price or remote.price or 0.0
                         if price <= 0:
                             price = 1.0
                         context.oms.register_fill(order.order_id, delta, price)
-                        self._last_reported_fill[order.order_id] = remote.filled_quantity
+                        self._last_reported_fill[order.order_id] = remote_filled
                         self._logger.info(
                             "Registered fill",
                             extra={
