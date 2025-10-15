@@ -109,9 +109,12 @@ class SlidingWindowRateLimiter:
 
         if isinstance(records, dict):
             utilisation_values: list[float] = []
+            cleanup_thresholds: dict[str, float] = {}
+            remove_empty: set[str] = set()
             try:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
+                loop = None
                 current_time = time.monotonic()
             else:
                 current_time = loop.time()
@@ -134,7 +137,11 @@ class SlidingWindowRateLimiter:
                                 expired += 1
                             else:
                                 break
+                        if expired:
+                            cleanup_thresholds[storage_key] = threshold
                         active_count = bucket_length - expired
+                        if active_count == 0 and bucket_length:
+                            remove_empty.add(storage_key)
                     else:
                         active_count = bucket_length
                 else:
@@ -151,6 +158,16 @@ class SlidingWindowRateLimiter:
 
             if utilisation_values:
                 max_utilization = max(utilisation_values)
+
+            if cleanup_thresholds or remove_empty:
+                cleanup_coro = self._prune_snapshot_buckets(
+                    cleanup_thresholds,
+                    remove_empty,
+                )
+                if loop is not None:
+                    loop.create_task(cleanup_coro)
+                else:
+                    asyncio.run(cleanup_coro)
 
         return RateLimiterSnapshot(
             backend=backend_name,
@@ -183,6 +200,31 @@ class SlidingWindowRateLimiter:
             return policy
         policy, _ = self._resolve_policy(None, None)
         return policy
+
+    async def _prune_snapshot_buckets(
+        self,
+        cleanup_thresholds: dict[str, float],
+        remove_empty: set[str],
+    ) -> None:
+        records = getattr(self._backend, "_records", None)
+        lock = getattr(self._backend, "_lock", None)
+        if not isinstance(records, dict) or lock is None:
+            return
+
+        async with lock:  # type: ignore[func-returns-value]
+            for storage_key, threshold in cleanup_thresholds.items():
+                bucket = records.get(storage_key)
+                if not isinstance(bucket, deque):
+                    continue
+                while bucket and bucket[0] <= threshold:
+                    bucket.popleft()
+                if not bucket:
+                    records.pop(storage_key, None)
+
+            for storage_key in remove_empty:
+                bucket = records.get(storage_key)
+                if not bucket:
+                    records.pop(storage_key, None)
 
 
 def build_rate_limiter(settings: ApiRateLimitSettings) -> SlidingWindowRateLimiter:
