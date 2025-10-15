@@ -7,12 +7,19 @@ from typing import Any, Dict, Iterable, List, Literal, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
+from .postgres import ensure_secure_postgres_uri, is_postgres_uri
+
 __all__ = [
     "CatalogConfig",
     "DataSourceConfig",
+    "ExperimentAnalyticsConfig",
+    "ExperimentConfig",
+    "ExperimentDataConfig",
+    "ExperimentTrackingConfig",
     "ExecutionConfig",
     "IngestConfig",
     "OptimizeConfig",
+    "PostgresTLSConfig",
     "ReportConfig",
     "StrategyConfig",
     "TradePulseBaseConfig",
@@ -31,6 +38,58 @@ class VersioningConfig(BaseModel):
     def _validate_repo(self) -> "VersioningConfig":
         if self.backend != "none" and self.repo_path is None:
             msg = "repo_path is required when using dvc or lakefs backends"
+            raise ValueError(msg)
+        return self
+
+
+class PostgresTLSConfig(BaseModel):
+    """TLS material required for PostgreSQL client authentication."""
+
+    ca_file: Path
+    cert_file: Path
+    key_file: Path
+
+
+class ExperimentDataConfig(BaseModel):
+    """Dataset location for experiment-oriented jobs."""
+
+    price_csv: Path
+    price_column: str
+
+
+class ExperimentAnalyticsConfig(BaseModel):
+    """Numeric parameters for experiment analytics windows."""
+
+    window: int
+    bins: int
+    delta: float
+
+
+class ExperimentTrackingConfig(BaseModel):
+    """Where to persist experiment tracking artifacts."""
+
+    enabled: bool = True
+    base_dir: Path
+
+
+class ExperimentConfig(BaseModel):
+    """Hydra experiment configuration with strict database validation."""
+
+    name: str
+    db_uri: str
+    db_tls: PostgresTLSConfig | None = None
+    debug: bool = False
+    log_level: str = "INFO"
+    random_seed: int = 0
+    data: ExperimentDataConfig
+    analytics: ExperimentAnalyticsConfig
+    tracking: ExperimentTrackingConfig
+
+    @model_validator(mode="after")
+    def _validate_database_security(self) -> "ExperimentConfig":
+        ensure_secure_postgres_uri(self.db_uri)
+        if is_postgres_uri(self.db_uri) and self.db_tls is None:
+            msg = "db_tls must be provided when using a PostgreSQL database"
             raise ValueError(msg)
         return self
 

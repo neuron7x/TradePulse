@@ -4,10 +4,15 @@ from .cli_models import (
     BacktestConfig,
     CatalogConfig,
     DataSourceConfig,
+    ExperimentAnalyticsConfig,
+    ExperimentConfig,
+    ExperimentDataConfig,
+    ExperimentTrackingConfig,
     ExecConfig,
     ExecutionConfig,
     IngestConfig,
     OptimizeConfig,
+    PostgresTLSConfig,
     ReportConfig,
     StrategyConfig,
     TradePulseBaseConfig,
@@ -30,10 +35,20 @@ from .kuramoto_ricci import (
     load_kuramoto_ricci_config,
     parse_cli_overrides,
 )
+from .postgres import (
+    ALLOWED_POSTGRES_SSLMODES,
+    ensure_secure_postgres_uri,
+    get_postgres_sslmode,
+    is_postgres_uri,
+)
 
 __all__ = [
     "BacktestConfig",
     "CatalogConfig",
+    "ExperimentAnalyticsConfig",
+    "ExperimentConfig",
+    "ExperimentDataConfig",
+    "ExperimentTrackingConfig",
     "CompositeConfig",
     "CompositeSignals",
     "CompositeThresholds",
@@ -49,6 +64,7 @@ __all__ = [
     "RicciTemporalConfig",
     "IngestConfig",
     "OptimizeConfig",
+    "PostgresTLSConfig",
     "ReportConfig",
     "TradePulseSettings",
     "YamlSettingsSource",
@@ -58,4 +74,11 @@ __all__ = [
     "StrategyConfig",
     "TradePulseBaseConfig",
     "VersioningConfig",
+]
+
+__all__ += [
+    "ALLOWED_POSTGRES_SSLMODES",
+    "ensure_secure_postgres_uri",
+    "get_postgres_sslmode",
+    "is_postgres_uri",
 ]
