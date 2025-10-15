@@ -125,6 +125,63 @@ jobs:
           safety-report.json
           pip-audit-report.json
 
+  osv-dependency-scan:
+    name: Cross-language Dependency Scan
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Install OSV-Scanner
+      run: |
+        set -euo pipefail
+        OSV_VERSION="1.7.4"
+        curl -sSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz" \
+          -o osv-scanner.tar.gz
+        tar -xzf osv-scanner.tar.gz
+        sudo mv "osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
+        rm -rf "osv-scanner_${OSV_VERSION}_linux_amd64" osv-scanner.tar.gz
+
+    - name: Run OSV-Scanner on project manifests
+      run: |
+        set -euo pipefail
+        files=()
+        if [ -f go.sum ]; then files+=("--lockfile=go.sum"); fi
+        if [ -f go.mod ]; then files+=("--lockfile=go.mod"); fi
+        if [ -f requirements.txt ]; then files+=("--lockfile=requirements.txt"); fi
+        if [ -f requirements-dev.txt ]; then files+=("--lockfile=requirements-dev.txt"); fi
+        if [ -f requirements.lock ]; then files+=("--lockfile=requirements.lock"); fi
+        if [ -f requirements-dev.lock ]; then files+=("--lockfile=requirements-dev.lock"); fi
+        if [ -f rust/tradepulse-accel/Cargo.lock ]; then files+=("--lockfile=rust/tradepulse-accel/Cargo.lock"); fi
+        if [ -f rust/tradepulse-accel/Cargo.toml ]; then files+=("--manifest=rust/tradepulse-accel/Cargo.toml"); fi
+
+        if [ ${#files[@]} -eq 0 ]; then
+          echo "No manifest or lock files were detected for OSV scanning."
+          exit 0
+        fi
+
+        echo "Scanning with OSV-Scanner using: ${files[*]}"
+        osv-scanner "${files[@]}"
+
+  semgrep-sast:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v5
+
+    - name: Run Semgrep
+      uses: returntocorp/semgrep-action@v1
+      with:
+        config: >-
+          p/ci
+
   container-scan:
     name: Container Image Scan
     runs-on: ubuntu-latest

@@ -188,6 +188,13 @@ safety check
 - Avoid inline scripts; prefer vetted modules bundled at build time. When inline styles are required, keep them minimal and scoped.
 - Document any intentional CSP relaxations directly in the pull request and in `SECURITY.md`.
 
+#### 5. CI/CD Security Gates
+
+- Every push, pull request, and weekly schedule runs Semgrep with the `p/ci` policy set. Any blocking rule will fail the workflow and must be remediated or waived via a documented suppression.
+- OSV-Scanner enforces software composition analysis across Python (`requirements*.txt`), Go (`go.mod`/`go.sum`), and Rust (`Cargo.toml`/`Cargo.lock`). Detected vulnerabilities block merges until resolved.
+- Existing Python-focused checks (`safety` and `pip-audit`) remain in place to provide detailed remediation guidance and JSON artifacts for tracking.
+- Security reports are published as workflow artifacts for traceability. Reference them during release reviews and post-incident analysis.
+
 #### CSRF and clickjacking test harness
 
 - The Playwright-based UI security suite asserts that all state-changing requests include valid CSRF tokens and that invalid tokens are rejected with HTTP 403 responses. The same suite verifies preflight requests and SameSite cookie attributes.

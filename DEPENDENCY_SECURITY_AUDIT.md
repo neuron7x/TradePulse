@@ -198,6 +198,8 @@ The security workflow (`.github/workflows/security.yml`) has been updated to:
 - Run both `safety` and `pip-audit` tools
 - Generate and archive security reports
 - Fail builds on high-severity vulnerabilities
+- Execute OSV-Scanner across Python, Go, and Rust manifests to prevent vulnerable dependencies from merging
+- Run Semgrep SAST policies (`p/ci`) to block insecure code patterns alongside dependency checks
 
 ### Future Considerations
 
