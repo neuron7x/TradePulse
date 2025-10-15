@@ -7,6 +7,7 @@ from core.data.resampling import resample_order_book
 from core.indicators.hierarchical_features import (
     FeatureBufferCache,
     HierarchicalFeatureResult,
+    _shannon_entropy,
     compute_hierarchical_features,
 )
 
@@ -49,4 +50,12 @@ def test_hierarchical_features_with_benchmarks():
     flat = {k: v for tf in result.features.values() for k, v in tf.items()}
     assert "entropy" in result.features["1min"]
     assert any(key.startswith("microprice") for key in flat)
+
+
+def test_shannon_entropy_float32_precision():
+    rng = np.random.default_rng(42)
+    samples = rng.normal(loc=0.0, scale=1.0, size=256).astype(np.float32)
+    entropy = _shannon_entropy(samples)
+    assert isinstance(entropy, float)
+    assert entropy >= 0.0
 
