@@ -10,6 +10,7 @@ import random
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import re
 from pathlib import Path
 from typing import Any
 
@@ -37,11 +38,21 @@ SENSITIVE_TOKENS = (
 )
 
 
+_CAMELCASE_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+
+
+def _iter_key_tokens(key: str) -> list[str]:
+    """Return normalized tokens extracted from a configuration key."""
+
+    normalized = _CAMELCASE_BOUNDARY.sub(r"\1_\2", key)
+    normalized = normalized.lower()
+    return [token for token in re.split(r"[^0-9a-z]+", normalized) if token]
+
+
 def _is_sensitive_key(key: str) -> bool:
     """Return ``True`` when the provided configuration key is sensitive."""
 
-    normalized = key.lower().replace("-", "_")
-    return any(token in normalized for token in SENSITIVE_TOKENS)
+    return any(token in SENSITIVE_TOKENS for token in _iter_key_tokens(key))
 
 
 def _redact_sensitive_data(data: Any) -> Any:

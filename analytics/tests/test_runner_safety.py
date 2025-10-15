@@ -13,6 +13,8 @@ def test_redact_sensitive_data_masks_known_keys() -> None:
         "database": {"user": "analyst", "password": "super-secret"},
         "apiKey": "plaintext-key",
         "nested": {"client-secret": "needs-masking", "normal": "value"},
+        "monkey": "should-remain-visible",
+        "author": "jane",  # should not be treated as auth credentials
         "sequence": [
             {"token": "token-value"},
             {"keep": "visible"},
@@ -28,6 +30,8 @@ def test_redact_sensitive_data_masks_known_keys() -> None:
     assert redacted["nested"]["normal"] == "value"
     assert redacted["sequence"][0]["token"] == runner.REDACTED_PLACEHOLDER
     assert redacted["sequence"][1]["keep"] == "visible"
+    assert redacted["monkey"] == "should-remain-visible"
+    assert redacted["author"] == "jane"
 
     # The original mapping should not be mutated.
     assert original["database"]["password"] == "super-secret"
