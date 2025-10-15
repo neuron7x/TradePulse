@@ -530,19 +530,27 @@ def create_app(
         raise RuntimeError(("Missing required OAuth configuration: {}.").format(joined)) from exc
     if security_settings is not None:
         setattr(get_api_security_settings, "_instance", resolved_security_settings)
-    secret_manager = resolved_settings.build_secret_manager()
+    audit_sink = None
+    if resolved_settings.audit_webhook_url is not None:
+        audit_sink = HttpAuditSink(str(resolved_settings.audit_webhook_url))
+
+    secret_manager = resolved_settings.build_secret_manager(
+        audit_logger_factory=lambda manager: AuditLogger(
+            secret_resolver=manager.provider("audit_secret"),
+            sink=audit_sink,
+        )
+    )
     require_bearer = verify_request_identity()
     require_bearer_with_mtls = verify_request_identity(require_client_certificate=True)
     audit_secret_provider = secret_manager.provider("audit_secret")
     rate_limit_max_attempts = resolved_settings.admin_rate_limit_max_attempts
     rate_limit_interval = resolved_settings.admin_rate_limit_interval_seconds
 
-    audit_sink = None
-    if resolved_settings.audit_webhook_url is not None:
-        audit_sink = HttpAuditSink(str(resolved_settings.audit_webhook_url))
+    audit_logger = secret_manager.audit_logger
+    if audit_logger is None:
+        audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
 
     risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
-    audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
     admin_rate_limiter = AdminRateLimiter(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),

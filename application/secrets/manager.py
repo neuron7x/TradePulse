@@ -1,19 +1,24 @@
-"""Secret management utilities with support for rotation."""
+"""Secret management utilities with support for rotation and auditing."""
 
 from __future__ import annotations
 
 import logging
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Mapping
+from typing import Any, Callable, Dict, Iterator, Mapping
+
+from src.audit.audit_logger import AuditLogger
 
 __all__ = [
     "ManagedSecret",
     "ManagedSecretConfig",
     "SecretManager",
     "SecretManagerError",
+    "secret_caller_context",
 ]
 
 
@@ -46,6 +51,7 @@ class ManagedSecret:
         self._logger = logger or logging.getLogger("tradepulse.secrets")
         self._lock = threading.Lock()
         self._value: str | None = None
+        self._has_fallback = fallback is not None
         self._last_refresh = 0.0
         if fallback is not None:
             self._ensure_min_length(fallback)
@@ -137,33 +143,160 @@ class ManagedSecret:
                 f"Secret '{self._config.name}' must be at least {self._config.min_length} characters."
             )
 
+    @property
+    def config(self) -> ManagedSecretConfig:
+        """Return the immutable configuration associated with the secret."""
+
+        return self._config
+
+    @property
+    def has_fallback(self) -> bool:
+        """Return whether a fallback value was configured for the secret."""
+
+        return self._has_fallback
+
+    def describe(self) -> dict[str, Any]:
+        """Return non-sensitive metadata describing the managed secret."""
+
+        path = self._config.path
+        return {
+            "name": self._config.name,
+            "path": str(path) if path is not None else None,
+            "min_length": self._config.min_length,
+            "has_fallback": self._has_fallback,
+            "cached": self._value is not None,
+            "refresh_interval_seconds": self._refresh_interval,
+        }
+
 
 class SecretManager:
     """Coordinate retrieval of managed secrets for the application."""
 
-    def __init__(self, secrets: Mapping[str, ManagedSecret]) -> None:
+    def __init__(
+        self,
+        secrets: Mapping[str, ManagedSecret],
+        *,
+        audit_logger: AuditLogger | None = None,
+        audit_logger_factory: Callable[["SecretManager"], AuditLogger] | None = None,
+    ) -> None:
         if not secrets:
             raise ValueError("At least one secret must be managed")
         self._secrets: Dict[str, ManagedSecret] = dict(secrets)
+        self._audit_state = threading.local()
+        self._audit_logger: AuditLogger | None = None
+        if audit_logger is not None and audit_logger_factory is not None:
+            raise ValueError("Provide either audit_logger or audit_logger_factory, not both")
+        if audit_logger is not None:
+            self._audit_logger = audit_logger
+        elif audit_logger_factory is not None:
+            self._audit_logger = audit_logger_factory(self)
+
+    @property
+    def audit_logger(self) -> AuditLogger | None:
+        """Return the audit logger bound to the secret manager, if any."""
+
+        return self._audit_logger
 
     def get(self, name: str) -> str:
         secret = self._secrets.get(name)
         if secret is None:
+            self._audit_operation(name=name, operation="get", status="missing")
             raise SecretManagerError(f"Unknown secret '{name}'")
-        return secret.get_secret()
+        try:
+            value = secret.get_secret()
+        except SecretManagerError:
+            self._audit_operation(name=name, operation="get", status="error")
+            raise
+        self._audit_operation(name=name, operation="get", status="success")
+        return value
 
     def provider(self, name: str) -> Callable[[], str]:
         secret = self._secrets.get(name)
         if secret is None:
+            self._audit_operation(name=name, operation="provider", status="missing")
             raise SecretManagerError(f"Unknown secret '{name}'")
+        self._audit_operation(name=name, operation="provider", status="issued")
 
         def _resolver() -> str:
-            return secret.get_secret()
+            try:
+                value = secret.get_secret()
+            except SecretManagerError:
+                self._audit_operation(name=name, operation="provider_access", status="error")
+                raise
+            self._audit_operation(name=name, operation="provider_access", status="success")
+            return value
 
         return _resolver
 
     def force_refresh(self, name: str) -> None:
         secret = self._secrets.get(name)
         if secret is None:
+            self._audit_operation(name=name, operation="force_refresh", status="missing")
             raise SecretManagerError(f"Unknown secret '{name}'")
-        secret.force_refresh()
+        try:
+            secret.force_refresh()
+        except SecretManagerError:
+            self._audit_operation(name=name, operation="force_refresh", status="error")
+            raise
+        self._audit_operation(name=name, operation="force_refresh", status="success")
+
+    def _audit_operation(
+        self,
+        *,
+        name: str,
+        operation: str,
+        status: str,
+        extra: Mapping[str, Any] | None = None,
+    ) -> None:
+        if self._audit_logger is None:
+            return
+        if getattr(self._audit_state, "active", False):
+            return
+        context = _SECRET_CALLER_CONTEXT.get()
+        actor = context.get("actor") or "system"
+        ip_address = context.get("ip_address") or "127.0.0.1"
+        secret = self._secrets.get(name)
+        details: dict[str, Any] = {
+            "operation": operation,
+            "status": status,
+            "secret": self._describe_secret(name, secret),
+        }
+        if extra is not None:
+            details.update(dict(extra))
+        setattr(self._audit_state, "active", True)
+        try:
+            self._audit_logger.log_event(
+                event_type=f"secret_{operation}",
+                actor=actor,
+                ip_address=ip_address,
+                details=details,
+            )
+        finally:
+            setattr(self._audit_state, "active", False)
+
+    def _describe_secret(self, name: str, secret: ManagedSecret | None) -> dict[str, Any]:
+        if secret is None:
+            return {"name": name, "managed": False}
+        metadata = secret.describe()
+        metadata.setdefault("name", name)
+        metadata["managed"] = metadata.get("path") is not None
+        return metadata
+
+
+_SECRET_CALLER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
+    "secret_caller_context",
+    default={"actor": "system", "ip_address": "127.0.0.1"},
+)
+
+
+@contextmanager
+def secret_caller_context(*, actor: str, ip_address: str, **extra: str) -> Iterator[None]:
+    """Temporarily override the caller context for secret access auditing."""
+
+    current = dict(_SECRET_CALLER_CONTEXT.get())
+    current.update({"actor": actor, "ip_address": ip_address, **extra})
+    token = _SECRET_CALLER_CONTEXT.set(current)
+    try:
+        yield
+    finally:
+        _SECRET_CALLER_CONTEXT.reset(token)
