@@ -56,11 +56,31 @@ Whether you are prototyping strategies or orchestrating production trading bots,
 
 ## ✅ Continuous Integration & Quality
 
-| Signal | Description |
-| --- | --- |
-| [![Tests Status](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml) | Pytest suite covering unit, integration, async, fuzz and property-based checks. |
-| [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Codecov uploads the latest coverage.xml artifact from CI for transparent coverage tracking. |
-| [![Security Scan](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Automated secret detection, dependency auditing, and supply-chain checks. |
+Every pull request goes through a **comprehensive quality gate** that ensures code quality, security, and reliability:
+
+### Quality Gates
+
+| Check Category | Status Badge | Description |
+| --- | --- | --- |
+| **Tests** | [![Tests](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/tests.yml?branch=main&label=tests)](https://github.com/neuron7x/TradePulse/actions/workflows/tests.yml) | Unit, integration, property-based, and E2E tests across Python 3.11-3.13 |
+| **Coverage** | [![Coverage](https://img.shields.io/codecov/c/github/neuron7x/TradePulse?branch=main&label=coverage)](https://app.codecov.io/gh/neuron7x/TradePulse) | Line coverage ≥97%, branch coverage ≥90% enforced |
+| **Security** | [![Security](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/security.yml?branch=main&label=security)](https://github.com/neuron7x/TradePulse/actions/workflows/security.yml) | Bandit, Safety, pip-audit, CodeQL, container scanning |
+| **Lint** | [![Lint](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/lint.yml?branch=main&label=lint)](https://github.com/neuron7x/TradePulse/actions/workflows/lint.yml) | Ruff, Black, MyPy, Shellcheck, pre-commit hooks |
+| **Build** | [![Build](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/build-wheels.yml?branch=main&label=build)](https://github.com/neuron7x/TradePulse/actions/workflows/build-wheels.yml) | Multi-platform wheel builds (Ubuntu, Windows, macOS) |
+| **SBOM** | [![SBOM](https://img.shields.io/github/actions/workflow/status/neuron7x/TradePulse/sbom.yml?branch=main&label=sbom)](https://github.com/neuron7x/TradePulse/actions/workflows/sbom.yml) | CycloneDX software bill of materials generation |
+
+### PR Requirements
+
+All pull requests must pass these automated checks before merge:
+
+- ✅ **Code Quality**: Ruff linting, Black formatting, MyPy type checking
+- ✅ **Security**: Secret scanning, dependency vulnerabilities, static analysis  
+- ✅ **Testing**: 97%+ line coverage, 90%+ branch coverage
+- ✅ **Build**: Successful wheel builds on all platforms
+- ✅ **E2E**: Smoke tests validate core workflows
+- ⚠️ **Mutation Tests**: Non-blocking validation of test suite effectiveness
+
+The [PR Quality Gate](https://github.com/neuron7x/TradePulse/actions/workflows/pr-quality-gate.yml) workflow orchestrates all checks and posts a comprehensive summary on each PR. See [TESTING.md](TESTING.md) for detailed information about our testing strategy.
 
 ## 📦 Release Automation
 
