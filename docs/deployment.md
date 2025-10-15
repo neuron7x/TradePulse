@@ -31,14 +31,31 @@ identity requirements that underpin these controls.
 
 ## Secret Management Expectations
 
-TradePulse loads sensitive credentials exclusively from environment variables or injected secret files.
+TradePulse loads sensitive credentials exclusively from environment variables, injected secret files, or supported secret
+backends.
 
 1. **Source of truth** – Store live venue keys in your secret manager; do not commit them to Git.
 2. **Rotation** – Align key rotation policies with venue requirements. The live trading loop supports hot credential reloads when files in the `state_dir` change.
 3. **Distribution** – Inject credentials during deployment (e.g., Kubernetes secrets, HashiCorp Vault Agent) and expose them as environment variables such as `BINANCE_API_KEY` and `COINBASE_API_SECRET` as documented in [Configuration](configuration.md#exchange-connector-credentials).
 4. **Audit** – Enable secret manager audit trails and configure alerts for unusual access patterns.
 
-The administrative FastAPI surface consumes the `TRADEPULSE_AUDIT_SECRET` via a managed file watcher that honours rotations at runtime. When you mount `TRADEPULSE_AUDIT_SECRET_PATH` (and, optionally, `TRADEPULSE_SIEM_CLIENT_SECRET_PATH`) into the container, the service refreshes the keys according to `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS` without restarts. Ensure your secret manager agent keeps the files up to date and enforces length policies that satisfy the defaults (16+ characters for audit signatures).
+The administrative FastAPI surface consumes the `TRADEPULSE_AUDIT_SECRET` via a managed watcher that honours rotations at
+runtime. Set `TRADEPULSE_SECRET_BACKEND_PROVIDER` to `vault` or `aws_secrets_manager` to source these secrets directly
+from HashiCorp Vault or AWS Secrets Manager, respectively. When a backend is configured you must also provide the
+corresponding connection details:
+
+- **Vault** – configure `TRADEPULSE_SECRET_BACKEND_VAULT_URL`, `TRADEPULSE_SECRET_BACKEND_VAULT_TOKEN`, and optionally
+  `TRADEPULSE_SECRET_BACKEND_VAULT_NAMESPACE`, `TRADEPULSE_SECRET_BACKEND_VAULT_MOUNT_POINT`, and
+  `TRADEPULSE_SECRET_BACKEND_VAULT_SECRET_PREFIX` to scope secrets under a path such as `tradepulse/prod/`.
+- **AWS Secrets Manager** – configure `TRADEPULSE_SECRET_BACKEND_AWS_REGION` and, if you prefer not to rely on the
+  default credential chain, `TRADEPULSE_SECRET_BACKEND_AWS_PROFILE`. Use `TRADEPULSE_SECRET_BACKEND_AWS_SECRET_PREFIX`
+  to prepend a namespace to each secret identifier.
+
+When the backend resolves a value, the previous file-based behaviour remains available as a fallback. This allows you to
+mount `TRADEPULSE_AUDIT_SECRET_PATH` (and, optionally, `TRADEPULSE_SIEM_CLIENT_SECRET_PATH`) for break-glass scenarios.
+The service refreshes the keys according to `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS` without restarts. Ensure your
+secret manager enforces the default length policies (16+ characters for audit signatures, 12+ characters for SIEM client
+secrets) and has audit logging enabled.
 
 ## Configuring the Live Trading Runner
 

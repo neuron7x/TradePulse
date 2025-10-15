@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import (
     AnyUrl,
@@ -80,6 +81,45 @@ class AdminApiSettings(BaseSettings):
         default=None,
         description="Optional OAuth2 scope requested when exchanging SIEM credentials for a token.",
     )
+    secret_backend_provider: Literal["vault", "aws_secrets_manager"] | None = Field(
+        default=None,
+        description=(
+            "Optional secret backend provider used instead of file-based secrets. When omitted the application "
+            "relies on local files with optional fallbacks."
+        ),
+    )
+    secret_backend_vault_url: AnyUrl | None = Field(
+        default=None,
+        description="Base URL of the HashiCorp Vault cluster used for managed secrets.",
+    )
+    secret_backend_vault_namespace: str | None = Field(
+        default=None,
+        description="Vault namespace that scopes secret requests when using Vault as backend.",
+    )
+    secret_backend_vault_token: SecretStr | None = Field(
+        default=None,
+        description="Authentication token used when connecting to the Vault API.",
+    )
+    secret_backend_vault_mount_point: str = Field(
+        "secret",
+        description="KV mount point that stores managed secrets when Vault backend is enabled.",
+    )
+    secret_backend_vault_secret_prefix: str | None = Field(
+        default=None,
+        description="Optional prefix prepended to secret identifiers when using the Vault backend.",
+    )
+    secret_backend_aws_region: str | None = Field(
+        default=None,
+        description="AWS region that hosts the Secrets Manager instance for managed secrets.",
+    )
+    secret_backend_aws_profile: str | None = Field(
+        default=None,
+        description="Optional named AWS profile used to authenticate when retrieving secrets.",
+    )
+    secret_backend_aws_secret_prefix: str | None = Field(
+        default=None,
+        description="Optional prefix prepended to secret identifiers before resolving them in Secrets Manager.",
+    )
 
     @model_validator(mode="after")
     def _validate_siem_configuration(self) -> "AdminApiSettings":
@@ -89,23 +129,67 @@ class AdminApiSettings(BaseSettings):
                 raise ValueError(
                     "siem_client_id and siem_client_secret must be configured when siem_endpoint is set"
                 )
+        if self.secret_backend_provider == "vault":
+            if self.secret_backend_vault_url is None:
+                raise ValueError("secret_backend_vault_url is required when using the Vault backend")
+            if self.secret_backend_vault_token is None:
+                raise ValueError("secret_backend_vault_token is required when using the Vault backend")
+        if self.secret_backend_provider == "aws_secrets_manager":
+            if self.secret_backend_aws_region is None:
+                raise ValueError(
+                    "secret_backend_aws_region is required when using the AWS Secrets Manager backend"
+                )
         return self
 
     def build_secret_manager(self) -> "SecretManager":
         """Return a configured secret manager for administrative components."""
 
-        from application.secrets.manager import ManagedSecret, ManagedSecretConfig, SecretManager
+        from application.secrets.backends import AwsSecretsManagerBackend, VaultSecretBackend
+        from application.secrets.manager import (
+            ManagedSecret,
+            ManagedSecretConfig,
+            SecretBackend,
+            SecretManager,
+        )
 
         refresh_interval = float(self.secret_refresh_interval_seconds)
+        backend: SecretBackend | None = None
+        provider = self.secret_backend_provider
+        if provider == "vault":
+            backend = VaultSecretBackend(
+                url=str(self.secret_backend_vault_url),
+                namespace=self.secret_backend_vault_namespace,
+                auth_token=self.secret_backend_vault_token.get_secret_value()
+                if self.secret_backend_vault_token is not None
+                else None,
+                mount_point=self.secret_backend_vault_mount_point,
+            )
+        elif provider == "aws_secrets_manager":
+            backend = AwsSecretsManagerBackend(
+                region_name=self.secret_backend_aws_region or "",
+                profile_name=self.secret_backend_aws_profile,
+                secret_prefix=self.secret_backend_aws_secret_prefix,
+            )
+
+        def backend_identifier(name: str) -> str | None:
+            if backend is None:
+                return None
+            if provider == "vault":
+                prefix = self.secret_backend_vault_secret_prefix or ""
+                return f"{prefix}{name}" if prefix else name
+            return name
+
         secrets: dict[str, ManagedSecret] = {
             "audit_secret": ManagedSecret(
                 config=ManagedSecretConfig(
                     name="audit_secret",
                     path=self.audit_secret_path,
                     min_length=16,
+                    backend_identifier=backend_identifier("audit_secret"),
                 ),
                 fallback=self.audit_secret.get_secret_value(),
                 refresh_interval_seconds=refresh_interval,
+                backend=backend,
             )
         }
 
@@ -118,9 +202,11 @@ class AdminApiSettings(BaseSettings):
                     name="siem_client_secret",
                     path=self.siem_client_secret_path,
                     min_length=12,
+                    backend_identifier=backend_identifier("siem_client_secret"),
                 ),
                 fallback=fallback,
                 refresh_interval_seconds=refresh_interval,
+                backend=backend,
             )
 
         return SecretManager(secrets)

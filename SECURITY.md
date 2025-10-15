@@ -124,6 +124,18 @@ api_key = "sk-12345..."  # in code
 git secrets --scan
 ```
 
+**Leverage managed secret backends when available:**
+
+- Configure `TRADEPULSE_SECRET_BACKEND_PROVIDER` to `vault` or `aws_secrets_manager` to fetch administrative secrets from
+  centralised stores. Provide the accompanying connection variables documented in `docs/deployment.md` and enable backend
+  audit logging.
+- Vault deployments should scope secrets to dedicated namespaces or prefixes (for example `tradepulse/prod/`) and issue
+  short-lived tokens for the TradePulse service account.
+- AWS Secrets Manager deployments should apply IAM policies that restrict access to the configured prefix and enforce
+  rotation on the secret resource.
+- Even when a backend is enabled, keep the file-based mounts available for break-glass recovery and monitor for fallback
+  events emitted by the application logs.
+
 #### 2. Input Validation
 
 **Always validate and sanitize inputs:**
