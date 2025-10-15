@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 
@@ -86,10 +87,12 @@ def security_context(monkeypatch: pytest.MonkeyPatch) -> Callable[..., str]:
 def configured_app(
     monkeypatch: pytest.MonkeyPatch,
     security_context: Callable[..., str],
+    tmp_path: Path,
 ) -> FastAPI:
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
     settings = AdminApiSettings(
         audit_secret="unit-audit-secret",
+        kill_switch_store_path=tmp_path / "kill_switch.sqlite",
     )
     return create_app(settings=settings)
 

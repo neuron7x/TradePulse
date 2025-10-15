@@ -28,7 +28,7 @@ from application.api.rate_limit import RateLimiterSnapshot, SlidingWindowRateLim
 from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
-from execution.risk import RiskLimits, RiskManager
+from execution.risk import RiskLimits, RiskManager, SQLiteKillSwitchStateStore
 from observability.health import HealthServer
 from src.admin.remote_control import (
     AdminIdentity,
@@ -550,7 +550,10 @@ def create_app(
     if audit_logger is None:
         audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
 
-    risk_manager_facade = RiskManagerFacade(RiskManager(RiskLimits()))
+    kill_switch_store = SQLiteKillSwitchStateStore(resolved_settings.kill_switch_store_path)
+    risk_manager_facade = RiskManagerFacade(
+        RiskManager(RiskLimits(), kill_switch_store=kill_switch_store)
+    )
     admin_rate_limiter = AdminRateLimiter(
         max_attempts=int(rate_limit_max_attempts),
         interval_seconds=float(rate_limit_interval),
