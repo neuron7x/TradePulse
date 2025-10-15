@@ -245,3 +245,140 @@ async def test_preexisting_state_certificate_is_preserved(
     assert identity.subject == "state-user"
     assert request.state.client_certificate == {"thumbprint": "abc123"}
 
+
+@pytest.mark.anyio
+async def test_certificate_scope_takes_precedence_over_header(
+    oauth2_context: OAuthContext,
+) -> None:
+    dependency = verify_request_identity(require_client_certificate=True)
+    token = oauth2_context.mint_token(subject="priority-user")
+    request = _make_request(
+        headers={"X-Client-Cert": "header-cert"},
+        scope_cert={"serial": "scope-cert"},
+    )
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    identity = await dependency(request, credentials, oauth2_context.settings)
+
+    assert identity.subject == "priority-user"
+    assert request.state.client_certificate == {"serial": "scope-cert"}
+
+
+@pytest.mark.anyio
+async def test_certificate_is_recorded_when_not_required(
+    oauth2_context: OAuthContext,
+) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token(subject="optional-cert-user")
+    request = _make_request(headers={"X-Client-Cert": "header-cert"})
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    identity = await dependency(request, credentials, oauth2_context.settings)
+
+    assert identity.subject == "optional-cert-user"
+    assert request.state.client_certificate == {"pem": "header-cert"}
+
+
+@pytest.mark.anyio
+async def test_missing_kid_in_header_is_rejected(
+    oauth2_context: OAuthContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token()
+    original = jwt.get_unverified_header
+
+    def fake_get_unverified_header(token_value: str) -> dict[str, Any]:
+        header = original(token_value)
+        header.pop("kid", None)
+        return header
+
+    monkeypatch.setattr("application.api.security.jwt.get_unverified_header", fake_get_unverified_header)
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid bearer token."
+
+
+@pytest.mark.anyio
+async def test_tampered_signature_is_rejected(oauth2_context: OAuthContext) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token()
+    header, payload, signature = token.split(".")
+    tampered_signature = (signature[:-2] + "AA") if signature.endswith("==") else ("A" * len(signature))
+    tampered_token = ".".join([header, payload, tampered_signature])
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=tampered_token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid bearer token."
+
+
+@pytest.mark.anyio
+async def test_expired_token_is_rejected(oauth2_context: OAuthContext) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token(lifetime=timedelta(minutes=-5))
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid bearer token."
+
+
+@pytest.mark.anyio
+async def test_incorrect_audience_is_rejected(oauth2_context: OAuthContext) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token(audience="different-audience")
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid bearer token."
+
+
+@pytest.mark.anyio
+async def test_incorrect_issuer_is_rejected(oauth2_context: OAuthContext) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token(issuer="https://issuer.invalid")
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid bearer token."
+
+
+@pytest.mark.anyio
+async def test_unsupported_signing_key_type_is_rejected(
+    oauth2_context: OAuthContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dependency = verify_request_identity()
+    token = oauth2_context.mint_token()
+
+    async def fake_get_key(uri: str, kid: str) -> dict[str, Any] | None:
+        return {"kid": kid, "kty": "unsupported"}
+
+    monkeypatch.setattr("application.api.security._jwks_resolver.get_key", fake_get_key)
+    request = _make_request()
+    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
+
+    with pytest.raises(HTTPException) as exc:
+        await dependency(request, credentials, oauth2_context.settings)
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Unsupported signing key type for bearer token."
+
