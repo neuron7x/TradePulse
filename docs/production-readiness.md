@@ -5,6 +5,7 @@ TradePulse is feature-rich for research and backtesting workflows, but several c
 ## Current Status
 
 - ✅ **GitHub release readiness**: The repository contains reproducible setups, CI pipelines, and documentation sufficient for open-source distribution.
+- ✅ **E2E smoke gating**: Pull-request CI now exercises the CLI smoke path (`tests/e2e/ -m "not slow and not flaky"`), while the slower full-pipeline regression stays marked `slow` for scheduled and manual runs.
 - ⚠️ **Pre-production maturity**: Core execution paths exist, but they rely on simulated data sources and mocked connectors.
 - ❌ **Production readiness**: Live trading is not yet safe; operational guardrails, integrations, and verification workflows are incomplete.
 

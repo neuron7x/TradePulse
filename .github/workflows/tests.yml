@@ -48,6 +48,12 @@ jobs:
             --junitxml=reports/unit-integration-tests.xml \
             --html=reports/unit-integration-report.html --self-contained-html \
             --flaky-report=reports/flaky-tests-skipped.json
+      - name: Run end-to-end smoke tests
+        run: |
+          .venv/bin/python -m pytest tests/e2e/ \
+            -m "not slow and not flaky" \
+            --junitxml=reports/e2e-tests.xml \
+            --html=reports/e2e-report.html --self-contained-html
       - name: Publish coverage summary
         id: coverage_summary
         run: |
@@ -122,6 +128,7 @@ jobs:
           paths: |
             reports/unit-integration-tests.xml
             reports/property-tests.xml
+            reports/e2e-tests.xml
           show: "fail, skip, pass"
       - name: Find existing test summary comment
         if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
@@ -166,6 +173,7 @@ jobs:
           path: |
             reports/unit-integration-report.html
             reports/property-tests-report.html
+            reports/e2e-report.html
           if-no-files-found: error
       - name: Upload flaky manifest
         uses: actions/upload-artifact@v4
