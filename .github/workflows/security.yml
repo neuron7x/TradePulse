@@ -134,13 +134,14 @@ jobs:
       uses: actions/checkout@v5
 
     - name: Install OSV-Scanner
+      env:
+        OSV_VERSION: "1.7.4"
       run: |
         set -euo pipefail
-        OSV_VERSION="1.7.4"
-        curl -sSL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz" \
+        curl -sSfL "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_${OSV_VERSION}_linux_amd64.tar.gz" \
           -o osv-scanner.tar.gz
         tar -xzf osv-scanner.tar.gz
-        sudo mv "osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
+        sudo install -m 0755 "osv-scanner_${OSV_VERSION}_linux_amd64/osv-scanner" /usr/local/bin/osv-scanner
         rm -rf "osv-scanner_${OSV_VERSION}_linux_amd64" osv-scanner.tar.gz
 
     - name: Run OSV-Scanner on project manifests
