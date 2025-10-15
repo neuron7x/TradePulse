@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, HttpUrl, PositiveFloat, PositiveInt, SecretStr
+from pydantic import (
+    AnyUrl,
+    BaseModel,
+    Field,
+    HttpUrl,
+    PositiveFloat,
+    PositiveInt,
+    SecretStr,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -66,7 +74,85 @@ class ApiSecuritySettings(BaseSettings):
         ),
     )
 
+    trusted_hosts: list[str] = Field(
+        default_factory=lambda: ["testserver", "localhost"],
+        description=(
+            "Host header values accepted by the API gateway. Requests from other hosts "
+            "are rejected before hitting route handlers."
+        ),
+        min_length=1,
+    )
+    max_request_bytes: PositiveInt = Field(
+        1_000_000,
+        description="Maximum request payload size, in bytes, accepted by the gateway.",
+    )
+    suspicious_json_keys: list[str] = Field(
+        default_factory=lambda: ["$where", "__proto__", "$regex"],
+        description=(
+            "JSON keys that trigger an early rejection when present in request payloads."
+        ),
+    )
+    suspicious_json_substrings: list[str] = Field(
+        default_factory=lambda: ["<script", "javascript:"],
+        description=(
+            "Case-insensitive substrings that mark a JSON value as suspicious and cause "
+            "the request to be rejected."
+        ),
+    )
+
     model_config = SettingsConfigDict(env_prefix="TRADEPULSE_", extra="ignore")
 
 
-__all__ = ["AdminApiSettings", "ApiSecuritySettings"]
+class RateLimitPolicy(BaseModel):
+    """Rate limit definition expressed as a sliding-window quota."""
+
+    max_requests: PositiveInt = Field(
+        ...,
+        description="Number of requests permitted within the configured window.",
+    )
+    window_seconds: PositiveFloat = Field(
+        ...,
+        description="Duration of the sliding window, in seconds, used for quota checks.",
+    )
+
+
+class ApiRateLimitSettings(BaseSettings):
+    """Runtime configuration for per-client API rate limiting."""
+
+    default_policy: RateLimitPolicy = Field(
+        default_factory=lambda: RateLimitPolicy(max_requests=120, window_seconds=60.0),
+        description="Fallback policy applied when a subject specific policy is not defined.",
+    )
+    unauthenticated_policy: RateLimitPolicy | None = Field(
+        default=None,
+        description=(
+            "Optional policy applied to unauthenticated requests. When unset the "
+            "default policy is used."
+        ),
+    )
+    client_policies: dict[str, RateLimitPolicy] = Field(
+        default_factory=dict,
+        description=(
+            "Mapping of authenticated subject identifiers to dedicated rate policies."
+        ),
+    )
+    redis_url: AnyUrl | None = Field(
+        default=None,
+        description=(
+            "Redis connection string used to coordinate rate limits across instances. "
+            "When omitted an in-memory limiter is used."
+        ),
+    )
+    redis_key_prefix: str = Field(
+        default="tradepulse:rate", description="Prefix applied to Redis keys."
+    )
+
+    model_config = SettingsConfigDict(env_prefix="TRADEPULSE_RATE_", extra="ignore")
+
+
+__all__ = [
+    "AdminApiSettings",
+    "ApiSecuritySettings",
+    "RateLimitPolicy",
+    "ApiRateLimitSettings",
+]

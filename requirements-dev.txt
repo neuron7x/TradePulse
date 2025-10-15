@@ -20,6 +20,7 @@ pytest-rerunfailures==16.1
 pytest-profiling==1.8.1; python_version < "3.13"
 mutmut==3.3.1
 click>=8.3.0
+redis>=5.0.1
 
 # Profiling tools
 scalene>=1.5.55
