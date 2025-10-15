@@ -5,6 +5,14 @@ services:
     build: .
     ports: ["8001:8001"]
     restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    tmpfs:
+      - /tmp:uid=65532,gid=65532,mode=1777
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=default
+      - apparmor=docker-default
   prometheus:
     image: prom/prometheus
     volumes:

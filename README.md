@@ -135,6 +135,48 @@ docker compose logs -f
 docker compose down
 ```
 
+> **Security hardening defaults**
+>
+> - The image is built via a multi-stage pipeline that ends on `gcr.io/distroless/python3`, runs as the locked-down `nonroot` user (UID/GID `65532`), and sets a strict `umask` via the container entrypoint.
+> - The Compose service enforces a read-only root filesystem, mounts `/tmp` on a `tmpfs`, drops privilege escalation with `no-new-privileges`, and pins the container to Docker's default seccomp/AppArmor profiles.
+> - Runtime secrets are **not** baked into the image. The entrypoint reads an optional `/run/secrets/tradepulse.env` file so secrets can be injected at deploy time without ever touching the Compose file.
+> - Port `8001` does not require extra Linux capabilities. If you remap the service to a privileged port (`<1024`), add `cap_add: ["NET_BIND_SERVICE"]` (or grant the capability through your orchestrator) and document the approval with your security team.
+
+#### Injecting secrets from an external manager
+
+1. **Sync secrets into Docker** – Pull the payload from your secret manager and create a short-lived Docker secret:
+
+   ```bash
+   aws secretsmanager get-secret-value --secret-id tradepulse/prod \
+     --query 'SecretString' --output text > /tmp/tradepulse.env
+   docker secret create tradepulse_env /tmp/tradepulse.env
+   rm -f /tmp/tradepulse.env
+   ```
+
+   > Replace the AWS CLI call with your provider (HashiCorp Vault, GCP Secret Manager, etc.).
+
+2. **Mount the secret** – Create an override file so the secret is surfaced at `/run/secrets/tradepulse.env` with the correct ownership:
+
+   ```yaml
+   # docker-compose.override.yml
+   services:
+     tradepulse:
+       secrets:
+         - source: tradepulse_env
+           target: tradepulse.env
+           uid: "65532"
+           gid: "65532"
+           mode: 0440
+
+   secrets:
+     tradepulse_env:
+       external: true
+   ```
+
+3. **Launch the stack** – `docker compose up -d` will now make the secret available inside the container. The hardened entrypoint automatically sources each `KEY=VALUE` pair before executing `python -m nfpro`.
+
+Rotate secrets directly in your manager and re-run step 1 to refresh the mounted payload without editing version-controlled files.
+
 See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instructions, including GPU setup and troubleshooting tips.
 
 ---
