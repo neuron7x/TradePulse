@@ -9,7 +9,7 @@ from functools import partial
 from typing import Any, Callable, Literal
 from weakref import finalize as _finalize
 
-from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor, wait
 
 import numpy as np
 
@@ -112,6 +112,7 @@ class IndicatorPipeline:
     def run(self, data: np.ndarray | Sequence[float], **kwargs: Any) -> PipelineResult:
         buffer, borrowed = self._prepare_buffer(data)
         values: dict[str, Any] = {}
+        tasks: list[Future[FeatureResult]] | None = None
         try:
             if self._execution == "sequential":
                 for feature in self._features:
@@ -121,13 +122,15 @@ class IndicatorPipeline:
                 self._ensure_executor_ready()
                 if self._executor is None:
                     raise RuntimeError("Parallel execution requires an executor")
-                tasks: list[Future[FeatureResult]] = []
+                tasks = []
                 for feature in self._features:
                     tasks.append(self._executor.submit(_run_feature, feature, buffer, kwargs))
                 for future in tasks:
                     result = future.result()
                     values[result.name] = result.value
         except Exception:
+            if tasks:
+                _cancel_and_wait(tasks)
             if borrowed:
                 self._pool.release(buffer)
             raise
@@ -165,6 +168,24 @@ def _run_feature(feature: BaseFeature, data: np.ndarray, kwargs: Mapping[str, An
     if kwargs:
         return feature.transform(data, **dict(kwargs))
     return feature.transform(data)
+
+
+def _cancel_and_wait(futures: Sequence[Future[Any]]) -> None:
+    if not futures:
+        return
+    for future in futures:
+        if not future.done():
+            future.cancel()
+    done, not_done = wait(futures)
+    if not_done:
+        # Wait one more time to guarantee completion; `wait` can return early if interrupted.
+        wait(not_done)
+    for future in done:
+        try:
+            future.result()
+        except Exception:
+            # Suppress downstream errors to preserve the original exception context.
+            pass
 
 
 def _noop() -> None:
