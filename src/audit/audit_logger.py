@@ -286,6 +286,7 @@ class SiemAuditSink:
         self._sequence = itertools.count()
         self._stop = threading.Event()
         self._lock = threading.Lock()
+        self._recover_inflight_envelopes()
         self._load_existing_spool()
         self._worker = threading.Thread(target=self._run, name="siem-sink", daemon=True)
         self._worker.start()
@@ -314,6 +315,15 @@ class SiemAuditSink:
     def _load_existing_spool(self) -> None:
         for path in sorted(self._spool_dir.glob("*.json")):
             self._schedule(path, ready_at=time.monotonic())
+
+    def _recover_inflight_envelopes(self) -> None:
+        for inflight in sorted(self._spool_dir.glob("*.json.inflight")):
+            pending = inflight.with_suffix("")
+            try:
+                with self._lock:
+                    os.replace(inflight, pending)
+            except FileNotFoundError:  # pragma: no cover - already recovered
+                continue
 
     def _schedule(self, path: Path, *, ready_at: float) -> None:
         self._queue.put((ready_at, next(self._sequence), path))
@@ -356,17 +366,27 @@ class SiemAuditSink:
                 continue
             record = envelope.get("record")
             attempts = int(envelope.get("attempts", 0))
+            inflight_path = self._mark_inflight(path)
             try:
                 model = AuditRecord.model_validate(record)
                 self._send(model)
             except Exception as exc:  # pragma: no cover - retry path exercises
-                self._handle_failure(path, envelope, attempts, exc)
+                self._handle_failure(path, inflight_path, envelope, attempts, exc)
             else:
-                self._acknowledge(path)
+                self._acknowledge(inflight_path)
 
     def _read_envelope(self, path: Path) -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as handle:
             return json.load(handle)
+
+    def _mark_inflight(self, path: Path) -> Path:
+        inflight_path = path.with_suffix(path.suffix + ".inflight")
+        with self._lock:
+            try:
+                os.replace(path, inflight_path)
+            except FileNotFoundError:  # pragma: no cover - already renamed
+                return inflight_path
+        return inflight_path
 
     def _send(self, record: AuditRecord) -> None:
         payload = record.model_dump(mode="json")
@@ -388,11 +408,16 @@ class SiemAuditSink:
         try:
             path.unlink()
         except FileNotFoundError:  # pragma: no cover - already removed
-            return
+            pending = path.with_suffix("")
+            try:
+                pending.unlink()
+            except FileNotFoundError:  # pragma: no cover - pending already gone
+                return
 
     def _handle_failure(
         self,
-        path: Path,
+        original_path: Path,
+        inflight_path: Path,
         envelope: Mapping[str, Any],
         attempts: int,
         exc: Exception,
@@ -405,17 +430,27 @@ class SiemAuditSink:
             exc_info=exc,
             extra={
                 "siem_sink": {
-                    "path": str(path),
+                    "path": str(original_path),
                     "attempt": attempts,
                 }
             },
         )
+        pending_path = self._restore_pending_path(original_path, inflight_path)
         if attempts > self._max_retries:
-            self._move_to_dead_letter(path, reason="max-retries", envelope=updated)
+            self._move_to_dead_letter(pending_path, reason="max-retries", envelope=updated)
             return
         retry_delay = self._compute_backoff(attempts)
-        self._rewrite_envelope(path, updated)
-        self._schedule(path, ready_at=time.monotonic() + retry_delay)
+        self._rewrite_envelope(pending_path, updated)
+        self._schedule(pending_path, ready_at=time.monotonic() + retry_delay)
+
+    def _restore_pending_path(self, original_path: Path, inflight_path: Path) -> Path:
+        if inflight_path.suffix == ".inflight" and inflight_path.exists():
+            with self._lock:
+                try:
+                    os.replace(inflight_path, original_path)
+                except FileNotFoundError:  # pragma: no cover - already restored
+                    pass
+        return original_path
 
     def _rewrite_envelope(self, path: Path, envelope: Mapping[str, Any]) -> None:
         payload = json.dumps(envelope, sort_keys=True)

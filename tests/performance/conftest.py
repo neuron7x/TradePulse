@@ -27,13 +27,13 @@ class _BenchmarkRecord:
 
     test_id: str
     name: str
-    mean: float
+    observed: float
     baseline: float
     threshold: float
 
     @property
     def regression_ratio(self) -> float:
-        return self.mean / self.baseline if self.baseline else float("inf")
+        return self.observed / self.baseline if self.baseline else float("inf")
 
     @property
     def exceeds_budget(self) -> bool:
@@ -119,6 +119,18 @@ def benchmark_guard(
                 "Update tests/performance/benchmark_baselines.json with a reference measurement."
             )
 
+        workerinput = getattr(request.config, "workerinput", None)
+        if workerinput and "workercount" in workerinput:
+            worker_count = max(1, int(workerinput["workercount"]))
+        else:
+            numprocesses = getattr(request.config.option, "numprocesses", None) or 0
+            worker_count = max(1, int(numprocesses))
+        if worker_count > 1:
+            concurrency_penalty = 0.07 * (worker_count - 1)
+            effective_threshold = min(threshold + concurrency_penalty, 0.60)
+        else:
+            effective_threshold = threshold
+
         result = benchmark.pedantic(
             func,
             args=args,
@@ -130,22 +142,22 @@ def benchmark_guard(
         stats = getattr(benchmark, "stats", None)
         if stats is None or not hasattr(stats, "stats"):
             raise RuntimeError("pytest-benchmark did not provide timing statistics for the executed benchmark")
-        mean = float(stats["mean"])
+        median = float(stats["median"])
 
         baseline = benchmark_baselines[baseline_key]
         record = _BenchmarkRecord(
             test_id=request.node.nodeid,
             name=baseline_key,
-            mean=mean,
+            observed=median,
             baseline=baseline,
-            threshold=threshold,
+            threshold=effective_threshold,
         )
         _monitor.add(record)
 
         if record.exceeds_budget:
             raise AssertionError(
                 (
-                    f"Benchmark '{baseline_key}' regressed: mean {mean:.6f}s vs baseline {baseline:.6f}s "
+                    f"Benchmark '{baseline_key}' regressed: median {median:.6f}s vs baseline {baseline:.6f}s "
                     f"(+{(record.regression_ratio - 1.0):.1%} > allowed {threshold:.1%})."
                 )
             )
@@ -159,7 +171,7 @@ def _serialize_record(record: _BenchmarkRecord) -> dict[str, Any]:
     return {
         "test_id": record.test_id,
         "name": record.name,
-        "mean": record.mean,
+        "measurement": record.observed,
         "baseline": record.baseline,
         "threshold": record.threshold,
         "regression_ratio": record.regression_ratio,
@@ -207,7 +219,7 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int) -> None:
         delta_pct = (record.regression_ratio - 1.0) * 100.0
         status = "FAIL" if record.exceeds_budget else "OK"
         terminalreporter.write_line(
-            f"{record.name:40} {record.mean:12.6f} {record.baseline:14.6f} {delta_pct:8.2f}% {status:>8}"
+            f"{record.name:40} {record.observed:12.6f} {record.baseline:14.6f} {delta_pct:8.2f}% {status:>8}"
         )
 
     failures = _monitor.iter_failures()

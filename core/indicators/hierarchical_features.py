@@ -119,18 +119,23 @@ def compute_hierarchical_features(
             use_float32=True,
             out=cache.buffer(f"{name}:phase", (close.size,)),
         )
-        mask = np.isfinite(phases)
+        mask = cache.buffer(f"{name}:phase_mask", (close.size,), dtype=bool)
+        np.isfinite(phases, out=mask)
         cos_vals = cache.buffer(f"{name}:phase_cos", (close.size,))
         sin_vals = cache.buffer(f"{name}:phase_sin", (close.size,))
-        valid_count = int(mask.sum(dtype=np.int32))
+        cos_vals.fill(0.0)
+        sin_vals.fill(0.0)
+        mask_view = mask[: close.size]
+        agg_cos_view = agg_cos[: close.size]
+        agg_sin_view = agg_sin[: close.size]
+        agg_counts_view = agg_counts[: close.size]
+        np.cos(phases, out=cos_vals, where=mask_view)
+        np.sin(phases, out=sin_vals, where=mask_view)
+        valid_count = int(mask_view.sum(dtype=np.int32))
         if valid_count:
-            np.cos(phases, out=cos_vals)
-            np.sin(phases, out=sin_vals)
-            cos_vals[~mask] = 0.0
-            sin_vals[~mask] = 0.0
-            np.add(agg_cos[: close.size], cos_vals, out=agg_cos[: close.size], where=mask)
-            np.add(agg_sin[: close.size], sin_vals, out=agg_sin[: close.size], where=mask)
-            agg_counts[: close.size] += mask
+            agg_cos_view += cos_vals
+            agg_sin_view += sin_vals
+            agg_counts_view += mask_view
             local_sum_real = float(np.add.reduce(cos_vals, dtype=np.float64))
             local_sum_imag = float(np.add.reduce(sin_vals, dtype=np.float64))
             local_magnitude = (local_sum_real * local_sum_real + local_sum_imag * local_sum_imag) ** 0.5
