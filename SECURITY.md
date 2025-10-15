@@ -158,6 +158,32 @@ The helper script wraps `pip-audit` with consistent flags, emits a human-readabl
 and optionally writes a JSON report (see `python scripts/dependency_audit.py --help`). Use
 `--include-dev` to cover development tooling as well.
 
+#### 4. SBOM Verification
+
+Install the CycloneDX validation tooling (one-time):
+
+```bash
+python -m pip install --upgrade cyclonedx-bom
+```
+
+Validate every published SBOM before consumption to ensure schema compliance:
+
+```bash
+python - <<'PY'
+from pathlib import Path
+from cyclonedx.validation import make_schemabased_validator, OutputFormat
+from cyclonedx.schema import SchemaVersion
+
+sbom_path = Path('sbom/cyclonedx-sbom.json')
+validator = make_schemabased_validator(OutputFormat.JSON, SchemaVersion.V1_6)
+validator.validate_str(sbom_path.read_text(encoding='utf-8'))
+print('SBOM validation succeeded.')
+PY
+```
+
+Use the same pattern with `OutputFormat.XML` and `cyclonedx-sbom.xml` when validating the XML
+artifact.
+
 #### Encryption & Key Management
 
 - **In transit**: Terminate all external-facing services with **TLS 1.3** using modern cipher

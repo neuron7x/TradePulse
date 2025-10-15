@@ -111,6 +111,21 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Install container SBOM tooling
+        run: |
+          mkdir -p sbom
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
+          python3 -m pip install --upgrade pip
+          python3 -m pip install cython tern
+
+      - name: Generate container SBOMs
+        env:
+          IMAGE_REF: ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+        run: |
+          syft "${IMAGE_REF}" -o cyclonedx-json > sbom/container-syft.cdx.json
+          syft "${IMAGE_REF}" -o cyclonedx-xml > sbom/container-syft.cdx.xml
+          tern report -i "${IMAGE_REF}" -f cyclonedx-json > sbom/container-tern.cdx.json
+
       - name: Record image metadata
         id: image-metadata
         run: |
@@ -124,6 +139,24 @@ jobs:
           COSIGN_YES: true
         run: |
           cosign sign ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}
+
+      - name: Upload container SBOM artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: container-sbom
+          path: |
+            sbom/container-syft.cdx.json
+            sbom/container-syft.cdx.xml
+            sbom/container-tern.cdx.json
+
+      - name: Attach container SBOM to release
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            sbom/container-syft.cdx.json
+            sbom/container-syft.cdx.xml
+            sbom/container-tern.cdx.json
 
   provenance:
     name: Generate SLSA provenance

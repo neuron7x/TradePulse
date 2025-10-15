@@ -9,13 +9,16 @@ on:
     branches:
       - main
       - develop
+  release:
+    types:
+      - published
 
 jobs:
   generate:
     name: Generate CycloneDX SBOM
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       actions: write
     steps:
       - name: Check out repository
@@ -28,10 +31,28 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install CycloneDX tooling
+      - name: Set up Rust
+        if: hashFiles('**/Cargo.toml') != ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Go
+        if: hashFiles('go.mod') != ''
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install SBOM tooling
         run: |
           python -m pip install --upgrade pip
           python -m pip install cyclonedx-bom
+          if command -v go >/dev/null 2>&1; then
+            go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@latest
+          fi
+          if command -v cargo >/dev/null 2>&1; then
+            if ! cargo install --list | grep -q '^cargo-cyclonedx '; then
+              cargo install cargo-cyclonedx --locked
+            fi
+          fi
 
       - name: Combine dependency manifests
         run: |
@@ -42,7 +63,7 @@ jobs:
               Path('requirements.txt'),
               Path('requirements-dev.txt'),
           ]
-          combined = Path('sbom/combined-requirements.txt')
+          combined = Path('sbom/python-requirements.txt')
           combined.parent.mkdir(parents=True, exist_ok=True)
 
           def write_requirements(source: Path, fh, seen: set[Path]) -> None:
@@ -74,13 +95,116 @@ jobs:
                   write_requirements(source, fh, seen)
           PY
 
-      - name: Generate CycloneDX SBOM (JSON)
+      - name: Generate Python SBOM (JSON)
         run: |
-          python -m cyclonedx_py requirements sbom/combined-requirements.txt --output-format JSON --output-file sbom/cyclonedx-sbom.json
+          python -m cyclonedx_py requirements sbom/python-requirements.txt --output-format JSON --output-file sbom/cyclonedx-python.json
 
-      - name: Generate CycloneDX SBOM (XML)
+      - name: Generate Python SBOM (XML)
         run: |
-          python -m cyclonedx_py requirements sbom/combined-requirements.txt --output-format XML --output-file sbom/cyclonedx-sbom.xml
+          python -m cyclonedx_py requirements sbom/python-requirements.txt --output-format XML --output-file sbom/cyclonedx-python.xml
+
+      - name: Capture Cargo metadata
+        if: hashFiles('**/Cargo.toml') != ''
+        working-directory: rust/tradepulse-accel
+        run: |
+          mkdir -p ../sbom
+          cargo metadata --format-version 1 --locked > ../sbom/cargo-metadata.json
+
+      - name: Generate Cargo SBOM
+        if: hashFiles('**/Cargo.toml') != ''
+        working-directory: rust/tradepulse-accel
+        run: |
+          mkdir -p ../sbom
+          cargo cyclonedx --output-format json --output ../sbom/cyclonedx-cargo.json
+          cargo cyclonedx --output-format xml --output ../sbom/cyclonedx-cargo.xml
+
+      - name: Generate Go SBOM
+        if: hashFiles('go.mod') != ''
+        run: |
+          mkdir -p sbom
+          cyclonedx-gomod mod -licenses -json -output sbom/cyclonedx-gomod.json
+          cyclonedx-gomod mod -licenses -xml -output sbom/cyclonedx-gomod.xml
+
+      - name: Merge ecosystem SBOMs
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import shutil
+          from copy import deepcopy
+          from pathlib import Path
+          from uuid import uuid4
+
+          sbom_dir = Path('sbom')
+          sbom_dir.mkdir(exist_ok=True)
+
+          sources = []
+          for stem in ('cyclonedx-python', 'cyclonedx-cargo', 'cyclonedx-gomod'):
+              json_path = sbom_dir / f'{stem}.json'
+              if json_path.is_file():
+                  sources.append(json_path)
+
+          if not sources:
+              raise SystemExit('No SBOM documents generated for merging.')
+
+          def load_json(path: Path) -> dict:
+              with path.open('r', encoding='utf-8') as fh:
+                  return json.load(fh)
+
+          merged = load_json(sources[0])
+          merged.setdefault('serialNumber', f"urn:uuid:{uuid4()}")
+
+          def extend_field(target: dict, source: dict, field: str) -> None:
+              if field in source:
+                  target.setdefault(field, [])
+                  target[field].extend(deepcopy(source[field]))
+
+          for extra_path in sources[1:]:
+              extra = load_json(extra_path)
+              for key in ('components', 'services', 'dependencies', 'vulnerabilities'):
+                  extend_field(merged, extra, key)
+
+          merged_path = sbom_dir / 'cyclonedx-sbom.json'
+          with merged_path.open('w', encoding='utf-8') as fh:
+              json.dump(merged, fh, indent=2, sort_keys=True)
+
+          xml_candidates = [sbom_dir / 'cyclonedx-python.xml', sbom_dir / 'cyclonedx-cargo.xml', sbom_dir / 'cyclonedx-gomod.xml']
+          preferred_xml = next((path for path in xml_candidates if path.is_file()), None)
+          if preferred_xml:
+              target_xml = sbom_dir / 'cyclonedx-sbom.xml'
+              shutil.copy(preferred_xml, target_xml)
+
+              try:
+                  from xml.etree import ElementTree as ET
+
+                  ns = {'c': 'http://cyclonedx.org/schema/bom/1.6'}
+                  ET.register_namespace('', ns['c'])
+                  base_tree = ET.parse(target_xml)
+                  base_root = base_tree.getroot()
+                  components_parent = base_root.find('c:components', ns)
+                  if components_parent is None:
+                      components_parent = ET.SubElement(base_root, f"{{{ns['c']}}}components")
+
+                  from copy import deepcopy as _copy
+
+                  for stem in ('cyclonedx-cargo', 'cyclonedx-gomod'):
+                      xml_path = sbom_dir / f'{stem}.xml'
+                      if not xml_path.is_file():
+                          continue
+                      extra_tree = ET.parse(xml_path)
+                      extra_components = extra_tree.getroot().find('c:components', ns)
+                      if extra_components is None:
+                          continue
+                      for component in extra_components.findall('c:component', ns):
+                          components_parent.append(_copy(component))
+
+                  base_tree.write(target_xml, encoding='utf-8', xml_declaration=True)
+              except Exception as exc:  # noqa: BLE001
+                  raise SystemExit(f'Failed to merge XML SBOMs: {exc}')
+          else:
+              raise SystemExit('No CycloneDX XML sources available for merge.')
+          PY
 
       - name: Validate CycloneDX artifacts
         run: |
@@ -107,6 +231,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: cyclonedx-sbom
+          if-no-files-found: warn
           path: |
+            sbom/cyclonedx-python.json
+            sbom/cyclonedx-python.xml
+            sbom/cyclonedx-cargo.json
+            sbom/cyclonedx-cargo.xml
+            sbom/cyclonedx-gomod.json
+            sbom/cyclonedx-gomod.xml
+            sbom/cyclonedx-sbom.json
+            sbom/cyclonedx-sbom.xml
+
+      - name: Attach SBOM to release
+        if: github.event_name == 'release' && github.event.action == 'published'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
             sbom/cyclonedx-sbom.json
             sbom/cyclonedx-sbom.xml
