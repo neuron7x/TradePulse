@@ -108,18 +108,45 @@ class SlidingWindowRateLimiter:
         saturated: list[str] = []
 
         if isinstance(records, dict):
-            tracked_keys = len(records)
             utilisation_values: list[float] = []
-            for storage_key, bucket in records.items():
+            keys_to_remove: list[str] = []
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                current_time = time.monotonic()
+            else:
+                current_time = loop.time()
+
+            for storage_key, bucket in list(records.items()):
                 if not hasattr(bucket, "__len__"):
                     continue
                 policy = self._policy_for_storage_key(storage_key)
                 if policy.max_requests <= 0:
                     continue
-                utilisation = len(bucket) / float(policy.max_requests)
+                bucket_length: int | None = None
+                if isinstance(bucket, deque):
+                    if policy.window_seconds > 0:
+                        threshold = current_time - policy.window_seconds
+                        while bucket and bucket[0] <= threshold:
+                            bucket.popleft()
+                    bucket_length = len(bucket)
+                    if bucket_length == 0:
+                        keys_to_remove.append(storage_key)
+                        continue
+                else:
+                    bucket_length = len(bucket)
+                    if bucket_length == 0:
+                        continue
+
+                utilisation = bucket_length / float(policy.max_requests)
                 utilisation_values.append(utilisation)
                 if utilisation >= 1.0:
                     saturated.append(storage_key)
+
+            for storage_key in keys_to_remove:
+                records.pop(storage_key, None)
+
+            tracked_keys = len(records)
             if utilisation_values:
                 max_utilization = max(utilisation_values)
 
