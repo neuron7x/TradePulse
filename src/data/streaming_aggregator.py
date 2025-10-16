@@ -8,7 +8,7 @@ from typing import Callable, Iterable, Sequence
 
 import pandas as pd
 
-from core.data.backfill import BackfillPlan, CacheKey, CacheRegistry, Gap, GapFillPlanner
+from core.data.backfill import BackfillPlan, CacheKey, Gap, GapFillPlanner
 from core.data.backfill import normalise_index
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.models import InstrumentType, PriceTick
@@ -63,8 +63,6 @@ class TickStreamAggregator:
         self._timeframe = timeframe
         self._market = market
         self._frequency = self._resolve_frequency(frequency or timeframe)
-        self._planner_registry: CacheRegistry = self._cache_service.cache_registry
-        self._planner = GapFillPlanner(self._planner_registry.cache_for(layer))
 
     def synchronise(
         self,
@@ -309,10 +307,8 @@ class TickStreamAggregator:
 
     def _get_planner(self) -> GapFillPlanner:
         registry = self._cache_service.cache_registry
-        if registry is not self._planner_registry:
-            self._planner_registry = registry
-            self._planner = GapFillPlanner(registry.cache_for(self._layer))
-        return self._planner
+        layer_cache = registry.cache_for(self._layer)
+        return GapFillPlanner(layer_cache)
 
     @staticmethod
     def _empty_frame() -> pd.DataFrame:
