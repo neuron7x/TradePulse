@@ -15,6 +15,9 @@ Tests verify:
 """
 from __future__ import annotations
 
+import asyncio
+import math
+from typing import Coroutine, Any
 import numpy as np
 import pytest
 
@@ -218,3 +221,67 @@ def test_ricci_curvature_edge_warns_without_scipy(monkeypatch: pytest.MonkeyPatc
         curvature = ricci_curvature_edge(graph, x, y)
 
     assert curvature == pytest.approx(expected_fallback)
+
+
+def test_shortest_path_length_safe_falls_back_to_unweighted() -> None:
+    class WeightedRaisesGraph:
+        def __init__(self) -> None:
+            self.calls: list[str | None] = []
+
+        def shortest_path_length(self, source: int, target: int, weight: str | None = None) -> float:
+            self.calls.append(weight)
+            if weight == "weight":
+                raise ValueError("invalid weight data")
+            if weight is None:
+                return 3.0
+            raise AssertionError("unexpected weight parameter")
+
+    graph = WeightedRaisesGraph()
+    distance = ricci_module._shortest_path_length_safe(graph, 1, 2)
+
+    assert distance == pytest.approx(3.0)
+    assert graph.calls == ["weight", None]
+
+
+def test_shortest_path_length_safe_returns_inf_when_unweighted_fails() -> None:
+    class AlwaysFailGraph:
+        def shortest_path_length(self, source: int, target: int, weight: str | None = None) -> float:
+            if weight == "weight":
+                raise ValueError("malformed weights")
+            raise RuntimeError("graph disconnected")
+
+    graph = AlwaysFailGraph()
+    distance = ricci_module._shortest_path_length_safe(graph, 5, 7)
+
+    assert math.isinf(distance)
+
+
+def test_mean_ricci_async_recovers_when_loop_running(monkeypatch: pytest.MonkeyPatch) -> None:
+    prices = np.array([100.0, 101.0, 102.5, 101.8], dtype=float)
+    graph = build_price_graph(prices, delta=0.01)
+
+    baseline = mean_ricci(graph)
+
+    original_new_loop = ricci_module.asyncio.new_event_loop
+    created_loop = False
+
+    def patched_new_event_loop() -> asyncio.AbstractEventLoop:
+        nonlocal created_loop
+        created_loop = True
+        return original_new_loop()
+
+    def failing_run(coro: Coroutine[Any, Any, Any]) -> None:
+        try:
+            coro.close()
+        finally:
+            raise RuntimeError("event loop is running")
+
+    monkeypatch.setattr(ricci_module.asyncio, "run", failing_run)
+    monkeypatch.setattr(ricci_module.asyncio, "new_event_loop", patched_new_event_loop)
+
+    async_result = mean_ricci(graph, parallel="async")
+
+    assert async_result == pytest.approx(baseline)
+    assert created_loop is True
+    with pytest.raises(RuntimeError):
+        ricci_module.asyncio.get_running_loop()
