@@ -1037,7 +1037,7 @@
     },
     {
       "bom-ref": "requirements-L33",
-      "description": "requirements line 33: networkx==3.5",
+      "description": "requirements line 33: networkx==3.4.2",
       "externalReferences": [
         {
           "comment": "implicit dist url",
@@ -1046,9 +1046,9 @@
         }
       ],
       "name": "networkx",
-      "purl": "pkg:pypi/networkx@3.5",
+      "purl": "pkg:pypi/networkx@3.4.2",
       "type": "library",
-      "version": "3.5"
+      "version": "3.4.2"
     },
     {
       "bom-ref": "requirements-L115",

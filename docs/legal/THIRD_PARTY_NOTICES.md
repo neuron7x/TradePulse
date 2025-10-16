@@ -380,7 +380,7 @@ python tools/compliance/generate_license_report.py
 | mutmut | 3.3.1 | BSD; BSD License | pkg:pypi/mutmut@3.3.1 |
 | mypy | 1.18.2 | MIT; MIT License | pkg:pypi/mypy@1.18.2 |
 | mypy-extensions | 1.1.0 | UNKNOWN | pkg:pypi/mypy-extensions@1.1.0 |
-| networkx | 3.5 | BSD License | pkg:pypi/networkx@3.5 |
+| networkx | 3.4.2 | BSD License | pkg:pypi/networkx@3.4.2 |
 | nh3 | 0.3.1 | MIT | pkg:pypi/nh3@0.3.1 |
 | numpy | 2.3.3 | BSD License; Copyright (c) 2005-2025, NumPy Developers.
          All rights reserved.
