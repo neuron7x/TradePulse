@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import random
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
+from enum import Enum, auto
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from queue import Empty, Queue
@@ -145,20 +148,31 @@ class HMACSigner:
 class HTTPBackoffController:
     """Adaptive rate limiter/backoff controller for REST calls."""
 
-    def __init__(self, *, base_delay: float = 0.25, max_delay: float = 8.0) -> None:
+    def __init__(
+        self,
+        *,
+        base_delay: float = 0.25,
+        max_delay: float = 8.0,
+        clock: Callable[[], float] | None = None,
+        sleeper: Callable[[float], None] | None = None,
+    ) -> None:
+        if base_delay <= 0:
+            raise ValueError("base_delay must be positive")
+        if max_delay < base_delay:
+            raise ValueError("max_delay must be greater than or equal to base_delay")
         self.base_delay = base_delay
         self.max_delay = max_delay
+        self._clock = clock or time.monotonic
+        self._sleep = sleeper or time.sleep
         self._lock = threading.Lock()
         self._backoff_until: float = 0.0
         self._attempts: int = 0
 
     def throttle(self) -> None:
         with self._lock:
-            now = time.monotonic()
-            if now < self._backoff_until:
-                time.sleep(self._backoff_until - now)
-        self._attempts = 0
-        self._backoff_until = 0.0
+            delay = self._backoff_until - self._clock()
+        if delay > 0:
+            self._sleep(delay)
 
     def reset(self) -> None:
         with self._lock:
@@ -168,7 +182,8 @@ class HTTPBackoffController:
     def backoff(self, response: httpx.Response | None = None) -> None:
         with self._lock:
             self._attempts += 1
-            delay = min(self.base_delay * (2 ** (self._attempts - 1)), self.max_delay)
+            exponential = min(self.base_delay * (2 ** (self._attempts - 1)), self.max_delay)
+            delay = random.uniform(self.base_delay, exponential)
             if response is not None:
                 retry_after = response.headers.get("Retry-After")
                 if retry_after:
@@ -176,10 +191,139 @@ class HTTPBackoffController:
                         delay = max(delay, float(retry_after))
                     except ValueError:
                         pass
-            jitter = random.uniform(0, delay / 2)
-            delay += jitter
-            self._backoff_until = time.monotonic() + delay
-            time.sleep(delay)
+            self._backoff_until = self._clock() + delay
+        self._sleep(delay)
+
+
+class CircuitBreakerState(Enum):
+    """States for :class:`CircuitBreaker`."""
+
+    CLOSED = auto()
+    OPEN = auto()
+    HALF_OPEN = auto()
+
+
+class CircuitBreakerOpenError(RuntimeError):
+    """Raised when a request is blocked by an open circuit breaker."""
+
+
+class CircuitBreaker:
+    """Circuit breaker tracking consecutive failures with half-open recovery."""
+
+    def __init__(
+        self,
+        *,
+        failure_threshold: int = 5,
+        recovery_timeout: float = 30.0,
+        half_open_success_threshold: int = 2,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if failure_threshold <= 0:
+            raise ValueError("failure_threshold must be positive")
+        if recovery_timeout <= 0:
+            raise ValueError("recovery_timeout must be positive")
+        if half_open_success_threshold <= 0:
+            raise ValueError("half_open_success_threshold must be positive")
+        self.failure_threshold = failure_threshold
+        self.recovery_timeout = recovery_timeout
+        self.half_open_success_threshold = half_open_success_threshold
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._state = CircuitBreakerState.CLOSED
+        self._failures = 0
+        self._successes = 0
+        self._opened_at: float | None = None
+
+    def before_call(self) -> None:
+        with self._lock:
+            now = self._clock()
+            if self._state is CircuitBreakerState.OPEN:
+                assert self._opened_at is not None
+                if now - self._opened_at >= self.recovery_timeout:
+                    self._state = CircuitBreakerState.HALF_OPEN
+                    self._successes = 0
+                else:
+                    raise CircuitBreakerOpenError("Circuit breaker open")
+
+    def record_success(self) -> None:
+        with self._lock:
+            if self._state is CircuitBreakerState.HALF_OPEN:
+                self._successes += 1
+                if self._successes >= self.half_open_success_threshold:
+                    self._transition_to_closed()
+            else:
+                self._transition_to_closed()
+
+    def record_failure(self, _: Exception | None = None) -> None:
+        with self._lock:
+            if self._state is CircuitBreakerState.HALF_OPEN:
+                self._trip(now=self._clock())
+                return
+            self._failures += 1
+            if self._failures >= self.failure_threshold:
+                self._trip(now=self._clock())
+
+    def _trip(self, *, now: float) -> None:
+        self._state = CircuitBreakerState.OPEN
+        self._opened_at = now
+        self._failures = 0
+        self._successes = 0
+
+    def _transition_to_closed(self) -> None:
+        self._state = CircuitBreakerState.CLOSED
+        self._failures = 0
+        self._successes = 0
+        self._opened_at = None
+
+
+@dataclass(slots=True)
+class _DuplicateRecord:
+    digest: str
+    first_seen: float
+    last_seen: float
+
+
+class DuplicateResponseDetector:
+    """Track response hashes and flag duplicates for downstream consumers."""
+
+    def __init__(
+        self,
+        *,
+        ttl: float = 30.0,
+        max_entries: int = 512,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if ttl <= 0:
+            raise ValueError("ttl must be positive")
+        if max_entries <= 0:
+            raise ValueError("max_entries must be positive")
+        self._ttl = ttl
+        self._max_entries = max_entries
+        self._clock = clock or time.monotonic
+        self._lock = threading.Lock()
+        self._records: "OrderedDict[str, _DuplicateRecord]" = OrderedDict()
+
+    def register(self, fingerprint: str, response: httpx.Response) -> tuple[bool, float | None]:
+        payload = response.content
+        digest = hashlib.sha256(payload).hexdigest()
+        now = self._clock()
+        with self._lock:
+            self._purge(now)
+            existing = self._records.get(fingerprint)
+            if existing and existing.digest == digest:
+                existing.last_seen = now
+                self._records.move_to_end(fingerprint)
+                return True, existing.first_seen
+            self._records[fingerprint] = _DuplicateRecord(digest=digest, first_seen=now, last_seen=now)
+            if len(self._records) > self._max_entries:
+                self._records.popitem(last=False)
+            return False, None
+
+    def _purge(self, now: float) -> None:
+        expiration = now - self._ttl
+        expired = [key for key, record in self._records.items() if record.last_seen < expiration]
+        for key in expired:
+            self._records.pop(key, None)
 
 
 class ConnectionHealthMonitor:
@@ -287,10 +431,13 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         http_client: httpx.Client | None = None,
         transport: httpx.BaseTransport | None = None,
         backoff: HTTPBackoffController | None = None,
+        circuit_breaker: CircuitBreaker | None = None,
+        duplicate_detector: DuplicateResponseDetector | None = None,
         health_monitor: ConnectionHealthMonitor | None = None,
         ws_factory: Callable[[str], Any] | None = None,
         enable_stream: bool = True,
         timeout: float = 10.0,
+        max_retries: int = 5,
     ) -> None:
         super().__init__(sandbox=sandbox)
         self.env_prefix = env_prefix
@@ -298,6 +445,9 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         self._ws_url = (sandbox_ws_url if sandbox and sandbox_ws_url else ws_url)
         self._timeout = timeout
         self._transport = transport
+        if max_retries <= 0:
+            raise ValueError("max_retries must be positive")
+        self._max_retries = max_retries
         self._credential_provider = credential_provider or CredentialProvider(
             env_prefix,
             optional_keys=optional_credential_keys,
@@ -307,6 +457,8 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         )
         self._http_client = http_client
         self._backoff = backoff or HTTPBackoffController()
+        self._circuit_breaker = circuit_breaker or CircuitBreaker()
+        self._duplicate_detector = duplicate_detector or DuplicateResponseDetector()
         self._health = health_monitor or ConnectionHealthMonitor()
         self._ws_factory = ws_factory or self._default_ws_factory
         self._ws_enabled = enable_stream and self._ws_url is not None
@@ -331,9 +483,10 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
             self._credentials = self._credential_provider.load()
         self._signer = self._create_signer(self.credentials)
         if self._http_client is None:
+            timeout_config = httpx.Timeout(self._timeout, connect=self._timeout, read=self._timeout * 3)
             self._http_client = httpx.Client(
                 base_url=self._base_url,
-                timeout=self._timeout,
+                timeout=timeout_config,
                 transport=self._transport,
                 headers=self._default_headers(),
             )
@@ -373,6 +526,44 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
     def _handle_stream_payload(self, payload: dict[str, Any]) -> None:
         self._event_queue.put(payload)
 
+    @staticmethod
+    def _normalise_component(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {
+                str(key): AuthenticatedRESTExecutionConnector._normalise_component(val)
+                for key, val in sorted(value.items(), key=lambda item: str(item[0]))
+            }
+        if isinstance(value, (list, tuple, set)):
+            return [AuthenticatedRESTExecutionConnector._normalise_component(item) for item in value]
+        if isinstance(value, (bytes, bytearray)):
+            try:
+                return value.decode()
+            except Exception:
+                return value.hex()
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return str(value)
+
+    def _fingerprint_request(
+        self,
+        method: str,
+        path: str,
+        params: Mapping[str, Any] | None,
+        body: Mapping[str, Any] | None,
+        idempotency_key: str | None,
+    ) -> str:
+        payload = {
+            "method": method,
+            "path": path,
+            "params": self._normalise_component(params or {}),
+            "body": self._normalise_component(body or {}),
+            "idempotency_key": idempotency_key,
+        }
+        serialized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(serialized.encode()).hexdigest()
+
     # --- HTTP helpers -------------------------------------------------
 
     def _request(
@@ -385,17 +576,35 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         headers: dict[str, str] | None = None,
         signed: bool = True,
         allow_retry: bool = True,
+        idempotency_key: str | None = None,
+        idempotent: bool | None = None,
+        request_timeout: float | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         if self._http_client is None:
             raise RuntimeError("HTTP client is not initialised")
         params = dict(params or {})
         headers = dict(headers or {})
+        request_kwargs = dict(kwargs)
+        timeout_override = request_timeout if request_timeout is not None else request_kwargs.pop("timeout", None)
+        effective_timeout = timeout_override if timeout_override is not None else self._timeout
+        normalized_method = method.upper()
+        if idempotent is None:
+            idempotent = normalized_method in {"GET", "HEAD", "OPTIONS", "DELETE", "PUT"}
+            if normalized_method in {"POST", "PATCH"} and idempotency_key is not None:
+                idempotent = True
+        max_attempts = self._max_retries if allow_retry and idempotent else 1
+        fingerprint = self._fingerprint_request(normalized_method, path, params, body, idempotency_key)
         attempt = 0
-        while True:
+        last_error: Exception | None = None
+        while attempt < max_attempts:
+            attempt += 1
             self._backoff.throttle()
+            self._circuit_breaker.before_call()
             req_params = dict(params)
             req_headers = dict(headers)
+            if idempotency_key is not None:
+                req_headers.setdefault("Idempotency-Key", idempotency_key)
             req_body = dict(body) if body is not None else None
             if signed:
                 if self._signer is None:
@@ -403,41 +612,62 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
                 req_params, req_headers, req_body = self._apply_signature(
                     method, path, req_params, req_headers, req_body
                 )
-            response = self._http_client.request(
-                method,
-                path,
-                params=req_params or None,
-                json=req_body if req_body is not None else None,
-                headers=req_headers or None,
-                **kwargs,
-            )
+            try:
+                response = self._http_client.request(
+                    method,
+                    path,
+                    params=req_params or None,
+                    json=req_body if req_body is not None else None,
+                    headers=req_headers or None,
+                    timeout=effective_timeout,
+                    **request_kwargs,
+                )
+            except httpx.RequestError as exc:
+                self._circuit_breaker.record_failure(exc)
+                last_error = exc
+                if not allow_retry or attempt >= max_attempts:
+                    raise
+                self._backoff.backoff(None)
+                continue
             try:
                 ensure_timestamp_skew(response)
             except RuntimeError:
-                # Hard failure: treat as transient to allow rotation/backoff logic to decide.
                 response.raise_for_status()
-            if response.status_code == 429:
-                if not allow_retry:
-                    break
+            status = response.status_code
+            if status == 429:
+                self._circuit_breaker.record_failure(None)
+                if not allow_retry or attempt >= max_attempts:
+                    response.raise_for_status()
                 self._backoff.backoff(response)
                 continue
-            if response.status_code in (401, 403) and allow_retry:
+            if status in (401, 403) and allow_retry:
+                self._circuit_breaker.record_failure(None)
                 if self._rotation_attempted:
-                    break
+                    response.raise_for_status()
                 self._refresh_credentials()
-                attempt += 1
                 self._rotation_attempted = True
+                attempt -= 1  # allow another authenticated attempt
                 continue
-            if response.status_code >= 500 and allow_retry:
+            if status >= 500:
+                self._circuit_breaker.record_failure(None)
+                if not allow_retry or attempt >= max_attempts:
+                    response.raise_for_status()
                 self._backoff.backoff(response)
                 continue
+            if not response.is_success:
+                self._circuit_breaker.record_failure(None)
+                response.raise_for_status()
             self._rotation_attempted = False
             self._backoff.reset()
-            if not response.is_success:
-                response.raise_for_status()
+            self._circuit_breaker.record_success()
+            duplicate, first_seen = self._duplicate_detector.register(fingerprint, response)
+            response.extensions["tradepulse_duplicate"] = duplicate
+            if duplicate and first_seen is not None:
+                response.extensions["tradepulse_duplicate_first_seen"] = first_seen
             return response
-        response.raise_for_status()
-        return response
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("HTTP request failed without raising an exception")
 
     def _refresh_credentials(self) -> None:
         self._credentials = self._credential_provider.rotate()

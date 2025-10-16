@@ -114,7 +114,12 @@ class CoinbaseExecutionConnector(AuthenticatedRESTExecutionConnector):
         client_id = idempotency_key or self._generate_client_id()
         body = self._build_payload(order, client_id)
         try:
-            response = self._request("POST", "/api/v3/brokerage/orders", body=body)
+            response = self._request(
+                "POST",
+                "/api/v3/brokerage/orders",
+                body=body,
+                idempotency_key=client_id,
+            )
         except httpx.HTTPStatusError as exc:
             raise OrderError(str(exc)) from exc
         payload = response.json()
@@ -134,7 +139,13 @@ class CoinbaseExecutionConnector(AuthenticatedRESTExecutionConnector):
     def cancel_order(self, order_id: str) -> bool:
         body = {"order_ids": [order_id]}
         try:
-            self._request("POST", "/api/v3/brokerage/orders/batch_cancel", body=body)
+            self._request(
+                "POST",
+                "/api/v3/brokerage/orders/batch_cancel",
+                body=body,
+                idempotent=True,
+                idempotency_key=f"cancel-{order_id}",
+            )
             return True
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 404:
