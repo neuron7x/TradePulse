@@ -61,6 +61,12 @@ class DataIngestionCacheService:
 
     # ------------------------------------------------------------------
     # Public API
+    @property
+    def cache_registry(self) -> CacheRegistry:
+        """Expose the underlying cache registry for orchestration components."""
+
+        return self._registry
+
     def ingest_csv(
         self,
         path: str,
