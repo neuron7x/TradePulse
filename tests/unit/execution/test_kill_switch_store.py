@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from execution.risk import KillSwitch, SQLiteKillSwitchStateStore
+from execution.risk import DataQualityError, KillSwitch, SQLiteKillSwitchStateStore
 
 
 def test_kill_switch_persists_state_across_instances(tmp_path) -> None:
@@ -93,3 +94,77 @@ def test_sqlite_store_raises_when_lock_persists(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(sqlite3.OperationalError):
         store.save(True, "doomed")
+
+
+def test_sqlite_store_enforces_staleness_contract(tmp_path) -> None:
+    current_time = datetime.now(timezone.utc)
+
+    def clock() -> datetime:
+        return current_time
+
+    store_path = tmp_path / "staleness.sqlite"
+    store = SQLiteKillSwitchStateStore(
+        store_path,
+        max_staleness=1.0,
+        max_future_drift=3600.0,
+        clock=clock,
+    )
+
+    store.save(True, "initial trip")
+
+    stale_timestamp = (current_time - timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
+    with sqlite3.connect(store_path) as connection:
+        connection.execute(
+            "UPDATE kill_switch_state SET updated_at = ? WHERE id = 1",
+            (stale_timestamp,),
+        )
+
+    with pytest.raises(DataQualityError) as excinfo:
+        store.load()
+
+    assert "stale" in str(excinfo.value).lower()
+    assert store.is_quarantined() is True
+    assert store.quarantine_reason() is not None
+
+    with pytest.raises(DataQualityError):
+        store.save(False, "")
+
+    store.clear_quarantine()
+    current_time = datetime.now(timezone.utc)
+    store.save(False, "")
+    current_time = datetime.now(timezone.utc) - timedelta(milliseconds=100)
+
+    assert store.load() == (False, "")
+
+
+def test_sqlite_store_enforces_reason_quality(tmp_path) -> None:
+    store = SQLiteKillSwitchStateStore(tmp_path / "reason.sqlite")
+
+    with pytest.raises(DataQualityError):
+        store.save(True, "")
+
+    with pytest.raises(DataQualityError):
+        store.save(True, "\x00invalid")
+
+    acceptable = "ok"
+    store.save(True, acceptable)
+    assert store.load() == (True, acceptable)
+
+
+def test_sqlite_store_detects_reason_length_anomaly(tmp_path) -> None:
+    store_path = tmp_path / "length.sqlite"
+    store = SQLiteKillSwitchStateStore(store_path)
+    store.save(False, "")
+
+    anomalous_reason = "x" * 600
+
+    with sqlite3.connect(store_path) as connection:
+        connection.execute(
+            "UPDATE kill_switch_state SET reason = ? WHERE id = 1",
+            (anomalous_reason,),
+        )
+
+    with pytest.raises(DataQualityError):
+        store.load()
+
+    assert store.is_quarantined() is True

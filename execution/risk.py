@@ -20,8 +20,11 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable, Dict, Iterable, Mapping, MutableMapping, Protocol, TypeVar
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
@@ -33,6 +36,10 @@ from .audit import ExecutionAuditLogger, get_execution_audit_logger
 
 class RiskError(RuntimeError):
     """Base exception for risk-control violations."""
+
+
+class DataQualityError(RiskError):
+    """Raised when persisted state fails data quality gates."""
 
 
 class LimitViolation(RiskError):
@@ -94,6 +101,60 @@ class KillSwitchStateStore(Protocol):
 T = TypeVar("T")
 
 
+class KillSwitchStateRecord(BaseModel):
+    """Validated kill-switch payload loaded from persistence."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    engaged: bool
+    reason: str = Field(default="", max_length=2048)
+    updated_at: datetime
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_payload(cls, data: object) -> dict[str, object]:
+        if isinstance(data, dict):
+            payload = dict(data)
+        elif isinstance(data, tuple):
+            if len(data) != 3:
+                raise ValueError("expected 3-tuple payload")
+            payload = {"engaged": data[0], "reason": data[1], "updated_at": data[2]}
+        else:
+            raise TypeError("unsupported payload shape")
+
+        payload["engaged"] = bool(payload.get("engaged", False))
+        payload["reason"] = payload.get("reason") or ""
+
+        raw_ts = payload.get("updated_at")
+        if raw_ts is None:
+            raise ValueError("updated_at is required")
+        if isinstance(raw_ts, datetime):
+            timestamp = raw_ts
+        else:
+            if not isinstance(raw_ts, str):
+                raise TypeError("updated_at must be str or datetime")
+            normalised = raw_ts.replace(" ", "T")
+            try:
+                timestamp = datetime.fromisoformat(normalised)
+            except ValueError as exc:
+                raise ValueError("updated_at is not ISO 8601 compliant") from exc
+
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+        else:
+            timestamp = timestamp.astimezone(timezone.utc)
+        payload["updated_at"] = timestamp
+        return payload
+
+    @model_validator(mode="after")
+    def _validate_reason(self) -> "KillSwitchStateRecord":
+        if self.engaged and not self.reason:
+            raise ValueError("reason must be provided when kill-switch is engaged")
+        if any(ord(ch) < 32 and ch not in {"\t", "\n"} for ch in self.reason):
+            raise ValueError("reason contains control characters")
+        return self
+
+
 class SQLiteKillSwitchStateStore(KillSwitchStateStore):
     """SQLite-backed store used to persist kill-switch state across restarts."""
 
@@ -114,6 +175,10 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
         max_retries: int = 5,
         retry_interval: float = 0.05,
         backoff_multiplier: float = 2.0,
+        max_staleness: float = 300.0,
+        max_future_drift: float = 5.0,
+        max_reason_length: int = 512,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._path = Path(path)
         if timeout <= 0:
@@ -124,12 +189,25 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
             raise ValueError("retry_interval must be positive")
         if backoff_multiplier < 1.0:
             raise ValueError("backoff_multiplier must be >= 1.0")
+        if max_staleness <= 0:
+            raise ValueError("max_staleness must be positive")
+        if max_future_drift < 0:
+            raise ValueError("max_future_drift must be non-negative")
+        if max_reason_length <= 0:
+            raise ValueError("max_reason_length must be positive")
 
         self._timeout = float(timeout)
         self._max_retries = int(max_retries)
         self._retry_interval = float(retry_interval)
         self._backoff_multiplier = float(backoff_multiplier)
+        self._max_staleness = timedelta(seconds=float(max_staleness))
+        self._max_future_drift = timedelta(seconds=float(max_future_drift))
+        self._max_reason_length = int(max_reason_length)
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._lock = threading.Lock()
+        self._quarantined = False
+        self._quarantine_reason: str | None = None
+        self._logger = get_logger(__name__)
         self._initialise()
 
     def _initialise(self) -> None:
@@ -169,21 +247,28 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
         return "locked" in message or "busy" in message
 
     def load(self) -> tuple[bool, str] | None:
+        self._check_not_quarantined()
+
         def _load(connection: sqlite3.Connection) -> tuple[bool, str] | None:
             cursor = connection.execute(
-                "SELECT engaged, reason FROM kill_switch_state WHERE id = 1"
+                "SELECT engaged, reason, updated_at FROM kill_switch_state WHERE id = 1"
             )
             row = cursor.fetchone()
             if row is None:
                 return None
-            engaged, reason = row
-            return bool(engaged), reason or ""
+            record = self._validate_record(row)
+            self._enforce_range_checks(record)
+            self._enforce_temporal_contract(record)
+            return record.engaged, record.reason
 
         return self._with_retry(_load)
 
     def save(self, engaged: bool, reason: str) -> None:
         payload_reason = reason or ""
         with self._lock:
+            self._check_not_quarantined()
+            self._enforce_outgoing_contracts(engaged, payload_reason)
+
             def _save(connection: sqlite3.Connection) -> None:
                 connection.execute(
                     self._UPSERT_STATEMENT,
@@ -191,6 +276,84 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
                 )
 
             self._with_retry(_save, write=True)
+
+    def is_quarantined(self) -> bool:
+        return self._quarantined
+
+    def quarantine_reason(self) -> str | None:
+        return self._quarantine_reason
+
+    def clear_quarantine(self) -> None:
+        with self._lock:
+            self._quarantined = False
+            self._quarantine_reason = None
+
+    def _check_not_quarantined(self) -> None:
+        if self._quarantined:
+            raise DataQualityError(
+                self._quarantine_reason or "kill-switch store quarantined due to invalid state"
+            )
+
+    def _quarantine(self, reason: str, *, exc: Exception | None = None) -> None:
+        with self._lock:
+            self._quarantined = True
+            self._quarantine_reason = reason
+        error_payload = {
+            "reason": reason,
+            "error_type": type(exc).__name__ if exc else None,
+            "error_message": str(exc) if exc else None,
+        }
+        self._logger.error("Kill-switch store quarantined", **error_payload)
+
+    def _validate_record(self, row: tuple[object, ...]) -> KillSwitchStateRecord:
+        try:
+            return KillSwitchStateRecord.model_validate(row)
+        except ValidationError as exc:
+            message = "Persisted kill-switch state failed schema validation"
+            self._quarantine(message, exc=exc)
+            raise DataQualityError(message) from exc
+
+    def _enforce_range_checks(self, record: KillSwitchStateRecord) -> None:
+        if len(record.reason) > self._max_reason_length:
+            message = (
+                "Persisted kill-switch reason exceeds allowed length"
+                f" ({len(record.reason)} > {self._max_reason_length})"
+            )
+            self._quarantine(message)
+            raise DataQualityError(message)
+
+    def _enforce_temporal_contract(self, record: KillSwitchStateRecord) -> None:
+        now = self._clock()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        else:
+            now = now.astimezone(timezone.utc)
+
+        updated_at = record.updated_at
+        if now - updated_at > self._max_staleness:
+            message = (
+                "Persisted kill-switch state is stale"
+                f" ({(now - updated_at).total_seconds():.3f}s > {self._max_staleness.total_seconds():.3f}s)"
+            )
+            self._quarantine(message)
+            raise DataQualityError(message)
+        if updated_at - now > self._max_future_drift:
+            message = (
+                "Persisted kill-switch timestamp is in the future"
+                f" ({(updated_at - now).total_seconds():.3f}s > {self._max_future_drift.total_seconds():.3f}s)"
+            )
+            self._quarantine(message)
+            raise DataQualityError(message)
+
+    def _enforce_outgoing_contracts(self, engaged: bool, reason: str) -> None:
+        if engaged and not reason:
+            raise DataQualityError("reason must be supplied when engaging the kill-switch")
+        if len(reason) > self._max_reason_length:
+            raise DataQualityError(
+                f"reason exceeds allowed length {len(reason)} > {self._max_reason_length}"
+            )
+        if any(ord(ch) < 32 and ch not in {"\t", "\n"} for ch in reason):
+            raise DataQualityError("reason contains control characters")
 
 
 class KillSwitch:
@@ -214,7 +377,12 @@ class KillSwitch:
         if self._store is None:
             return
 
-        persisted = self._store.load()
+        try:
+            persisted = self._store.load()
+        except DataQualityError as exc:
+            self._triggered = True
+            self._reason = str(exc)
+            raise
         if persisted is None:
             self._triggered = False
             self._reason = ""
