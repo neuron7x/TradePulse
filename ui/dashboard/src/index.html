@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TradePulse Control Center</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="branding">
+        <div class="logo">TP</div>
+        <div>
+          <h1>TradePulse Control Center</h1>
+          <p>Моніторинг торгових стратегій у режимі реального часу</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <label class="theme-toggle">
+          <input type="checkbox" data-theme-toggle checked />
+          <span>Темна тема</span>
+        </label>
+        <button class="primary" data-export="json">Експорт JSON</button>
+        <button class="secondary" data-export="csv">Експорт CSV</button>
+        <button class="secondary" data-export="markdown">Експорт Markdown</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <section class="panel panel--metrics">
+        <h2>Ключові метрики</h2>
+        <div class="metrics-grid">
+          <article class="metric-card">
+            <h3>Найкраща стратегія</h3>
+            <p class="metric-value" data-best-strategy>—</p>
+            <p class="metric-subtitle" data-best-score>—</p>
+          </article>
+          <article class="metric-card">
+            <h3>Найгірша стратегія</h3>
+            <p class="metric-value" data-worst-strategy>—</p>
+            <p class="metric-subtitle" data-worst-score>—</p>
+          </article>
+          <article class="metric-card">
+            <h3>Діапазон за метрикою</h3>
+            <p class="metric-value" data-spread-delta>—</p>
+            <p class="metric-subtitle"><span data-spread-range>—</span></p>
+          </article>
+          <article class="metric-card">
+            <h3>Трейс</h3>
+            <p class="metric-value" data-trace-id>—</p>
+            <p class="metric-subtitle">Traceparent заголовок</p>
+          </article>
+        </div>
+        <div class="metric-controls">
+          <label>
+            Порівнювана метрика
+            <select data-metric-select>
+              <option value="sharpe">Sharpe</option>
+              <option value="pnl">PnL</option>
+              <option value="winRate">Win Rate</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="panel panel--chart">
+        <div class="panel-header">
+          <h2>Динаміка капіталу</h2>
+          <label>
+            Стратегія
+            <select data-strategy-series></select>
+          </label>
+        </div>
+        <canvas data-equity-chart width="640" height="260" aria-label="Equity curve"></canvas>
+      </section>
+
+      <section class="panel panel--strategies">
+        <h2>Параметри стратегій</h2>
+        <div class="strategy-list" data-strategy-list></div>
+      </section>
+
+      <section class="panel panel--table">
+        <div class="panel-header">
+          <h2>Результати бектестів</h2>
+          <div class="legend">
+            <span class="badge badge--green">Staging</span>
+            <span class="badge badge--blue">Live-ready</span>
+            <span class="badge badge--warning">Потребує уваги</span>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Стратегія</th>
+                <th>Sharpe</th>
+                <th>PnL</th>
+                <th>Max DD</th>
+                <th>Win Rate</th>
+                <th>Статус</th>
+              </tr>
+            </thead>
+            <tbody data-backtest-table></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel panel--form">
+        <h2>Додати новий бектест</h2>
+        <form data-backtest-form class="form-grid">
+          <label>
+            ID бектесту
+            <input name="id" required placeholder="BT-2024-05" />
+          </label>
+          <label>
+            Стратегія
+            <select name="strategy" required data-strategy-options></select>
+          </label>
+          <label>
+            Sharpe
+            <input name="sharpe" type="number" step="0.01" required />
+          </label>
+          <label>
+            PnL ($)
+            <input name="pnl" type="number" step="0.01" required />
+          </label>
+          <label>
+            Max Drawdown (%)
+            <input name="maxDrawdown" type="number" step="0.01" required />
+          </label>
+          <label>
+            Win Rate (%)
+            <input name="winRate" type="number" step="0.01" required />
+          </label>
+          <label class="wide">
+            Нотатка
+            <input name="note" placeholder="Що змінилося у цій ітерації?" />
+          </label>
+          <button class="primary" type="submit">Зберегти</button>
+        </form>
+      </section>
+
+      <section class="panel panel--activity">
+        <h2>Журнал активності</h2>
+        <ul class="activity-feed" data-activity-feed></ul>
+      </section>
+
+      <section class="panel panel--export">
+        <h2>Звіт</h2>
+        <textarea readonly data-export-output rows="10" spellcheck="false"></textarea>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <p>© 2024 TradePulse. Контроль ризиків. Управління ліквідністю. Операційна стійкість.</p>
+    </footer>
+
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
