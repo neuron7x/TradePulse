@@ -64,41 +64,49 @@ jobs:
         run: kustomize build deploy/kustomize/overlays/production >/tmp/production.yaml
 
   deploy-staging:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'production'))
+    if: github.repository == 'neuron7x/TradePulse' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && (github.event.inputs.environment == 'staging' || github.event.inputs.environment == 'production')))
     name: Deploy staging
     runs-on: ubuntu-latest
     needs:
       - validate-infrastructure
     environment:
       name: staging
+    outputs:
+      deploy_enabled: ${{ steps.configure_kube.outputs.deploy_enabled }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v4
-        with:
-          version: v1.29.2
-
-      - name: Install kustomize
-        uses: imranismail/setup-kustomize@v2
-        with:
-          kustomize-version: '5.4.1'
-
       - name: Configure kubeconfig
+        id: configure_kube
         env:
           KUBE_CONFIG_STAGING: ${{ secrets.KUBE_CONFIG_STAGING }}
         run: |
           set -euo pipefail
           if [ -z "${KUBE_CONFIG_STAGING:-}" ]; then
-            echo "KUBE_CONFIG_STAGING secret is not configured" >&2
-            exit 1
+            echo "KUBE_CONFIG_STAGING secret is not configured; skipping deployment" >&2
+            echo "deploy_enabled=false" >>"$GITHUB_OUTPUT"
+            exit 0
           fi
           mkdir -p "$HOME/.kube"
           echo "$KUBE_CONFIG_STAGING" | base64 -d > "$HOME/.kube/config"
           chmod 600 "$HOME/.kube/config"
+          echo "deploy_enabled=true" >>"$GITHUB_OUTPUT"
+
+      - name: Install kubectl
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
+        uses: azure/setup-kubectl@v4
+        with:
+          version: v1.29.2
+
+      - name: Install kustomize
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
+        uses: imranismail/setup-kustomize@v2
+        with:
+          kustomize-version: '5.4.1'
 
       - name: Diff manifest against cluster
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
         run: |
           set -euo pipefail
           if kubectl diff -k deploy/kustomize/overlays/staging; then
@@ -110,13 +118,15 @@ jobs:
           fi
 
       - name: Apply manifests
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
         run: kubectl apply -k deploy/kustomize/overlays/staging --server-side --force-conflicts
 
       - name: Wait for rollout
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
         run: kubectl rollout status deployment/tradepulse-api -n tradepulse-staging --timeout=5m
 
   deploy-production:
-    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
+    if: github.repository == 'neuron7x/TradePulse' && needs.deploy-staging.outputs.deploy_enabled == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
     name: Deploy production
     runs-on: ubuntu-latest
     needs:
@@ -138,6 +148,7 @@ jobs:
           kustomize-version: '5.4.1'
 
       - name: Configure kubeconfig
+        id: configure_kube
         env:
           KUBE_CONFIG_PRODUCTION: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
         run: |
