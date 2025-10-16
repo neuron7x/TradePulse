@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from application.system import (
@@ -78,3 +79,25 @@ def test_tradepulse_system_rejects_hold_signal(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         system.submit_signal(signal, venue="binance", quantity=1.0)
+
+
+def test_generate_signals_filters_invalid_scores(tmp_path: Path) -> None:
+    system = _build_system(tmp_path)
+
+    index = pd.date_range("2024-01-01", periods=4, freq="min", tz="UTC")
+    feature_frame = pd.DataFrame(
+        {
+            "close": [100.0, 100.5, 101.0, 101.5],
+            "feature": [0.1, 0.2, 0.3, 0.4],
+        },
+        index=index,
+    )
+
+    def strategy(_prices: np.ndarray) -> np.ndarray:
+        return np.array([0.5, np.nan, np.inf, -0.75])
+
+    signals = system.generate_signals(feature_frame, strategy=strategy, symbol="BTCUSDT")
+
+    assert len(signals) == 2
+    assert {signal.action for signal in signals} == {SignalAction.BUY, SignalAction.SELL}
+    assert all(np.isfinite(signal.metadata["score"]) for signal in signals)
