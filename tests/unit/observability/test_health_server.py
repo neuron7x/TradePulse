@@ -16,6 +16,11 @@ def test_health_endpoints_expose_liveness_and_readiness() -> None:
         assert payload["live"] is True
         assert payload["status"] == "ok"
 
+        live_response = httpx.get(f"{base_url}/health/live", timeout=2.0)
+        assert live_response.status_code == 200
+        live_payload = live_response.json()
+        assert live_payload["status"] == "live"
+
         ready_response = httpx.get(f"{base_url}/readyz", timeout=2.0)
         assert ready_response.status_code == 503
 
@@ -32,3 +37,7 @@ def test_health_endpoints_expose_liveness_and_readiness() -> None:
         response = httpx.get(f"{base_url}/healthz", timeout=2.0)
         assert response.status_code == 503
         assert response.json()["status"] == "down"
+
+        live_response = httpx.get(f"{base_url}/health/live", timeout=2.0)
+        assert live_response.status_code == 503
+        assert live_response.json()["status"] == "down"

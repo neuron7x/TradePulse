@@ -65,6 +65,11 @@ class HealthServer:
                     payload = {"status": "ok" if snapshot["live"] else "down", **snapshot}
                     self._write(status, payload)
                     return
+                if self.path == "/health/live":
+                    status = 200 if snapshot["live"] else 503
+                    payload = {"status": "live" if snapshot["live"] else "down", **snapshot}
+                    self._write(status, payload)
+                    return
                 if self.path == "/readyz":
                     status = 200 if snapshot["ready"] else 503
                     payload = {"status": "ready" if snapshot["ready"] else "not-ready", **snapshot}

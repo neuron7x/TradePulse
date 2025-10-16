@@ -16,6 +16,7 @@ from domain import Order
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
 from .oms import OMSConfig, OrderManagementSystem
 from .risk import RiskManager
+from .watchdog import Watchdog
 
 
 class Signal:
@@ -106,9 +107,9 @@ class LiveExecutionLoop:
         self._last_reported_fill: Dict[str, float] = {}
         self._stop = threading.Event()
         self._activity = threading.Event()
-        self._threads: list[threading.Thread] = []
         self._started = False
         self._kill_notified = False
+        self._watchdog: Watchdog | None = None
 
         for name, connector in connectors.items():
             state_path = self._config.state_dir / f"{name}_oms.json"
@@ -140,9 +141,13 @@ class LiveExecutionLoop:
             if not cold_start:
                 self._reconcile_state(context)
 
-        self._spawn_worker(self._order_submission_loop, name="order-submission")
-        self._spawn_worker(self._fill_polling_loop, name="fill-poller")
-        self._spawn_worker(self._heartbeat_loop, name="heartbeat")
+        self._watchdog = Watchdog(
+            name="execution-live-loop",
+            heartbeat_interval=self._config.heartbeat_interval,
+        )
+        self._watchdog.register("order-submission", self._order_submission_loop)
+        self._watchdog.register("fill-poller", self._fill_polling_loop)
+        self._watchdog.register("heartbeat", self._heartbeat_loop)
         self._started = True
 
     def shutdown(self) -> None:
@@ -153,9 +158,9 @@ class LiveExecutionLoop:
         self._logger.info("Shutting down live execution loop", extra={"event": "live_loop.shutdown"})
         self._stop.set()
         self._activity.set()
-        for thread in self._threads:
-            thread.join(timeout=5.0)
-        self._threads.clear()
+        if self._watchdog is not None:
+            self._watchdog.stop()
+            self._watchdog = None
         for context in self._contexts.values():
             try:
                 context.connector.disconnect()
@@ -234,11 +239,6 @@ class LiveExecutionLoop:
 
     # ------------------------------------------------------------------
     # Internal helpers
-    def _spawn_worker(self, target: Callable[[], None], *, name: str) -> None:
-        thread = threading.Thread(target=target, name=f"live-loop-{name}", daemon=True)
-        thread.start()
-        self._threads.append(thread)
-
     def _resolve_context_for_order(
         self, order_id: str, *, venue: str | None = None
     ) -> _VenueContext | None:
