@@ -82,3 +82,92 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "db_engine_version" {
+  description = "Aurora PostgreSQL engine version for the managed cluster."
+  type        = string
+  default     = "15.4"
+}
+
+variable "db_instance_class" {
+  description = "Instance class to use for Aurora PostgreSQL instances."
+  type        = string
+  default     = "db.r6g.large"
+}
+
+variable "db_reader_instance_count" {
+  description = "Number of reader instances to provision alongside the writer."
+  type        = number
+  default     = 1
+}
+
+variable "db_admin_username" {
+  description = "Admin username for the Aurora PostgreSQL cluster."
+  type        = string
+  default     = "tradepulse_admin"
+}
+
+variable "db_admin_password" {
+  description = "Admin password for the Aurora PostgreSQL cluster."
+  type        = string
+  sensitive   = true
+
+  validation {
+    condition     = length(var.db_admin_password) >= 12
+    error_message = "db_admin_password must be at least 12 characters long."
+  }
+}
+
+variable "db_name" {
+  description = "Default database name to create in the Aurora PostgreSQL cluster."
+  type        = string
+  default     = "tradepulse"
+}
+
+variable "db_backup_retention_period" {
+  description = "Number of days to retain automated backups."
+  type        = number
+  default     = 7
+}
+
+variable "db_backup_window" {
+  description = "Preferred backup window in UTC (format hh24:mi-hh24:mi)."
+  type        = string
+  default     = "03:00-05:00"
+}
+
+variable "db_maintenance_window" {
+  description = "Preferred maintenance window in UTC (format ddd:hh24:mi-ddd:hh24:mi)."
+  type        = string
+  default     = "sun:06:00-sun:07:00"
+}
+
+variable "db_deletion_protection" {
+  description = "Enable deletion protection on the Aurora PostgreSQL cluster."
+  type        = bool
+  default     = true
+}
+
+variable "db_skip_final_snapshot" {
+  description = "Skip the final snapshot when destroying the cluster (not recommended for production)."
+  type        = bool
+  default     = false
+}
+
+variable "db_performance_insights_enabled" {
+  description = "Enable Amazon RDS Performance Insights for the PostgreSQL instances."
+  type        = bool
+  default     = true
+}
+
+variable "db_performance_insights_retention_period" {
+  description = "Retention period (in days) for Performance Insights metrics."
+  type        = number
+  default     = 7
+}
+
+variable "db_max_connections" {
+  description = "Upper bound for allowed PostgreSQL connections (applied via parameter group)."
+  type        = number
+  default     = 500
+}

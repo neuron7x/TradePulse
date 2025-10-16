@@ -26,12 +26,24 @@ locals {
       taints = []
     }
   }
+
+  db_major_version     = element(split(".", var.db_engine_version), 0)
+  db_cluster_family    = "aurora-postgresql${local.db_major_version}"
+  db_writer_identifier = "${local.name_prefix}-aurora-writer"
+  db_reader_identifier = "${local.name_prefix}-aurora-reader"
 }
 
 check "subnet_cidr_alignment" {
   assert {
     condition     = length(var.private_subnet_cidrs) == length(var.public_subnet_cidrs)
     error_message = "private_subnet_cidrs must align with the number of public_subnet_cidrs."
+  }
+}
+
+check "db_reader_instance_count" {
+  assert {
+    condition     = var.db_reader_instance_count >= 1
+    error_message = "db_reader_instance_count must be at least 1 to guarantee failover capacity."
   }
 }
 
@@ -107,6 +119,134 @@ module "eks" {
   node_security_group_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
+}
+
+resource "aws_security_group" "db" {
+  name        = "${local.name_prefix}-db"
+  description = "Security group for TradePulse Aurora PostgreSQL"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description = "PostgreSQL from VPC"
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [module.vpc.vpc_cidr_block]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.tags, {
+    "Name" = "${local.name_prefix}-db"
+  })
+}
+
+resource "aws_db_subnet_group" "db" {
+  name        = "${local.name_prefix}-db-subnets"
+  description = "Private subnets for TradePulse Aurora PostgreSQL"
+  subnet_ids  = module.vpc.private_subnets
+  tags        = local.tags
+}
+
+resource "aws_rds_cluster_parameter_group" "db" {
+  name        = "${local.name_prefix}-aurora-cluster"
+  family      = local.db_cluster_family
+  description = "Cluster parameter group enforcing TLS and audit logging"
+
+  parameter {
+    name  = "rds.force_ssl"
+    value = "1"
+  }
+
+  parameter {
+    name  = "log_statement"
+    value = "ddl"
+  }
+
+  tags = local.tags
+}
+
+resource "aws_db_parameter_group" "db" {
+  name        = "${local.name_prefix}-aurora-instance"
+  family      = local.db_cluster_family
+  description = "Instance parameter group for TradePulse Aurora"
+
+  parameter {
+    name  = "max_connections"
+    value = tostring(var.db_max_connections)
+  }
+
+  parameter {
+    name  = "shared_preload_libraries"
+    value = "pg_stat_statements"
+  }
+
+  tags = local.tags
+}
+
+resource "aws_rds_cluster" "db" {
+  cluster_identifier              = "${local.name_prefix}-aurora"
+  engine                          = "aurora-postgresql"
+  engine_version                  = var.db_engine_version
+  master_username                 = var.db_admin_username
+  master_password                 = var.db_admin_password
+  database_name                   = var.db_name
+  db_subnet_group_name            = aws_db_subnet_group.db.name
+  vpc_security_group_ids          = [aws_security_group.db.id]
+  storage_encrypted               = true
+  iam_database_authentication_enabled = true
+  backup_retention_period         = var.db_backup_retention_period
+  preferred_backup_window         = var.db_backup_window
+  preferred_maintenance_window    = var.db_maintenance_window
+  deletion_protection             = var.db_deletion_protection
+  copy_tags_to_snapshot           = true
+  apply_immediately               = false
+  skip_final_snapshot             = var.db_skip_final_snapshot
+  port                            = 5432
+  db_cluster_parameter_group_name = aws_rds_cluster_parameter_group.db.name
+  enabled_cloudwatch_logs_exports = ["postgresql"]
+
+  tags = local.tags
+}
+
+resource "aws_rds_cluster_instance" "writer" {
+  cluster_identifier              = aws_rds_cluster.db.id
+  identifier                      = local.db_writer_identifier
+  instance_class                  = var.db_instance_class
+  engine                          = aws_rds_cluster.db.engine
+  engine_version                  = aws_rds_cluster.db.engine_version
+  db_parameter_group_name         = aws_db_parameter_group.db.name
+  publicly_accessible             = false
+  auto_minor_version_upgrade      = true
+  performance_insights_enabled    = var.db_performance_insights_enabled
+  performance_insights_retention_period = var.db_performance_insights_enabled ? var.db_performance_insights_retention_period : null
+  promotion_tier                  = 1
+  apply_immediately               = false
+
+  tags = merge(local.tags, { "Role" = "writer" })
+}
+
+resource "aws_rds_cluster_instance" "readers" {
+  count                           = var.db_reader_instance_count
+  cluster_identifier              = aws_rds_cluster.db.id
+  identifier                      = "${local.db_reader_identifier}-${count.index + 1}"
+  instance_class                  = var.db_instance_class
+  engine                          = aws_rds_cluster.db.engine
+  engine_version                  = aws_rds_cluster.db.engine_version
+  db_parameter_group_name         = aws_db_parameter_group.db.name
+  publicly_accessible             = false
+  auto_minor_version_upgrade      = true
+  performance_insights_enabled    = var.db_performance_insights_enabled
+  performance_insights_retention_period = var.db_performance_insights_enabled ? var.db_performance_insights_retention_period : null
+  promotion_tier                  = min(15, count.index + 2)
+  apply_immediately               = false
+
+  tags = merge(local.tags, { "Role" = "reader" })
 }
 
 data "aws_caller_identity" "current" {}

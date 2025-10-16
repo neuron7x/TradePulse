@@ -57,6 +57,44 @@ spec:
               value: /etc/tradepulse/tls/client-ca.pem
             - name: TRADEPULSE_MTLS_REVOCATION_LIST_PATH
               value: /etc/tradepulse/tls/client.crl
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: writer-host
+            - name: POSTGRES_RO_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: reader-host
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: database
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: password
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-db-credentials
+                  key: database-url
+            - name: PROD_DB_CA_FILE
+              value: /etc/tradepulse/db/root-ca.pem
+            - name: PROD_DB_CERT_FILE
+              value: /etc/tradepulse/db/client.crt
+            - name: PROD_DB_KEY_FILE
+              value: /etc/tradepulse/db/client.key
           ports:
             - containerPort: 8080
               name: http
@@ -90,7 +128,13 @@ spec:
             - name: tls-client-ca
               mountPath: /etc/tradepulse/tls
               readOnly: true
+            - name: db-client-tls
+              mountPath: /etc/tradepulse/db
+              readOnly: true
       volumes:
         - name: tls-client-ca
           secret:
             secretName: tradepulse-mtls-client
+        - name: db-client-tls
+          secret:
+            secretName: tradepulse-db-client-tls

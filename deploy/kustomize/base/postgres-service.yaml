@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradepulse-db
+  labels:
+    app.kubernetes.io/component: database
+spec:
+  type: ExternalName
+  externalName: writer.postgres.example.com
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tradepulse-db-ro
+  labels:
+    app.kubernetes.io/component: database
+spec:
+  type: ExternalName
+  externalName: reader.postgres.example.com
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432

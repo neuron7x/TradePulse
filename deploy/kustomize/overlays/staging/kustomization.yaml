@@ -7,9 +7,17 @@ resources:
   - ../../namespaces/staging
   - ../../base
 
+configMapGenerator:
+  - name: tradepulse-db-endpoints
+    behavior: replace
+    literals:
+      - writerHost=__POSTGRES_WRITER_ENDPOINT__
+      - readerHost=__POSTGRES_READER_ENDPOINT__
+
 images:
   - name: ghcr.io/neuron7x/tradepulse
     newTag: staging
 
 patches:
   - path: patches/deployment-resources.yaml
+  - path: patches/postgres-secrets.yaml

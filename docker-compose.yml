@@ -6,6 +6,21 @@ services:
     ports:
       - "8001:8001"
     restart: unless-stopped
+    environment:
+      POSTGRES_HOST: pgpool
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: tradepulse
+      POSTGRES_USER: tradepulse_app
+      POSTGRES_PASSWORD: tradepulse_app_password
+      DATABASE_URL: >-
+        postgresql://tradepulse_app:tradepulse_app_password@pgpool:5432/tradepulse
+        ?sslmode=verify-full
+        &sslrootcert=/etc/tradepulse/db/root-ca.pem
+        &sslcert=/etc/tradepulse/db/client.crt
+        &sslkey=/etc/tradepulse/db/client.key
+      PROD_DB_CA_FILE: /etc/tradepulse/db/root-ca.pem
+      PROD_DB_CERT_FILE: /etc/tradepulse/db/client.crt
+      PROD_DB_KEY_FILE: /etc/tradepulse/db/client.key
     healthcheck:
       test:
         - "CMD"
@@ -20,8 +35,113 @@ services:
       - "co.elastic.logs/enabled=true"
       - "co.elastic.logs/module=tradepulse"
     depends_on:
+      pgpool:
+        condition: service_healthy
       - prometheus
       - logstash
+    volumes:
+      - ./deploy/postgres/tls/client:/etc/tradepulse/db:ro
+  postgresql-primary:
+    image: bitnami/postgresql-repmgr:15
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_POSTGRES_PASSWORD: supersecure
+      POSTGRESQL_USERNAME: tradepulse_app
+      POSTGRESQL_PASSWORD: tradepulse_app_password
+      POSTGRESQL_DATABASE: tradepulse
+      REPMGR_PASSWORD: supersecure
+      REPMGR_PRIMARY_HOST: postgresql-primary
+      REPMGR_PARTNER_NODES: postgresql-primary,postgresql-replica
+      REPMGR_PRIMARY_PORT: "5432"
+      REPMGR_NODE_NAME: postgresql-primary
+      REPMGR_NODE_NETWORK_NAME: postgresql-primary
+      POSTGRESQL_ENABLE_TLS: "yes"
+      POSTGRESQL_TLS_CERT_FILE: /tls/server.crt
+      POSTGRESQL_TLS_KEY_FILE: /tls/server.key
+      POSTGRESQL_TLS_CA_FILE: /tls/root-ca.pem
+      POSTGRESQL_TLS_AUTH_CERT_FILE: /tls/client.crt
+      POSTGRESQL_TLS_AUTH_KEY_FILE: /tls/client.key
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U tradepulse_app -d tradepulse -h localhost -p 5432
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    volumes:
+      - postgresql-primary-data:/bitnami/postgresql
+      - ./deploy/postgres/tls/server:/tls:ro
+  postgresql-replica:
+    image: bitnami/postgresql-repmgr:15
+    restart: unless-stopped
+    environment:
+      POSTGRESQL_POSTGRES_PASSWORD: supersecure
+      POSTGRESQL_USERNAME: tradepulse_app
+      POSTGRESQL_PASSWORD: tradepulse_app_password
+      POSTGRESQL_DATABASE: tradepulse
+      REPMGR_PASSWORD: supersecure
+      REPMGR_PRIMARY_HOST: postgresql-primary
+      REPMGR_PARTNER_NODES: postgresql-primary,postgresql-replica
+      REPMGR_PRIMARY_PORT: "5432"
+      REPMGR_NODE_NAME: postgresql-replica
+      REPMGR_NODE_NETWORK_NAME: postgresql-replica
+      REPMGR_NODE_TYPE: replica
+      POSTGRESQL_ENABLE_TLS: "yes"
+      POSTGRESQL_TLS_CERT_FILE: /tls/server.crt
+      POSTGRESQL_TLS_KEY_FILE: /tls/server.key
+      POSTGRESQL_TLS_CA_FILE: /tls/root-ca.pem
+      POSTGRESQL_TLS_AUTH_CERT_FILE: /tls/client.crt
+      POSTGRESQL_TLS_AUTH_KEY_FILE: /tls/client.key
+    depends_on:
+      - postgresql-primary
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U tradepulse_app -d tradepulse -h localhost -p 5432
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    volumes:
+      - postgresql-replica-data:/bitnami/postgresql
+      - ./deploy/postgres/tls/server:/tls:ro
+  pgpool:
+    image: bitnami/pgpool:4
+    restart: unless-stopped
+    environment:
+      PGPOOL_BACKEND_NODES: 0:postgresql-primary:5432:1,1:postgresql-replica:5432:1
+      PGPOOL_SR_CHECK_USER: repmgr
+      PGPOOL_SR_CHECK_PASSWORD: supersecure
+      PGPOOL_HEALTH_CHECK_PERIOD: "10"
+      PGPOOL_HEALTH_CHECK_RETRY_DELAY: "5"
+      PGPOOL_HEALTH_CHECK_MAX_RETRIES: "3"
+      PGPOOL_ADMIN_USERNAME: pgpool_admin
+      PGPOOL_ADMIN_PASSWORD: pgpool_admin_password
+      PGPOOL_AUTH_METHOD: md5
+      PGPOOL_POSTGRES_USERNAME: tradepulse_app
+      PGPOOL_POSTGRES_PASSWORD: tradepulse_app_password
+      PGPOOL_ENABLE_TLS: "yes"
+      PGPOOL_TLS_CA_FILE: /tls/root-ca.pem
+      PGPOOL_TLS_CERT_FILE: /tls/server.crt
+      PGPOOL_TLS_KEY_FILE: /tls/server.key
+    ports:
+      - "5432:5432"
+    depends_on:
+      postgresql-primary:
+        condition: service_healthy
+      postgresql-replica:
+        condition: service_started
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U tradepulse_app -h localhost -p 5432
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    volumes:
+      - ./deploy/postgres/tls/server:/tls:ro
   prometheus:
     image: prom/prometheus
     volumes:
@@ -68,3 +188,5 @@ services:
 
 volumes:
   elasticsearch-data:
+  postgresql-primary-data:
+  postgresql-replica-data:

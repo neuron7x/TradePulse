@@ -9,3 +9,37 @@ resources:
   - deployment.yaml
   - service.yaml
   - pdb.yaml
+  - postgres-service.yaml
+  - postgres-credentials-secret.yaml
+  - postgres-tls-secret.yaml
+
+configMapGenerator:
+  - name: tradepulse-db-endpoints
+    literals:
+      - writerHost=writer.postgres.example.com
+      - readerHost=reader.postgres.example.com
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+replacements:
+  - source:
+      kind: ConfigMap
+      name: tradepulse-db-endpoints
+      fieldPath: data.writerHost
+    targets:
+      - select:
+          kind: Service
+          name: tradepulse-db
+        fieldPaths:
+          - spec.externalName
+  - source:
+      kind: ConfigMap
+      name: tradepulse-db-endpoints
+      fieldPath: data.readerHost
+    targets:
+      - select:
+          kind: Service
+          name: tradepulse-db-ro
+        fieldPaths:
+          - spec.externalName

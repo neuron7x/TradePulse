@@ -48,10 +48,11 @@ docker compose logs -f
 ```
 
 Services started:
-- **TradePulse**: Main application
-- **Prometheus**: Metrics collection (port 9090)
-- **Grafana**: Dashboards (port 3000)
-- **PostgreSQL**: Database (port 5432)
+- **TradePulse** – API + metrics (port 8001) with client TLS bundle mounted from `deploy/postgres/tls/client`.
+- **Pgpool** – HA connection proxy exposing PostgreSQL on port 5432 with automatic failover.【F:docker-compose.yml†L94-L116】
+- **PostgreSQL (primary/replica)** – Bitnami `postgresql-repmgr` nodes replicating via TLS for durability.【F:docker-compose.yml†L38-L93】
+- **Prometheus** – Metrics collection (port 9090).
+- **Elasticsearch/Logstash/Kibana/Filebeat** – Optional observability stack shipped with the Compose profile.【F:docker-compose.yml†L28-L75】
 
 ### 3. Verify Services
 
@@ -59,25 +60,37 @@ Services started:
 # Check running containers
 docker compose ps
 
-# Should show:
-# tradepulse-app      running
-# tradepulse-prometheus running
-# tradepulse-grafana   running
-# tradepulse-db        running
+# Should show the HA PostgreSQL stack in addition to the TradePulse API and observability services.
 ```
 
-### 4. Access Services
+### 4. Rotate TLS material and passwords
 
-**Grafana Dashboard:**
-- URL: http://localhost:3000
-- Username: `admin`
-- Password: `admin` (change on first login)
+- Replace the example certificates in `deploy/postgres/tls/server` and `deploy/postgres/tls/client` with environment-specific
+  PEM files. Restart the affected containers (`docker compose restart pgpool postgresql-primary postgresql-replica tradepulse`)
+  whenever you rotate credentials.【F:deploy/postgres/tls/README.md†L1-L17】【F:docker-compose.yml†L10-L22】
+- Update database passwords in your `.env` file or secret manager and rerun `docker compose up -d` to ensure Pgpool and
+  PostgreSQL reload the new value across the cluster.【F:docker-compose.yml†L41-L44】【F:docker-compose.yml†L69-L88】
+- Use Pgpool PCP commands to inspect status and perform manual failover when needed:
+  ```bash
+  docker compose exec pgpool pcp_node_info -U pgpool_admin -h localhost -p 9898 0
+  docker compose exec pgpool pcp_promote_node -U pgpool_admin -h localhost -p 9898 1
+  ```
+  The first command reports node health, the second promotes the replica to primary in a controlled fashion.【F:docker-compose.yml†L94-L116】
+
+### 5. Access Services
 
 **Prometheus:**
 - URL: http://localhost:9090
 
-**TradePulse API:**
-- URL: http://localhost:8000
+**Kibana (logs explorer):**
+- URL: http://localhost:5601
+
+**TradePulse API / metrics:**
+- URL: http://localhost:8001
+
+**Pgpool:**
+- Host: `localhost`
+- Port: `5432`
 
 ---
 
@@ -103,7 +116,7 @@ docker compose up -d prometheus
 docker compose stop
 
 # Stop specific service
-docker compose stop grafana
+docker compose stop pgpool
 
 # Stop and remove containers
 docker compose down
@@ -175,9 +188,15 @@ Create `.env` file in project root:
 
 ```bash
 # .env
-POSTGRES_USER=tradepulse
+POSTGRES_HOST=pgpool
+POSTGRES_PORT=5432
+POSTGRES_USER=tradepulse_app
 POSTGRES_PASSWORD=secure_password
 POSTGRES_DB=tradepulse
+DATABASE_URL=postgresql://tradepulse_app:${POSTGRES_PASSWORD}@pgpool:5432/tradepulse?sslmode=verify-full
+PROD_DB_CA_FILE=/etc/tradepulse/db/root-ca.pem
+PROD_DB_CERT_FILE=/etc/tradepulse/db/client.crt
+PROD_DB_KEY_FILE=/etc/tradepulse/db/client.key
 
 # Exchange API keys
 BINANCE_API_KEY=your_api_key

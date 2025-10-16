@@ -29,6 +29,9 @@ Before deploying, install the following tools:
 - Export the corresponding environment variables that the Hydra experiments expect (`PROD_DB_CA_FILE`, `PROD_DB_CERT_FILE`,
   `PROD_DB_KEY_FILE`, and their staging equivalents). These defaults map to `/etc/tradepulse/db/*.pem` paths in the sample
   configuration so mounting the directory at that location keeps the templates working out of the box.【F:conf/experiment/prod.yaml†L2-L6】【F:conf/experiment/stage.yaml†L2-L6】
+- In Kubernetes, hydrate the placeholder Secrets `tradepulse-db-credentials` and `tradepulse-db-client-tls` via the overlay
+  patches before applying manifests. CI/CD should inject the Terraform-derived endpoints and PEM bundles into the templated
+  files located at `deploy/kustomize/overlays/*/patches/postgres-secrets.yaml`.【F:deploy/kustomize/overlays/staging/patches/postgres-secrets.yaml†L1-L20】【F:deploy/kustomize/overlays/production/patches/postgres-secrets.yaml†L1-L20】
 - Ensure your database accepts only TLS-authenticated connections and requires the `verify-full` (or stronger) `sslmode` so
   hostname and certificate validation protect against downgrade attacks. The configuration loader now rejects weaker modes,
   causing application startup to fail fast if misconfigured.【F:core/config/postgres.py†L6-L43】
@@ -36,6 +39,10 @@ Before deploying, install the following tools:
 ## Docker Compose Deployment
 
 The repository ships with a lightweight Compose stack that builds the TradePulse container and runs Prometheus for metrics scraping.【F:docker-compose.yml†L1-L12】
+
+> **New:** The stack now provisions an HA PostgreSQL topology using Bitnami `postgresql-repmgr` (primary + replica) fronted by
+> Pgpool with mutual TLS enforced end-to-end.【F:docker-compose.yml†L38-L104】 TLS materials live under
+> `deploy/postgres/tls/`—replace the sample certificates before moving beyond local development.【F:deploy/postgres/tls/README.md†L1-L17】
 
 1. **Build images** (only required when you change the application code):
    ```bash
@@ -45,6 +52,10 @@ The repository ships with a lightweight Compose stack that builds the TradePulse
    ```bash
    docker compose --env-file .env up -d
    ```
+   - Mount updated TLS material into `deploy/postgres/tls/server` and `deploy/postgres/tls/client` before first boot. Pgpool
+     and both PostgreSQL nodes reload certificates at container restart.【F:docker-compose.yml†L40-L45】【F:docker-compose.yml†L77-L109】
+   - The `tradepulse` container consumes the same client certificate bundle and enforces `sslmode=verify-full` via the composed
+     `DATABASE_URL` environment variable.【F:docker-compose.yml†L10-L22】
 3. **Verify runtime state**:
    ```bash
    docker compose ps
@@ -54,6 +65,16 @@ The repository ships with a lightweight Compose stack that builds the TradePulse
    ```bash
    docker compose down -v
    ```
+
+#### Database failover & maintenance
+
+- **Check node health:** `docker compose exec pgpool pcp_node_info -U pgpool_admin -h localhost -p 9898 0` reports the writer;
+  replace `0` with `1` for the replica. Pgpool exposes standard PCP commands for health and promotions.【F:docker-compose.yml†L94-L116】
+- **Manual promotion:** If the primary becomes unhealthy, promote the replica with `pcp_promote_node` and restart the failed
+  node once it is repaired. Pgpool updates its routing table automatically.
+- **Credential rotation:** Update the password inside `.env` (or your secret store) and run `docker compose up -d` to recreate
+  the services. Rotate certificates by replacing the PEM files in `deploy/postgres/tls/` and restarting the affected
+  containers. The mounted volume ensures TradePulse picks up the new credentials immediately on restart.【F:docker-compose.yml†L10-L22】
 
 ### Compose Health Check
 
@@ -101,7 +122,8 @@ TradePulse now ships with first-class infrastructure code for Amazon EKS alongsi
 
 ### Staging and Production Manifests
 
-- Base manifests reside in `deploy/kustomize/base/` and encapsulate shared deployment traits, probes, and service wiring.【F:deploy/kustomize/base/deployment.yaml†L1-L74】【F:deploy/kustomize/base/service.yaml†L1-L17】【F:deploy/kustomize/base/pdb.yaml†L1-L11】
+- Base manifests reside in `deploy/kustomize/base/` and encapsulate shared deployment traits, probes, and service wiring.【F:deploy/kustomize/base/deployment.yaml†L1-L89】【F:deploy/kustomize/base/service.yaml†L1-L17】【F:deploy/kustomize/base/pdb.yaml†L1-L11】
+- Database connectivity is modelled as reusable Kustomize resources: an ExternalName service plus credential/TLS Secrets ship in the base and are patched per environment with Terraform outputs and rotated materials.【F:deploy/kustomize/base/postgres-service.yaml†L1-L24】【F:deploy/kustomize/base/postgres-credentials-secret.yaml†L1-L15】【F:deploy/kustomize/base/postgres-tls-secret.yaml†L1-L17】
 - Environment overlays extend the base with namespace scoping, image tags, scheduling policies, and topology constraints:
   - `deploy/kustomize/overlays/staging` targets the `tradepulse-staging` namespace, preserves mTLS requirements, and spreads pods across zones while staying right-sized for testing.【F:deploy/kustomize/overlays/staging/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/staging/patches/deployment-resources.yaml†L1-L36】
   - `deploy/kustomize/overlays/production` introduces a high-priority class, strict topology distribution, and rate limiting tuned for live trading traffic in the `tradepulse-production` namespace.【F:deploy/kustomize/overlays/production/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/production/patches/deployment-high-availability.yaml†L1-L43】
@@ -118,7 +140,7 @@ kubectl apply -k deploy/kustomize/overlays/production
 kubectl rollout status deployment/tradepulse-api -n tradepulse-production
 ```
 
-Secrets referenced by the deployments (`tradepulse-secrets`, `tradepulse-mtls-client`) must be provisioned outside of source control via your secret management workflow.
+Secrets referenced by the deployments (`tradepulse-secrets`, `tradepulse-mtls-client`, `tradepulse-db-credentials`, `tradepulse-db-client-tls`) must be provisioned outside of source control via your secret management workflow.【F:deploy/kustomize/base/deployment.yaml†L27-L63】
 
 ### Continuous Delivery Pipeline
 
