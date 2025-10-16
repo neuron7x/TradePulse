@@ -1,10 +1,11 @@
 filebeat.autodiscover:
   providers:
     - type: docker
+      cleanup_removed: true
       templates:
         - condition:
             equals:
-              docker.labels.co.elastic.logs/enabled: "true"
+              docker.container.labels.co.elastic.logs/enabled: "true"
           config:
             - type: filestream
               id: tradepulse-container-logs
