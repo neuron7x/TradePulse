@@ -1,29 +1,60 @@
 # SPDX-License-Identifier: MIT
+# Pre-commit configuration aligned with the CI workflow. Hooks mirror the
+# automated checks so contributors can get fast feedback locally.
+minimum_pre_commit_version: '3.6.0'
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+default_language_version:
+  python: python3
+
+default_stages:
+  - commit
+  - push
+
 repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-added-large-files
+        args: ['--maxkb=500']
+      - id: check-ast
+      - id: check-case-conflict
+      - id: check-yaml
+        args: ['--unsafe']
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+        args: ['--fix=lf']
+      - id: trailing-whitespace
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.5
+    rev: v0.6.8
     hooks:
       - id: ruff
-        args: ["--fix"]
+        name: ruff (lint + import order)
+        args: ['--fix', '--unsafe-fixes']
+      - id: ruff-format
   - repo: https://github.com/psf/black
-    rev: 24.10.0
+    rev: 25.1.0
     hooks:
       - id: black
         language_version: python3
-  - repo: https://github.com/mvdan/sh
-    rev: v3.7.0
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
     hooks:
-      - id: shfmt
-        args: ["-w"]
-  - repo: https://github.com/koalaman/shellcheck
-    rev: v0.10.0
-    hooks:
-      - id: shellcheck
+      - id: isort
+        name: isort (imports)
+        args: ['--filter-files']
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.13.0
     hooks:
       - id: mypy
-        additional_dependencies: [types-requests]
+        name: mypy (manual stage)
+        stages: [manual]
+        additional_dependencies:
+          - numpy
+          - pydantic
+          - pydantic-settings
+          - types-requests
   - repo: local
     hooks:
       - id: slotscheck
@@ -33,8 +64,10 @@ repos:
         additional_dependencies:
           - slotscheck==0.19.1
         pass_filenames: false
+        stages:
+          - manual
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
     hooks:
       - id: detect-secrets
-        args: ["--baseline", ".secrets.baseline"]
+        args: ['--baseline', '.secrets.baseline']

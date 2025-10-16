@@ -1,120 +1,131 @@
-# Test Coverage Configuration Guide
+# Test Coverage & Quality Gates Guide
 
-This document explains how to configure and use the test coverage workflow (`.github/workflows/ci.yml`) in the TradePulse repository.
+This guide explains how the main CI workflow (`.github/workflows/ci.yml`) enforces coverage and
+quality gates, and how to wire the resulting checks into branch protection rules.
 
 ## Overview
 
-The CI workflow enforces test coverage requirements on all pull requests and pushes to the `main` branch. It runs tests with coverage reporting and fails the build if coverage drops below the configured threshold.
+The CI workflow runs a multi-stage pipeline:
+
+1. **Lint & formatting** via a reusable pre-commit workflow (`lint.yml`).
+2. **Static analysis** with `mypy` and `slotscheck`.
+3. **Security audits** of Python dependencies (`pip-audit` and `safety`).
+4. **Parallelised test matrix** across Python 3.11 and 3.12 using `pytest-xdist`, `pytest-rerunfailures`,
+   and coverage reporting.
+5. **Flaky test quarantine** that retries quarantined suites.
+6. **Coverage gate enforcement** that aggregates line/branch coverage and fails if thresholds are not met.
+7. **Codecov uploads** for historical trends and delta checks.
+
+The default thresholds are **92% line coverage** and **85% branch coverage**. Both the `pytest`
+invocation and the `coverage-gate` job enforce these limits, so a regression fails fast.
 
 ## Configuration
 
-### Coverage Threshold
+### Adjusting coverage thresholds
 
-The default coverage threshold is **80%**. To change this threshold:
+Thresholds are configured once in `ci.yml` through the environment variables
+`COVERAGE_LINE_THRESHOLD` and `COVERAGE_BRANCH_THRESHOLD`:
 
-1. Open `.github/workflows/ci.yml`
-2. Locate the `pytest` command in the "Run tests with coverage" step
-3. Modify the `--cov-fail-under` parameter:
+```yaml
+env:
+  COVERAGE_LINE_THRESHOLD: '92'
+  COVERAGE_BRANCH_THRESHOLD: '85'
+```
+
+When you update these values:
+
+1. Keep the numbers in sync with branch protection expectations and the `coverage-gate` job.
+2. Update this README so contributors understand the new policy.
+
+### Customising coverage scope
+
+By default we instrument the core Python packages:
+
+```bash
+pytest \
+  --cov=analytics --cov=application --cov=backtest --cov=core \
+  --cov=domain --cov=execution --cov=interfaces --cov=markets \
+  --cov=observability --cov=tools
+```
+
+Add or remove packages inside the `pytest` step if your project layout changes.
+
+### Codecov integration
+
+The workflow uploads `coverage.xml` for each Python version via `codecov/codecov-action@v4` with
+`fail_ci_if_error: true`. For public repositories, no token is required. For private repositories,
+set a `CODECOV_TOKEN` secret under **Settings → Secrets and variables → Actions**.
+
+To enable the optional "no negative delta" policy:
+
+1. Create (or update) a `codecov.yml` configuration in the repository root with:
    ```yaml
-   pytest --cov=./ --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+   coverage:
+     status:
+       project:
+         default:
+           target: auto
+           threshold: 0%
+           informational: false
+       patch:
+         default:
+           target: 0%
+           threshold: 0%
+           informational: false
    ```
-   Replace `80` with your desired threshold (e.g., `85` for 85% coverage)
+2. In the Codecov UI, enable the **"Require Changes"** toggle for both project and patch checks.
+3. Add the generated Codecov status checks (e.g. `codecov/project` and `codecov/patch`) to your
+   branch protection rules (see below).
 
-### Coverage Scope
+## Branch protection setup
 
-By default, the workflow measures coverage for the entire repository (`--cov=./`). To measure coverage for specific directories only:
+To require CI, coverage, and Codecov checks before merging:
 
-1. Open `.github/workflows/ci.yml`
-2. Modify the `--cov` parameter to target specific packages:
-   ```yaml
-   pytest --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-fail-under=80
-   ```
+1. Navigate to **Settings → Branches** and edit or create the rule for `main` (and `develop` if used).
+2. Enable **Require a pull request before merging** and **Require status checks to pass before merging**.
+3. Add the following checks:
+   - `CI / Style & lint (pre-commit)`
+   - `CI / Static type checking`
+   - `CI / Dependency security scan`
+   - `CI / Test matrix (Python 3.11)`
+   - `CI / Test matrix (Python 3.12)`
+   - `CI / Coverage gate enforcement`
+   - `CI / Flaky test quarantine` (optional but recommended so quarantined flakes stay green)
+   - `CodeQL (Python)`
+   - `codecov/project` and `codecov/patch` (after enabling in Codecov)
 
-You can also configure coverage settings in `.coveragerc` file in the repository root.
+You may also require the `Security Scan` workflow (Bandit/Safety/Trivy) for elevated assurance.
 
-## Codecov Integration
+## Viewing coverage artefacts
 
-### For Public Repositories
+### GitHub Actions summary
 
-Codecov works automatically for public repositories without requiring a token. The workflow will upload coverage reports to Codecov for tracking coverage trends over time.
+Each `Test matrix` job and the `Coverage gate enforcement` job append tables to the run summary. The
+reports include line and branch coverage percentages alongside their thresholds.
 
-### For Private Repositories
+### Downloadable artefacts
 
-To enable Codecov for private repositories:
+For every Python version the workflow uploads:
 
-1. Go to [Codecov](https://codecov.io/) and sign in with your GitHub account
-2. Add your repository to Codecov
-3. Copy the repository upload token from Codecov settings
-4. Add the token to your GitHub repository secrets:
-   - Go to your repository's **Settings** → **Secrets and variables** → **Actions**
-   - Click **New repository secret**
-   - Name: `CODECOV_TOKEN`
-   - Value: Paste the token from Codecov
-   - Click **Add secret**
+- `junit-py3x.xml` — machine-readable test results.
+- `coverage-py3x` — HTML coverage reports plus `coverage.xml`.
+- `coverage-metrics-py3x.json` — the metrics consumed by the gate job (useful for debugging).
 
-The workflow is configured with `fail_ci_if_error: true`, which means it will fail if Codecov upload fails (useful for catching configuration issues).
+Artefacts are retained according to your repository settings (default: 90 days).
 
-## Branch Protection
+### Codecov dashboards
 
-To make test coverage a required check before merging pull requests:
-
-1. Go to your repository's **Settings** → **Branches**
-2. Under "Branch protection rules", click **Add rule** or edit the existing rule for `main`
-3. Enter `main` as the branch name pattern (if creating a new rule)
-4. Check **Require status checks to pass before merging**
-5. Check **Require branches to be up to date before merging**
-6. In the search box, find and select:
-   - `Test Coverage (Python 3.10)`
-   - `Test Coverage (Python 3.11)`
-7. (Optional but recommended) Check **Require a pull request before merging**
-8. Click **Create** or **Save changes**
-
-This ensures that:
-- All tests must pass
-- Coverage must meet the threshold
-- Both Python versions must succeed
-- Pull requests cannot be merged until these checks pass
-
-## Workflow Triggers
-
-The workflow runs automatically on:
-- **Pull requests** targeting the `main` branch
-- **Pushes** to the `main` branch
-
-This ensures coverage is checked both during code review and after merging.
-
-## Viewing Coverage Reports
-
-### In GitHub Actions
-
-1. Go to the **Actions** tab in your repository
-2. Click on a workflow run
-3. Expand the "Run tests with coverage" step to see the coverage report in the logs
-
-### On Codecov
-
-1. Visit your repository on [Codecov](https://codecov.io/)
-2. View detailed coverage reports, trends, and file-level coverage
-3. See coverage changes in pull request comments (automatically posted by Codecov)
+Visit `https://app.codecov.io/gh/<owner>/<repo>` for interactive visualisations, file-by-file
+coverage, and PR deltas. Configure Codecov to post pull request comments if you want inline insights.
 
 ## Troubleshooting
 
-### Coverage Below Threshold
+- **Coverage gate fails but pytest passed**: check the aggregated summary. The gate may fail because
+  branch coverage dipped even when line coverage is fine.
+- **Codecov upload failures**: verify the token (for private repos) and ensure `coverage.xml` exists.
+  The workflow will fail fast if the file is missing.
+- **Safety or pip-audit failures**: update dependencies or pin vulnerable packages. Use the SARIF
+  output from the `Security Scan` workflow for deeper diagnostics.
 
-If the workflow fails due to low coverage:
-1. Check which files/functions are not covered in the test output
-2. Add tests to cover the missing code
-3. Push your changes to re-run the workflow
-
-### Codecov Upload Fails
-
-If Codecov upload fails:
-- For private repos: Ensure `CODECOV_TOKEN` secret is correctly configured
-- For public repos: Check Codecov service status
-- Verify the `coverage.xml` file is being generated correctly
-
-### Python Version Compatibility
-
-The workflow tests against Python 3.10 and 3.11. If your code requires a different version:
-1. Edit the `matrix.python-version` in `.github/workflows/ci.yml`
-2. Update the branch protection rules to match the new Python versions
+With these guardrails configured, the CI pipeline enforces consistent quality while giving
+contributors actionable feedback when regressions surface.

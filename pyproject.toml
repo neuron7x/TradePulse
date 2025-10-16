@@ -155,15 +155,99 @@ fail_under = 90
 show_missing = true
 skip_covered = false
 
-[tool.ruff]
+[tool.black]
 line-length = 100
+target-version = ["py311", "py312"]
+skip-string-normalization = false
+
+[tool.isort]
+profile = "black"
+line_length = 100
+combine_as_imports = true
+float_to_top = true
+known_first_party = [
+    "analytics",
+    "application",
+    "backtest",
+    "core",
+    "domain",
+    "execution",
+    "interfaces",
+    "markets",
+    "observability",
+    "tools",
+]
+src_paths = [
+    "analytics",
+    "application",
+    "backtest",
+    "core",
+    "domain",
+    "execution",
+    "interfaces",
+    "markets",
+    "observability",
+    "tools",
+    "tests",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = [
+    "analytics",
+    "application",
+    "backtest",
+    "core",
+    "domain",
+    "execution",
+    "interfaces",
+    "markets",
+    "observability",
+    "tools",
+    "tests",
+]
+
+[tool.ruff.format]
+docstring-code-format = true
+indent-style = "space"
+quote-style = "double"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I"]
-ignore = ["E203"]
+select = ["E", "F", "W", "B", "I", "UP", "N", "C4", "S"]
+ignore = [
+    "E203",  # Handled by black
+]
+extend-safe-fixes = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "analytics",
+    "application",
+    "backtest",
+    "core",
+    "domain",
+    "execution",
+    "interfaces",
+    "markets",
+    "observability",
+    "tools",
+]
+combine-as-imports = true
+case-sensitive = true
+length-sort = false
 
 [tool.mypy]
+python_version = "3.11"
 ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+allow_redefinition = true
 plugins = ["numpy.typing.mypy_plugin"]
 
 [tool.towncrier]
