@@ -261,6 +261,7 @@ def ingest(
     result: Dict[str, Any] = {}
 
     def _ingest_worker(stop_event: threading.Event) -> None:
+        fatal = False
         try:
             with step_logger(command, "load config"):
                 cfg = manager.load_config(config, IngestConfig)
@@ -295,7 +296,14 @@ def ingest(
         except (CLIError, click.ClickException) as exc:
             fatal_error.append(exc)
             fatal_event.set()
+            fatal = True
+        except BaseException as exc:
+            fatal_error.append(exc)
+            fatal_event.set()
+            fatal = True
         finally:
+            if fatal:
+                return
             if not stop_event.is_set():
                 stop_event.wait()
 
