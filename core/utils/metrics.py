@@ -171,6 +171,28 @@ class MetricsCollector:
             registry=registry,
         )
 
+        # Watchdog metrics
+        self.watchdog_worker_restarts = Counter(
+            "tradepulse_watchdog_worker_restarts_total",
+            "Total number of worker restarts triggered by watchdog supervision",
+            ["watchdog", "worker"],
+            registry=registry,
+        )
+
+        self.watchdog_live_probe_status = Gauge(
+            "tradepulse_watchdog_live_probe_status",
+            "Outcome of the most recent watchdog live probe (1=healthy, 0=unhealthy)",
+            ["watchdog"],
+            registry=registry,
+        )
+
+        self.watchdog_last_heartbeat = Gauge(
+            "tradepulse_watchdog_last_heartbeat_timestamp",
+            "Unix timestamp of the last watchdog heartbeat publish",
+            ["watchdog"],
+            registry=registry,
+        )
+
         # Execution metrics
         self.order_placement_duration = Histogram(
             "tradepulse_order_placement_duration_seconds",
@@ -750,6 +772,29 @@ class MetricsCollector:
                 symbol=symbol,
                 violation_type=str(violation),
             ).inc()
+
+    def record_watchdog_restart(self, watchdog: str, worker: str) -> None:
+        """Record a watchdog-driven worker restart."""
+
+        if not self._enabled:
+            return
+        self.watchdog_worker_restarts.labels(watchdog=watchdog, worker=worker).inc()
+
+    def set_watchdog_live_probe(self, watchdog: str, healthy: bool) -> None:
+        """Update the outcome of the most recent watchdog live probe."""
+
+        if not self._enabled:
+            return
+        self.watchdog_live_probe_status.labels(watchdog=watchdog).set(1.0 if healthy else 0.0)
+
+    def set_watchdog_heartbeat(self, watchdog: str, timestamp: float | None = None) -> None:
+        """Record the timestamp associated with the latest watchdog heartbeat."""
+
+        if not self._enabled:
+            return
+        if timestamp is None:
+            timestamp = time.time()
+        self.watchdog_last_heartbeat.labels(watchdog=watchdog).set(float(timestamp))
 
 
 # Global metrics collector instance

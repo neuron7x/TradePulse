@@ -6,6 +6,7 @@ from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecifica
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .oms import OMSConfig, OrderManagementSystem
 from .live_loop import LiveExecutionLoop, LiveLoopConfig
+from .watchdog import Watchdog
 from .risk import (
     IdempotentRetryExecutor,
     KillSwitch,
@@ -34,6 +35,7 @@ __all__ = [
     "OrderManagementSystem",
     "LiveLoopConfig",
     "LiveExecutionLoop",
+    "Watchdog",
     "RiskLimits",
     "RiskManager",
     "KillSwitch",

@@ -9,6 +9,7 @@ import io
 import json
 import sys
 import time
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, Iterator, List, Tuple
@@ -35,6 +36,7 @@ from core.config.template_manager import ConfigTemplateManager
 from core.data.feature_catalog import FeatureCatalog
 from core.data.versioning import DataVersionManager
 from core.reporting import generate_markdown_report, render_markdown_to_html, render_markdown_to_pdf
+from execution.watchdog import Watchdog
 
 DEFAULT_TEMPLATES_DIR = Path("configs/templates")
 
@@ -253,27 +255,67 @@ def ingest(
     if config is None:
         raise click.UsageError("--config is required when not generating a template")
 
-    with step_logger(command, "load config"):
-        cfg = manager.load_config(config, IngestConfig)
-    with step_logger(command, "load source data"):
-        frame = _load_prices(cfg)
-        record_count = len(frame)
-    with step_logger(command, "persist dataset"):
-        digest = _write_frame(frame, cfg.destination, command=command)
-    with step_logger(command, "register catalog"):
-        catalog = FeatureCatalog(cfg.catalog)
-        entry = catalog.register(
-            cfg.name,
-            cfg.destination,
-            config=cfg,
-            lineage=[str(cfg.source.path)],
-            metadata=cfg.metadata,
-        )
-        click.echo(f"[{command}] • catalog checksum={entry.checksum}")
-    with step_logger(command, "snapshot version"):
-        version_mgr = DataVersionManager(cfg.versioning)
-        version_mgr.snapshot(cfg.destination, metadata={"records": record_count})
-    click.echo(f"[{command}] completed records={record_count} dest={cfg.destination} sha256={digest}")
+    completion = threading.Event()
+    fatal_event = threading.Event()
+    fatal_error: list[BaseException] = []
+    result: Dict[str, Any] = {}
+
+    def _ingest_worker(stop_event: threading.Event) -> None:
+        try:
+            with step_logger(command, "load config"):
+                cfg = manager.load_config(config, IngestConfig)
+            with step_logger(command, "load source data"):
+                frame = _load_prices(cfg)
+                record_count = len(frame)
+            with step_logger(command, "persist dataset"):
+                digest = _write_frame(frame, cfg.destination, command=command)
+            with step_logger(command, "register catalog"):
+                catalog = FeatureCatalog(cfg.catalog)
+                entry = catalog.register(
+                    cfg.name,
+                    cfg.destination,
+                    config=cfg,
+                    lineage=[str(cfg.source.path)],
+                    metadata=cfg.metadata,
+                )
+                click.echo(f"[{command}] • catalog checksum={entry.checksum}")
+            with step_logger(command, "snapshot version"):
+                version_mgr = DataVersionManager(cfg.versioning)
+                version_mgr.snapshot(cfg.destination, metadata={"records": record_count})
+
+            result.clear()
+            result.update(
+                {
+                    "records": record_count,
+                    "digest": digest,
+                    "destination": cfg.destination,
+                }
+            )
+            completion.set()
+        except (CLIError, click.ClickException) as exc:
+            fatal_error.append(exc)
+            fatal_event.set()
+        finally:
+            if not stop_event.is_set():
+                stop_event.wait()
+
+    with Watchdog(name="ingest-cli", monitor_interval=0.25, health_url=None) as watchdog:
+        watchdog.register("ingest-worker", _ingest_worker, args=(watchdog.stop_event,))
+
+        while True:
+            if completion.wait(timeout=0.1):
+                break
+            if fatal_event.is_set():
+                watchdog.stop()
+                exc = fatal_error[0] if fatal_error else RuntimeError("ingest worker failed")
+                raise exc
+
+    if not result:
+        raise RuntimeError("ingest worker terminated without producing a result")
+
+    click.echo(
+        f"[{command}] completed records={result['records']} dest={result['destination']} sha256={result['digest']}"
+    )
 
 
 def _run_backtest(cfg: BacktestConfig) -> Dict[str, Any]:
