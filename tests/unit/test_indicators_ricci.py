@@ -18,6 +18,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import core.indicators.ricci as ricci_module
 from core.indicators.ricci import (
     MeanRicciFeature,
     build_price_graph,
@@ -193,3 +194,27 @@ def test_mean_ricci_feature_chunk_size_behavior() -> None:
     # Metadata should reflect the difference
     assert "chunk_size" not in result_unchunked.metadata
     assert result_chunked.metadata["chunk_size"] == 5
+
+
+def test_ricci_curvature_edge_warns_without_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
+    prices = np.array([100.0, 100.5, 101.2, 100.9, 101.5], dtype=float)
+    graph = build_price_graph(prices, delta=0.01)
+    edges = [(u, v) for u, v in graph.edges() if u != v]
+    assert edges, "Expected at least one non-loop edge in price graph"
+    x, y = edges[0]
+
+    mu_x = local_distribution(graph, x)
+    mu_y = local_distribution(graph, y)
+    size = max(len(mu_x), len(mu_y))
+    a = np.pad(mu_x, (0, size - len(mu_x)))
+    b = np.pad(mu_y, (0, size - len(mu_y)))
+    d_xy = ricci_module._shortest_path_length_safe(graph, x, y)
+    assert d_xy > 0
+    expected_fallback = float(1.0 - ricci_module._w1_fallback(a, b) / d_xy)
+
+    monkeypatch.setattr(ricci_module, "W1", None, raising=False)
+
+    with pytest.warns(RuntimeWarning):
+        curvature = ricci_curvature_edge(graph, x, y)
+
+    assert curvature == pytest.approx(expected_fallback)
