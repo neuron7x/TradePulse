@@ -15,6 +15,9 @@ Tests verify:
 """
 from __future__ import annotations
 
+import asyncio
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -194,6 +197,43 @@ def test_mean_ricci_feature_chunk_size_behavior() -> None:
     # Metadata should reflect the difference
     assert "chunk_size" not in result_unchunked.metadata
     assert result_chunked.metadata["chunk_size"] == 5
+
+
+def test_mean_ricci_async_recovers_when_loop_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Async execution should fall back when the main loop is already running."""
+
+    prices = np.array([100.0, 101.0, 100.5, 101.5], dtype=float)
+    graph = build_price_graph(prices, delta=0.01)
+
+    expected = mean_ricci(graph)
+
+    policy = asyncio.get_event_loop_policy()
+    local_state = getattr(policy, "_local", None)
+    original_loop = getattr(local_state, "_loop", None) if local_state else None
+
+    def _raise_loop_running(coro: Any, *args: Any, **kwargs: Any) -> None:
+        coro.close()
+        raise RuntimeError("event loop is running")
+
+    monkeypatch.setattr("core.indicators.ricci.asyncio.run", _raise_loop_running)
+
+    try:
+        result = mean_ricci(graph, parallel="async")
+        assert result == pytest.approx(expected, rel=1e-9)
+
+        with pytest.raises(RuntimeError):
+            asyncio.get_running_loop()
+
+        local_state = getattr(policy, "_local", None)
+        residual_loop = getattr(local_state, "_loop", None) if local_state else None
+        if original_loop is None:
+            assert residual_loop is None
+        else:
+            assert residual_loop is original_loop
+    finally:
+        policy.set_event_loop(original_loop)
 
 
 def test_ricci_curvature_edge_warns_without_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
