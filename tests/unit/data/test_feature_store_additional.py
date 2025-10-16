@@ -27,8 +27,15 @@ from core.data.feature_store import (
     RetentionPolicy,
     SQLiteEncryptionConfig,
     SQLiteOnlineFeatureStore,
+    InMemoryKeyValueClient,
+    KeyValueClient,
+    _ENVELOPE_PREFIX,
+    _NONCE_SIZE,
     _RetentionManager,
+    _SQLiteEncryptionEnvelope,
+    _derive_aes_key,
     _format_numeric_value,
+    _redis_client_uses_tls,
     reencrypt_sqlite_payloads,
 )
 from core.utils.dataframe_io import read_dataframe, write_dataframe
@@ -115,6 +122,35 @@ def sqlite_encryption_config() -> SQLiteEncryptionConfig:
     return SQLiteEncryptionConfig(key_id="v1", key_material="primary-secret")
 
 
+def test_derive_aes_key_rejects_empty_material() -> None:
+    with pytest.raises(FeatureStoreConfigurationError):
+        _derive_aes_key(b"")
+
+
+def test_derive_aes_key_returns_exact_length_bytes() -> None:
+    material = b"x" * 16
+    assert _derive_aes_key(material) is material
+
+
+def test_sqlite_encryption_config_validates_identifiers() -> None:
+    with pytest.raises(ValueError, match="key_id"):
+        SQLiteEncryptionConfig(key_id="", key_material="secret")
+
+    too_long = "a" * 300
+    with pytest.raises(ValueError, match="255 bytes"):
+        SQLiteEncryptionConfig(key_id=too_long, key_material="secret")
+
+    with pytest.raises(ValueError, match="fallback key identifiers cannot be empty"):
+        SQLiteEncryptionConfig(key_id="v1", key_material="secret", fallback_keys={"": b"a"})
+
+    with pytest.raises(ValueError, match="fallback key identifiers must not exceed"):
+        SQLiteEncryptionConfig(
+            key_id="v1",
+            key_material="secret",
+            fallback_keys={"a" * 300: b"material"},
+        )
+
+
 def test_retention_manager_ttl_seconds_handles_absent_policy() -> None:
     manager = _RetentionManager(None)
     assert manager.ttl_seconds() is None
@@ -185,6 +221,29 @@ def test_redis_tls_client_config(monkeypatch) -> None:
     assert captured["ssl_context"] is context
 
 
+def test_redis_tls_client_config_without_credentials(monkeypatch) -> None:
+    captured: dict[str, Any] = {}
+
+    class _Client:
+        connection_pool = None
+
+    def fake_from_url(url: str, **kwargs: Any) -> Any:
+        captured["url"] = url
+        captured.update(kwargs)
+        return _Client()
+
+    redis_module = pytest.importorskip("redis")
+    monkeypatch.setattr(redis_module.Redis, "from_url", fake_from_url)
+    monkeypatch.setattr("core.data.feature_store.redis", redis_module, raising=False)
+
+    config = RedisClientConfig(url="rediss://example.com:6379/0")
+    client = config.create_client()
+    assert isinstance(client, _Client)
+    assert captured["url"] == "rediss://example.com:6379/0"
+    assert "username" not in captured
+    assert "password" not in captured
+
+
 def test_redis_tls_url_required(monkeypatch) -> None:
     monkeypatch.setattr("core.data.feature_store.redis", object(), raising=False)
     with pytest.raises(FeatureStoreConfigurationError):
@@ -197,6 +256,29 @@ def test_redis_sync_detects_column_mismatch(sample_frame: pd.DataFrame) -> None:
     mismatched = sample_frame.assign(extra=1)
     with pytest.raises(ValueError):
         store.sync("demo.view", mismatched, mode="append", validate=False)
+
+
+def test_redis_client_tls_detection_handles_non_dict_pool() -> None:
+    class _Client:
+        connection_pool = type("Pool", (), {"connection_kwargs": ["not", "dict"]})()
+
+    assert _redis_client_uses_tls(_Client()) is True
+
+
+def test_redis_client_tls_detection_accepts_tls_flags() -> None:
+    class _Client:
+        connection_pool = type("Pool", (), {"connection_kwargs": {"ssl": True}})()
+
+    assert _redis_client_uses_tls(_Client()) is True
+
+
+def test_redis_online_store_rejects_conflicting_client_arguments() -> None:
+    class _StubConfig:
+        def create_client(self) -> KeyValueClient:
+            return InMemoryKeyValueClient()
+
+    with pytest.raises(FeatureStoreConfigurationError):
+        RedisOnlineFeatureStore(client=InMemoryKeyValueClient(), client_config=_StubConfig())
 
 
 def test_redis_sync_orders_columns_for_append(sample_frame: pd.DataFrame) -> None:
@@ -273,6 +355,7 @@ def test_integrity_report_detects_mismatches() -> None:
     [
         (math.nan, "NaN"),
         (pd.NA, "NaN"),
+        ("NaN", "NaN"),
         (math.inf, "Infinity"),
         (-math.inf, "-Infinity"),
         (Fraction(1, 3), "0.3333333333333333"),
@@ -343,6 +426,14 @@ def test_online_store_canonicalize_with_no_columns() -> None:
     assert canonical.empty
 
 
+def test_online_store_canonicalize_orders_columns() -> None:
+    frame = pd.DataFrame({"b": [2, 1], "a": [1, 2]}, index=[5, 3])
+    canonical = OnlineFeatureStore._canonicalize(frame)
+    assert list(canonical.columns) == ["a", "b"]
+    assert list(canonical.index) == [0, 1]
+    assert canonical.loc[0, "a"] == 1
+
+
 def test_online_store_sync_rejects_mismatched_columns(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
     store = OnlineFeatureStore(tmp_path)
     store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
@@ -370,6 +461,32 @@ def test_online_store_purge_removes_artifacts(tmp_path: Path, sample_frame: pd.D
     assert store.load("demo.view").empty is False
     store.purge("demo.view")
     assert store.load("demo.view").empty
+
+
+def test_online_store_write_frame_copies_legacy_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = OnlineFeatureStore(tmp_path)
+    feature_view = "demo.view"
+    destination = store._resolve_path(feature_view)
+    target_path = destination.with_suffix(".json")
+    index_path = destination.with_suffix(".index.json")
+    names_path = destination.with_suffix(".index.names.json")
+
+    def fake_write_dataframe(frame: pd.DataFrame, dest: Path, *, index: bool, allow_json_fallback: bool) -> Path:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        target_path.write_text("data")
+        index_path.write_text("index")
+        names_path.write_text("names")
+        return target_path
+
+    monkeypatch.setattr("core.data.feature_store.write_dataframe", fake_write_dataframe)
+
+    frame = pd.DataFrame({"value": [1, 2]})
+    store._write_frame(feature_view, destination, frame)
+
+    legacy_base = tmp_path / feature_view
+    assert legacy_base.with_suffix(".json").read_text() == "data"
+    assert legacy_base.with_suffix(".index.json").read_text() == "index"
+    assert legacy_base.with_suffix(".index.names.json").read_text() == "names"
 
 
 def test_sqlite_store_purge_and_missing_load(
@@ -451,6 +568,45 @@ def test_sqlite_store_requires_encryption(tmp_path: Path) -> None:
         SQLiteOnlineFeatureStore(tmp_path / "store.db", encryption=None)  # type: ignore[arg-type]
 
 
+def test_sqlite_envelope_plaintext_handling() -> None:
+    strict = _SQLiteEncryptionEnvelope(SQLiteEncryptionConfig(key_id="v1", key_material="alpha"))
+    with pytest.raises(FeatureStoreConfigurationError):
+        strict.decrypt(b"plaintext")
+
+    permissive = _SQLiteEncryptionEnvelope(
+        SQLiteEncryptionConfig(
+            key_id="v1",
+            key_material="alpha",
+            allow_plaintext_fallback=True,
+        )
+    )
+    assert permissive.decrypt(b"plaintext") == b"plaintext"
+
+
+def test_sqlite_envelope_validates_structure() -> None:
+    envelope = _SQLiteEncryptionEnvelope(SQLiteEncryptionConfig(key_id="v1", key_material="alpha"))
+
+    with pytest.raises(FeatureStoreConfigurationError, match="header is truncated"):
+        envelope.decrypt(_ENVELOPE_PREFIX)
+
+    with pytest.raises(FeatureStoreConfigurationError, match="missing key identifier"):
+        envelope.decrypt(_ENVELOPE_PREFIX + bytes([1]))
+
+    with pytest.raises(FeatureStoreConfigurationError, match="missing nonce"):
+        envelope.decrypt(_ENVELOPE_PREFIX + bytes([1]) + b"a")
+
+
+def test_sqlite_envelope_unknown_key_identifier() -> None:
+    envelope = _SQLiteEncryptionEnvelope(SQLiteEncryptionConfig(key_id="v1", key_material="alpha"))
+    payload = envelope.encrypt(b"secret")
+    header_len = len(_ENVELOPE_PREFIX)
+    key_len = payload[header_len]
+    cursor = header_len + 1 + key_len
+    forged = _ENVELOPE_PREFIX + bytes([1]) + b"x" + payload[cursor:]
+    with pytest.raises(FeatureStoreConfigurationError):
+        envelope.decrypt(forged)
+
+
 def test_sqlite_payload_is_encrypted(
     tmp_path: Path,
     sample_frame: pd.DataFrame,
@@ -526,6 +682,54 @@ def test_sqlite_reencrypt_from_plaintext(tmp_path: Path, sample_frame: pd.DataFr
     reopened = SQLiteOnlineFeatureStore(path, encryption=rotated)
     loaded = reopened.load("demo.view")
     pd.testing.assert_frame_equal(loaded, sample_frame.reset_index(drop=True))
+
+
+def test_sqlite_reencrypt_missing_file(tmp_path: Path) -> None:
+    target = tmp_path / "missing.db"
+    with pytest.raises(FileNotFoundError):
+        reencrypt_sqlite_payloads(
+            target,
+            current_encryption=None,
+            target_encryption=SQLiteEncryptionConfig(key_id="v1", key_material="alpha"),
+        )
+
+
+def test_sqlite_reencrypt_creates_backup(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
+    original = SQLiteEncryptionConfig(key_id="v1", key_material="alpha")
+    rotated = SQLiteEncryptionConfig(key_id="v2", key_material="beta")
+    path = tmp_path / "store.db"
+    store = SQLiteOnlineFeatureStore(path, encryption=original)
+    store.sync("demo.view", sample_frame, mode="overwrite", validate=False)
+
+    reencrypt_sqlite_payloads(
+        path,
+        current_encryption=original,
+        target_encryption=rotated,
+        backup=True,
+    )
+
+    backup_path = path.with_suffix(path.suffix + ".bak")
+    assert backup_path.exists()
+
+
+def test_sqlite_reencrypt_rejects_non_bytes_payload(tmp_path: Path) -> None:
+    path = tmp_path / "store.db"
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "CREATE TABLE IF NOT EXISTS feature_views (name TEXT PRIMARY KEY, payload BLOB)"
+        )
+        connection.execute(
+            "REPLACE INTO feature_views (name, payload) VALUES (?, ?)",
+            ("demo.view", "not-bytes"),
+        )
+
+    with pytest.raises(FeatureStoreConfigurationError):
+        reencrypt_sqlite_payloads(
+            path,
+            current_encryption=None,
+            target_encryption=SQLiteEncryptionConfig(key_id="v1", key_material="alpha"),
+            backup=False,
+        )
 
 
 def test_offline_validator_non_enforcing(tmp_path: Path, sample_frame: pd.DataFrame) -> None:
