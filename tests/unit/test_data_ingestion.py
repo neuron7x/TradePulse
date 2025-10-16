@@ -2,12 +2,34 @@
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 import core.data.ingestion as ingestion
 from core.data.ingestion import BinanceStreamHandle, DataIngestor, Ticker
+
+
+class DummyCollector:
+    def __init__(self) -> None:
+        self.measure_calls: list[dict[str, object]] = []
+        self.processed: list[tuple[str, str, int]] = []
+
+    @contextmanager
+    def measure_data_ingestion(self, source: str, symbol: str):  # type: ignore[override]
+        ctx: dict[str, object] = {}
+        record = {"source": source, "symbol": symbol, "ctx": ctx, "status": None}
+        self.measure_calls.append(record)
+        try:
+            yield ctx
+            record["status"] = ctx.get("status", "success")
+        except Exception:
+            record["status"] = "error"
+            raise
+
+    def record_tick_processed(self, source: str, symbol: str, count: int = 1) -> None:
+        self.processed.append((source, symbol, count))
 
 
 def test_historical_csv_reads_rows(tmp_path: Path) -> None:
@@ -23,6 +45,50 @@ def test_historical_csv_reads_rows(tmp_path: Path) -> None:
     assert len(records) == 2
     assert records[0].price == 100.0
     assert records[1].volume == 6.0
+
+
+def test_historical_csv_records_metrics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    csv_path = tmp_path / "history.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
+        writer.writeheader()
+        writer.writerow({"ts": "1", "price": "100", "volume": "5"})
+
+    collector = DummyCollector()
+    monkeypatch.setattr(ingestion, "metrics", collector)
+
+    ingestor = DataIngestor()
+    ingestor.historical_csv(str(csv_path), lambda _: None)
+
+    assert collector.processed == [("csv", "UNKNOWN", 1)]
+    assert len(collector.measure_calls) == 1
+    call = collector.measure_calls[0]
+    assert call["source"] == "csv"
+    ctx = call["ctx"]
+    assert isinstance(ctx, dict)
+    assert ctx["venue"] == "CSV"
+    assert str(ctx["file_path"]).endswith("history.csv")
+    assert ctx["instrument_type"] == ingestion.InstrumentType.SPOT.value
+
+
+def test_historical_csv_metrics_error_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    csv_path = tmp_path / "history.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
+        writer.writeheader()
+        writer.writerow({"ts": "1", "price": "100", "volume": "5"})
+
+    collector = DummyCollector()
+    monkeypatch.setattr(ingestion, "metrics", collector)
+
+    ingestor = DataIngestor()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        ingestor.historical_csv(str(csv_path), lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    assert collector.processed == []
+    assert len(collector.measure_calls) == 1
+    assert collector.measure_calls[0]["status"] == "error"
 
 
 def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,6 +113,57 @@ def test_binance_ws_emits_ticks_when_dependency_available(monkeypatch: pytest.Mo
     assert isinstance(ws, DummyWS)
     assert float(captured[0].price) == pytest.approx(101.5)
     assert float(captured[0].volume) == pytest.approx(7.0)
+
+
+def test_binance_ws_records_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[Ticker] = []
+
+    class DummyWS:
+        def start(self) -> None:
+            pass
+
+        def kline(self, symbol, id, interval, callback):  # type: ignore[no-untyped-def]
+            callback({"e": "kline", "k": {"T": 2000, "c": "101.5", "v": "7.0"}})
+
+    collector = DummyCollector()
+    monkeypatch.setattr(ingestion, "metrics", collector)
+    monkeypatch.setattr(ingestion, "BinanceWS", DummyWS)
+
+    ingestor = DataIngestor()
+    ws = ingestor.binance_ws("BTCUSDT", captured.append, interval="1m")
+    assert isinstance(ws, DummyWS)
+    assert captured
+    assert collector.processed == [("binance", "BTCUSDT", 1)]
+    assert len(collector.measure_calls) == 1
+    call = collector.measure_calls[0]
+    assert call["source"] == "binance"
+    ctx = call["ctx"]
+    assert isinstance(ctx, dict)
+    assert ctx["venue"] == "BINANCE"
+    assert ctx["interval"] == "1m"
+    assert ctx["event_type"] == "kline"
+
+
+def test_binance_ws_metrics_error_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyWS:
+        def start(self) -> None:
+            pass
+
+        def kline(self, symbol, id, interval, callback):  # type: ignore[no-untyped-def]
+            callback({"e": "kline", "k": {"T": 2000, "c": "101.5", "v": "7.0"}})
+
+    collector = DummyCollector()
+    monkeypatch.setattr(ingestion, "metrics", collector)
+    monkeypatch.setattr(ingestion, "BinanceWS", DummyWS)
+
+    ingestor = DataIngestor()
+
+    with pytest.raises(RuntimeError, match="fail"):
+        ingestor.binance_ws("BTCUSDT", lambda _: (_ for _ in ()).throw(RuntimeError("fail")))
+
+    assert collector.processed == []
+    assert len(collector.measure_calls) == 1
+    assert collector.measure_calls[0]["status"] == "error"
 
 
 def test_binance_stream_handle_manages_lifecycle() -> None:
