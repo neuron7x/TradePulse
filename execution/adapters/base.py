@@ -15,6 +15,8 @@ import httpx
 
 from domain import Order
 
+from core.utils.metrics import get_metrics_collector
+
 from execution.connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
@@ -90,6 +92,7 @@ class RESTWebSocketConnector(ExecutionConnector):
         self._lock = threading.Lock()
         self._connected = False
         self._credentials: Mapping[str, str] = {}
+        self._metrics = get_metrics_collector()
 
     # ------------------------------------------------------------------
     # Abstract hooks for subclasses
@@ -218,13 +221,36 @@ class RESTWebSocketConnector(ExecutionConnector):
         if idempotency_key and idempotency_key in self._idempotency_cache:
             return self._idempotency_cache[idempotency_key]
         payload = self._build_place_payload(order, idempotency_key)
+        started_at = time.perf_counter()
         response = self._request("POST", self._order_endpoint(), params=payload, signed=True)
+        finished_at = time.perf_counter()
         submitted = self._parse_order(response, original=order)
+        self._record_trade_latency(order=submitted, started_at=started_at, finished_at=finished_at)
         with self._lock:
             self._orders[submitted.order_id or ""] = submitted
             if idempotency_key:
                 self._idempotency_cache[idempotency_key] = submitted
         return submitted
+
+    def _record_trade_latency(self, *, order: Order, started_at: float, finished_at: float) -> None:
+        metrics = getattr(self, "_metrics", None)
+        if metrics is None or not metrics.enabled:
+            return
+
+        latency_ms = max(0.0, (finished_at - started_at) * 1000.0)
+        try:
+            order_type = order.order_type.value  # type: ignore[union-attr]
+        except AttributeError:
+            order_type = str(order.order_type)
+
+        exchange = getattr(self, "name", self.__class__.__name__.lower())
+        metrics.observe_trade_latency_ms(
+            exchange=exchange,
+            adapter=self.__class__.__name__,
+            symbol=order.symbol,
+            order_type=order_type,
+            latency_ms=latency_ms,
+        )
 
     def cancel_order(self, order_id: str) -> bool:  # type: ignore[override]
         path, payload = self._cancel_endpoint(order_id)

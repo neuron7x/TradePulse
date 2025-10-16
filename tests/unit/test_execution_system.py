@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 import json
 
 import pytest
+from prometheus_client import CollectorRegistry
 
 from domain import Order, OrderSide, OrderStatus, OrderType
 from execution.algorithms import POVAlgorithm, TWAPAlgorithm, VWAPAlgorithm, aggregate_fills
@@ -17,6 +18,8 @@ from execution.normalization import NormalizationError, SymbolNormalizer, Symbol
 from execution.oms import OMSConfig, OrderManagementSystem
 from execution.risk import RiskLimits, RiskManager
 from execution.audit import ExecutionAuditLogger
+from core.utils import metrics as metrics_module
+from core.utils.metrics import MetricsCollector
 
 
 @pytest.fixture()
@@ -66,6 +69,42 @@ def test_oms_register_fill_updates_risk(tmp_path, risk_manager: RiskManager) -> 
     updated = oms.register_fill(placed.order_id, 1.0, 25_100)
     assert updated.status.name == "FILLED"
     assert risk_manager.current_position("BTCUSDT") == pytest.approx(2.0)
+
+
+def test_oms_register_fill_emits_slippage_metric(tmp_path, risk_manager: RiskManager, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+    monkeypatch.setattr(metrics_module, "_collector", collector, raising=False)
+
+    state_path = tmp_path / "slippage_state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = BinanceConnector()
+    oms = OrderManagementSystem(connector, risk_manager, config)
+
+    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=25_000.0, order_type=OrderType.LIMIT)
+    oms.submit(order, correlation_id="slip-1")
+    placed = oms.process_next()
+    assert placed.order_id is not None
+
+    captured: list[float] = []
+    original = collector.observe_slippage_bps
+
+    def capture_slippage(exchange: str, symbol: str, side: str, slippage_bps: float) -> None:
+        captured.append(slippage_bps)
+        original(exchange, symbol, side, slippage_bps)
+
+    monkeypatch.setattr(collector, "observe_slippage_bps", capture_slippage)
+
+    updated = oms.register_fill(placed.order_id, 1.0, 25_050.0)
+
+    assert updated.filled_quantity == pytest.approx(1.0)
+    assert captured and captured[0] == pytest.approx(20.0)
+    exchange_label = getattr(connector, "name", connector.__class__.__name__.lower())
+    adverse_bucket = registry.get_sample_value(
+        "slippage_bps_bucket",
+        {"exchange": exchange_label, "symbol": "BTCUSDT", "side": "buy", "le": "25.0"},
+    )
+    assert adverse_bucket == pytest.approx(1.0)
 
 
 def test_oms_compliance_blocking_triggers_audit(tmp_path) -> None:

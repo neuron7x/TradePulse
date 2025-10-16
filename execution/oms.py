@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Dict, Iterable, MutableMapping
 
-from domain import Order, OrderStatus
+from domain import Order, OrderSide, OrderStatus
 from interfaces.execution import RiskController
 
 from core.utils.metrics import get_metrics_collector
@@ -299,6 +299,22 @@ class OrderManagementSystem:
 
     def register_fill(self, order_id: str, quantity: float, price: float) -> Order:
         order = self._orders[order_id]
+        reference_price: float | None = order.price if order.price is not None else None
+        metadata = getattr(order, "metadata", None)
+        if reference_price is None and isinstance(metadata, dict):
+            candidate = metadata.get("benchmark_price") or metadata.get("reference_price")
+            if isinstance(candidate, (int, float)):
+                reference_price = float(candidate)
+        if reference_price is None and order.average_price is not None:
+            reference_price = float(order.average_price)
+        if reference_price is None:
+            reference_price = price if price > 0 else None
+
+        slippage_bps_value: float | None = None
+        if reference_price and reference_price > 0:
+            baseline = (price - reference_price) / reference_price * 10_000.0
+            direction = 1.0 if order.side == OrderSide.BUY else -1.0
+            slippage_bps_value = baseline * direction
         order.record_fill(quantity, price)
         self.risk.register_fill(order.symbol, order.side.value, quantity, price)
         if self._metrics.enabled:
@@ -308,6 +324,13 @@ class OrderManagementSystem:
             if ack_ts is not None:
                 latency = max(0.0, (now - ack_ts).total_seconds())
                 self._metrics.record_order_fill_latency(exchange, order.symbol, latency)
+            if slippage_bps_value is not None:
+                self._metrics.observe_slippage_bps(
+                    exchange,
+                    order.symbol,
+                    order.side.value,
+                    slippage_bps_value,
+                )
             signal_origin = getattr(order, "created_at", None)
             signal_latency = None
             if isinstance(signal_origin, datetime):

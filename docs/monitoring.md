@@ -175,12 +175,19 @@ tradepulse_order_submission_latency_quantiles_seconds{quantile="0.95"}
 tradepulse_order_ack_latency_quantiles_seconds{quantile="0.95"}
 tradepulse_order_fill_latency_quantiles_seconds{quantile="0.95"}
 tradepulse_signal_to_fill_latency_quantiles_seconds{quantile="0.95"}
+histogram_quantile(0.95, sum(rate(trade_latency_ms_bucket[5m])) by (le))
 ```
 
 The `quantile` label exposes p50/p95/p99 so alerts can target specific tiers.
 Prometheus recording rules aggregate by `strategy` and `exchange` to surface
 outliers, and Grafana overlays SLA bands (p95 ≤ 0.4 s, p99 ≤ 0.65 s) for fast
 visual validation.
+
+In addition to the quantile gauges, connectors emit the raw
+`trade_latency_ms` histogram that captures the send→ack distribution in
+milliseconds. This enables fine grained histogram queries (via
+`histogram_quantile`) and per-adapter heatmaps without waiting for the OMS to
+process acknowledgements.
 
 Alerting policy:
 
@@ -205,6 +212,8 @@ tradepulse_order_submission_latency_quantiles_seconds   # Gauge: Order placement
 tradepulse_order_ack_latency_quantiles_seconds          # Gauge: Submission → acknowledgement latency (p50/p95/p99)
 tradepulse_order_fill_latency_quantiles_seconds         # Gauge: Fill latency (p50/p95/p99)
 tradepulse_signal_to_fill_latency_quantiles_seconds     # Gauge: Signal → fill aggregate latency (p50/p95/p99)
+trade_latency_ms                                        # Histogram: Venue acknowledgement latency in milliseconds
+slippage_bps                                            # Histogram: Realised fill slippage in basis points
 
 # Positions
 open_positions_count        # Gauge: Current open positions

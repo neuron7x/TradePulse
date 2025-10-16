@@ -170,6 +170,48 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     assert market_orders == 2.0
 
 
+def test_trade_latency_and_slippage_helpers_record_samples() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    collector.observe_trade_latency_ms("binance", "RESTWebSocketConnector", "BTCUSDT", "limit", 125.0)
+    collector.observe_trade_latency_ms("binance", "RESTWebSocketConnector", "BTCUSDT", "limit", 75.0)
+    collector.observe_slippage_bps("binance", "BTCUSDT", "buy", 12.5)
+    collector.observe_slippage_bps("binance", "BTCUSDT", "buy", -5.0)
+
+    latency_count = _sample_value(
+        registry,
+        "trade_latency_ms_count",
+        {"exchange": "binance", "adapter": "RESTWebSocketConnector", "symbol": "BTCUSDT", "order_type": "limit"},
+    )
+    latency_sum = _sample_value(
+        registry,
+        "trade_latency_ms_sum",
+        {"exchange": "binance", "adapter": "RESTWebSocketConnector", "symbol": "BTCUSDT", "order_type": "limit"},
+    )
+    slippage_count = _sample_value(
+        registry,
+        "slippage_bps_count",
+        {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy"},
+    )
+    adverse_bucket = _sample_value(
+        registry,
+        "slippage_bps_bucket",
+        {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy", "le": "25.0"},
+    )
+    favorable_bucket = _sample_value(
+        registry,
+        "slippage_bps_bucket",
+        {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy", "le": "0.0"},
+    )
+
+    assert latency_count == 2.0
+    assert latency_sum == pytest.approx(200.0)
+    assert slippage_count == 2.0
+    assert adverse_bucket == 2.0
+    assert favorable_bucket == 1.0
+
+
 def test_render_prometheus_disabled_returns_empty(monkeypatch) -> None:
     monkeypatch.setattr("core.utils.metrics.PROMETHEUS_AVAILABLE", False)
     collector = MetricsCollector()

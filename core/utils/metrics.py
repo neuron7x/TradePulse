@@ -271,6 +271,64 @@ class MetricsCollector:
             registry=registry,
         )
 
+        latency_buckets = (
+            1.0,
+            2.0,
+            5.0,
+            10.0,
+            25.0,
+            50.0,
+            75.0,
+            100.0,
+            150.0,
+            250.0,
+            400.0,
+            600.0,
+            1000.0,
+            2000.0,
+            5000.0,
+        )
+        self.trade_latency_ms = Histogram(
+            "trade_latency_ms",
+            "Round-trip latency between order submission and venue acknowledgement in milliseconds.",
+            ["exchange", "adapter", "symbol", "order_type"],
+            registry=registry,
+            buckets=latency_buckets,
+        )
+
+        slippage_buckets = (
+            -1000.0,
+            -250.0,
+            -100.0,
+            -50.0,
+            -25.0,
+            -10.0,
+            -5.0,
+            -1.0,
+            -0.5,
+            -0.1,
+            0.0,
+            0.1,
+            0.5,
+            1.0,
+            2.0,
+            5.0,
+            10.0,
+            25.0,
+            50.0,
+            100.0,
+            250.0,
+            500.0,
+            1000.0,
+        )
+        self.slippage_bps = Histogram(
+            "slippage_bps",
+            "Distribution of realised per-fill slippage in basis points (positive = adverse).",
+            ["exchange", "symbol", "side"],
+            registry=registry,
+            buckets=slippage_buckets,
+        )
+
         # Strategy metrics
         self.strategy_score = Gauge(
             "tradepulse_strategy_score",
@@ -712,6 +770,45 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.strategy_memory_size.set(size)
+
+    def observe_trade_latency_ms(
+        self,
+        exchange: str,
+        adapter: str,
+        symbol: str,
+        order_type: str,
+        latency_ms: float,
+    ) -> None:
+        """Record the latency between submission and acknowledgement in milliseconds."""
+
+        if not self._enabled:
+            return
+
+        clamped = max(0.0, float(latency_ms))
+        self.trade_latency_ms.labels(
+            exchange=exchange,
+            adapter=adapter,
+            symbol=symbol,
+            order_type=order_type,
+        ).observe(clamped)
+
+    def observe_slippage_bps(
+        self,
+        exchange: str,
+        symbol: str,
+        side: str,
+        slippage_bps: float,
+    ) -> None:
+        """Record realised slippage in basis points for a fill."""
+
+        if not self._enabled:
+            return
+
+        self.slippage_bps.labels(
+            exchange=exchange,
+            symbol=symbol,
+            side=side,
+        ).observe(float(slippage_bps))
 
     def record_regression_metrics(self, model: str, **metrics: float) -> None:
         """Record regression evaluation metrics for a given model identifier."""
