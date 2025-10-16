@@ -98,7 +98,7 @@ pip install -e .
 3. Run from project root:
 ```bash
 cd /path/to/TradePulse
-python -m interfaces.cli analyze --csv sample.csv
+python -m interfaces.cli analyze --csv sample.csv --price-col close
 ```
 
 ### ImportError: cannot import name 'compute_phase_gpu'
@@ -134,7 +134,7 @@ FileNotFoundError: [Errno 2] No such file or directory: 'data.csv'
 
 1. Use absolute path:
 ```bash
-python -m interfaces.cli analyze --csv /full/path/to/data.csv
+python -m interfaces.cli analyze --csv /full/path/to/data.csv --price-col <column-name>
 ```
 
 2. Check file exists:

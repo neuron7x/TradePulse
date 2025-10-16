@@ -143,10 +143,10 @@ docker compose restart tradepulse
 
 ```bash
 # Analyze data
-docker compose exec tradepulse python -m interfaces.cli analyze --csv /data/sample.csv
+docker compose exec tradepulse python -m interfaces.cli analyze --csv /data/sample.csv --price-col close
 
 # Run backtest
-docker compose exec tradepulse python -m interfaces.cli backtest --csv /data/sample.csv
+docker compose exec tradepulse python -m interfaces.cli backtest --csv /data/sample.csv --price-col close
 
 # Run tests
 docker compose exec tradepulse pytest tests/
@@ -159,7 +159,7 @@ docker compose exec tradepulse /bin/bash
 
 ```bash
 # One-off command
-docker compose run --rm tradepulse python -m interfaces.cli analyze --csv /data/sample.csv
+docker compose run --rm tradepulse python -m interfaces.cli analyze --csv /data/sample.csv --price-col close
 
 # Interactive shell
 docker compose run --rm tradepulse /bin/bash

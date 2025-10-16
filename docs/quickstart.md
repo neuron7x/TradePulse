@@ -73,7 +73,7 @@ pytest tests/ -v
 
 ```bash
 # Analyze the included sample.csv
-python -m interfaces.cli analyze --csv sample.csv --window 200
+python -m interfaces.cli analyze --csv sample.csv --price-col close --window 200
 ```
 
 Expected output:
@@ -100,7 +100,7 @@ timestamp,close,volume
 
 Then analyze:
 ```bash
-python -m interfaces.cli analyze --csv your_data.csv
+python -m interfaces.cli analyze --csv your_data.csv --price-col close
 ```
 
 ---
@@ -110,7 +110,7 @@ python -m interfaces.cli analyze --csv your_data.csv
 ```bash
 # Simple backtest
 python -m interfaces.cli backtest \
-    --csv sample.csv \
+    --csv sample.csv --price-col close \
     --train-window 500 \
     --test-window 100 \
     --initial-capital 10000
@@ -322,10 +322,10 @@ Now that you're up and running, explore:
 
 ```bash
 # Analyze data
-python -m interfaces.cli analyze --csv data.csv
+python -m interfaces.cli analyze --csv data.csv --price-col <column-name>
 
 # Run backtest
-python -m interfaces.cli backtest --csv data.csv --train-window 500
+python -m interfaces.cli backtest --csv data.csv --price-col <column-name> --train-window 500
 
 # Run tests
 pytest tests/

@@ -20,10 +20,9 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import pandas as pd
-
 from backtest.engine import walk_forward
 from core.data.ingestion import DataIngestor
+from core.data.models import PriceTick as Ticker
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
@@ -186,6 +185,20 @@ def _make_data_ingestor(csv_path: str | None = None) -> DataIngestor:
     return DataIngestor(allowed_roots=allowed)
 
 
+def _collect_ticks(csv_path: str, *, price_col: str) -> list[Ticker]:
+    """Ingest ``csv_path`` and return ticks respecting ``price_col``."""
+
+    ingestor = _make_data_ingestor(csv_path)
+    ticks: list[Ticker] = []
+    ingestor.historical_csv(
+        csv_path,
+        ticks.append,
+        required_fields=("ts", price_col),
+        price_field=price_col,
+    )
+    return ticks
+
+
 def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     """Attach the active traceparent to ``payload`` when available."""
     traceparent = current_traceparent()
@@ -214,8 +227,8 @@ def cmd_analyze(args):
     """
     args = _apply_config(args)
 
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    ticks = _collect_ticks(args.csv, price_col=args.price_col)
+    prices = np.array([float(t.price) for t in ticks], dtype=float)
     from core.indicators.kuramoto import compute_phase_gpu
     phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
     R = kuramoto_order(phases[-args.window:])
@@ -257,8 +270,8 @@ def cmd_backtest(args):
         same implementation invoked by automation in ``docs/runbook_live_trading.md``.
     """
     args = _apply_config(args)
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    ticks = _collect_ticks(args.csv, price_col=args.price_col)
+    prices = np.array([float(t.price) for t in ticks], dtype=float)
     sig = signal_from_indicators(prices, window=args.window)
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
     out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}

@@ -68,13 +68,23 @@ class DataIngestor(DataIngestionService):
         path: str,
         on_tick: Callable[[Ticker], None],
         *,
-        required_fields: Iterable[str] = ("ts", "price"),
+        required_fields: Iterable[str] | None = None,
+        price_field: str = "price",
         symbol: str = "UNKNOWN",
         venue: str = "CSV",
         instrument_type: InstrumentType = InstrumentType.SPOT,
         market: Optional[str] = None,
     ) -> None:
-        missing: list[str] = []
+        if not price_field or not price_field.strip():
+            raise ValueError("price_field must be a non-empty string")
+        normalized_price_field = price_field.strip()
+        base_required = ("ts", normalized_price_field)
+        if required_fields is None:
+            resolved_required = base_required
+        else:
+            resolved_required = tuple(dict.fromkeys(required_fields))
+            if normalized_price_field not in resolved_required:
+                resolved_required = tuple(dict.fromkeys((*resolved_required, normalized_price_field)))
         resolved_path = self._path_guard.resolve(path, description="CSV data file")
 
         with pipeline_span(
@@ -88,13 +98,13 @@ class DataIngestor(DataIngestionService):
                 reader = csv.DictReader(f)
                 if reader.fieldnames is None:
                     raise ValueError("CSV file must include a header row")
-                missing = [field for field in required_fields if field not in reader.fieldnames]
+                missing = [field for field in resolved_required if field not in reader.fieldnames]
                 if missing:
                     raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
                 for row_number, row in enumerate(reader, start=2):
                     try:
                         ts_raw = float(row["ts"])
-                        price = row["price"]
+                        price = row[normalized_price_field]
                         volume = row.get("volume", 0.0) or 0.0
                         timestamp = normalize_timestamp(ts_raw, market=market)
                         tick = Ticker.create(

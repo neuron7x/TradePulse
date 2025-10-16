@@ -220,7 +220,7 @@ See the [Docker Quick Start Guide](docs/docker-quickstart.md) for detailed instr
 
 ```bash
 # Analyze CSV data
-python -m interfaces.cli analyze --csv sample.csv --window 200
+python -m interfaces.cli analyze --csv sample.csv --price-col close --window 200
 
 # Output includes Kuramoto order, entropy, Ricci curvature, Hurst exponent
 ```
@@ -229,7 +229,7 @@ python -m interfaces.cli analyze --csv sample.csv --window 200
 
 ```bash
 # Walk-forward backtest with custom strategy
-python -m interfaces.cli backtest --csv sample.csv \
+python -m interfaces.cli backtest --csv sample.csv --price-col close \
     --train-window 500 --test-window 100 \
     --initial-capital 10000
 ```

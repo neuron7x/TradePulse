@@ -25,6 +25,24 @@ def test_historical_csv_reads_rows(tmp_path: Path) -> None:
     assert records[1].volume == 6.0
 
 
+def test_historical_csv_respects_custom_price_field(tmp_path: Path) -> None:
+    csv_path = tmp_path / "custom_price.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["ts", "close", "volume"])
+        writer.writeheader()
+        writer.writerow({"ts": "1", "close": "200", "volume": "3"})
+    ingestor = DataIngestor()
+    records: list[Ticker] = []
+    ingestor.historical_csv(
+        str(csv_path),
+        records.append,
+        required_fields=("ts", "close", "volume"),
+        price_field="close",
+    )
+    assert len(records) == 1
+    assert records[0].price == 200.0
+
+
 def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
     ingestor = DataIngestor()
     with pytest.raises(RuntimeError):
