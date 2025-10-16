@@ -5,6 +5,7 @@ from .connectors import ExecutionConnector, OrderError
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .oms import OMSConfig, OrderManagementSystem
+from .order_lifecycle import OrderEvent, OrderLifecycle, OrderLifecycleStore
 from .live_loop import LiveExecutionLoop, LiveLoopConfig
 from .watchdog import Watchdog
 from .risk import (
@@ -33,6 +34,9 @@ __all__ = [
     "ComplianceViolation",
     "OMSConfig",
     "OrderManagementSystem",
+    "OrderEvent",
+    "OrderLifecycle",
+    "OrderLifecycleStore",
     "LiveLoopConfig",
     "LiveExecutionLoop",
     "Watchdog",
