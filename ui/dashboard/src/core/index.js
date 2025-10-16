@@ -146,6 +146,8 @@ export function exportReport(summary, options = {}) {
   throw new Error(`Unsupported export format: ${format}`);
 }
 
+export { renderDashboard, DASHBOARD_STYLES, formatCurrency, formatPercent } from './dashboard_ui.js';
+
 export class DashboardState {
   constructor({ strategies = [], backtests = [] } = {}) {
     this.configurator = createStrategyConfigurator(strategies);
