@@ -17,7 +17,7 @@ COPY requirements.lock ./
 RUN python -m venv "$VIRTUAL_ENV" \
     && "$VIRTUAL_ENV/bin/pip" install --upgrade pip setuptools wheel \
     && "$VIRTUAL_ENV/bin/pip" install --no-deps -r requirements.lock
-COPY pyproject.toml README.md VERSION ./
+COPY pyproject.toml README.md VERSION sample.csv ./
 COPY analytics ./analytics
 COPY application ./application
 COPY backtest ./backtest
