@@ -148,17 +148,27 @@ class ApiSecuritySettings(BaseSettings):
     """Runtime configuration for OAuth2, mutual TLS, and upstream WAF hand-off."""
 
     oauth2_issuer: HttpUrl = Field(
-        ...,
-        description="Expected issuer claim for incoming OAuth2 JWT bearer tokens.",
+        "https://auth.tradepulse.invalid/issuer",
+        description=(
+            "Expected issuer claim for incoming OAuth2 JWT bearer tokens."
+            " Defaults ensure unit tests can import the API without extra"
+            " environment configuration."
+        ),
     )
     oauth2_audience: str = Field(
-        ...,
+        "tradepulse-api",
         min_length=1,
-        description="Audience that must be present within validated JWT access tokens.",
+        description=(
+            "Audience that must be present within validated JWT access tokens."
+            " Override in production via environment variables."
+        ),
     )
     oauth2_jwks_uri: HttpUrl = Field(
-        ...,
-        description="JWKS endpoint used to discover signing keys for JWT validation.",
+        "https://auth.tradepulse.invalid/jwks",
+        description=(
+            "JWKS endpoint used to discover signing keys for JWT validation."
+            " Defaults are non-routable placeholders suitable for tests."
+        ),
     )
     mtls_trusted_ca_path: Path | None = Field(
         default=None,
