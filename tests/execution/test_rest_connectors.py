@@ -70,6 +70,10 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = request.url.path
+        if path.endswith("/time") and request.method == "GET":
+            return httpx.Response(200, json={"serverTime": int(1_700_000_000_000)})
+        if path.endswith("/exchangeInfo") and request.method == "GET":
+            return httpx.Response(200, json={"symbols": []})
         if path.endswith("/userDataStream") and request.method == "POST":
             assert request.headers["X-MBX-APIKEY"] == "key"
             return httpx.Response(200, json={"listenKey": "listen-key"})
@@ -195,12 +199,110 @@ def test_binance_rest_connector_signs_and_streams(monkeypatch: pytest.MonkeyPatc
     client.close()
 
 
+def test_binance_cancel_replace(monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path.endswith("/time") and request.method == "GET":
+            return httpx.Response(200, json={"serverTime": int(1_700_000_000_000)})
+        if path.endswith("/exchangeInfo") and request.method == "GET":
+            return httpx.Response(200, json={"symbols": []})
+        if path.endswith("/userDataStream") and request.method == "POST":
+            return httpx.Response(200, json={"listenKey": "listen-key"})
+        if path.endswith("/order") and request.method == "POST":
+            params = dict(request.url.params)
+            if "cancelOrderId" in params:
+                return httpx.Response(
+                    200,
+                    json={
+                        "newOrderResponse": {
+                            "symbol": "BTCUSDT",
+                            "orderId": "200",
+                            "status": "NEW",
+                            "side": "BUY",
+                            "type": "STOP_LOSS_LIMIT",
+                            "origQty": "0.5",
+                            "price": "20100",
+                            "stopPrice": "19900",
+                        }
+                    },
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "symbol": "BTCUSDT",
+                    "orderId": "100",
+                    "status": "NEW",
+                    "side": "BUY",
+                    "type": "LIMIT",
+                    "origQty": "0.5",
+                    "price": "20000",
+                },
+            )
+        if path.endswith("/order/cancelReplace") and request.method == "POST":
+            return httpx.Response(
+                200,
+                json={
+                    "newOrderResponse": {
+                        "symbol": "BTCUSDT",
+                        "orderId": "200",
+                        "status": "NEW",
+                        "side": "BUY",
+                        "type": "STOP_LOSS_LIMIT",
+                        "origQty": "0.5",
+                        "price": "20100",
+                        "stopPrice": "19900",
+                    }
+                },
+            )
+        if path.endswith("/order") and request.method == "DELETE":
+            return httpx.Response(200, json={"status": "CANCELED"})
+        raise AssertionError(f"Unhandled request {request.method} {path}")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(base_url="https://testnet.binance.vision", transport=transport)
+    connector = BinanceRESTConnector(sandbox=True, http_client=client, ws_factory=ws_factory)
+    monkeypatch.setattr("execution.adapters.binance.time.time", lambda: 1_700_000_000.0)
+
+    connector.connect({"api_key": "key", "api_secret": "secret"})
+
+    base_order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.5,
+        price=20000.0,
+        order_type=OrderType.LIMIT,
+    )
+    placed = connector.place_order(base_order, idempotency_key="orig")
+    assert placed.order_id == "100"
+
+    replacement = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.5,
+        price=20100.0,
+        stop_price=19900.0,
+        order_type=OrderType.STOP_LIMIT,
+    )
+    updated = connector.cancel_replace_order("100", replacement, idempotency_key="replace")
+    assert updated.order_id == "200"
+    assert updated.order_type is OrderType.STOP_LIMIT
+
+    connector.disconnect()
+    client.close()
+
+
 def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory) -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
         path = request.url.path
+        host = request.url.host
+        if host == "api.coinbase.com" and path.endswith("/time"):
+            return httpx.Response(200, json={"data": {"epoch": 1_700_000_000}})
         if path.endswith("/orders") and request.method == "POST":
             assert request.headers["CB-ACCESS-KEY"] == "key"
             assert request.headers["CB-ACCESS-PASSPHRASE"] == "pass"
@@ -330,6 +432,87 @@ def test_coinbase_rest_connector_handles_auth_and_stream(monkeypatch: pytest.Mon
 
     # Coinbase signing produces deterministic headers for each request
     assert any("CB-ACCESS-SIGN" in req.headers for req in requests)
+
+
+def test_coinbase_cancel_replace(monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        host = request.url.host
+        if host == "api.coinbase.com" and path.endswith("/time"):
+            return httpx.Response(200, json={"data": {"epoch": 1_700_000_000}})
+        if path.endswith("/orders") and request.method == "POST":
+            return httpx.Response(
+                200,
+                json={
+                    "order": {
+                        "order_id": "cb-1",
+                        "product_id": "BTC-USD",
+                        "side": "BUY",
+                        "order_type": "LIMIT_LIMIT_GTC",
+                        "size": "0.1",
+                        "filled_size": "0.0",
+                        "status": "OPEN",
+                        "limit_price": "21000.0",
+                    }
+                },
+            )
+        if path.endswith("/orders/edit") and request.method == "POST":
+            body = json.loads(request.content.decode())
+            assert body["order_configuration"]["stop_limit_stop_limit_gtc"]["stop_price"] == "20500.0000000000"
+            return httpx.Response(
+                200,
+                json={
+                    "order": {
+                        "order_id": "cb-2",
+                        "product_id": "BTC-USD",
+                        "side": "BUY",
+                        "order_type": "STOP_LIMIT_STOP_LIMIT_GTC",
+                        "size": "0.1",
+                        "filled_size": "0.0",
+                        "status": "OPEN",
+                        "limit_price": "20750.0",
+                        "stop_price": "20500.0",
+                    }
+                },
+            )
+        if path.endswith("/userDataStream"):
+            return httpx.Response(404)
+        return httpx.Response(404)
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(
+        base_url="https://api-public.sandbox.exchange.coinbase.com/api/v3/brokerage",
+        transport=transport,
+    )
+    connector = CoinbaseRESTConnector(sandbox=True, http_client=client, ws_factory=ws_factory)
+    monkeypatch.setattr("execution.adapters.coinbase.time.time", lambda: 1_700_000_000)
+
+    connector.connect({"api_key": "key", "api_secret": base64_secret("secret"), "passphrase": "pass"})
+
+    original = Order(
+        symbol="BTC-USD",
+        side=OrderSide.BUY,
+        quantity=0.1,
+        price=21000.0,
+        order_type=OrderType.LIMIT,
+    )
+    placed = connector.place_order(original, idempotency_key="orig")
+    assert placed.order_id == "cb-1"
+
+    replacement = Order(
+        symbol="BTC-USD",
+        side=OrderSide.BUY,
+        quantity=0.1,
+        price=20750.0,
+        stop_price=20500.0,
+        order_type=OrderType.STOP_LIMIT,
+    )
+    updated = connector.cancel_replace_order("cb-1", replacement, idempotency_key="replace")
+    assert updated.order_id == "cb-2"
+    assert updated.order_type is OrderType.STOP_LIMIT
+
+    connector.disconnect()
+    client.close()
 
 
 def base64_secret(secret: str) -> str:
