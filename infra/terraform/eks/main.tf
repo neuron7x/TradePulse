@@ -28,6 +28,13 @@ locals {
   }
 }
 
+check "subnet_cidr_alignment" {
+  assert {
+    condition     = length(var.private_subnet_cidrs) == length(var.public_subnet_cidrs)
+    error_message = "private_subnet_cidrs must align with the number of public_subnet_cidrs."
+  }
+}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }

@@ -25,8 +25,8 @@ variable "private_subnet_cidrs" {
   default     = ["10.40.0.0/19", "10.40.32.0/19", "10.40.64.0/19"]
 
   validation {
-    condition     = length(var.private_subnet_cidrs) >= 2 && length(var.private_subnet_cidrs) == length(var.public_subnet_cidrs)
-    error_message = "private_subnet_cidrs must define at least two subnets and align with the number of public_subnet_cidrs."
+    condition     = length(var.private_subnet_cidrs) >= 2
+    error_message = "private_subnet_cidrs must define at least two subnets."
   }
 }
 
