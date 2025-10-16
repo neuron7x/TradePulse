@@ -37,7 +37,7 @@ data "aws_iam_policy_document" "assume_role_policy" {
       variable = "aws:SourceArn"
 
       values = [
-        "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:fargateprofile/${var.cluster_name}/*",
+        "arn:${data.aws_partition.current.partition}:eks:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:fargateprofile/${var.cluster_name}/*",
       ]
     }
   }
