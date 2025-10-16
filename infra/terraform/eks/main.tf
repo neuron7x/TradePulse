@@ -7,9 +7,9 @@ locals {
   }
   tags = merge(local.base_tags, var.tags)
 
-  resolved_azs = length(var.availability_zones) > 0 ? var.availability_zones : slice(data.aws_availability_zones.available.names, 0, 3)
-  subnet_count = min(length(local.resolved_azs), length(var.private_subnet_cidrs), length(var.public_subnet_cidrs))
-  azs           = slice(local.resolved_azs, 0, local.subnet_count)
+  resolved_azs    = length(var.availability_zones) > 0 ? var.availability_zones : slice(data.aws_availability_zones.available.names, 0, 3)
+  subnet_count    = min(length(local.resolved_azs), length(var.private_subnet_cidrs), length(var.public_subnet_cidrs))
+  azs             = slice(local.resolved_azs, 0, local.subnet_count)
   private_subnets = slice(var.private_subnet_cidrs, 0, local.subnet_count)
   public_subnets  = slice(var.public_subnet_cidrs, 0, local.subnet_count)
 
@@ -57,12 +57,12 @@ module "vpc" {
 
   public_subnet_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/elb"                     = "1"
+    "kubernetes.io/role/elb"                    = "1"
   }
 
   private_subnet_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "shared"
-    "kubernetes.io/role/internal-elb"            = "1"
+    "kubernetes.io/role/internal-elb"           = "1"
   }
 
   tags = local.tags
@@ -80,8 +80,8 @@ module "eks" {
 
   enable_irsa = true
 
-  vpc_id                   = module.vpc.vpc_id
-  subnet_ids               = module.vpc.private_subnets
+  vpc_id                                = module.vpc.vpc_id
+  subnet_ids                            = module.vpc.private_subnets
   cluster_additional_security_group_ids = []
 
   tags = local.tags
@@ -94,9 +94,9 @@ module "eks" {
       instance_types = group.instance_types
       capacity_type  = group.capacity_type
       labels = merge({
-        "app.kubernetes.io/part-of" = "tradepulse"
+        "app.kubernetes.io/part-of"    = "tradepulse"
         "app.kubernetes.io/managed-by" = "terraform"
-        "environment"                   = var.environment
+        "environment"                  = var.environment
       }, group.labels)
       taints = [for taint in group.taints : {
         key    = taint.key
@@ -120,7 +120,7 @@ data "aws_eks_cluster_auth" "this" {
 }
 
 locals {
-  autoscaler_namespace = "kube-system"
+  autoscaler_namespace       = "kube-system"
   autoscaler_service_account = "cluster-autoscaler"
 }
 
@@ -134,8 +134,8 @@ resource "aws_iam_policy" "cluster_autoscaler" {
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = [
+        Effect = "Allow"
+        Action = [
           "autoscaling:DescribeAutoScalingGroups",
           "autoscaling:DescribeAutoScalingInstances",
           "autoscaling:DescribeLaunchConfigurations",
@@ -195,8 +195,8 @@ resource "helm_release" "cluster_autoscaler" {
     autoDiscovery = {
       clusterName = module.eks.cluster_name
     }
-    awsRegion      = var.aws_region
-    cloudProvider  = "aws"
+    awsRegion     = var.aws_region
+    cloudProvider = "aws"
     rbac = {
       serviceAccount = {
         create = true
@@ -207,10 +207,10 @@ resource "helm_release" "cluster_autoscaler" {
       }
     }
     extraArgs = {
-      balance-similar-node-groups = "true"
-      expander                     = "least-waste"
-      skip-nodes-with-local-storage = "false"
-      skip-nodes-with-system-pods   = "false"
+      "balance-similar-node-groups"   = "true"
+      expander                        = "least-waste"
+      "skip-nodes-with-local-storage" = "false"
+      "skip-nodes-with-system-pods"   = "false"
     }
   })]
 
