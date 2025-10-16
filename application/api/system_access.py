@@ -6,7 +6,9 @@ import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Awaitable, Callable, Mapping, Sequence
+
+import logging
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +16,13 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from application.system import TradePulseSystem
 from application.trading import order_to_dto
 from domain import Order, OrderSide, OrderType, Position
+from src.admin.remote_control import AdminIdentity
+
+from application.api.authorization import require_roles
+from application.api.security import verify_request_identity
+from application.settings import NotificationSettings
+from observability.logging import configure_logging
+from observability.notifications import NotificationDispatcher, EmailSender, SlackNotifier
 
 
 def _read_version() -> str:
@@ -32,6 +41,49 @@ def _coerce_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _build_notification_dispatcher(
+    settings: NotificationSettings | None,
+) -> NotificationDispatcher | None:
+    if settings is None:
+        return None
+
+    email_sender: EmailSender | None = None
+    if settings.email is not None:
+        email_password = (
+            settings.email.password.get_secret_value()
+            if settings.email.password is not None
+            else None
+        )
+        email_sender = EmailSender(
+            host=settings.email.host,
+            port=int(settings.email.port),
+            sender=settings.email.sender,
+            recipients=tuple(settings.email.recipients),
+            username=settings.email.username,
+            password=email_password,
+            use_tls=settings.email.use_tls,
+            use_ssl=settings.email.use_ssl,
+            timeout=float(settings.email.timeout_seconds),
+        )
+
+    slack_notifier: SlackNotifier | None = None
+    if settings.slack_webhook_url is not None:
+        slack_notifier = SlackNotifier(
+            str(settings.slack_webhook_url),
+            channel=settings.slack_channel,
+            username=settings.slack_username,
+            timeout=float(settings.slack_timeout_seconds),
+        )
+
+    if email_sender is None and slack_notifier is None:
+        return None
+
+    return NotificationDispatcher(
+        email_sender=email_sender,
+        slack_notifier=slack_notifier,
+    )
 
 
 class StatusResponse(BaseModel):
@@ -191,25 +243,72 @@ class _PositionNormaliser:
 class SystemAccess:
     """Coordinator exposing TradePulse system capabilities over REST."""
 
-    def __init__(self, system: TradePulseSystem) -> None:
+    def __init__(
+        self,
+        system: TradePulseSystem,
+        *,
+        logger: logging.Logger | None = None,
+        notifier: NotificationDispatcher | None = None,
+    ) -> None:
         self._system = system
         self._started_at = datetime.now(timezone.utc)
         self._lock = asyncio.Lock()
         self._normaliser = _PositionNormaliser()
         self._connected: set[str] = set()
         self._version = _read_version()
+        self._logger = logger or logging.getLogger("tradepulse.system_access")
+        self._notifier = notifier
 
     @property
     def version(self) -> str:
         return self._version
 
-    def status(self) -> StatusResponse:
+    def _log(
+        self,
+        level: str,
+        message: str,
+        *,
+        identity: AdminIdentity | None = None,
+        **fields: Any,
+    ) -> None:
+        logger_method = getattr(self._logger, level, None)
+        if logger_method is None:  # pragma: no cover - defensive guard for invalid level
+            raise AttributeError(f"Unsupported log level requested: {level}")
+        payload = {"event": message, **fields}
+        if identity is not None:
+            payload.setdefault("subject", identity.subject)
+        logger_method(message, extra=payload)
+
+    async def _notify_order_event(
+        self,
+        event: str,
+        *,
+        subject: str,
+        message: str,
+        metadata: Mapping[str, Any],
+    ) -> None:
+        if self._notifier is None:
+            return
+        await self._notifier.dispatch(event, subject=subject, message=message, metadata=metadata)
+
+    @staticmethod
+    def _actor(identity: AdminIdentity | None) -> str:
+        return identity.subject if identity is not None else "anonymous"
+
+    def status(self, identity: AdminIdentity | None = None) -> StatusResponse:
         uptime = max(
             0.0,
             (datetime.now(timezone.utc) - self._started_at).total_seconds(),
         )
         kill_switch = self._system.risk_manager.kill_switch.is_triggered()
         status_value = "halted" if kill_switch else "running"
+        self._log(
+            "debug",
+            "system.status",
+            identity=identity,
+            uptime_seconds=uptime,
+            kill_switch_engaged=kill_switch,
+        )
         return StatusResponse(status=status_value, uptime_seconds=uptime, version=self._version)
 
     def _default_venue(self) -> str:
@@ -218,23 +317,44 @@ class SystemAccess:
             raise RuntimeError("TradePulseSystem has no configured execution venues")
         return names[0]
 
-    def _ensure_connected(self, venue: str) -> None:
+    def _ensure_connected(self, venue: str, *, identity: AdminIdentity | None = None) -> None:
         key = venue.lower()
         if key in self._connected:
+            self._log("debug", "system.connector.cached", identity=identity, venue=venue)
             return
         connector = self._system.get_connector(venue)
         credentials = self._system.connector_credentials(venue)
-        connector.connect(credentials)
+        self._log("debug", "system.connector.connect", identity=identity, venue=venue)
+        try:
+            connector.connect(credentials)
+        except Exception as exc:  # pragma: no cover - connector implementations vary
+            self._log(
+                "error",
+                "system.connector.connect_failed",
+                identity=identity,
+                venue=venue,
+                error=str(exc),
+            )
+            raise
         self._connected.add(key)
+        self._log("info", "system.connector.connected", identity=identity, venue=venue)
 
-    async def list_positions(self) -> PositionsResponse:
+    async def list_positions(self, *, identity: AdminIdentity | None = None) -> PositionsResponse:
+        self._log("info", "system.positions.fetch", identity=identity)
         snapshots: list[PositionSnapshot] = []
         for venue in self._system.connector_names:
             connector = self._system.get_connector(venue)
-            self._ensure_connected(venue)
+            self._ensure_connected(venue, identity=identity)
             try:
                 raw_positions = connector.get_positions()
             except Exception as exc:  # pragma: no cover - defensive
+                self._log(
+                    "error",
+                    "system.positions.error",
+                    identity=identity,
+                    venue=venue,
+                    error=str(exc),
+                )
                 raise HTTPException(
                     status.HTTP_502_BAD_GATEWAY,
                     detail=f"Failed to fetch positions from venue '{venue}': {exc}",
@@ -243,20 +363,56 @@ class SystemAccess:
                 try:
                     snapshot = self._normaliser.normalise(payload)
                 except Exception as exc:  # pragma: no cover - defensive
+                    self._log(
+                        "error",
+                        "system.positions.normalize_failed",
+                        identity=identity,
+                        venue=venue,
+                        error=str(exc),
+                    )
                     raise HTTPException(
                         status.HTTP_500_INTERNAL_SERVER_ERROR,
                         detail=f"Failed to normalise position payload from '{venue}': {exc}",
                     ) from exc
                 snapshots.append(snapshot)
+        self._log(
+            "debug",
+            "system.positions.fetched",
+            identity=identity,
+            venues=list(self._system.connector_names),
+            position_count=len(snapshots),
+        )
         return PositionsResponse(positions=snapshots)
 
-    async def place_order(self, request: OrderRequest) -> OrderResponse:
+    async def place_order(
+        self,
+        request: OrderRequest,
+        identity: AdminIdentity | None = None,
+    ) -> OrderResponse:
         venue = request.venue or self._default_venue()
         connector = self._system.get_connector(venue)
+        actor = self._actor(identity)
+        self._log(
+            "info",
+            "system.orders.submit",
+            identity=identity,
+            venue=venue,
+            symbol=request.symbol,
+            side=request.side.value,
+            quantity=request.quantity,
+            order_type=request.order_type.value,
+        )
         async with self._lock:
-            self._ensure_connected(venue)
+            self._ensure_connected(venue, identity=identity)
             risk_price = request.price or request.reference_price
             if risk_price is None or risk_price <= 0:
+                self._log(
+                    "warning",
+                    "system.orders.invalid_reference_price",
+                    identity=identity,
+                    venue=venue,
+                    symbol=request.symbol,
+                )
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail="reference price must be positive",
@@ -269,6 +425,14 @@ class SystemAccess:
                     risk_price,
                 )
             except Exception as exc:
+                self._log(
+                    "warning",
+                    "system.orders.risk_rejected",
+                    identity=identity,
+                    venue=venue,
+                    symbol=request.symbol,
+                    error=str(exc),
+                )
                 raise HTTPException(
                     status.HTTP_422_UNPROCESSABLE_ENTITY,
                     detail=str(exc),
@@ -286,6 +450,14 @@ class SystemAccess:
             try:
                 placed = connector.place_order(order, idempotency_key=request.client_order_id)
             except Exception as exc:
+                self._log(
+                    "error",
+                    "system.orders.connector_error",
+                    identity=identity,
+                    venue=venue,
+                    symbol=request.symbol,
+                    error=str(exc),
+                )
                 raise HTTPException(
                     status.HTTP_502_BAD_GATEWAY,
                     detail=f"Connector rejected order submission: {exc}",
@@ -306,12 +478,45 @@ class SystemAccess:
                         pass
 
             dto = order_to_dto(placed)
-            return OrderResponse(
+            response = OrderResponse(
                 order_id=dto.get("order_id"),
                 status=str(dto.get("status", placed.status.value)),
                 filled_quantity=float(dto.get("filled_quantity", placed.filled_quantity)),
                 average_price=_coerce_float(dto.get("average_price")),
             )
+
+        metadata = {
+            "actor": actor,
+            "venue": venue,
+            "symbol": request.symbol,
+            "side": request.side.value,
+            "quantity": request.quantity,
+            "order_type": request.order_type.value,
+            "status": response.status,
+            "order_id": response.order_id,
+            "filled_quantity": response.filled_quantity,
+            "average_price": response.average_price,
+        }
+        self._log(
+            "info",
+            "system.orders.accepted",
+            identity=identity,
+            venue=venue,
+            symbol=request.symbol,
+            status=response.status,
+            order_id=response.order_id,
+            filled_quantity=response.filled_quantity,
+        )
+        await self._notify_order_event(
+            "order.submitted",
+            subject=f"Order {response.status.upper()} - {request.symbol}",
+            message=(
+                f"{actor} submitted a {request.side.value} order for {request.quantity} "
+                f"{request.symbol} on {venue}. Status: {response.status}."
+            ),
+            metadata=metadata,
+        )
+        return response
 
 
 def _get_access(request: Request) -> SystemAccess:
@@ -321,22 +526,47 @@ def _get_access(request: Request) -> SystemAccess:
     return access
 
 
-def create_system_app(system: TradePulseSystem) -> FastAPI:
+def create_system_app(
+    system: TradePulseSystem,
+    *,
+    identity_dependency: Callable[..., Awaitable[AdminIdentity] | AdminIdentity] | None = None,
+    reader_roles: Sequence[str] = ("system:read",),
+    trader_roles: Sequence[str] = ("system:trade",),
+    notification_dispatcher: NotificationDispatcher | None = None,
+    notification_settings: NotificationSettings | None = None,
+    log_sink: Callable[[dict[str, Any]], None] | None = None,
+    log_level: int | str = logging.INFO,
+) -> FastAPI:
     """Instantiate a FastAPI app exposing TradePulse system endpoints."""
 
-    access = SystemAccess(system)
+    if log_sink is not None or not logging.getLogger().handlers:
+        configure_logging(level=log_level, sink=log_sink)
+
+    base_dependency = identity_dependency or verify_request_identity()
+    reader_dependency = require_roles(reader_roles, identity_dependency=base_dependency)
+    trader_dependency = require_roles(trader_roles, identity_dependency=base_dependency)
+
+    notifier = notification_dispatcher or _build_notification_dispatcher(notification_settings)
+    logger = logging.getLogger("tradepulse.system_access")
+    access = SystemAccess(system, logger=logger, notifier=notifier)
+
     app = FastAPI(title="TradePulse System API", version=access.version)
     app.state.system_access = access
+    app.state.notification_dispatcher = notifier
 
     @app.get("/api/v1/status", response_model=StatusResponse, tags=["system"])
-    async def read_status(access: SystemAccess = Depends(_get_access)) -> StatusResponse:
-        return access.status()
+    async def read_status(
+        identity: AdminIdentity = Depends(reader_dependency),
+        access: SystemAccess = Depends(_get_access),
+    ) -> StatusResponse:
+        return access.status(identity)
 
     @app.get("/api/v1/positions", response_model=PositionsResponse, tags=["system"])
     async def read_positions(
+        identity: AdminIdentity = Depends(reader_dependency),
         access: SystemAccess = Depends(_get_access),
     ) -> PositionsResponse:
-        return await access.list_positions()
+        return await access.list_positions(identity=identity)
 
     @app.post(
         "/api/v1/orders",
@@ -346,9 +576,10 @@ def create_system_app(system: TradePulseSystem) -> FastAPI:
     )
     async def submit_order(
         payload: OrderRequest,
+        identity: AdminIdentity = Depends(trader_dependency),
         access: SystemAccess = Depends(_get_access),
     ) -> OrderResponse:
-        return await access.place_order(payload)
+        return await access.place_order(payload, identity=identity)
 
     return app
 

@@ -7,7 +7,7 @@ import base64
 import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Awaitable, Callable
+from typing import Any, Awaitable, Callable, Mapping
 
 import httpx
 import jwt
@@ -175,6 +175,48 @@ def _require_subject(claims: dict[str, Any]) -> str:
     return subject
 
 
+def _normalise_role(value: str) -> str | None:
+    candidate = value.strip().lower()
+    return candidate or None
+
+
+def _extract_roles(claims: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return normalised roles discovered within *claims*."""
+
+    roles: set[str] = set()
+
+    def _ingest(candidate: Any) -> None:
+        if isinstance(candidate, str):
+            for part in candidate.replace(",", " ").split():
+                normalised = _normalise_role(part)
+                if normalised:
+                    roles.add(normalised)
+            return
+        if isinstance(candidate, (list, tuple, set, frozenset)):
+            for entry in candidate:
+                _ingest(entry)
+            return
+        if isinstance(candidate, Mapping):
+            for entry in candidate.values():
+                _ingest(entry)
+
+    for key in ("roles", "permissions", "scope"):
+        raw = claims.get(key)
+        if raw:
+            _ingest(raw)
+
+    realm_access = claims.get("realm_access")
+    if isinstance(realm_access, Mapping):
+        _ingest(realm_access.get("roles"))
+
+    resource_access = claims.get("resource_access")
+    if isinstance(resource_access, Mapping):
+        for entry in resource_access.values():
+            _ingest(entry)
+
+    return tuple(sorted(roles))
+
+
 def _default_settings_loader() -> ApiSecuritySettings:
     return ApiSecuritySettings()
 
@@ -255,7 +297,8 @@ def verify_request_identity(
 
         _store_identity_context(request, claims=claims, certificate=certificate)
         subject = _require_subject(claims)
-        return AdminIdentity(subject=subject)
+        roles = _extract_roles(claims)
+        return AdminIdentity(subject=subject, roles=roles)
 
     return dependency
 

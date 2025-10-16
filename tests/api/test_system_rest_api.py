@@ -1,5 +1,11 @@
 from __future__ import annotations
 
+from typing import Any, Awaitable, Callable, Mapping
+
+import pytest
+from fastapi.testclient import TestClient
+
+from application.api.system_access import create_system_app
 from typing import Any
 
 import pytest
@@ -9,6 +15,7 @@ from application.api.system_access import create_system_app
 from application.system import ExchangeAdapterConfig, TradePulseSystem, TradePulseSystemConfig
 from domain import Order
 from execution.connectors import SimulatedExchangeConnector
+from src.admin.remote_control import AdminIdentity
 
 
 class _EagerFillConnector(SimulatedExchangeConnector):
@@ -46,8 +53,28 @@ def system() -> TradePulseSystem:
 
 
 @pytest.fixture()
-def client(system: TradePulseSystem) -> TestClient:
-    app = create_system_app(system)
+def authorized_identity() -> AdminIdentity:
+    return AdminIdentity(subject="integration-test", roles=("system:read", "system:trade"))
+
+
+@pytest.fixture()
+def identity_dependency(authorized_identity: AdminIdentity):
+    async def _dependency() -> AdminIdentity:
+        return authorized_identity
+
+    return _dependency
+
+
+@pytest.fixture()
+def client(
+    system: TradePulseSystem, identity_dependency: Callable[[], Awaitable[AdminIdentity]]
+) -> TestClient:
+    app = create_system_app(
+        system,
+        identity_dependency=identity_dependency,
+        reader_roles=("system:read",),
+        trader_roles=("system:trade",),
+    )
     return TestClient(app)
 
 
@@ -152,4 +179,81 @@ def test_market_order_uses_reference_price_for_risk_validation(
 
     assert response.status_code == 201
     assert captured["price"] == 1900.0
+
+
+def test_trader_role_is_required(system: TradePulseSystem) -> None:
+    async def _limited_identity() -> AdminIdentity:
+        return AdminIdentity(subject="integration-test", roles=("system:read",))
+
+    app = create_system_app(
+        system,
+        identity_dependency=_limited_identity,
+        reader_roles=("system:read",),
+        trader_roles=("system:trade",),
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "BTCUSD",
+            "side": "buy",
+            "quantity": 1.0,
+            "reference_price": 42000.0,
+        },
+    )
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert "missing_roles" in payload["detail"]
+    assert payload["detail"]["missing_roles"] == ["system:trade"]
+
+
+def test_order_submission_emits_notification(
+    system: TradePulseSystem,
+    identity_dependency: Callable[[], Awaitable[AdminIdentity]],
+) -> None:
+    events: list[dict[str, Any]] = []
+
+    class _Recorder:
+        async def dispatch(
+            self,
+            event: str,
+            *,
+            subject: str,
+            message: str,
+            metadata: Mapping[str, Any] | None = None,
+        ) -> None:
+            events.append(
+                {
+                    "event": event,
+                    "subject": subject,
+                    "message": message,
+                    "metadata": dict(metadata or {}),
+                }
+            )
+
+    recorder = _Recorder()
+    app = create_system_app(
+        system,
+        identity_dependency=identity_dependency,
+        notification_dispatcher=recorder,
+    )
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "ETHUSD",
+            "side": "buy",
+            "order_type": "limit",
+            "quantity": 1.0,
+            "price": 1800.0,
+        },
+    )
+
+    assert response.status_code == 201
+    assert events, "expected notification to be dispatched"
+    assert events[0]["event"] == "order.submitted"
+    assert events[0]["metadata"]["symbol"] == "ETHUSD"
 
