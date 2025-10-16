@@ -1,7 +1,9 @@
 # Core analytics stack
-numpy>=2.3.3
+# Pin <2.3 to ensure pre-built wheels remain available on Python 3.10 in CI runners.
+numpy>=2.2.6,<2.3
 scipy>=1.16.2
-pandas>=2.3.3
+# 2.3.2 is the latest release shipping wheels for Python 3.10 runners.
+pandas>=2.3.2,<2.4
 networkx>=3.5
 
 # Data validation
