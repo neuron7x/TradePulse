@@ -1,29 +1,46 @@
 # SPDX-License-Identifier: MIT
-filebeat.inputs:
-  - type: filestream
-    id: docker-container-logs
-    enabled: true
-    paths:
-      - /var/lib/docker/containers/*/*.log
-    parsers:
-      - ndjson:
-          target: ""
-          overwrite_keys: true
-          add_error_key: true
-          message_key: log
-    processors:
-      - add_docker_metadata: ~
-      - decode_json_fields:
-          when:
-            has_fields: ["message"]
-          fields: ["message"]
-          target: ""
-          overwrite_keys: true
-          process_array: false
-          max_depth: 1
-      - drop_fields:
-          fields: ["log", "stream", "time"]
-          ignore_missing: true
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      templates:
+        - condition:
+            equals:
+              docker.labels.co.elastic.logs/enabled: "true"
+          config:
+            - type: filestream
+              id: tradepulse-container-logs
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              parsers:
+                - ndjson:
+                    target: ""
+                    message_key: log
+                    overwrite_keys: true
+                    add_error_key: true
+              processors:
+                - decode_json_fields:
+                    when:
+                      has_fields: ["message"]
+                    fields: ["message"]
+                    target: ""
+                    overwrite_keys: true
+                    process_array: false
+                    max_depth: 1
+                - drop_fields:
+                    fields: ["log", "stream", "time"]
+                    ignore_missing: true
+              fields:
+                service.name: ${data.docker.container.labels.co.elastic.logs/module:tradepulse}
+                environment: local
+              fields_under_root: true
+              ignore_older: 72h
+
+processors:
+  - add_docker_metadata: ~
+  - add_host_metadata: ~
+  - add_process_metadata: ~
+  - drop_fields:
+      fields: ["input", "agent"]
 
 output.logstash:
   hosts: ["logstash:5044"]
