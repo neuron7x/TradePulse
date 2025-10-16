@@ -4,6 +4,10 @@ import {
   compareBacktests,
   exportReport,
   DashboardState,
+  renderDashboard,
+  DASHBOARD_STYLES,
+  formatCurrency,
+  formatPercent,
 } from '../src/core/index.js';
 import {
   TRACEPARENT_HEADER,
@@ -93,3 +97,48 @@ const headers = ensureTraceHeaders({}, generatedTraceparent).headers;
 assert.strictEqual(headers[TRACEPARENT_HEADER], generatedTraceparent);
 assert.strictEqual(extractTraceparent(headers), generatedTraceparent);
 console.log('telemetry tests passed');
+
+const dashboardView = renderDashboard({
+  title: 'Execution Control Center',
+  subtitle: 'Live oversight across strategies.',
+  tags: ['derivatives', 'equities'],
+  currency: 'USD',
+  metrics: [
+    { label: 'Net Exposure', value: 1250000, kind: 'currency', change: 0.012 },
+    { label: 'Open Positions', value: 12 },
+  ],
+  pnlSeries: [
+    { label: 'Today', value: 18250, change: 0.024, target: 25000 },
+    { label: 'MTD', value: -12250, change: -0.018, target: 30000 },
+  ],
+  statusItems: [
+    { label: 'Exchange Connectivity', state: 'Operational', level: 'ok', description: 'All exchanges responding within latency budget.' },
+    { label: 'Risk Engine', state: 'Degraded', level: 'warning', description: 'Position limits approaching 80% threshold.' },
+  ],
+});
+
+assert.ok(dashboardView.html.includes('PnL Overview'), 'rendered dashboard should include PnL panel heading');
+assert.ok(dashboardView.html.includes('System Status'), 'rendered dashboard should include status panel heading');
+assert.ok(dashboardView.html.includes('Operational'), 'status label should be present');
+assert.ok(dashboardView.html.includes('−1.80%'), 'negative change should use minus symbol and percentage');
+assert.ok(dashboardView.styles.includes('.tp-dashboard'), 'styles should expose dashboard root selector');
+assert.strictEqual(dashboardView.styles, DASHBOARD_STYLES, 'render should expose shared stylesheet reference');
+
+assert.strictEqual(formatCurrency(10500), '$10,500');
+assert.strictEqual(formatPercent(0.256), '25.6%');
+assert.strictEqual(formatPercent(0.025), '2.50%');
+console.log('dashboard ui rendering tests passed');
+
+const sanitizedView = renderDashboard({
+  statusItems: [
+    {
+      label: '<b>Automation</b>',
+      state: '<script>alert(1)</script>',
+      level: 'critical',
+      description: 'Check <i>agent</i> response.',
+    },
+  ],
+});
+
+assert.ok(!sanitizedView.html.includes('<script>'), 'dashboard should escape script tags');
+assert.ok(sanitizedView.html.includes('&lt;b&gt;Automation&lt;/b&gt;'), 'escaped HTML should remain visible as text');
