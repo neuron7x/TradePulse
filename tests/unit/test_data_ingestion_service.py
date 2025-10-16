@@ -13,6 +13,7 @@ from src.data.ingestion_service import (
     CacheEntrySnapshot,
     DataIngestionCacheService,
     DataIntegrityError,
+    TickFrameIntegrityValidator,
 )
 
 
@@ -43,10 +44,13 @@ def test_cache_ticks_records_metadata() -> None:
     )
     service = DataIngestionCacheService(clock=clock)
 
-    cached = service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    cached, report = service.cache_ticks(
+        ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
 
     assert isinstance(cached, pd.DataFrame)
     assert list(cached.columns) == ["price", "volume"]
+    assert report.clean.equals(cached)
     metadata = service.metadata_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
     assert isinstance(metadata, CacheEntrySnapshot)
     assert metadata.rows == 3
@@ -85,20 +89,29 @@ def test_cache_frame_rejects_nan_values() -> None:
         )
 
 
-def test_cache_frame_rejects_duplicate_timestamps() -> None:
+def test_cache_frame_quarantines_duplicate_timestamps() -> None:
     ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
     index = pd.DatetimeIndex([ts, ts])
     frame = pd.DataFrame({"price": [100.0, 101.0], "volume": [1.0, 2.0]}, index=index)
     service = DataIngestionCacheService()
 
-    with pytest.raises(DataIntegrityError, match="duplicate"):
-        service.cache_frame(
-            frame,
-            layer="raw",
-            symbol="BTCUSD",
-            venue="BINANCE",
-            timeframe="1min",
-        )
+    cached, report = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.shape[0] == 1
+    assert cached.index[0] == ts
+    assert report.duplicates.shape[0] == 2
+    assert report.quarantined.equals(report.duplicates)
+    stored = service.quality_report_for(
+        layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
+    assert stored is not None
+    assert stored.duplicates.equals(report.duplicates)
 
 
 def test_cache_frame_rejects_frequency_mismatch() -> None:
@@ -167,6 +180,33 @@ def test_ingest_csv_populates_cache(tmp_path: Path) -> None:
     assert metadata is not None
     assert metadata.rows == 2
     assert metadata.start == frame.index.min().to_pydatetime()
+
+
+def test_cache_frame_quarantines_price_spikes() -> None:
+    index = pd.date_range("2024-01-01", periods=5, freq="1min", tz=timezone.utc)
+    frame = pd.DataFrame(
+        {"price": [100.0, 101.0, 102.0, 1000.0, 103.0], "volume": [1.0] * 5}, index=index
+    )
+    validator = TickFrameIntegrityValidator(anomaly_threshold=2.5, anomaly_window=3)
+    service = DataIngestionCacheService(integrity_validator=validator)
+
+    cached, report = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.shape[0] == 4
+    assert index[3] not in cached.index
+    assert report.spikes.shape[0] == 1
+    assert report.spikes.index[0] == index[3]
+    stored = service.quality_report_for(
+        layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
+    assert stored is not None
+    assert stored.spikes.equals(report.spikes)
 
 
 def test_cache_snapshot_returns_sorted_entries() -> None:
