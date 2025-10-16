@@ -121,7 +121,12 @@ class BinanceExecutionConnector(AuthenticatedRESTExecutionConnector):
         client_id = idempotency_key or self._generate_client_id()
         params = self._build_order_payload(order, client_id)
         try:
-            response = self._request("POST", "/api/v3/order", params=params)
+            response = self._request(
+                "POST",
+                "/api/v3/order",
+                params=params,
+                idempotency_key=client_id,
+            )
         except httpx.HTTPStatusError as exc:  # pragma: no cover - httpx raises with status context
             raise OrderError(str(exc)) from exc
         data = response.json()
@@ -202,6 +207,7 @@ class BinanceExecutionConnector(AuthenticatedRESTExecutionConnector):
             "/api/v3/userDataStream",
             signed=False,
             headers=self._api_headers(),
+            idempotent=True,
         )
         payload = response.json()
         listen_key = payload.get("listenKey")
