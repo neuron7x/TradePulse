@@ -9,6 +9,7 @@ import pytest
 
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.quality_control import QualityReport
 from src.data.ingestion_service import (
     CacheEntrySnapshot,
     DataIngestionCacheService,
@@ -85,20 +86,26 @@ def test_cache_frame_rejects_nan_values() -> None:
         )
 
 
-def test_cache_frame_rejects_duplicate_timestamps() -> None:
+def test_cache_frame_quarantines_duplicate_timestamps() -> None:
     ts = datetime(2024, 1, 1, tzinfo=timezone.utc)
     index = pd.DatetimeIndex([ts, ts])
     frame = pd.DataFrame({"price": [100.0, 101.0], "volume": [1.0, 2.0]}, index=index)
     service = DataIngestionCacheService()
 
-    with pytest.raises(DataIntegrityError, match="duplicate"):
-        service.cache_frame(
-            frame,
-            layer="raw",
-            symbol="BTCUSD",
-            venue="BINANCE",
-            timeframe="1min",
-        )
+    cached = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.shape[0] == 1
+    report = service.quality_report_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    assert isinstance(report, QualityReport)
+    assert report.duplicates.shape[0] == 2
+    assert report.quarantined.shape[0] == 2
+    assert report.clean.index[0] == ts
 
 
 def test_cache_frame_rejects_frequency_mismatch() -> None:
@@ -139,6 +146,29 @@ def test_get_cached_frame_supports_ranges() -> None:
     assert subset.shape[0] == 3
     assert subset.index[0] == ticks[2].timestamp
     assert subset.index[-1] == ticks[4].timestamp
+
+
+def test_cache_frame_quarantines_price_spikes() -> None:
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    index = pd.DatetimeIndex([base.replace(minute=i) for i in range(25)])
+    prices = [100.0 + i for i in range(25)]
+    prices[21] = 5000.0
+    frame = pd.DataFrame({"price": prices, "volume": [1.0] * 25}, index=index)
+    service = DataIngestionCacheService()
+
+    cached = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.shape[0] == 24
+    report = service.quality_report_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    assert report is not None
+    assert report.spikes.shape[0] == 1
+    assert float(report.spikes.iloc[0]["price"]) == 5000.0
 
 
 def test_ingest_csv_populates_cache(tmp_path: Path) -> None:

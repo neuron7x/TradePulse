@@ -2,12 +2,33 @@
 from __future__ import annotations
 
 import csv
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 
 import core.data.ingestion as ingestion
 from core.data.ingestion import BinanceStreamHandle, DataIngestor, Ticker
+
+
+class DummyMetrics:
+    def __init__(self) -> None:
+        self.measure_calls: list[tuple[str, str]] = []
+        self.contexts: list[dict[str, object]] = []
+        self.records: list[tuple[str, str, int]] = []
+
+    @contextmanager
+    def measure_data_ingestion(self, source: str, symbol: str):
+        ctx: dict[str, object] = {}
+        self.measure_calls.append((source, symbol))
+        self.contexts.append(ctx)
+        try:
+            yield ctx
+        finally:
+            pass
+
+    def record_tick_processed(self, source: str, symbol: str, count: int = 1) -> None:
+        self.records.append((source, symbol, count))
 
 
 def test_historical_csv_reads_rows(tmp_path: Path) -> None:
@@ -23,6 +44,27 @@ def test_historical_csv_reads_rows(tmp_path: Path) -> None:
     assert len(records) == 2
     assert records[0].price == 100.0
     assert records[1].volume == 6.0
+
+
+def test_historical_csv_records_metrics(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    csv_path = tmp_path / "history.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
+        writer.writeheader()
+        writer.writerow({"ts": "1", "price": "100", "volume": "5"})
+        writer.writerow({"ts": "2", "price": "101", "volume": "6"})
+
+    dummy = DummyMetrics()
+    monkeypatch.setattr(ingestion, "get_metrics_collector", lambda: dummy)
+    ingestor = DataIngestor()
+    records: list[Ticker] = []
+    ingestor.historical_csv(str(csv_path), records.append, symbol="BTCUSDT", venue="CSV")
+
+    assert dummy.measure_calls == [("csv", "BTCUSDT")]
+    assert dummy.contexts[0]["path"] == str(csv_path)
+    assert dummy.contexts[0]["rows"] == 2
+    assert len(dummy.records) == 2
+    assert all(source == "csv" and symbol == "BTCUSDT" for source, symbol, _ in dummy.records)
 
 
 def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None:

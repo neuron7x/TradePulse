@@ -17,19 +17,25 @@ import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from backtest.engine import walk_forward
 from core.data.ingestion import DataIngestor
+from core.data.quality_control import QualityReport, validate_and_quarantine
+from core.data.validation import TimeSeriesValidationConfig, ValueColumnConfig
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
+from core.utils.metrics import get_metrics_collector
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
+
+if TYPE_CHECKING:
+    from core.data.models import PriceTick as Ticker
 
 
 def signal_from_indicators(
@@ -196,6 +202,79 @@ def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
+def _collect_ticks(
+    ingestor: DataIngestor,
+    csv_path: str,
+    *,
+    symbol: str,
+    venue: str,
+    metrics_source: str,
+) -> list["Ticker"]:
+    from core.data.models import PriceTick as Ticker  # Imported lazily to avoid cycles.
+
+    records: list["Ticker"] = []
+    metrics = get_metrics_collector()
+
+    with metrics.measure_data_ingestion(metrics_source, symbol) as ctx:
+        ctx["path"] = csv_path
+        ctx["venue"] = venue
+
+        def _append(tick: Ticker) -> None:
+            records.append(tick)
+            metrics.record_tick_processed(metrics_source, symbol)
+
+        ingestor.historical_csv(
+            csv_path,
+            _append,
+            symbol=symbol,
+            venue=venue,
+        )
+        ctx["rows"] = len(records)
+        if not records:
+            ctx["status"] = "empty"
+
+    return records
+
+
+def _ticks_to_frame(records: list["Ticker"], price_column: str) -> pd.DataFrame:
+    if not records:
+        return pd.DataFrame(columns=[price_column, "volume"]).set_index(pd.DatetimeIndex([], name="timestamp"))
+    index = pd.DatetimeIndex([tick.timestamp for tick in records], name="timestamp")
+    data = {
+        price_column: [float(tick.price) for tick in records],
+        "volume": [float(tick.volume) for tick in records],
+    }
+    return pd.DataFrame(data, index=index)
+
+
+def _validate_frame(frame: pd.DataFrame, price_column: str) -> tuple[pd.DataFrame, QualityReport]:
+    prepared = frame.reset_index().rename(columns={frame.index.name or "index": "timestamp"})
+    config = TimeSeriesValidationConfig(
+        timestamp_column="timestamp",
+        value_columns=[
+            ValueColumnConfig(name=price_column, dtype=str(prepared[price_column].dtype), nullable=False),
+            ValueColumnConfig(name="volume", dtype=str(prepared["volume"].dtype), nullable=False),
+        ],
+        allow_extra_columns=True,
+    )
+    report = validate_and_quarantine(prepared, config, price_column=price_column)
+    clean = report.clean.set_index("timestamp").sort_index()
+    return clean, report
+
+
+def _quality_summary(report: QualityReport) -> dict[str, Any]:
+    summary = {
+        "clean_rows": int(report.clean.shape[0]),
+        "quarantined_rows": int(report.quarantined.shape[0]),
+        "duplicate_rows": int(report.duplicates.shape[0]),
+        "spike_rows": int(report.spikes.shape[0]),
+    }
+    if not report.quarantined.empty:
+        preview = json.loads(report.quarantined.head(5).to_json(orient="records", date_format="iso"))
+        summary["quarantined_preview"] = preview
+    return summary
+
+
 def cmd_analyze(args):
     """Compute indicator diagnostics for a CSV price series.
 
@@ -214,8 +293,15 @@ def cmd_analyze(args):
     """
     args = _apply_config(args)
 
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    csv_path = args.csv
+    symbol = Path(csv_path).stem.upper()
+    ingestor = _make_data_ingestor(csv_path)
+    records = _collect_ticks(ingestor, csv_path, symbol=symbol, venue="CSV", metrics_source="cli_csv")
+    if not records:
+        raise ValueError(f"No ticks were ingested from {csv_path}")
+    frame = _ticks_to_frame(records, args.price_col)
+    clean_frame, quality = _validate_frame(frame, args.price_col)
+    prices = clean_frame[args.price_col].to_numpy()
     from core.indicators.kuramoto import compute_phase_gpu
     phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
     R = kuramoto_order(phases[-args.window:])
@@ -234,6 +320,7 @@ def cmd_analyze(args):
                     "kappa_mean": float(kappa),
                     "Hurst": float(Hs),
                     "phase": phase,
+                    "quality": _quality_summary(quality),
                 }
             ),
             indent=2,
@@ -257,11 +344,23 @@ def cmd_backtest(args):
         same implementation invoked by automation in ``docs/runbook_live_trading.md``.
     """
     args = _apply_config(args)
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    csv_path = args.csv
+    symbol = Path(csv_path).stem.upper()
+    ingestor = _make_data_ingestor(csv_path)
+    records = _collect_ticks(ingestor, csv_path, symbol=symbol, venue="CSV", metrics_source="cli_csv")
+    if not records:
+        raise ValueError(f"No ticks were ingested from {csv_path}")
+    frame = _ticks_to_frame(records, args.price_col)
+    clean_frame, quality = _validate_frame(frame, args.price_col)
+    prices = clean_frame[args.price_col].to_numpy()
     sig = signal_from_indicators(prices, window=args.window)
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
-    out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
+    out = {
+        "pnl": res.pnl,
+        "max_dd": res.max_dd,
+        "trades": res.trades,
+        "quality": _quality_summary(quality),
+    }
     print(json.dumps(_enrich_with_trace(out), indent=2))
 
 def cmd_live(args):

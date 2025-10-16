@@ -12,11 +12,11 @@ from core.data.backfill import CacheKey, CacheRegistry, normalise_index
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.quality_control import QualityReport, validate_and_quarantine
 from core.data.validation import (
     TimeSeriesValidationConfig,
     TimeSeriesValidationError,
     ValueColumnConfig,
-    validate_timeseries_frame,
 )
 from interfaces.ingestion import DataIngestionService
 
@@ -57,6 +57,7 @@ class DataIngestionCacheService:
         self._registry = cache_registry or CacheRegistry()
         self._clock = clock or (lambda: datetime.now(UTC))
         self._metadata: dict[CacheKey, CacheEntrySnapshot] = {}
+        self._quality_reports: dict[CacheKey, QualityReport] = {}
         self._integrity_validator = integrity_validator or TickFrameIntegrityValidator()
 
     # ------------------------------------------------------------------
@@ -149,25 +150,37 @@ class DataIngestionCacheService:
 
         if not timeframe or not timeframe.strip():
             raise ValueError("timeframe must be a non-empty string")
+        report: QualityReport
         if frame.empty:
             normalized = frame.copy()
+            empty_reset = frame.reset_index().rename(
+                columns={frame.index.name or "index": self._integrity_validator.timestamp_column}
+            )
+            report = QualityReport(
+                clean=normalized,
+                quarantined=empty_reset.iloc[0:0],
+                duplicates=empty_reset.iloc[0:0],
+                spikes=empty_reset.iloc[0:0],
+            )
         else:
             if not isinstance(frame.index, pd.DatetimeIndex):
                 raise TypeError("frame must use a DatetimeIndex")
             normalized = normalise_index(frame, market=market).sort_index()
-            normalized = self._integrity_validator.validate(
+            report = self._integrity_validator.validate(
                 normalized,
                 layer=layer,
                 symbol=symbol,
                 venue=venue,
                 timeframe=timeframe,
             )
+            normalized = report.clean
         key = self._build_key(layer, symbol, venue, timeframe, instrument_type)
         cache = self._registry.cache_for(layer)
         cache.put(key, normalized)
         cached = cache.get(key)
         snapshot = self._build_snapshot(key, cached)
         self._metadata[key] = snapshot
+        self._quality_reports[key] = report
         return cached
 
     def get_cached_frame(
@@ -202,6 +215,20 @@ class DataIngestionCacheService:
 
         key = self._build_key(layer, symbol, venue, timeframe, instrument_type)
         return self._metadata.get(key)
+
+    def quality_report_for(
+        self,
+        *,
+        layer: str,
+        symbol: str,
+        venue: str,
+        timeframe: str,
+        instrument_type: InstrumentType = InstrumentType.SPOT,
+    ) -> QualityReport | None:
+        """Return the most recent quality report for the cached frame if available."""
+
+        key = self._build_key(layer, symbol, venue, timeframe, instrument_type)
+        return self._quality_reports.get(key)
 
     def cache_snapshot(self) -> list[CacheEntrySnapshot]:
         """Return metadata for all cached datasets ordered deterministically."""
@@ -274,9 +301,15 @@ class TickFrameIntegrityValidator:
         *,
         timestamp_column: str = "timestamp",
         timezone: str = "UTC",
+        price_column: str = "price",
     ) -> None:
         self._timestamp_column = timestamp_column
         self._timezone = timezone
+        self._price_column = price_column
+
+    @property
+    def timestamp_column(self) -> str:
+        return self._timestamp_column
 
     def validate(
         self,
@@ -286,24 +319,47 @@ class TickFrameIntegrityValidator:
         symbol: str,
         venue: str,
         timeframe: str,
-    ) -> pd.DataFrame:
-        """Validate ``frame`` and return a normalised copy ready for caching."""
+    ) -> QualityReport:
+        """Validate ``frame`` and return a quality report with clean/quarantined rows."""
 
         if frame.empty:
-            return frame
+            empty_reset = frame.reset_index().rename(
+                columns={frame.index.name or "index": self._timestamp_column}
+            )
+            return QualityReport(
+                clean=frame,
+                quarantined=empty_reset.iloc[0:0],
+                duplicates=empty_reset.iloc[0:0],
+                spikes=empty_reset.iloc[0:0],
+            )
 
         config = self._build_config(frame, timeframe=timeframe, layer=layer)
         prepared = frame.reset_index().rename(
             columns={frame.index.name or "index": self._timestamp_column}
         )
+        value_columns = [column.name for column in config.value_columns]
+        price_column = self._price_column
+        if price_column not in value_columns:
+            price_column = value_columns[0] if value_columns else next(
+                col for col in prepared.columns if col != self._timestamp_column
+            )
         try:
-            validated = validate_timeseries_frame(prepared, config)
+            report = validate_and_quarantine(
+                prepared,
+                config,
+                price_column=price_column,
+            )
         except TimeSeriesValidationError as exc:
             raise DataIntegrityError(str(exc)) from exc
 
-        validated = validated.set_index(self._timestamp_column)
-        validated.index.name = frame.index.name
-        return validated.sort_index()
+        clean = report.clean.set_index(self._timestamp_column)
+        clean.index.name = frame.index.name
+        return QualityReport(
+            clean=clean.sort_index(),
+            quarantined=report.quarantined,
+            duplicates=report.duplicates,
+            spikes=report.spikes,
+        )
 
     def _build_config(
         self,
