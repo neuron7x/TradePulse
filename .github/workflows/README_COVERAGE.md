@@ -64,15 +64,16 @@ To make test coverage a required check before merging pull requests:
 4. Check **Require status checks to pass before merging**
 5. Check **Require branches to be up to date before merging**
 6. In the search box, find and select:
-   - `Test Coverage (Python 3.10)`
    - `Test Coverage (Python 3.11)`
+   - `Test Coverage (Python 3.12)`
+   - `Test Coverage (Python 3.13)`
 7. (Optional but recommended) Check **Require a pull request before merging**
 8. Click **Create** or **Save changes**
 
 This ensures that:
 - All tests must pass
 - Coverage must meet the threshold
-- Both Python versions must succeed
+- All supported Python versions must succeed
 - Pull requests cannot be merged until these checks pass
 
 ## Workflow Triggers
@@ -115,6 +116,6 @@ If Codecov upload fails:
 
 ### Python Version Compatibility
 
-The workflow tests against Python 3.10 and 3.11. If your code requires a different version:
+The workflow tests against Python 3.11, 3.12, and 3.13. If your code requires a different version:
 1. Edit the `matrix.python-version` in `.github/workflows/ci.yml`
 2. Update the branch protection rules to match the new Python versions

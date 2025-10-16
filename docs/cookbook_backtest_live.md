@@ -19,7 +19,7 @@ remains deterministic end-to-end.
    ```
 3. **Verify tooling versions** (pin exact versions for deterministic runs):
    ```bash
-   python --version   # >=3.10
+   python --version   # >=3.11
    tradepulse-cli --version
    jq --version       # optional but recommended for JSONL post-processing
    ```
