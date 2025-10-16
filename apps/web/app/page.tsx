@@ -1,7 +1,7 @@
 'use client'
 
 import type { ChangeEvent } from 'react'
-import { useMemo, useState } from 'react'
+import { useId, useMemo, useState } from 'react'
 
 type ScenarioField = 'initialBalance' | 'riskPerTrade' | 'maxPositions' | 'timeframe'
 
@@ -37,6 +37,28 @@ type ScenarioHealth = {
   score: number
   summary: string
   checklist: string[]
+}
+
+type PnlPoint = {
+  label: string
+  value: number
+  cumulative: number
+}
+
+type PnlSummary = {
+  total: number
+  best: PnlPoint | null
+  worst: PnlPoint | null
+  positiveRate: number
+  maxDrawdown: number
+}
+
+type StatusLevel = 'ready' | 'watch' | 'action'
+
+type StatusIndicator = {
+  label: string
+  level: StatusLevel
+  detail: string
 }
 
 const FIELD_META: Record<ScenarioField, FieldMeta> = {
@@ -296,6 +318,197 @@ function buildTimeframeInsights(timeframe: string): string[] {
   return insights
 }
 
+function toSafeNumber(value: number | null | undefined, fallback: number): number {
+  return Number.isFinite(value) && typeof value === 'number' ? value : fallback
+}
+
+function formatCurrency(value: number, fractionDigits = 2): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(value)
+}
+
+function generatePnlSeries(config: ScenarioConfig, points = 12): PnlPoint[] {
+  const initialBalance = toSafeNumber(config.initialBalance, 15000)
+  const riskPerTrade = toSafeNumber(config.riskPerTrade, 1)
+  const maxPositions = toSafeNumber(config.maxPositions, 3)
+  const timeframeMinutes = convertTimeframeToMinutes(config.timeframe) ?? 60
+
+  if (points <= 0) {
+    return []
+  }
+
+  const normalizedRisk = Math.max(0.2, Math.min(5, riskPerTrade)) / 100
+  const activityFactor = clamp(maxPositions / 6, 0.2, 1.4)
+  const cadenceFactor = clamp(timeframeMinutes / 240, 0.35, 1.4)
+  const drift = normalizedRisk * 0.65 - (activityFactor - 0.5) * 0.015
+  const volatility = normalizedRisk * 2.8 * activityFactor * (1 / Math.sqrt(cadenceFactor))
+
+  let cumulative = 0
+  const baseline = initialBalance
+
+  return Array.from({ length: points }).map((_, index) => {
+    const t = index + 1
+    const wave = Math.sin(t * 0.85 + normalizedRisk * 6.5) * 0.6
+    const modulation = Math.cos(t * 0.42 + activityFactor) * 0.35
+    const adjustment = Math.sin((t + timeframeMinutes) * 0.12) * 0.2
+    const dailyReturn = drift + (wave + modulation + adjustment) * (volatility / 10)
+    const pnl = baseline * dailyReturn
+    cumulative += pnl
+    return {
+      label: `Day ${t}`,
+      value: Number(pnl.toFixed(2)),
+      cumulative: Number(cumulative.toFixed(2)),
+    }
+  })
+}
+
+function summarisePnl(series: PnlPoint[]): PnlSummary {
+  if (series.length === 0) {
+    return {
+      total: 0,
+      best: null,
+      worst: null,
+      positiveRate: 0,
+      maxDrawdown: 0,
+    }
+  }
+
+  const total = Number(series.reduce((sum, point) => sum + point.value, 0).toFixed(2))
+  let best = series[0]
+  let worst = series[0]
+  let positives = 0
+  let runningPeak = 0
+  let maxDrawdown = 0
+
+  series.forEach((point) => {
+    if (point.value > best.value) {
+      best = point
+    }
+    if (point.value < worst.value) {
+      worst = point
+    }
+    if (point.value >= 0) {
+      positives += 1
+    }
+    runningPeak = Math.max(runningPeak, point.cumulative)
+    maxDrawdown = Math.max(maxDrawdown, runningPeak - point.cumulative)
+  })
+
+  return {
+    total,
+    best,
+    worst,
+    positiveRate: Number((positives / series.length).toFixed(2)),
+    maxDrawdown: Number(maxDrawdown.toFixed(2)),
+  }
+}
+
+function buildSparkline(series: PnlPoint[]) {
+  if (series.length === 0) {
+    return {
+      line: '0,50 100,50',
+      area: '0,100 0,50 100,50 100,100',
+      last: { x: 100, y: 50 },
+    }
+  }
+
+  const values = series.map((point) => point.cumulative)
+  const min = Math.min(0, ...values)
+  const max = Math.max(0, ...values)
+  const range = max - min || 1
+
+  const coordinates = series.map((point, index) => {
+    const progress = series.length === 1 ? 0 : index / (series.length - 1)
+    const x = progress * 100
+    const y = 100 - ((point.cumulative - min) / range) * 100
+    return { x, y }
+  })
+
+  const line = coordinates.map(({ x, y }) => `${x},${y}`).join(' ')
+  const areaPoints = [`0,100`, ...coordinates.map(({ x, y }) => `${x},${y}`), `100,100`]
+
+  return {
+    line,
+    area: areaPoints.join(' '),
+    last: coordinates[coordinates.length - 1] ?? { x: 100, y: 50 },
+  }
+}
+
+function buildStatusIndicators(
+  scenarioHealth: ScenarioHealth,
+  warnings: string[],
+  hasErrors: boolean,
+  pnlSummary: PnlSummary,
+  timeframe: string,
+): StatusIndicator[] {
+  const indicators: StatusIndicator[] = []
+
+  indicators.push({
+    label: 'Execution readiness',
+    level:
+      scenarioHealth.status === 'Production-ready'
+        ? 'ready'
+        : scenarioHealth.status === 'Needs review'
+        ? 'watch'
+        : 'action',
+    detail: scenarioHealth.summary,
+  })
+
+  const pnlLevel: StatusLevel = pnlSummary.total >= 0
+    ? pnlSummary.maxDrawdown <= Math.abs(pnlSummary.total) * 0.6
+      ? 'ready'
+      : 'watch'
+    : 'action'
+  const pnlTrend = pnlSummary.total >= 0 ? 'Profitable window' : 'Net drawdown'
+  const pnlDetail = `${pnlTrend}: ${formatCurrency(pnlSummary.total, 0)} over the observed period.`
+  indicators.push({ label: 'PnL trajectory', level: pnlLevel, detail: pnlDetail })
+
+  indicators.push({
+    label: 'Risk posture',
+    level: warnings.length === 0 ? 'ready' : warnings.length <= 2 ? 'watch' : 'action',
+    detail:
+      warnings.length === 0
+        ? 'Risk snapshot shows balanced exposure with headroom for automation.'
+        : `${warnings.length} warning${warnings.length === 1 ? '' : 's'} active — review the highlighted risk controls.`,
+  })
+
+  indicators.push({
+    label: 'Form validation',
+    level: hasErrors ? 'action' : 'ready',
+    detail: hasErrors
+      ? 'Resolve validation errors above to unlock exports and scenario sync.'
+      : 'Configuration is valid and ready to export or promote.',
+  })
+
+  const timeframeDescription = describeTimeframe(timeframe)
+  indicators.push({
+    label: 'Monitoring cadence',
+    level: (() => {
+      const minutes = convertTimeframeToMinutes(timeframe)
+      if (minutes === null) {
+        return 'watch' as StatusLevel
+      }
+      if (minutes <= 5) {
+        return 'watch'
+      }
+      if (minutes >= 1440) {
+        return 'watch'
+      }
+      return 'ready'
+    })(),
+    detail:
+      timeframeDescription !== null
+        ? `Plan monitoring touchpoints roughly every ${timeframeDescription}.`
+        : 'Define a timeframe to plan monitoring handoffs.',
+  })
+
+  return indicators
+}
+
 function evaluateScenario(
   config: ScenarioConfig,
   warnings: string[],
@@ -417,6 +630,19 @@ export default function Home() {
   const preview = useMemo(() => JSON.stringify(buildPreview(parsedConfig), null, 2), [parsedConfig])
   const timeframeInsights = useMemo(() => buildTimeframeInsights(parsedConfig.timeframe), [parsedConfig.timeframe])
   const scenarioHealth = useMemo(() => evaluateScenario(parsedConfig, warnings, hasErrors), [parsedConfig, warnings, hasErrors])
+  const pnlSeries = useMemo(() => generatePnlSeries(parsedConfig), [parsedConfig])
+  const pnlSummary = useMemo(() => summarisePnl(pnlSeries), [pnlSeries])
+  const sparkline = useMemo(() => buildSparkline(pnlSeries), [pnlSeries])
+  const statusIndicators = useMemo(
+    () => buildStatusIndicators(scenarioHealth, warnings, hasErrors, pnlSummary, parsedConfig.timeframe),
+    [scenarioHealth, warnings, hasErrors, pnlSummary, parsedConfig.timeframe],
+  )
+  const recentPnl = useMemo(() => pnlSeries.slice(-4).reverse(), [pnlSeries])
+  const cumulativeClose = useMemo(
+    () => (pnlSeries.length > 0 ? pnlSeries[pnlSeries.length - 1].cumulative : 0),
+    [pnlSeries],
+  )
+  const sparklineGradientId = useId()
 
   const riskDollars = useMemo(() => {
     if (!Number.isFinite(parsedConfig.initialBalance) || !Number.isFinite(parsedConfig.riskPerTrade)) {
@@ -673,20 +899,104 @@ export default function Home() {
               ) : null}
             </article>
 
-            <article className="panel">
+            <article className="panel pnl-panel">
+              <div className="pnl-header">
+                <h2>P&amp;L trajectory</h2>
+                <span
+                  className={`trend-badge ${pnlSummary.total >= 0 ? 'trend-badge--positive' : 'trend-badge--negative'}`}
+                >
+                  {pnlSummary.total >= 0 ? 'Uptrend' : 'Drawdown'}
+                </span>
+              </div>
+              <p className="tp-helper tp-helper-spaced">
+                Visualise rolling performance to detect when profits accelerate or drawdowns deepen.
+              </p>
+              <div
+                className="pnl-chart"
+                role="img"
+                aria-label={`Cumulative profit and loss sparkline ending at ${formatCurrency(cumulativeClose, 0)}`}
+              >
+                <svg viewBox="0 0 100 100" preserveAspectRatio="none" role="presentation" aria-hidden="true">
+                  <defs>
+                    <linearGradient id={sparklineGradientId} x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="rgba(56, 189, 248, 0.75)" />
+                      <stop offset="100%" stopColor="rgba(34, 211, 238, 0.05)" />
+                    </linearGradient>
+                  </defs>
+                  <polygon points={sparkline.area} fill={`url(#${sparklineGradientId})`} className="pnl-area" />
+                  <polyline points={sparkline.line} className="pnl-line" />
+                  <circle cx={sparkline.last.x} cy={sparkline.last.y} r={2.6} className="pnl-marker" />
+                </svg>
+              </div>
+              <dl className="pnl-metric-grid">
+                <div>
+                  <dt>Net P&amp;L</dt>
+                  <dd>{formatCurrency(pnlSummary.total, 0)}</dd>
+                </div>
+                <div>
+                  <dt>Hit rate</dt>
+                  <dd>{Math.round(pnlSummary.positiveRate * 100)}%</dd>
+                </div>
+                <div>
+                  <dt>Best session</dt>
+                  <dd>{pnlSummary.best ? formatCurrency(pnlSummary.best.value, 0) : '—'}</dd>
+                </div>
+                <div>
+                  <dt>Max drawdown</dt>
+                  <dd>{formatCurrency(-Math.abs(pnlSummary.maxDrawdown), 0)}</dd>
+                </div>
+              </dl>
+              <div className="pnl-recent">
+                <h3>Recent sessions</h3>
+                <ul>
+                  {recentPnl.map((point) => (
+                    <li key={point.label}>
+                      <span>{point.label}</span>
+                      <span
+                        className={
+                          point.value >= 0 ? 'pnl-value pnl-value--positive' : 'pnl-value pnl-value--negative'
+                        }
+                      >
+                        {formatCurrency(point.value, 0)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </article>
+
+            <article className="panel status-panel">
+              <h2>Status overview</h2>
+              <p className="tp-helper tp-helper-spaced">
+                Track readiness signals across execution, validation, and monitoring workflows.
+              </p>
+              <div className="status-grid">
+                {statusIndicators.map((indicator) => (
+                  <div key={indicator.label} className={`status-item status-item--${indicator.level}`}>
+                    <span className="status-dot" aria-hidden="true" />
+                    <div className="status-copy">
+                      <p className="status-label">{indicator.label}</p>
+                      <p className="status-detail">{indicator.detail}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel risk-panel">
               <h2>Risk snapshot</h2>
               <div className="metric-grid">
                 <div className="metric-tiles">
                   <div className="metric-tile">
                     <span>Risk per trade</span>
-                    <p>{riskDollars === null ? '—' : `$${riskDollars.toFixed(2)}`}</p>
+                    <p>{riskDollars === null ? '—' : formatCurrency(riskDollars, 2)}</p>
                     {riskPercentOfEquity !== null ? (
                       <span>{riskPercentOfEquity.toFixed(2)}% of equity</span>
                     ) : null}
                   </div>
                   <div className="metric-tile">
                     <span>Max portfolio risk</span>
-                    <p>{aggregateRisk === null ? '—' : `$${aggregateRisk.toFixed(2)}`}</p>
+                    <p>{aggregateRisk === null ? '—' : formatCurrency(aggregateRisk, 2)}</p>
                     {portfolioRiskPercent !== null ? (
                       <span>{portfolioRiskPercent.toFixed(2)}% of equity</span>
                     ) : null}

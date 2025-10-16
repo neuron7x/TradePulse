@@ -33,6 +33,7 @@ Thumbs.db
 *.log
 .env
 .env.local
+*.tsbuildinfo
 apps/web/node_modules/
 apps/web/.next/
 apps/web/playwright-report/
