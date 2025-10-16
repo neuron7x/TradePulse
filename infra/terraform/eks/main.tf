@@ -114,7 +114,7 @@ data "aws_caller_identity" "current" {}
 data "aws_partition" "current" {}
 
 data "aws_eks_cluster_auth" "this" {
-  cluster_name = module.eks.cluster_name
+  name = module.eks.cluster_name
 }
 
 locals {
