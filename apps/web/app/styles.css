@@ -103,6 +103,13 @@ main.scenario-main {
   gap: 0.85rem;
 }
 
+.template-label {
+  margin: 0;
+  margin-top: 0.2rem;
+  margin-bottom: 0.15rem;
+  color: var(--tp-text-primary);
+}
+
 .template-description {
   margin: 0;
   color: var(--tp-text-secondary);

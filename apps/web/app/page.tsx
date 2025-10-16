@@ -556,6 +556,9 @@ export default function Home() {
                   </option>
                 ))}
               </select>
+              <p className="tp-status template-label" aria-live="polite">
+                {selectedTemplate.label}
+              </p>
               <p id={templateHelperId} className="template-description">
                 {selectedTemplate.description}
               </p>
