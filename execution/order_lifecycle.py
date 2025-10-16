@@ -210,39 +210,58 @@ class OrderLifecycleStore:
                 details_placeholder,
             ]
         )
-        return (
-            f"INSERT INTO {self._qualified_table} "
-            f"(order_id, correlation_id, event, from_status, to_status, details) "
-            f"VALUES ({values}) ON CONFLICT (order_id, correlation_id) DO NOTHING"
+        return "".join(
+            [
+                "INSERT INTO ",
+                self._qualified_table,
+                " (order_id, correlation_id, event, from_status, to_status, details) ",
+                "VALUES (",
+                values,
+                ") ON CONFLICT (order_id, correlation_id) DO NOTHING",
+            ]
         )
 
     def _build_select_one_sql(self) -> str:
-        return (
-            "SELECT sequence, order_id, correlation_id, event, from_status, "
-            "to_status, details, created_at "
-            f"FROM {self._qualified_table} "
-            f"WHERE order_id = {self._placeholder} "
-            f"AND correlation_id = {self._placeholder}"
+        return "".join(
+            [
+                "SELECT sequence, order_id, correlation_id, event, from_status, ",
+                "to_status, details, created_at ",
+                "FROM ",
+                self._qualified_table,
+                " WHERE order_id = ",
+                self._placeholder,
+                " AND correlation_id = ",
+                self._placeholder,
+            ]
         )
 
     def _build_history_sql(self) -> str:
-        return (
-            "SELECT sequence, order_id, correlation_id, event, from_status, "
-            "to_status, details, created_at "
-            f"FROM {self._qualified_table} "
-            "WHERE order_id = {placeholder} ORDER BY sequence"
-        ).format(placeholder=self._placeholder)
+        return "".join(
+            [
+                "SELECT sequence, order_id, correlation_id, event, from_status, ",
+                "to_status, details, created_at ",
+                "FROM ",
+                self._qualified_table,
+                " WHERE order_id = ",
+                self._placeholder,
+                " ORDER BY sequence",
+            ]
+        )
 
     def _build_latest_sql(self) -> str:
-        return (
-            "SELECT t.sequence, t.order_id, t.correlation_id, t.event, "
-            "t.from_status, t.to_status, t.details, t.created_at "
-            f"FROM {self._qualified_table} AS t "
-            "JOIN ("
-            "    SELECT order_id, MAX(sequence) AS max_sequence "
-            f"    FROM {self._qualified_table} GROUP BY order_id"
-            ") AS latest "
-            "ON t.order_id = latest.order_id AND t.sequence = latest.max_sequence"
+        return "".join(
+            [
+                "SELECT t.sequence, t.order_id, t.correlation_id, t.event, ",
+                "t.from_status, t.to_status, t.details, t.created_at ",
+                "FROM ",
+                self._qualified_table,
+                " AS t JOIN (",
+                "SELECT order_id, MAX(sequence) AS max_sequence FROM ",
+                self._qualified_table,
+                " GROUP BY order_id",
+                ") AS latest ON t.order_id = latest.order_id ",
+                "AND t.sequence = latest.max_sequence",
+            ]
         )
 
     # ------------------------------------------------------------------
@@ -268,11 +287,15 @@ class OrderLifecycleStore:
         )
 
         existing_sql = self._select_one_sql
-        latest_sql = (
-            "SELECT sequence, order_id, correlation_id, event, from_status, "
-            "to_status, details, created_at "
-            f"FROM {self._qualified_table} WHERE order_id = {self._placeholder} "
-            "ORDER BY sequence DESC LIMIT 1"
+        latest_sql = "".join(
+            [
+                "SELECT sequence, order_id, correlation_id, event, from_status, ",
+                "to_status, details, created_at FROM ",
+                self._qualified_table,
+                " WHERE order_id = ",
+                self._placeholder,
+                " ORDER BY sequence DESC LIMIT 1",
+            ]
         )
         if self._dialect == "postgres":
             existing_sql += " FOR UPDATE"
@@ -333,11 +356,15 @@ class OrderLifecycleStore:
         return self._row_to_transition(self._coerce_row(row))
 
     def last_transition(self, order_id: str) -> OrderTransition | None:
-        sql = (
-            "SELECT sequence, order_id, correlation_id, event, from_status, "
-            "to_status, details, created_at "
-            f"FROM {self._qualified_table} WHERE order_id = {self._placeholder} "
-            "ORDER BY sequence DESC LIMIT 1"
+        sql = "".join(
+            [
+                "SELECT sequence, order_id, correlation_id, event, from_status, ",
+                "to_status, details, created_at FROM ",
+                self._qualified_table,
+                " WHERE order_id = ",
+                self._placeholder,
+                " ORDER BY sequence DESC LIMIT 1",
+            ]
         )
         row = self._dal.fetch_one(sql, (order_id,))
         if row is None:
