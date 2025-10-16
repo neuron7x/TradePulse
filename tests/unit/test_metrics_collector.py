@@ -89,6 +89,8 @@ def test_measure_data_ingestion_records_duration_and_status() -> None:
     with collector.measure_data_ingestion("csv", "BTC-USDT"):
         pass
 
+    collector.set_ingestion_throughput("csv", "BTC-USDT", 128.5)
+
     count = _sample_value(
         registry,
         "tradepulse_data_ingestion_duration_seconds_count",
@@ -99,6 +101,11 @@ def test_measure_data_ingestion_records_duration_and_status() -> None:
         "tradepulse_data_ingestion_total",
         {"source": "csv", "symbol": "BTC-USDT", "status": "success"},
     )
+    throughput = _sample_value(
+        registry,
+        "tradepulse_data_ingestion_throughput_ticks_per_second",
+        {"source": "csv", "symbol": "BTC-USDT"},
+    )
     latency_quantile = _sample_value(
         registry,
         "tradepulse_data_ingestion_latency_quantiles_seconds",
@@ -107,6 +114,7 @@ def test_measure_data_ingestion_records_duration_and_status() -> None:
 
     assert count == 1.0
     assert total == 1.0
+    assert throughput == 128.5
     assert latency_quantile is not None
 
 
@@ -197,6 +205,34 @@ def test_data_ingestion_context_ignores_none_and_blank_status_overrides() -> Non
 
     assert success_total == 1.0
     assert none_total is None
+
+
+def test_health_check_metrics_capture_latency_and_status() -> None:
+    registry = CollectorRegistry()
+    collector = MetricsCollector(registry)
+
+    collector.observe_health_check_latency("data-pipeline", 0.42)
+    collector.set_health_check_status("data-pipeline", True)
+
+    latency_count = _sample_value(
+        registry,
+        "tradepulse_health_check_latency_seconds_count",
+        {"check_name": "data-pipeline"},
+    )
+    latency_sum = _sample_value(
+        registry,
+        "tradepulse_health_check_latency_seconds_sum",
+        {"check_name": "data-pipeline"},
+    )
+    status = _sample_value(
+        registry,
+        "tradepulse_health_check_status",
+        {"check_name": "data-pipeline"},
+    )
+
+    assert latency_count == 1.0
+    assert latency_sum == pytest.approx(0.42, rel=1e-6)
+    assert status == 1.0
 
     second_registry = CollectorRegistry()
     collector = MetricsCollector(second_registry)

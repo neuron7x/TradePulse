@@ -79,6 +79,13 @@
       "subsystem": "data"
     },
     {
+      "name": "tradepulse_data_ingestion_throughput_ticks_per_second",
+      "type": "gauge",
+      "description": "Instantaneous ingestion throughput expressed as ticks per second.",
+      "labels": ["source", "symbol"],
+      "subsystem": "data"
+    },
+    {
       "name": "tradepulse_ticks_processed_total",
       "type": "counter",
       "description": "Ticks processed for each data source and symbol.",
@@ -147,6 +154,20 @@
       "description": "Total number of signal generation invocations.",
       "labels": ["strategy", "status"],
       "subsystem": "signals"
+    },
+    {
+      "name": "tradepulse_health_check_latency_seconds",
+      "type": "histogram",
+      "description": "Latency of periodic system health probes.",
+      "labels": ["check_name"],
+      "subsystem": "observability"
+    },
+    {
+      "name": "tradepulse_health_check_status",
+      "type": "gauge",
+      "description": "Outcome of the latest health probe (1=healthy, 0=unhealthy).",
+      "labels": ["check_name"],
+      "subsystem": "observability"
     },
     {
       "name": "tradepulse_strategy_score",

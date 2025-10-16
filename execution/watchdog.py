@@ -141,6 +141,26 @@ class Watchdog:
             self._workers.clear()
             self._monitor_thread = None
 
+    def snapshot(self) -> Dict[str, object]:
+        """Return a thread-safe snapshot of worker and probe status."""
+
+        with self._lock:
+            workers = {
+                name: {
+                    "alive": bool(spec.thread and spec.thread.is_alive()),
+                    "restarts": spec.restarts,
+                }
+                for name, spec in self._workers.items()
+            }
+            live_probe_ok = self._last_live_probe_ok
+            live_probe_at = self._last_live_probe_at
+
+        return {
+            "workers": workers,
+            "live_probe_ok": live_probe_ok,
+            "live_probe_at": live_probe_at,
+        }
+
     # ------------------------------------------------------------------
     # Worker management
     def register(

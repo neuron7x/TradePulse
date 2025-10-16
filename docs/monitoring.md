@@ -881,6 +881,31 @@ with HealthServer(port=8085) as server:
     run_application_loop()
 ```
 
+Pair the HTTP server with `observability.health_monitor.PeriodicHealthMonitor`
+to keep the readiness state fresh without relying on ad-hoc probes. The helper
+executes the default checks in `observability.health_checks` on a cadence and
+updates the `HealthServer` object as well as Prometheus metrics:
+
+```python
+from observability.health_checks import build_default_health_checks
+from observability.health_monitor import PeriodicHealthMonitor
+
+checks = build_default_health_checks(system)
+monitor = PeriodicHealthMonitor(server, checks)
+monitor.start()
+```
+
+Two new metrics help track probe performance:
+
+* `tradepulse_health_check_latency_seconds` – histogram capturing the runtime
+  of each periodic check.
+* `tradepulse_health_check_status` – gauge signalling the most recent outcome
+  (1=healthy, 0=unhealthy).
+
+Operational metrics now also include
+`tradepulse_data_ingestion_throughput_ticks_per_second`, exposing how quickly
+the ingestion layer is processing raw ticks.
+
 ### Exporters in isolated processes
 
 The metrics stack can now be hosted outside the main interpreter to reduce
@@ -901,6 +926,20 @@ finally:
 Grafana ships with `observability/dashboards/tradepulse-pipeline.json` which
 provides latency, throughput, and error-budget panels for the end-to-end
 pipeline. Import it alongside the existing overview dashboard to monitor SLOs.
+
+### Shipping logs to Elasticsearch
+
+`docker-compose.yml` provisions Elasticsearch, Logstash, Filebeat, and Kibana to
+collect TradePulse container logs. Start the stack with:
+
+```bash
+docker compose up tradepulse prometheus elasticsearch logstash kibana filebeat
+```
+
+Filebeat autodiscovers containers labelled with `co.elastic.logs/enabled=true`
+and forwards their JSON log streams to Logstash, which normalises the payload
+before indexing it under the `tradepulse-logs-*` pattern. Kibana surfaces the
+data at <http://localhost:5601> for ad-hoc queries and dashboards.
 
 ---
 

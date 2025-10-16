@@ -124,6 +124,19 @@ class LiveExecutionLoop:
 
     # ------------------------------------------------------------------
     # Public API
+    @property
+    def started(self) -> bool:
+        """Return ``True`` when the live loop has been started."""
+
+        return self._started
+
+    def watchdog_snapshot(self) -> dict[str, object] | None:
+        """Return diagnostic data from the underlying watchdog."""
+
+        if self._watchdog is None:
+            return None
+        return self._watchdog.snapshot()
+
     def start(self, cold_start: bool) -> None:
         """Start background workers and hydrate state."""
 

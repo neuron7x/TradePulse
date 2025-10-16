@@ -164,6 +164,13 @@ class MetricsCollector:
             registry=registry,
         )
 
+        self.data_ingestion_throughput = Gauge(
+            "tradepulse_data_ingestion_throughput_ticks_per_second",
+            "Instantaneous ingestion throughput expressed as ticks per second",
+            ["source", "symbol"],
+            registry=registry,
+        )
+
         self.ticks_processed = Counter(
             "tradepulse_ticks_processed_total",
             "Total number of ticks processed",
@@ -310,6 +317,20 @@ class MetricsCollector:
             "tradepulse_signal_generation_total",
             "Total number of signal generation calls",
             ["strategy", "status"],
+            registry=registry,
+        )
+
+        self.health_check_latency = Histogram(
+            "tradepulse_health_check_latency_seconds",
+            "Latency of periodic system health probes",
+            ["check_name"],
+            registry=registry,
+        )
+
+        self.health_check_status = Gauge(
+            "tradepulse_health_check_status",
+            "Outcome of the latest health probe (1=healthy, 0=unhealthy)",
+            ["check_name"],
             registry=registry,
         )
 
@@ -564,6 +585,14 @@ class MetricsCollector:
                 status=final_status,
             ).inc()
 
+    def set_ingestion_throughput(self, source: str, symbol: str, throughput: float) -> None:
+        """Record instantaneous ingestion throughput."""
+
+        if not self._enabled:
+            return
+
+        self.data_ingestion_throughput.labels(source=source, symbol=symbol).set(max(0.0, float(throughput)))
+
     def record_tick_processed(self, source: str, symbol: str, count: int = 1) -> None:
         """Record that ticks were processed.
 
@@ -795,6 +824,22 @@ class MetricsCollector:
         if timestamp is None:
             timestamp = time.time()
         self.watchdog_last_heartbeat.labels(watchdog=watchdog).set(float(timestamp))
+
+    def observe_health_check_latency(self, check_name: str, duration: float) -> None:
+        """Observe the execution time of a health check probe."""
+
+        if not self._enabled:
+            return
+
+        self.health_check_latency.labels(check_name=check_name).observe(max(0.0, float(duration)))
+
+    def set_health_check_status(self, check_name: str, healthy: bool) -> None:
+        """Update the status gauge tracking the latest health probe outcome."""
+
+        if not self._enabled:
+            return
+
+        self.health_check_status.labels(check_name=check_name).set(1.0 if healthy else 0.0)
 
 
 # Global metrics collector instance

@@ -32,6 +32,10 @@ def test_tradepulse_system_generates_features_and_orders(tmp_path: Path) -> None
     market = system.ingest_csv(_data_path(), symbol="BTCUSDT", venue="BINANCE")
     assert not market.empty
     assert market.index.tz is not None
+    assert system.last_ingestion_completed_at is not None
+    assert system.last_ingestion_duration_seconds is not None
+    assert system.last_ingestion_error is None
+    assert system.last_ingestion_symbol == "BTCUSDT"
 
     features = system.build_feature_frame(market)
     assert "rsi" in features.columns
@@ -43,6 +47,9 @@ def test_tradepulse_system_generates_features_and_orders(tmp_path: Path) -> None
     signals = system.generate_signals(features, strategy=strategy)
     assert signals
     assert all(signal.symbol == "BTCUSDT" for signal in signals)
+    assert system.last_signal_generated_at is not None
+    assert system.last_signal_latency_seconds is not None
+    assert system.last_signal_error is None
 
     payloads = system.signals_to_dtos(signals)
     assert payloads[-1]["symbol"] == "BTCUSDT"
@@ -61,6 +68,8 @@ def test_tradepulse_system_generates_features_and_orders(tmp_path: Path) -> None
     assert order.symbol == "BTCUSDT"
     assert order.status == OrderStatus.PENDING
     assert order.side.value in {"buy", "sell"}
+    assert system.last_execution_submission_at is not None
+    assert system.last_execution_error is None
 
 
 def test_tradepulse_system_rejects_hold_signal(tmp_path: Path) -> None:
