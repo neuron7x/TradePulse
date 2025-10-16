@@ -15,16 +15,36 @@ Tests verify:
 """
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pytest
 
 from core.indicators.ricci import (
     MeanRicciFeature,
+    _shortest_path_length_safe,
     build_price_graph,
     local_distribution,
     mean_ricci,
     ricci_curvature_edge,
 )
+
+
+class _ShortestPathGraphStub:
+    """Graph stub emulating weight handling for shortest-path queries."""
+
+    def __init__(self, *, unweighted_distance: float, raise_unweighted: bool = False) -> None:
+        self._unweighted_distance = unweighted_distance
+        self._raise_unweighted = raise_unweighted
+
+    def shortest_path_length(self, x: int, y: int, weight: str | None = None) -> float:
+        if weight == "weight":
+            raise ValueError("invalid weight metadata")
+        if weight is None:
+            if self._raise_unweighted:
+                raise RuntimeError("unweighted fallback failed")
+            return self._unweighted_distance
+        return self._unweighted_distance
 
 
 def test_build_price_graph_connects_consecutive_levels() -> None:
@@ -172,7 +192,7 @@ def test_mean_ricci_feature_chunk_size_behavior() -> None:
     """Test that chunk_size affects processing of graphs with many edges."""
     # Create data that produces a graph with many edges
     prices = np.linspace(100.0, 110.0, 50)
-    
+
     feature_unchunked = MeanRicciFeature(delta=0.005)
     feature_chunked = MeanRicciFeature(delta=0.005, chunk_size=5)
     
@@ -193,3 +213,23 @@ def test_mean_ricci_feature_chunk_size_behavior() -> None:
     # Metadata should reflect the difference
     assert "chunk_size" not in result_unchunked.metadata
     assert result_chunked.metadata["chunk_size"] == 5
+
+
+def test_shortest_path_length_safe_falls_back_to_unweighted() -> None:
+    """Ensure weighted failures use the unweighted shortest path as a fallback."""
+
+    graph = _ShortestPathGraphStub(unweighted_distance=7.25)
+
+    distance = _shortest_path_length_safe(graph, 1, 2)
+
+    assert distance == pytest.approx(7.25)
+
+
+def test_shortest_path_length_safe_returns_inf_when_all_strategies_fail() -> None:
+    """Verify the final guard returns infinity when every attempt raises."""
+
+    graph = _ShortestPathGraphStub(unweighted_distance=3.0, raise_unweighted=True)
+
+    distance = _shortest_path_length_safe(graph, 1, 2)
+
+    assert math.isinf(distance)
