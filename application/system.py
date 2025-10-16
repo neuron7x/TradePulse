@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import (
     AsyncIterator,
     Callable,
@@ -22,6 +24,7 @@ from core.data.connectors.market import BaseMarketDataConnector
 from core.data.async_ingestion import AsyncDataIngestor
 from core.data.ingestion import DataIngestor
 from core.data.models import InstrumentType, PriceTick
+from core.utils.metrics import get_metrics_collector
 from domain import Order, OrderSide, OrderType, Signal, SignalAction
 from execution.connectors import ExecutionConnector
 from execution.live_loop import LiveExecutionLoop, LiveLoopConfig
@@ -110,6 +113,8 @@ class TradePulseSystem:
         )
         self._pipeline = SignalFeaturePipeline(config.feature_pipeline)
         self._risk_manager = risk_manager or RiskManager(config.risk_limits)
+        self._metrics = get_metrics_collector()
+        self._clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc)
 
         connectors: MutableMapping[str, ExecutionConnector] = {}
         credentials: MutableMapping[str, Mapping[str, str]] = {}
@@ -127,6 +132,16 @@ class TradePulseSystem:
 
         self._last_symbol: str | None = None
         self._last_venue: str | None = None
+        self._last_ingestion_started_at: datetime | None = None
+        self._last_ingestion_completed_at: datetime | None = None
+        self._last_ingestion_duration_seconds: float | None = None
+        self._last_ingestion_error: str | None = None
+        self._last_ingestion_symbol: str | None = None
+        self._last_signal_generated_at: datetime | None = None
+        self._last_signal_latency_seconds: float | None = None
+        self._last_signal_error: str | None = None
+        self._last_execution_submission_at: datetime | None = None
+        self._last_execution_error: str | None = None
 
     # ------------------------------------------------------------------
     # Accessors
@@ -174,6 +189,46 @@ class TradePulseSystem:
 
         return self._credentials.get(venue.lower())
 
+    @property
+    def last_ingestion_started_at(self) -> datetime | None:
+        return self._last_ingestion_started_at
+
+    @property
+    def last_ingestion_completed_at(self) -> datetime | None:
+        return self._last_ingestion_completed_at
+
+    @property
+    def last_ingestion_duration_seconds(self) -> float | None:
+        return self._last_ingestion_duration_seconds
+
+    @property
+    def last_ingestion_error(self) -> str | None:
+        return self._last_ingestion_error
+
+    @property
+    def last_ingestion_symbol(self) -> str | None:
+        return self._last_ingestion_symbol
+
+    @property
+    def last_signal_generated_at(self) -> datetime | None:
+        return self._last_signal_generated_at
+
+    @property
+    def last_signal_latency_seconds(self) -> float | None:
+        return self._last_signal_latency_seconds
+
+    @property
+    def last_signal_error(self) -> str | None:
+        return self._last_signal_error
+
+    @property
+    def last_execution_submission_at(self) -> datetime | None:
+        return self._last_execution_submission_at
+
+    @property
+    def last_execution_error(self) -> str | None:
+        return self._last_execution_error
+
     # ------------------------------------------------------------------
     # Data ingestion & feature engineering
     def ingest_csv(
@@ -187,21 +242,41 @@ class TradePulseSystem:
     ) -> pd.DataFrame:
         """Load historical ticks from *path* and return a normalised OHLCV frame."""
 
+        self._last_ingestion_started_at = self._clock()
+        self._last_ingestion_symbol = symbol
+        start = perf_counter()
         records: list[PriceTick] = []
-        self._data_ingestor.historical_csv(
-            str(path),
-            records.append,
-            required_fields=("ts", "price"),
-            symbol=symbol,
-            venue=venue,
-            instrument_type=instrument_type,
-            market=market,
-        )
+        with self._metrics.measure_data_ingestion("csv", symbol) as ctx:
+            try:
+                self._data_ingestor.historical_csv(
+                    str(path),
+                    records.append,
+                    required_fields=("ts", "price"),
+                    symbol=symbol,
+                    venue=venue,
+                    instrument_type=instrument_type,
+                    market=market,
+                )
+            except Exception as exc:
+                ctx["status"] = "error"
+                self._last_ingestion_error = str(exc)
+                self._last_ingestion_completed_at = self._clock()
+                self._last_ingestion_duration_seconds = perf_counter() - start
+                raise
+            else:
+                ctx["status"] = "success"
+                self._last_ingestion_error = None
 
         if not records:
             raise ValueError(f"No ticks ingested from {path}")
 
         frame = self._ticks_to_frame(records)
+        duration = perf_counter() - start
+        self._last_ingestion_completed_at = self._clock()
+        self._last_ingestion_duration_seconds = duration
+        self._metrics.record_tick_processed("csv", symbol, len(records))
+        if duration > 0:
+            self._metrics.set_ingestion_throughput("csv", symbol, len(records) / duration)
         self._last_symbol = symbol
         self._last_venue = venue
         return frame
@@ -261,6 +336,7 @@ class TradePulseSystem:
     ) -> list[Signal]:
         """Run *strategy* over ``feature_frame`` and return domain signals."""
 
+        strategy_name = getattr(strategy, "__name__", strategy.__class__.__name__)
         resolved_symbol = symbol or self._last_symbol
         if resolved_symbol is None:
             raise ValueError("symbol must be provided when no ingestion has been performed")
@@ -274,31 +350,46 @@ class TradePulseSystem:
             raise ValueError("Feature frame does not contain any fully populated rows")
 
         prices = aligned[price_col].to_numpy(dtype=float)
-        raw_scores = np.asarray(strategy(prices), dtype=float)
-        if raw_scores.shape[0] != aligned.shape[0]:
-            raise ValueError("Strategy output length must match feature frame rows")
+        start = perf_counter()
+        with self._metrics.measure_signal_generation(strategy_name) as ctx:
+            try:
+                raw_scores = np.asarray(strategy(prices), dtype=float)
+                if raw_scores.shape[0] != aligned.shape[0]:
+                    raise ValueError("Strategy output length must match feature frame rows")
 
-        signals: list[Signal] = []
-        for timestamp, score in zip(aligned.index, raw_scores):
-            if score > 0:
-                action = SignalAction.BUY
-            elif score < 0:
-                action = SignalAction.SELL
+                signals: list[Signal] = []
+                for timestamp, score in zip(aligned.index, raw_scores):
+                    if score > 0:
+                        action = SignalAction.BUY
+                    elif score < 0:
+                        action = SignalAction.SELL
+                    else:
+                        action = SignalAction.HOLD
+
+                    confidence = float(np.clip(abs(score), 0.0, 1.0))
+                    metadata = {"score": float(score)}
+                    signals.append(
+                        Signal(
+                            symbol=resolved_symbol,
+                            action=action,
+                            confidence=confidence,
+                            timestamp=pd.Timestamp(timestamp).to_pydatetime(),
+                            metadata=metadata,
+                        )
+                    )
+            except Exception as exc:
+                ctx["status"] = "error"
+                self._last_signal_error = str(exc)
+                self._last_signal_generated_at = self._clock()
+                self._last_signal_latency_seconds = perf_counter() - start
+                raise
             else:
-                action = SignalAction.HOLD
+                ctx["status"] = "success"
+                self._last_signal_error = None
 
-            confidence = float(np.clip(abs(score), 0.0, 1.0))
-            metadata = {"score": float(score)}
-            signals.append(
-                Signal(
-                    symbol=resolved_symbol,
-                    action=action,
-                    confidence=confidence,
-                    timestamp=pd.Timestamp(timestamp).to_pydatetime(),
-                    metadata=metadata,
-                )
-            )
-
+        duration = perf_counter() - start
+        self._last_signal_generated_at = self._clock()
+        self._last_signal_latency_seconds = duration
         return signals
 
     @staticmethod
@@ -316,6 +407,12 @@ class TradePulseSystem:
             credentials = self._credentials or None
             config = self._config.live_settings.build_config(credentials=credentials)
             self._live_loop = LiveExecutionLoop(self._connectors, self._risk_manager, config=config)
+        return self._live_loop
+
+    @property
+    def live_loop(self) -> LiveExecutionLoop | None:
+        """Expose the instantiated live execution loop if available."""
+
         return self._live_loop
 
     def submit_signal(
@@ -358,7 +455,15 @@ class TradePulseSystem:
 
         loop = self.ensure_live_loop()
         derived_correlation = correlation_id or f"{signal.symbol}-{int(signal.timestamp.timestamp() * 1e9)}"
-        return loop.submit_order(venue_key, order, correlation_id=derived_correlation)
+        try:
+            submitted = loop.submit_order(venue_key, order, correlation_id=derived_correlation)
+        except Exception as exc:
+            self._last_execution_error = str(exc)
+            raise
+        else:
+            self._last_execution_error = None
+            self._last_execution_submission_at = self._clock()
+            return submitted
 
     # ------------------------------------------------------------------
     # Internal helpers
