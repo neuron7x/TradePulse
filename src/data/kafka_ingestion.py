@@ -256,6 +256,7 @@ class _PartitionState:
     last_lag: int = 0
     last_seen: float = field(default_factory=time.monotonic)
     pending_ticks: list[PriceTick] = field(default_factory=list)
+    pending_event_ids: list[str] = field(default_factory=list)
     pending_offset: int | None = None
 
     def advance(self, offset: int) -> None:
@@ -356,15 +357,20 @@ class KafkaIngestionService:
                 raise RuntimeError("Kafka producer does not support transactions") from exc
             processed_offsets: Dict[Any, int] = {}
             ticks: list[PriceTick] = []
+            committable_event_ids: list[str] = []
+            current_event_ids: set[str] = set()
             abort_transaction = False
             for tp, messages in batches.items():
                 key = (getattr(tp, "topic"), getattr(tp, "partition"))
                 state = self._partition_state.setdefault(key, _PartitionState())
                 if state.pending_ticks:
                     ticks.extend(state.pending_ticks)
+                    committable_event_ids.extend(state.pending_event_ids)
+                    current_event_ids.update(state.pending_event_ids)
                     if state.pending_offset is not None:
                         processed_offsets[tp] = state.pending_offset
                     state.pending_ticks = []
+                    state.pending_event_ids = []
                 for message in messages:
                     headers = _coerce_headers(getattr(message, "headers", []))
                     event_id = headers.get("event_id") or f"{key[0]}:{key[1]}:{message.offset}"
@@ -398,7 +404,7 @@ class KafkaIngestionService:
                         state.advance(message.offset)
                         processed_offsets[tp] = message.offset + 1
                         continue
-                    if self._idempotency.was_processed(event_id):
+                    if event_id in current_event_ids or self._idempotency.was_processed(event_id):
                         state.advance(message.offset)
                         processed_offsets[tp] = message.offset + 1
                         continue
@@ -411,9 +417,11 @@ class KafkaIngestionService:
                         continue
                     ticks.append(tick)
                     state.pending_ticks.append(tick)
+                    state.pending_event_ids.append(event_id)
+                    current_event_ids.add(event_id)
+                    committable_event_ids.append(event_id)
                     state.advance(message.offset)
                     processed_offsets[tp] = message.offset + 1
-                    self._idempotency.mark_processed(event_id)
                 if abort_transaction:
                     break
             if abort_transaction:
@@ -432,8 +440,11 @@ class KafkaIngestionService:
             try:
                 await producer.send_offsets_to_transaction(processed_offsets, self._config.group_id)
                 await producer.commit_transaction()
+                for event_id in committable_event_ids:
+                    self._idempotency.mark_processed(event_id)
                 for state in self._partition_state.values():
                     state.pending_ticks.clear()
+                    state.pending_event_ids.clear()
                     state.pending_offset = None
             except Exception:  # pragma: no cover - transactional failure
                 logger.exception("Failed to commit Kafka transaction")
