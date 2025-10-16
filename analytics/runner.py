@@ -180,17 +180,29 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
     """Execute the analytics pipeline using configuration parameters."""
 
     logger = logging.getLogger("tradepulse.experiment")
+    logger.info("Starting analytics pipeline execution.")
     data_cfg = cfg.experiment.data
     analytics_cfg = cfg.experiment.analytics
 
     data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
+    logger.debug("Resolved price data path to %s", data_path)
     if not data_path.exists():
         logger.warning("Data file %s does not exist; analytics step skipped.", data_path)
         return {"status": "missing-data", "path": str(data_path)}
 
     df = pd.read_csv(data_path)
+    logger.debug(
+        "Loaded dataset with shape %s and columns %s",
+        df.shape,
+        list(df.columns),
+    )
     price_column = str(data_cfg.price_column)
     if price_column not in df.columns:
+        logger.error(
+            "Configured price column %s missing from dataset columns %s",
+            price_column,
+            list(df.columns),
+        )
         raise ValueError(
             f"Price column '{price_column}' not found in dataset columns {list(df.columns)}"
         )
@@ -201,6 +213,11 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
     delta = float(analytics_cfg.delta)
 
     if len(prices) < window:
+        logger.error(
+            "Insufficient price observations: received %s, expected at least %s",
+            len(prices),
+            window,
+        )
         raise ValueError(
             f"Not enough price observations ({len(prices)}) for window size {window}."
         )
@@ -221,9 +238,11 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
         "bins": bins,
         "delta": delta,
     }
+    logger.debug("Computed analytics summary: %s", summary)
     logger.info("Analytics summary computed: %s", summary)
 
     results_path = Path.cwd() / "results.json"
+    logger.info("Writing analytics results to %s", results_path)
     results_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     return {"status": "ok", "summary": summary, "results_path": str(results_path)}
 
@@ -241,6 +260,7 @@ def main(cfg: DictConfig) -> None:
     metadata = collect_run_metadata(run_dir, original_cwd, cfg)
 
     logger = logging.getLogger(__name__)
+    logger.debug("Collected run metadata: %s", metadata)
     try:
         safe_yaml = _redacted_config_yaml(cfg)
     except Exception:
@@ -254,7 +274,10 @@ def main(cfg: DictConfig) -> None:
     results = run_pipeline(cfg)
     _write_metadata(metadata)
 
+    logger.info("Run metadata written to %s", metadata.run_dir / "run_metadata.json")
+
     results_path = run_dir / "pipeline_results.json"
+    logger.info("Persisting pipeline results to %s", results_path)
     results_path.write_text(json.dumps(results, indent=2), encoding="utf-8")
 
 
