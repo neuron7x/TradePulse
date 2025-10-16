@@ -136,20 +136,14 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
             }
         return payload
 
-    def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:  # type: ignore[override]
-        if idempotency_key and idempotency_key in self._idempotency_cache:
-            return self._idempotency_cache[idempotency_key]
-        payload = self._build_place_payload(order, idempotency_key)
-        started_at = time.perf_counter()
-        response = self._request("POST", self._order_endpoint(), json_payload=payload, signed=True)
-        finished_at = time.perf_counter()
-        submitted = self._parse_order(response, original=order)
-        self._record_trade_latency(order=submitted, started_at=started_at, finished_at=finished_at)
-        with self._lock:
-            self._orders[submitted.order_id or ""] = submitted
-            if idempotency_key:
-                self._idempotency_cache[idempotency_key] = submitted
-        return submitted
+    def _send_place_order(
+        self,
+        order: Order,
+        payload: dict[str, Any],
+        *,
+        idempotency_key: str | None,
+    ) -> Mapping[str, Any] | list:
+        return self._request("POST", self._order_endpoint(), json_payload=payload, signed=True)
 
     def _parse_order(self, payload: Mapping[str, Any], *, original: Order | None = None) -> Order:
         if "order" in payload and isinstance(payload["order"], Mapping):

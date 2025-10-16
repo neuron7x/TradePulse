@@ -222,7 +222,11 @@ class RESTWebSocketConnector(ExecutionConnector):
             return self._idempotency_cache[idempotency_key]
         payload = self._build_place_payload(order, idempotency_key)
         started_at = time.perf_counter()
-        response = self._request("POST", self._order_endpoint(), params=payload, signed=True)
+        response = self._send_place_order(
+            order,
+            payload,
+            idempotency_key=idempotency_key,
+        )
         finished_at = time.perf_counter()
         submitted = self._parse_order(response, original=order)
         self._record_trade_latency(order=submitted, started_at=started_at, finished_at=finished_at)
@@ -231,6 +235,17 @@ class RESTWebSocketConnector(ExecutionConnector):
             if idempotency_key:
                 self._idempotency_cache[idempotency_key] = submitted
         return submitted
+
+    def _send_place_order(
+        self,
+        order: Order,
+        payload: Dict[str, Any],
+        *,
+        idempotency_key: str | None,
+    ) -> Mapping[str, Any] | list:
+        """Dispatch the place-order request and return the raw payload."""
+
+        return self._request("POST", self._order_endpoint(), params=payload, signed=True)
 
     def _record_trade_latency(self, *, order: Order, started_at: float, finished_at: float) -> None:
         metrics = getattr(self, "_metrics", None)
