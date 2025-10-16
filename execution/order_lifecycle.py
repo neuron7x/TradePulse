@@ -266,10 +266,54 @@ class OrderLifecycleStore:
             to_status.value,
             payload,
         )
-        self._dal.execute(self._insert_sql, params)
-        stored = self.get(order_id, correlation_id)
-        if stored is None:  # pragma: no cover - defensive guard
+
+        existing_sql = self._select_one_sql
+        latest_sql = (
+            "SELECT sequence, order_id, correlation_id, event, from_status, "
+            "to_status, details, created_at "
+            f"FROM {self._qualified_table} WHERE order_id = {self._placeholder} "
+            "ORDER BY sequence DESC LIMIT 1"
+        )
+        if self._dialect == "postgres":
+            existing_sql += " FOR UPDATE"
+            latest_sql += " FOR UPDATE"
+
+        with self._dal.transaction() as connection:
+            cursor = connection.cursor()
+
+            cursor.execute(existing_sql, (order_id, correlation_id))
+            existing = cursor.fetchone()
+            if existing is not None:
+                stored = self._row_to_transition(self._coerce_row(existing))
+                if stored.event != event or stored.to_status != to_status:
+                    raise ValueError(
+                        "Idempotency violation: correlation_id already recorded with different transition"
+                    )
+                if stored.from_status != from_status:
+                    raise ValueError(
+                        "Inconsistent transition replay detected for correlation_id"
+                    )
+                return stored
+
+            cursor.execute(latest_sql, (order_id,))
+            latest = cursor.fetchone()
+            if latest is not None:
+                last_transition = self._row_to_transition(self._coerce_row(latest))
+                if last_transition.to_status != from_status:
+                    raise ValueError(
+                        "Concurrent transition detected for order: expected %s, found %s"
+                        % (from_status.value, last_transition.to_status.value)
+                    )
+
+            cursor.execute(self._insert_sql, params)
+
+            cursor.execute(self._select_one_sql, (order_id, correlation_id))
+            stored_row = cursor.fetchone()
+
+        if stored_row is None:  # pragma: no cover - defensive guard
             raise RuntimeError("Failed to read back order transition")
+
+        stored = self._row_to_transition(self._coerce_row(stored_row))
         if stored.event != event or stored.to_status != to_status:
             raise ValueError(
                 "Idempotency violation: correlation_id already recorded with different transition"
