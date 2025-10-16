@@ -24,11 +24,14 @@ import pandas as pd
 
 from backtest.engine import walk_forward
 from core.data.ingestion import DataIngestor
+from core.data.quality_control import QualityReport, validate_and_quarantine
+from core.data.validation import TimeSeriesValidationConfig, ValueColumnConfig
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
+from core.utils.metrics import get_metrics_collector
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
 
 
@@ -196,6 +199,69 @@ def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     return enriched
 
 
+def _derive_symbol(csv_path: str) -> str:
+    """Best-effort derivation of a symbol identifier from ``csv_path``."""
+
+    stem = Path(csv_path).stem
+    return stem or "UNKNOWN"
+
+
+def _quality_summary(report: QualityReport, *, clean_rows: int) -> dict[str, int]:
+    """Summarise quarantine statistics for CLI output payloads."""
+
+    return {
+        "clean_rows": int(clean_rows),
+        "quarantined_rows": int(report.quarantined.shape[0]),
+        "duplicate_rows": int(report.duplicates.shape[0]),
+        "spike_rows": int(report.spikes.shape[0]),
+    }
+
+
+def _ingest_and_validate(csv_path: str, price_column: str) -> tuple[pd.DataFrame, QualityReport]:
+    """Ingest ``csv_path`` via :class:`DataIngestor` and apply quality gates."""
+
+    ingestor = _make_data_ingestor(csv_path)
+    metrics = get_metrics_collector()
+    symbol = _derive_symbol(csv_path)
+    records: list[dict[str, Any]] = []
+
+    def _collect(tick) -> None:
+        records.append(
+            {
+                "timestamp": tick.timestamp,
+                "price": float(tick.price),
+                "volume": float(tick.volume),
+                "symbol": tick.symbol,
+                "venue": tick.venue,
+            }
+        )
+
+    with metrics.measure_data_ingestion("csv", symbol):
+        ingestor.historical_csv(csv_path, _collect, symbol=symbol)
+        frame = pd.DataFrame.from_records(
+            records,
+            columns=["timestamp", "price", "volume", "symbol", "venue"],
+        )
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+        frame["price"] = frame["price"].astype(float, copy=False)
+        frame["volume"] = frame["volume"].astype(float, copy=False)
+        if price_column != "price":
+            frame[price_column] = frame["price"]
+        config = TimeSeriesValidationConfig(
+            timestamp_column="timestamp",
+            value_columns=[ValueColumnConfig(name=price_column, dtype="float64")],
+            allow_extra_columns=True,
+        )
+        report = validate_and_quarantine(
+            frame,
+            config,
+            price_column=price_column,
+        )
+        clean = report.clean.sort_values("timestamp").reset_index(drop=True)
+        metrics.record_tick_processed("csv", symbol, count=int(clean.shape[0]))
+        return clean, report
+
+
 def cmd_analyze(args):
     """Compute indicator diagnostics for a CSV price series.
 
@@ -214,8 +280,10 @@ def cmd_analyze(args):
     """
     args = _apply_config(args)
 
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    clean, report = _ingest_and_validate(args.csv, args.price_col)
+    if clean.empty:
+        raise ValueError("No clean data available after quality control")
+    prices = clean[args.price_col].to_numpy(dtype=float)
     from core.indicators.kuramoto import compute_phase_gpu
     phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
     R = kuramoto_order(phases[-args.window:])
@@ -234,6 +302,7 @@ def cmd_analyze(args):
                     "kappa_mean": float(kappa),
                     "Hurst": float(Hs),
                     "phase": phase,
+                    "quality": _quality_summary(report, clean_rows=clean.shape[0]),
                 }
             ),
             indent=2,
@@ -257,11 +326,18 @@ def cmd_backtest(args):
         same implementation invoked by automation in ``docs/runbook_live_trading.md``.
     """
     args = _apply_config(args)
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    clean, report = _ingest_and_validate(args.csv, args.price_col)
+    if clean.empty:
+        raise ValueError("No clean data available after quality control")
+    prices = clean[args.price_col].to_numpy(dtype=float)
     sig = signal_from_indicators(prices, window=args.window)
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
-    out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
+    out = {
+        "pnl": res.pnl,
+        "max_dd": res.max_dd,
+        "trades": res.trades,
+        "quality": _quality_summary(report, clean_rows=clean.shape[0]),
+    }
     print(json.dumps(_enrich_with_trace(out), indent=2))
 
 def cmd_live(args):
