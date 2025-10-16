@@ -12,11 +12,16 @@ on:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ['3.11', '3.12', '3.13']
-    name: Tests (Python ${{ matrix.python-version }})
+    name: Tests (Python ${{ matrix.python-version }} / ${{ matrix.os }})
     steps:
       - uses: actions/checkout@v5
       - name: Set up Python
@@ -28,6 +33,13 @@ jobs:
         uses: astral-sh/setup-uv@v3
       - name: Create virtual environment
         run: uv venv
+      - name: Configure virtual environment Python path
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            echo "PYTHON_EXEC=.venv/Scripts/python.exe" >> "$GITHUB_ENV"
+          else
+            echo "PYTHON_EXEC=.venv/bin/python" >> "$GITHUB_ENV"
+          fi
       - name: Install dependencies
         run: |
           uv pip install -r requirements.txt
@@ -37,7 +49,7 @@ jobs:
           mkdir -p reports
       - name: Run unit and integration tests with coverage
         run: |
-          .venv/bin/python -m pytest \
+          "$PYTHON_EXEC" -m pytest \
             -m "not flaky" \
             tests/ \
             --cov=core --cov=backtest --cov=execution \
@@ -49,14 +61,14 @@ jobs:
             --flaky-report=reports/flaky-tests-skipped.json
       - name: Run end-to-end smoke tests
         run: |
-          .venv/bin/python -m pytest tests/e2e/ \
+          "$PYTHON_EXEC" -m pytest tests/e2e/ \
             -m "not slow and not flaky" \
             --junitxml=reports/e2e-tests.xml \
             --html=reports/e2e-report.html --self-contained-html
       - name: Publish coverage summary
         id: coverage_summary
         run: |
-          python - <<'PY'
+          "$PYTHON_EXEC" - <<'PY'
           import os
           import pathlib
           import xml.etree.ElementTree as ET
@@ -94,7 +106,7 @@ jobs:
               raise SystemExit(f"Branch coverage {branch_rate:.2f}% is below the required 90% threshold")
       PY
       - name: Update missing-coverage label
-        if: ${{ github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        if: ${{ github.event_name == 'pull_request' && matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' }}
         uses: actions/github-script@v7
         with:
           script: |
@@ -116,7 +128,7 @@ jobs:
             }
       - name: Run property-based tests with statistics
         run: |
-          .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
+          "$PYTHON_EXEC" -m pytest tests/property/ --hypothesis-show-statistics \
             --junitxml=reports/property-tests.xml \
             --html=reports/property-tests-report.html --self-contained-html
       - name: Summarize pytest results
@@ -130,7 +142,7 @@ jobs:
             reports/e2e-tests.xml
           show: "fail, skip, pass"
       - name: Find existing test summary comment
-        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' && !github.event.pull_request.head.repo.fork }}
         id: find_test_comment
         uses: peter-evans/find-comment@v3
         with:
@@ -138,7 +150,7 @@ jobs:
           comment-author: 'github-actions[bot]'
           body-includes: '### Test & Coverage Summary'
       - name: Post test summary comment
-        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && matrix.os == 'ubuntu-latest' && !github.event.pull_request.head.repo.fork }}
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
