@@ -30,7 +30,7 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: 'npm run start -- --hostname 127.0.0.1 --port 3000',
+        command: 'npm run dev -- --hostname 127.0.0.1 --port 3000',
         url: baseURL,
         reuseExistingServer: !process.env.CI,
         stdout: 'pipe',
