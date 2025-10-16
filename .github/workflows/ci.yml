@@ -6,6 +6,13 @@ on:
   push:
     branches: [main]
 
+env:
+  # Coverage threshold - change this value to adjust the required coverage percentage
+  COVERAGE_THRESHOLD: "85"
+  # Coverage target packages - change this to target specific packages
+  # Current: core,backtest,execution,analytics (matching .coveragerc)
+  COVERAGE_PACKAGES: "core,backtest,execution,analytics"
+
 jobs:
   test-coverage:
     runs-on: ubuntu-latest
@@ -28,12 +35,39 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
+          if [ -f requirements-dev.txt ]; then pip install -r requirements-dev.txt; fi
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
-          pip install pytest pytest-cov
       
       - name: Run tests with coverage
         run: |
-          pytest --cov=./ --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+          # Build coverage arguments for each package
+          COV_ARGS=""
+          IFS=',' read -ra PACKAGES <<< "${{ env.COVERAGE_PACKAGES }}"
+          for pkg in "${PACKAGES[@]}"; do
+            COV_ARGS="$COV_ARGS --cov=$pkg"
+          done
+          
+          # Run pytest with xdist for parallel execution and coverage
+          pytest $COV_ARGS \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.COVERAGE_THRESHOLD }} \
+            --junitxml=junit-${{ matrix.python-version }}.xml \
+            -n auto
+      
+      - name: Upload JUnit test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-results-py${{ matrix.python-version }}
+          path: junit-${{ matrix.python-version }}.xml
+      
+      - name: Upload coverage XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml-py${{ matrix.python-version }}
+          path: coverage.xml
       
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

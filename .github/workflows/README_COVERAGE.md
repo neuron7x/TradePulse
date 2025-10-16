@@ -10,27 +10,44 @@ The CI workflow enforces test coverage requirements on all pull requests and pus
 
 ### Coverage Threshold
 
-The default coverage threshold is **80%**. To change this threshold:
+The default coverage threshold is **85%**. To change this threshold:
 
 1. Open `.github/workflows/ci.yml`
-2. Locate the `pytest` command in the "Run tests with coverage" step
-3. Modify the `--cov-fail-under` parameter:
+2. Locate the `COVERAGE_THRESHOLD` environment variable at the top of the file:
    ```yaml
-   pytest --cov=./ --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+   env:
+     COVERAGE_THRESHOLD: "85"
    ```
-   Replace `80` with your desired threshold (e.g., `85` for 85% coverage)
+3. Change the value to your desired threshold (e.g., `"90"` for 90% coverage)
 
 ### Coverage Scope
 
-By default, the workflow measures coverage for the entire repository (`--cov=./`). To measure coverage for specific directories only:
+By default, the workflow measures coverage for: `core`, `backtest`, `execution`, and `analytics` packages. To change the coverage scope:
 
 1. Open `.github/workflows/ci.yml`
-2. Modify the `--cov` parameter to target specific packages:
+2. Locate the `COVERAGE_PACKAGES` environment variable at the top of the file:
    ```yaml
-   pytest --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+   env:
+     COVERAGE_PACKAGES: "core,backtest,execution,analytics"
    ```
+3. Modify the comma-separated list to target specific packages, for example:
+   - `"core,backtest"` - Only core and backtest packages
+   - `"tradepulse"` - Single tradepulse package (if using a unified package structure)
+   - `"./"` - Entire repository (not recommended for large projects)
 
-You can also configure coverage settings in `.coveragerc` file in the repository root.
+You can also configure coverage settings in the `[tool.coverage]` section of `pyproject.toml`.
+
+## Features
+
+The CI workflow includes:
+
+- **Python Version Matrix**: Tests against Python 3.10 and 3.11
+- **Parallel Testing**: Uses pytest-xdist with `-n auto` for faster test execution
+- **Coverage Reports**: Generates both XML and terminal reports
+- **JUnit XML**: Produces JUnit XML reports for test results
+- **Artifact Upload**: Uploads both JUnit and coverage XML as GitHub Actions artifacts
+- **Codecov Integration**: Automatically uploads coverage data to Codecov with per-version flags
+- **Configurable Thresholds**: Easy-to-change coverage threshold via environment variables
 
 ## Codecov Integration
 
@@ -90,12 +107,24 @@ This ensures coverage is checked both during code review and after merging.
 1. Go to the **Actions** tab in your repository
 2. Click on a workflow run
 3. Expand the "Run tests with coverage" step to see the coverage report in the logs
+4. Download JUnit or coverage XML artifacts from the workflow run summary
 
 ### On Codecov
 
 1. Visit your repository on [Codecov](https://codecov.io/)
 2. View detailed coverage reports, trends, and file-level coverage
 3. See coverage changes in pull request comments (automatically posted by Codecov)
+
+## Parallel Test Execution
+
+The workflow uses pytest-xdist with `-n auto` to run tests in parallel, significantly reducing CI time. The number of parallel workers is automatically determined based on available CPU cores.
+
+If you need to disable parallel execution or adjust the number of workers:
+
+1. Open `.github/workflows/ci.yml`
+2. Modify the pytest command in the "Run tests with coverage" step:
+   - Use `-n 4` to run with 4 workers
+   - Use `-n 1` or remove the `-n` flag to disable parallel execution
 
 ## Troubleshooting
 
@@ -115,6 +144,13 @@ If Codecov upload fails:
 
 ### Python Version Compatibility
 
-The workflow tests against Python 3.10 and 3.11. If your code requires a different version:
+The workflow tests against Python 3.10 and 3.11. If your code requires different versions:
 1. Edit the `matrix.python-version` in `.github/workflows/ci.yml`
 2. Update the branch protection rules to match the new Python versions
+
+### Parallel Test Issues
+
+If tests fail with parallel execution but pass without it:
+- Some tests may have race conditions or shared state issues
+- Use pytest markers to identify and fix problematic tests
+- Consider using `-n 1` or removing `-n auto` as a temporary workaround

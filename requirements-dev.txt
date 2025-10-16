@@ -3,6 +3,7 @@
 # Formatters & linters
 black==25.9.0
 ruff==0.14.0
+isort==5.13.2
 slotscheck==0.19.1
 
 # Type checking
@@ -21,6 +22,12 @@ pytest-profiling==1.8.1; python_version < "3.13"
 mutmut==3.3.1
 click>=8.3.0
 redis>=5.0.1
+
+# Pre-commit hooks
+pre-commit==4.0.1
+
+# Coverage reporting
+codecov==2.1.13
 
 # Profiling tools
 scalene>=1.5.55
