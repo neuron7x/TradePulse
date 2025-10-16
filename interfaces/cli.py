@@ -16,6 +16,7 @@ import json
 import os
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -23,12 +24,15 @@ import numpy as np
 import pandas as pd
 
 from backtest.engine import walk_forward
+from core.data.quality_control import QualityReport, validate_and_quarantine
 from core.data.ingestion import DataIngestor
+from core.data.validation import TimeSeriesValidationConfig, ValueColumnConfig
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
+from core.utils import get_metrics_collector
 from observability.tracing import activate_traceparent, current_traceparent, get_tracer
 
 
@@ -186,6 +190,132 @@ def _make_data_ingestor(csv_path: str | None = None) -> DataIngestor:
     return DataIngestor(allowed_roots=allowed)
 
 
+def _derive_symbol(args: argparse.Namespace) -> str:
+    candidate = getattr(args, "symbol", None)
+    if candidate:
+        return str(candidate).upper()
+    csv_path = getattr(args, "csv", None)
+    if not csv_path:
+        return "UNKNOWN"
+    stem = Path(csv_path).stem
+    return stem.upper() or "UNKNOWN"
+
+
+def _ticks_to_frame(ticks: list[Any]) -> pd.DataFrame:
+    timestamps = pd.to_datetime([tick.timestamp for tick in ticks], utc=True)
+    prices = [float(tick.price) for tick in ticks]
+    volumes = [float(tick.volume) for tick in ticks]
+    frame = pd.DataFrame({
+        "timestamp": timestamps,
+        "price": prices,
+        "volume": volumes,
+    })
+    return frame
+
+
+def _prepare_quality_report(report: QualityReport, *, price_column: str) -> QualityReport:
+    def _normalise(frame: pd.DataFrame) -> pd.DataFrame:
+        prepared = frame.copy()
+        if prepared.empty:
+            return prepared
+        if "timestamp" in prepared.columns:
+            prepared["timestamp"] = pd.to_datetime(prepared["timestamp"], utc=True, errors="coerce")
+            prepared = prepared.sort_values("timestamp").reset_index(drop=True)
+        if price_column != "price" and "price" in prepared.columns:
+            prepared = prepared.rename(columns={"price": price_column})
+        return prepared
+
+    return QualityReport(
+        clean=_normalise(report.clean),
+        quarantined=_normalise(report.quarantined),
+        duplicates=_normalise(report.duplicates),
+        spikes=_normalise(report.spikes),
+    )
+
+
+def _serialise_value(value: Any) -> Any:
+    if value is pd.NaT:
+        return None
+    if isinstance(value, pd.Timestamp):
+        ts = value.tz_convert("UTC") if value.tzinfo is not None else value.tz_localize("UTC")
+        return ts.isoformat()
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).isoformat()
+    return value
+
+
+def _frame_preview(frame: pd.DataFrame, *, limit: int = 10) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
+    preview = frame.head(limit).copy()
+    for column in preview.columns:
+        series = preview[column]
+        if pd.api.types.is_datetime64_any_dtype(series):
+            converted = series.dt.tz_convert("UTC")
+            preview[column] = [value.isoformat() if not pd.isna(value) else None for value in converted]
+        else:
+            preview[column] = series.apply(_serialise_value)
+    return preview.to_dict(orient="records")
+
+
+def _quality_payload(report: QualityReport) -> dict[str, Any]:
+    return {
+        "clean_rows": int(report.clean.shape[0]),
+        "quarantined_rows": int(report.quarantined.shape[0]),
+        "duplicates_rows": int(report.duplicates.shape[0]),
+        "spikes_rows": int(report.spikes.shape[0]),
+        "quarantined_preview": _frame_preview(report.quarantined),
+        "duplicates_preview": _frame_preview(report.duplicates),
+        "spikes_preview": _frame_preview(report.spikes),
+    }
+
+
+def _ingest_and_validate(args: argparse.Namespace) -> tuple[pd.DataFrame, QualityReport, str]:
+    ingestor = _make_data_ingestor(args.csv)
+    collector = get_metrics_collector()
+    symbol = _derive_symbol(args)
+    ticks: list[Any] = []
+
+    with collector.measure_data_ingestion("csv", symbol) as ctx:
+        ingestor.historical_csv(
+            args.csv,
+            ticks.append,
+            required_fields=("ts", "price"),
+            symbol=symbol,
+            venue="CLI",
+        )
+        count = len(ticks)
+        collector.record_tick_processed("csv", symbol, count)
+        ctx.setdefault("rows", count)
+
+    if not ticks:
+        raise ValueError(f"No ticks were ingested from {args.csv}")
+
+    frame = _ticks_to_frame(ticks)
+    frame_length = len(frame)
+    config = TimeSeriesValidationConfig(
+        timestamp_column="timestamp",
+        value_columns=[
+            ValueColumnConfig(name="price", dtype="float64", nullable=False),
+            ValueColumnConfig(name="volume", dtype="float64", nullable=True),
+        ],
+        allow_extra_columns=True,
+    )
+    window_size = max(1, min(args.window, frame_length or 1))
+    report = validate_and_quarantine(
+        frame,
+        config,
+        window=window_size,
+        price_column="price",
+    )
+    prepared = _prepare_quality_report(report, price_column=args.price_col)
+    if prepared.clean.empty:
+        raise ValueError("All ingested rows were quarantined; no clean data available.")
+    return prepared.clean, prepared, symbol
+
+
 def _enrich_with_trace(payload: dict[str, Any]) -> dict[str, Any]:
     """Attach the active traceparent to ``payload`` when available."""
     traceparent = current_traceparent()
@@ -214,8 +344,8 @@ def cmd_analyze(args):
     """
     args = _apply_config(args)
 
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    clean_frame, quality_report, _ = _ingest_and_validate(args)
+    prices = clean_frame[args.price_col].to_numpy(dtype=float, copy=False)
     from core.indicators.kuramoto import compute_phase_gpu
     phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
     R = kuramoto_order(phases[-args.window:])
@@ -234,6 +364,7 @@ def cmd_analyze(args):
                     "kappa_mean": float(kappa),
                     "Hurst": float(Hs),
                     "phase": phase,
+                    "quality": _quality_payload(quality_report),
                 }
             ),
             indent=2,
@@ -257,11 +388,20 @@ def cmd_backtest(args):
         same implementation invoked by automation in ``docs/runbook_live_trading.md``.
     """
     args = _apply_config(args)
-    df = pd.read_csv(args.csv)
-    prices = df[args.price_col].to_numpy()
+    clean_frame, quality_report, symbol = _ingest_and_validate(args)
+    prices = clean_frame[args.price_col].to_numpy(dtype=float, copy=False)
     sig = signal_from_indicators(prices, window=args.window)
-    res = walk_forward(prices, lambda _: sig, fee=args.fee)
-    out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
+    collector = get_metrics_collector()
+    with collector.measure_backtest("cli.signal") as backtest_ctx:
+        res = walk_forward(prices, lambda _: sig, fee=args.fee)
+        backtest_ctx.update({"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades})
+    out = {
+        "pnl": res.pnl,
+        "max_dd": res.max_dd,
+        "trades": res.trades,
+        "quality": _quality_payload(quality_report),
+        "symbol": symbol,
+    }
     print(json.dumps(_enrich_with_trace(out), indent=2))
 
 def cmd_live(args):
