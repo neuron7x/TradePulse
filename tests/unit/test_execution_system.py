@@ -101,7 +101,7 @@ def test_oms_register_fill_emits_slippage_metric(tmp_path, risk_manager: RiskMan
     assert captured and captured[0] == pytest.approx(20.0)
     exchange_label = getattr(connector, "name", connector.__class__.__name__.lower())
     adverse_bucket = registry.get_sample_value(
-        "slippage_bps_bucket",
+        "tradepulse_slippage_bps_bucket",
         {"exchange": exchange_label, "symbol": "BTCUSDT", "side": "buy", "le": "25.0"},
     )
     assert adverse_bucket == pytest.approx(1.0)

@@ -94,7 +94,7 @@ def test_rest_connector_emits_trade_latency(monkeypatch: pytest.MonkeyPatch) -> 
     assert observed[0]["latency_ms"] == pytest.approx(250.0)
 
     latency_sum = registry.get_sample_value(
-        "trade_latency_ms_sum",
+        "tradepulse_trade_latency_ms_sum",
         {"exchange": "dummy", "adapter": "DummyConnector", "symbol": "BTCUSDT", "order_type": "limit"},
     )
     assert latency_sum == pytest.approx(250.0)
@@ -146,7 +146,7 @@ def test_coinbase_connector_emits_trade_latency(monkeypatch: pytest.MonkeyPatch)
     assert observed[0]["latency_ms"] == pytest.approx(120.0)
 
     latency_sum = registry.get_sample_value(
-        "trade_latency_ms_sum",
+        "tradepulse_trade_latency_ms_sum",
         {"exchange": "coinbase", "adapter": "CoinbaseRESTConnector", "symbol": "BTC-USD", "order_type": "limit"},
     )
     assert latency_sum == pytest.approx(120.0)

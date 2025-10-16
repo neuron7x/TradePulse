@@ -289,7 +289,7 @@ class MetricsCollector:
             5000.0,
         )
         self.trade_latency_ms = Histogram(
-            "trade_latency_ms",
+            "tradepulse_trade_latency_ms",
             "Round-trip latency between order submission and venue acknowledgement in milliseconds.",
             ["exchange", "adapter", "symbol", "order_type"],
             registry=registry,
@@ -322,7 +322,7 @@ class MetricsCollector:
             1000.0,
         )
         self.slippage_bps = Histogram(
-            "slippage_bps",
+            "tradepulse_slippage_bps",
             "Distribution of realised per-fill slippage in basis points (positive = adverse).",
             ["exchange", "symbol", "side"],
             registry=registry,

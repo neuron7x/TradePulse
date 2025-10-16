@@ -181,27 +181,27 @@ def test_trade_latency_and_slippage_helpers_record_samples() -> None:
 
     latency_count = _sample_value(
         registry,
-        "trade_latency_ms_count",
+        "tradepulse_trade_latency_ms_count",
         {"exchange": "binance", "adapter": "RESTWebSocketConnector", "symbol": "BTCUSDT", "order_type": "limit"},
     )
     latency_sum = _sample_value(
         registry,
-        "trade_latency_ms_sum",
+        "tradepulse_trade_latency_ms_sum",
         {"exchange": "binance", "adapter": "RESTWebSocketConnector", "symbol": "BTCUSDT", "order_type": "limit"},
     )
     slippage_count = _sample_value(
         registry,
-        "slippage_bps_count",
+        "tradepulse_slippage_bps_count",
         {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy"},
     )
     adverse_bucket = _sample_value(
         registry,
-        "slippage_bps_bucket",
+        "tradepulse_slippage_bps_bucket",
         {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy", "le": "25.0"},
     )
     favorable_bucket = _sample_value(
         registry,
-        "slippage_bps_bucket",
+        "tradepulse_slippage_bps_bucket",
         {"exchange": "binance", "symbol": "BTCUSDT", "side": "buy", "le": "0.0"},
     )
 

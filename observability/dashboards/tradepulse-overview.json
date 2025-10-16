@@ -465,17 +465,17 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum(rate(trade_latency_ms_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.5, sum(rate(tradepulse_trade_latency_ms_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(trade_latency_ms_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(tradepulse_trade_latency_ms_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(trade_latency_ms_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(tradepulse_trade_latency_ms_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         }
@@ -532,22 +532,22 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.5, sum(rate(slippage_bps_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.5, sum(rate(tradepulse_slippage_bps_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p50",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, sum(rate(slippage_bps_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.95, sum(rate(tradepulse_slippage_bps_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p95",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.99, sum(rate(slippage_bps_bucket[$__rate_interval])) by (le))",
+          "expr": "histogram_quantile(0.99, sum(rate(tradepulse_slippage_bps_bucket[$__rate_interval])) by (le))",
           "legendFormat": "p99",
           "refId": "C"
         },
         {
-          "expr": "sum(rate(slippage_bps_sum[$__rate_interval])) / sum(rate(slippage_bps_count[$__rate_interval]))",
+          "expr": "sum(rate(tradepulse_slippage_bps_sum[$__rate_interval])) / sum(rate(tradepulse_slippage_bps_count[$__rate_interval]))",
           "legendFormat": "mean",
           "refId": "D"
         }

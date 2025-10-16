@@ -121,14 +121,14 @@
       "subsystem": "execution"
     },
     {
-      "name": "trade_latency_ms",
+      "name": "tradepulse_trade_latency_ms",
       "type": "histogram",
       "description": "Distribution of order submission to acknowledgement latency in milliseconds.",
       "labels": ["exchange", "adapter", "symbol", "order_type"],
       "subsystem": "execution"
     },
     {
-      "name": "slippage_bps",
+      "name": "tradepulse_slippage_bps",
       "type": "histogram",
       "description": "Realised fill slippage captured in basis points (positive values are adverse).",
       "labels": ["exchange", "symbol", "side"],
