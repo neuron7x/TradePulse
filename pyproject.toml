@@ -8,7 +8,7 @@ dynamic = ["version", "readme"]
 description = "Advanced algorithmic trading framework with geometric market indicators"
 authors = [{ name = "TradePulse Contributors" }]
 license = { file = "LICENSE" }
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 keywords = ["trading", "quant", "algorithmic", "markets", "analytics"]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -22,9 +22,9 @@ classifiers = [
     "Topic :: Office/Business :: Financial :: Investment",
 ]
 dependencies = [
-    "numpy>=2.3.3",
-    "scipy>=1.16.2",
-    "pandas>=2.3.3",
+    "numpy>=1.26.4,<3",
+    "scipy>=1.11,<2",
+    "pandas>=2.2,<3",
     "networkx>=3.5",
     "pydantic>=2.12.1,<3.0.0",
     "pydantic-settings>=2.11.0,<3.0.0",
