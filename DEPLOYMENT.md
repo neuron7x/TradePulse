@@ -35,7 +35,7 @@ Before deploying, install the following tools:
 
 ## Docker Compose Deployment
 
-The repository ships with a production-ready Compose stack that builds the TradePulse application container and provisions the full observability toolchain (Prometheus, Alertmanager, Grafana, node-exporter, and cAdvisor).【F:docker-compose.yml†L1-L86】
+The repository ships with a production-ready Compose stack that builds the TradePulse application container and provisions the full observability toolchain (Prometheus, Alertmanager, Grafana, node-exporter, and cAdvisor) alongside an Elastic-based logging pipeline (Elasticsearch, Logstash, Kibana, and Filebeat).【F:docker-compose.yml†L1-L120】
 
 1. **Compile observability artefacts** whenever dashboards or alert definitions change:
    ```bash
@@ -59,13 +59,14 @@ The repository ships with a production-ready Compose stack that builds the Trade
    docker compose ps
    docker compose logs -f tradepulse
    docker compose logs -f prometheus
+   docker compose logs -f logstash
    ```
 6. **Stop and remove** the stack when done:
    ```bash
    docker compose down -v
    ```
 
-The Compose configuration exposes Prometheus on `http://localhost:9090`, Grafana on `http://localhost:3000`, Alertmanager on `http://localhost:9093`, and cAdvisor on `http://localhost:8080`. Grafana auto-imports all dashboards generated under `observability/generated/dashboards`, so rebuilding the bundle keeps the UI in sync with Git.【F:docker-compose.yml†L33-L86】【F:deploy/grafana/provisioning/dashboards/dashboards.yaml†L1-L9】
+The Compose configuration exposes Prometheus on `http://localhost:9090`, Grafana on `http://localhost:3000`, Alertmanager on `http://localhost:9093`, cAdvisor on `http://localhost:8080`, Elasticsearch on `http://localhost:9200`, and Kibana on `http://localhost:5601`. Grafana auto-imports all dashboards generated under `observability/generated/dashboards`, so rebuilding the bundle keeps the UI in sync with Git, while Filebeat streams container logs through Logstash into Elasticsearch using the pipeline under `observability/logstash/pipeline/`.【F:docker-compose.yml†L33-L153】【F:deploy/grafana/provisioning/dashboards/dashboards.yaml†L1-L9】【F:observability/logstash/pipeline/tradepulse.conf†L1-L26】【F:observability/logging/filebeat.docker.yml†L1-L19】
 
 ### Compose Health Check
 

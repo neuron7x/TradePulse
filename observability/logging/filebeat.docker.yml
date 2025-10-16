@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: MIT
+filebeat.inputs:
+  - type: filestream
+    id: docker-container-logs
+    enabled: true
+    paths:
+      - /var/lib/docker/containers/*/*.log
+    parsers:
+      - ndjson:
+          target: json
+    processors:
+      - add_docker_metadata: ~
+      - decode_json_fields:
+          fields: ["message"]
+          process_array: false
+          max_depth: 1
+          target: "json"
+
+output.logstash:
+  hosts: ["logstash:5044"]
