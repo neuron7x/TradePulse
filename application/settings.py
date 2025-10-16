@@ -274,9 +274,67 @@ class ApiRateLimitSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="TRADEPULSE_RATE_", extra="ignore")
 
 
+class EmailNotificationSettings(BaseModel):
+    """SMTP configuration used for email notifications."""
+
+    host: str = Field(..., min_length=1, description="SMTP server hostname.")
+    port: PositiveInt = Field(587, description="SMTP server port.")
+    sender: str = Field(..., min_length=3, description="Email address used as the sender.")
+    recipients: list[str] = Field(
+        default_factory=list,
+        description="Email recipients that receive TradePulse notifications.",
+    )
+    username: str | None = Field(
+        default=None, description="Optional username used for SMTP authentication."
+    )
+    password: SecretStr | None = Field(
+        default=None, description="Optional password used for SMTP authentication."
+    )
+    use_tls: bool = Field(True, description="Enable STARTTLS for SMTP connections.")
+    use_ssl: bool = Field(False, description="Use implicit TLS when connecting to SMTP.")
+    timeout_seconds: PositiveFloat = Field(10.0, description="SMTP connection timeout.")
+
+    @model_validator(mode="after")
+    def _validate_configuration(self) -> "EmailNotificationSettings":
+        if not self.recipients:
+            raise ValueError("recipients must contain at least one address")
+        if self.use_tls and self.use_ssl:
+            raise ValueError("use_tls and use_ssl are mutually exclusive")
+        return self
+
+
+class NotificationSettings(BaseSettings):
+    """Runtime configuration for out-of-band notifications."""
+
+    email: EmailNotificationSettings | None = Field(
+        default=None,
+        description="Optional SMTP configuration for email alerts.",
+    )
+    slack_webhook_url: HttpUrl | None = Field(
+        default=None,
+        description="Incoming webhook URL used for Slack notifications.",
+    )
+    slack_channel: str | None = Field(
+        default=None,
+        description="Override Slack channel routed by the webhook.",
+    )
+    slack_username: str | None = Field(
+        default=None,
+        description="Display name used by the Slack notifier.",
+    )
+    slack_timeout_seconds: PositiveFloat = Field(
+        5.0,
+        description="HTTP timeout used for Slack webhook requests.",
+    )
+
+    model_config = SettingsConfigDict(env_prefix="TRADEPULSE_NOTIFY_", extra="ignore")
+
+
 __all__ = [
     "AdminApiSettings",
     "ApiSecuritySettings",
     "RateLimitPolicy",
     "ApiRateLimitSettings",
+    "EmailNotificationSettings",
+    "NotificationSettings",
 ]

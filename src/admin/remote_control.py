@@ -39,8 +39,29 @@ class AdminIdentity(BaseModel):
     """Authenticated administrator identity extracted from the request."""
 
     subject: str = Field(..., description="Unique subject identifier for the administrator.")
+    roles: tuple[str, ...] = Field(
+        default_factory=tuple,
+        description=(
+            "Normalised set of roles associated with the administrator. Roles are stored "
+            "as lowercase strings to simplify downstream authorization checks."
+        ),
+    )
 
     model_config = ConfigDict(frozen=True)
+
+    def has_role(self, role: str) -> bool:
+        """Return ``True`` when *role* is associated with the identity."""
+
+        candidate = role.strip().lower()
+        if not candidate:
+            raise ValueError("role must be a non-empty string")
+        return candidate in self.role_set
+
+    @property
+    def role_set(self) -> set[str]:
+        """Return the set of configured roles in lowercase form."""
+
+        return {value.lower() for value in self.roles}
 
 
 class KillSwitchRequest(BaseModel):
