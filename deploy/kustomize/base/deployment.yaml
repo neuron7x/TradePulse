@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tradepulse-api
+  labels:
+    app.kubernetes.io/name: tradepulse-api
+spec:
+  replicas: 3
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tradepulse-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: tradepulse-api
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: tradepulse-api
+          image: ghcr.io/neuron7x/tradepulse:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          env:
+            - name: TRADEPULSE_AUDIT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: audit-secret
+            - name: TRADEPULSE_OAUTH2_ISSUER
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-issuer
+            - name: TRADEPULSE_OAUTH2_AUDIENCE
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-audience
+            - name: TRADEPULSE_OAUTH2_JWKS_URI
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-secrets
+                  key: oauth2-jwks-uri
+            - name: TRADEPULSE_MTLS_TRUSTED_CA_PATH
+              value: /etc/tradepulse/tls/client-ca.pem
+            - name: TRADEPULSE_MTLS_REVOCATION_LIST_PATH
+              value: /etc/tradepulse/tls/client.crl
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 8001
+              name: metrics
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 12
+          volumeMounts:
+            - name: tls-client-ca
+              mountPath: /etc/tradepulse/tls
+              readOnly: true
+      volumes:
+        - name: tls-client-ca
+          secret:
+            secretName: tradepulse-mtls-client

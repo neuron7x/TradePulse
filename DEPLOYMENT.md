@@ -73,54 +73,63 @@ services:
 
 Prometheus is preconfigured to scrape the TradePulse metrics endpoint on port 8001, so a failing health check will surface quickly in dashboards.【F:deploy/prometheus.yml†L2-L7】
 
-## Kubernetes Deployment with Helm
+## Kubernetes Infrastructure with Terraform and Kustomize
 
-Although the repository does not include a packaged chart, you can scaffold one under `deploy/helm/tradepulse` using:
+TradePulse now ships with first-class infrastructure code for Amazon EKS alongside Kustomize overlays for staging and production workloads. Use Terraform to provision the cluster(s) and managed node groups, then deploy the application manifests with the provided overlays.
 
-```bash
-mkdir -p deploy/helm
-helm create deploy/helm/tradepulse
-```
+### Provisioning EKS
 
-Update the generated files as follows:
+1. Review the Terraform module under `infra/terraform/eks/`. It provisions a multi-AZ VPC, EKS control plane, managed node groups, and an optional Cluster Autoscaler with IRSA.【F:infra/terraform/eks/main.tf†L1-L203】
+2. Initialise Terraform with the desired backend (configure S3/DynamoDB or Terraform Cloud before the first apply):
 
-- **`values.yaml`** – set the container image (`image.repository`, `image.tag`), replica count, and service type. Define sensible resource requests/limits so the scheduler can reserve capacity for steady-state traffic.
-- **`templates/deployment.yaml`** – mount environment configuration via Secrets/ConfigMaps, open the metrics port, and wire HTTP probes for `/healthz` and `/readyz` to surface pod status to the control plane.
+   ```bash
+   terraform -chdir=infra/terraform/eks init
+   ```
 
-Example patches for the Deployment template:
+3. Select the workspace for the target environment and apply the corresponding variables file:
 
-```yaml
-envFrom:
-  - secretRef:
-      name: tradepulse-secrets
-ports:
-  - name: metrics
-    containerPort: 8001
-livenessProbe:
-  httpGet:
-    path: /metrics
-    port: metrics
-  initialDelaySeconds: 30
-  periodSeconds: 30
-readinessProbe:
-  httpGet:
-    path: /metrics
-    port: metrics
-  initialDelaySeconds: 10
-  periodSeconds: 10
-```
+   ```bash
+   terraform -chdir=infra/terraform/eks workspace select staging || terraform -chdir=infra/terraform/eks workspace new staging
+   terraform -chdir=infra/terraform/eks apply -var-file=environments/staging.tfvars
+   ```
 
-The repository ships with a production-ready manifest (`deploy/tradepulse-deployment.yaml`) that demonstrates these patterns: the Deployment constrains rollouts to one unavailable pod at a time, advertises resource guarantees, and exposes liveness/readiness/startup probes along with a dedicated metrics port.【F:deploy/tradepulse-deployment.yaml†L1-L74】 A companion `Service` (`deploy/tradepulse-service.yaml`) targets the HTTP and metrics endpoints, while an accompanying PodDisruptionBudget keeps at least two replicas available during voluntary disruptions to preserve availability guarantees.【F:deploy/tradepulse-service.yaml†L1-L24】
+   The `production.tfvars` file contains higher-capacity defaults and an additional SPOT node group tailored for mission-critical workloads.【F:infra/terraform/eks/environments/production.tfvars†L1-L27】 Stage-specific sizing lives in `staging.tfvars` for parity testing without the full production footprint.【F:infra/terraform/eks/environments/staging.tfvars†L1-L20】
 
-Install or upgrade the release once the chart is configured and the container image is available in your registry:
+4. Export AWS credentials securely (e.g., via IAM roles, AWS SSO, or Vault) before applying Terraform. Never embed static keys inside the codebase.
+
+5. The Kubernetes and Helm providers rely on the cluster outputs created in the same plan, so Terraform waits for the control plane to stabilise before installing add-ons like the Cluster Autoscaler.【F:infra/terraform/eks/main.tf†L132-L203】
+
+### Staging and Production Manifests
+
+- Base manifests reside in `deploy/kustomize/base/` and encapsulate shared deployment traits, probes, and service wiring.【F:deploy/kustomize/base/deployment.yaml†L1-L74】【F:deploy/kustomize/base/service.yaml†L1-L17】【F:deploy/kustomize/base/pdb.yaml†L1-L11】
+- Environment overlays extend the base with namespace scoping, image tags, scheduling policies, and topology constraints:
+  - `deploy/kustomize/overlays/staging` targets the `tradepulse-staging` namespace, preserves mTLS requirements, and spreads pods across zones while staying right-sized for testing.【F:deploy/kustomize/overlays/staging/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/staging/patches/deployment-resources.yaml†L1-L36】
+  - `deploy/kustomize/overlays/production` introduces a high-priority class, strict topology distribution, and rate limiting tuned for live trading traffic in the `tradepulse-production` namespace.【F:deploy/kustomize/overlays/production/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/production/patches/deployment-high-availability.yaml†L1-L43】
+- Namespaces are declaratively managed in `deploy/kustomize/namespaces/` and should be applied before or together with the workload overlays.【F:deploy/kustomize/namespaces/staging.yaml†L1-L7】【F:deploy/kustomize/namespaces/production.yaml†L1-L7】
+- Production overlays install a dedicated `PriorityClass` so the API keeps scheduling headroom even during large-scale cluster events.【F:deploy/kustomize/overlays/production/priorityclass.yaml†L1-L7】
+
+Apply manifests directly with `kubectl` once your kubeconfig contexts are configured:
 
 ```bash
-helm upgrade --install tradepulse deploy/helm/tradepulse \
-  --namespace tradepulse \
-  --create-namespace \
-  --values deploy/helm/tradepulse/values.yaml \
-  --set image.tag=$(git rev-parse --short HEAD)
+kubectl apply -k deploy/kustomize/overlays/staging
+kubectl rollout status deployment/tradepulse-api -n tradepulse-staging
+
+kubectl apply -k deploy/kustomize/overlays/production
+kubectl rollout status deployment/tradepulse-api -n tradepulse-production
 ```
+
+Secrets referenced by the deployments (`tradepulse-secrets`, `tradepulse-mtls-client`) must be provisioned outside of source control via your secret management workflow.
+
+### Continuous Delivery Pipeline
+
+The `Deploy TradePulse Environments` GitHub Actions workflow automates validation and rollouts for both environments.【F:.github/workflows/deploy-environments.yml†L1-L139】 Key characteristics:
+
+- On every push to `main`, Terraform formatting/validation and Kustomize builds are executed before any cluster writes.
+- Staging deploys automatically after validation. Production deploys once staging succeeds and the protected `production` environment gate is approved inside GitHub.
+- Workflow dispatch supports ad-hoc rollouts; provide base64-encoded kubeconfigs through the `KUBE_CONFIG_STAGING` and `KUBE_CONFIG_PRODUCTION` secrets.
+- `kubectl diff` runs before each apply to surface configuration drift without failing the run for expected changes.
+
+Document required environment reviewers inside your repository settings so production deployments remain a two-person control.
 
 ## Managing Secrets
 
