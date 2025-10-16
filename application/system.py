@@ -357,6 +357,15 @@ class TradePulseSystem:
                 if raw_scores.shape[0] != aligned.shape[0]:
                     raise ValueError("Strategy output length must match feature frame rows")
 
+                valid_mask = np.isfinite(raw_scores)
+                if not valid_mask.all():
+                    dropped = int((~valid_mask).sum())
+                    ctx["dropped_invalid_scores"] = dropped
+                    raw_scores = raw_scores[valid_mask]
+                    aligned = aligned.iloc[valid_mask]
+                if raw_scores.size == 0:
+                    raise ValueError("Strategy produced no valid signal scores")
+
                 signals: list[Signal] = []
                 for timestamp, score in zip(aligned.index, raw_scores):
                     if score > 0:
