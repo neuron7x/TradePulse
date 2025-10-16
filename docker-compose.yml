@@ -3,18 +3,94 @@ version: '3.9'
 services:
   tradepulse:
     build: .
-    ports: ["8001:8001"]
+    ports:
+      - "8001:8001"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     labels:
       - "co.elastic.logs/enabled=true"
       - "co.elastic.logs/module=tradepulse"
     depends_on:
+      - prometheus
       - logstash
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/metrics"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
   prometheus:
-    image: prom/prometheus
+    image: prom/prometheus:v2.53.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--web.enable-lifecycle"
     volumes:
-      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml
-    ports: ["9090:9090"]
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/generated/prometheus:/etc/prometheus/rules:ro
+    ports:
+      - "9090:9090"
+    restart: unless-stopped
+    depends_on:
+      - alertmanager
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--config.expand-env"
+    environment:
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:?set SLACK_WEBHOOK_URL}
+      PAGERDUTY_ROUTING_KEY: ${PAGERDUTY_ROUTING_KEY:?set PAGERDUTY_ROUTING_KEY}
+    volumes:
+      - ./deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    restart: unless-stopped
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    command:
+      - "--path.rootfs=/host"
+    pid: host
+    restart: unless-stopped
+    volumes:
+      - /:/host:ro,rslave
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./deploy/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./deploy/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./observability/generated/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    depends_on:
+      - prometheus
+
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.3
     environment:
@@ -25,6 +101,8 @@ services:
       - "9200:9200"
     volumes:
       - elasticsearch-data:/usr/share/elasticsearch/data
+    restart: unless-stopped
+
   logstash:
     image: docker.elastic.co/logstash/logstash:8.11.3
     environment:
@@ -35,6 +113,8 @@ services:
       - "5044:5044"
     depends_on:
       - elasticsearch
+    restart: unless-stopped
+
   kibana:
     image: docker.elastic.co/kibana/kibana:8.11.3
     environment:
@@ -43,6 +123,8 @@ services:
       - "5601:5601"
     depends_on:
       - elasticsearch
+    restart: unless-stopped
+
   filebeat:
     image: docker.elastic.co/beats/filebeat:8.11.3
     user: root
@@ -53,6 +135,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     depends_on:
       - logstash
+    restart: unless-stopped
 
 volumes:
   elasticsearch-data:
