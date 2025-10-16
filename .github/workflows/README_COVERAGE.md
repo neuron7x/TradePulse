@@ -32,6 +32,31 @@ By default, the workflow measures coverage for the entire repository (`--cov=./`
 
 You can also configure coverage settings in `.coveragerc` file in the repository root.
 
+### Environment Provisioning
+
+The workflow uses [uv](https://github.com/astral-sh/uv) to provision an isolated virtual environment that matches the configured
+Python version. The relevant steps in `.github/workflows/ci.yml` look like this:
+
+```yaml
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Create virtual environment
+        run: uv venv
+
+      - name: Install dependencies
+        run: |
+          if [ -f requirements.txt ]; then uv pip install -r requirements.txt; fi
+          uv pip install pytest pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          .venv/bin/python -m pytest --cov=./ --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+```
+
+Using uv ensures that dependency resolution respects the selected interpreter (Python 3.11 and 3.12 by default) and avoids
+accidentally picking up pre-installed system interpreters that may be incompatible with the declared requirements.
+
 ## Codecov Integration
 
 ### For Public Repositories
