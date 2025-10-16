@@ -167,16 +167,16 @@
           }
         },
         {
-          "alert": "TradePulsePodCrashLoop",
-          "expr": "increase(kube_pod_container_status_restarts_total[15m]) > 3",
+          "alert": "TradePulseContainerCrashLoop",
+          "expr": "changes(container_start_time_seconds{container_label_com_docker_compose_service=\"tradepulse\"}[15m]) > 3",
           "for": "15m",
           "labels": {
             "severity": "critical",
             "team": "platform"
           },
           "annotations": {
-            "summary": "Pod experiencing repeated restarts",
-            "description": "A pod restarted more than three times in 15 minutes. Check application logs and resource limits."
+            "summary": "TradePulse container restarted repeatedly",
+            "description": "The TradePulse service restarted more than three times over 15 minutes. Inspect the container logs and resource budgets."
           }
         }
       ]
