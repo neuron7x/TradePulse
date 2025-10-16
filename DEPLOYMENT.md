@@ -105,7 +105,7 @@ TradePulse now ships with first-class infrastructure code for Amazon EKS alongsi
 - Environment overlays extend the base with namespace scoping, image tags, scheduling policies, and topology constraints:
   - `deploy/kustomize/overlays/staging` targets the `tradepulse-staging` namespace, preserves mTLS requirements, and spreads pods across zones while staying right-sized for testing.【F:deploy/kustomize/overlays/staging/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/staging/patches/deployment-resources.yaml†L1-L36】
   - `deploy/kustomize/overlays/production` introduces a high-priority class, strict topology distribution, and rate limiting tuned for live trading traffic in the `tradepulse-production` namespace.【F:deploy/kustomize/overlays/production/kustomization.yaml†L1-L14】【F:deploy/kustomize/overlays/production/patches/deployment-high-availability.yaml†L1-L43】
-- Namespaces are declaratively managed in `deploy/kustomize/namespaces/` and should be applied before or together with the workload overlays.【F:deploy/kustomize/namespaces/staging.yaml†L1-L7】【F:deploy/kustomize/namespaces/production.yaml†L1-L7】
+- Namespaces are declaratively managed in `deploy/kustomize/namespaces/` and should be applied before or together with the workload overlays.【F:deploy/kustomize/namespaces/staging/namespace.yaml†L1-L8】【F:deploy/kustomize/namespaces/production/namespace.yaml†L1-L8】
 - Production overlays install a dedicated `PriorityClass` so the API keeps scheduling headroom even during large-scale cluster events.【F:deploy/kustomize/overlays/production/priorityclass.yaml†L1-L7】
 
 Apply manifests directly with `kubectl` once your kubeconfig contexts are configured:

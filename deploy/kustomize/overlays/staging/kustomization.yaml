@@ -4,7 +4,7 @@ kind: Kustomization
 namespace: tradepulse-staging
 
 resources:
-  - ../../namespaces/staging.yaml
+  - ../../namespaces/staging
   - ../../base
 
 images:
