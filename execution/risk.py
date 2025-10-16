@@ -21,7 +21,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, Mapping, MutableMapping, Protocol
+from typing import Callable, Dict, Iterable, Mapping, MutableMapping, Protocol, TypeVar
 
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
@@ -91,17 +91,50 @@ class KillSwitchStateStore(Protocol):
         """Persist the supplied state atomically."""
 
 
+T = TypeVar("T")
+
+
 class SQLiteKillSwitchStateStore(KillSwitchStateStore):
     """SQLite-backed store used to persist kill-switch state across restarts."""
 
-    def __init__(self, path: str | Path) -> None:
+    _UPSERT_STATEMENT = """
+        INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+            engaged = excluded.engaged,
+            reason = excluded.reason,
+            updated_at = CURRENT_TIMESTAMP
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        timeout: float = 10.0,
+        max_retries: int = 5,
+        retry_interval: float = 0.05,
+        backoff_multiplier: float = 2.0,
+    ) -> None:
         self._path = Path(path)
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if retry_interval <= 0:
+            raise ValueError("retry_interval must be positive")
+        if backoff_multiplier < 1.0:
+            raise ValueError("backoff_multiplier must be >= 1.0")
+
+        self._timeout = float(timeout)
+        self._max_retries = int(max_retries)
+        self._retry_interval = float(retry_interval)
+        self._backoff_multiplier = float(backoff_multiplier)
         self._lock = threading.Lock()
         self._initialise()
 
     def _initialise(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._path) as connection:
+        with sqlite3.connect(self._path, timeout=self._timeout) as connection:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.execute(
                 """
@@ -114,32 +147,50 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
                 """
             )
 
+    def _with_retry(self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False) -> T:
+        delay = self._retry_interval
+        attempts_remaining = self._max_retries
+        while True:
+            try:
+                with sqlite3.connect(self._path, timeout=self._timeout) as connection:
+                    if write:
+                        connection.execute("PRAGMA journal_mode=WAL")
+                    return operation(connection)
+            except sqlite3.OperationalError as exc:
+                if not self._should_retry(exc) or attempts_remaining <= 0:
+                    raise
+                time.sleep(delay)
+                attempts_remaining -= 1
+                delay = min(delay * self._backoff_multiplier, self._timeout)
+
+    @staticmethod
+    def _should_retry(error: sqlite3.OperationalError) -> bool:
+        message = str(error).lower()
+        return "locked" in message or "busy" in message
+
     def load(self) -> tuple[bool, str] | None:
-        with sqlite3.connect(self._path) as connection:
+        def _load(connection: sqlite3.Connection) -> tuple[bool, str] | None:
             cursor = connection.execute(
                 "SELECT engaged, reason FROM kill_switch_state WHERE id = 1"
             )
             row = cursor.fetchone()
-        if row is None:
-            return None
-        engaged, reason = row
-        return bool(engaged), reason or ""
+            if row is None:
+                return None
+            engaged, reason = row
+            return bool(engaged), reason or ""
+
+        return self._with_retry(_load)
 
     def save(self, engaged: bool, reason: str) -> None:
         payload_reason = reason or ""
         with self._lock:
-            with sqlite3.connect(self._path) as connection:
+            def _save(connection: sqlite3.Connection) -> None:
                 connection.execute(
-                    """
-                    INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
-                    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(id) DO UPDATE SET
-                        engaged = excluded.engaged,
-                        reason = excluded.reason,
-                        updated_at = CURRENT_TIMESTAMP
-                    """,
+                    self._UPSERT_STATEMENT,
                     (1, int(bool(engaged)), payload_reason),
                 )
+
+            self._with_retry(_save, write=True)
 
 
 class KillSwitch:
