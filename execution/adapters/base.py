@@ -167,6 +167,11 @@ class RESTWebSocketConnector(ExecutionConnector):
 
     # ------------------------------------------------------------------
     # REST helpers
+    def _weight_for(self, method: str, path: str) -> int:
+        """Return the request weight for rate limiting purposes."""
+
+        return 1
+
     def _request(
         self,
         method: str,
@@ -175,11 +180,12 @@ class RESTWebSocketConnector(ExecutionConnector):
         params: Dict[str, Any] | None = None,
         json_payload: Dict[str, Any] | None = None,
         signed: bool = False,
-        weight: int = 1,
+        weight: int | None = None,
     ) -> Mapping[str, Any] | list:
         if not self._connected or self._http_client is None:
             raise RuntimeError("Connector is not connected")
-        self._rate_limiter.acquire(weight)
+        request_weight = weight if weight is not None else self._weight_for(method, path)
+        self._rate_limiter.acquire(max(1, int(request_weight)))
         request_params = dict(params or {})
         request_json = dict(json_payload) if json_payload is not None else None
         headers = self._default_headers()
@@ -265,6 +271,15 @@ class RESTWebSocketConnector(ExecutionConnector):
         path, payload = self._positions_endpoint()
         response = self._request("GET", path, params=payload, signed=True)
         return self._parse_positions(response)
+
+    def cancel_replace_order(
+        self,
+        order_id: str,
+        new_order: Order,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Order:  # type: ignore[override]
+        raise OrderError("Cancel/replace is not supported by this connector")
 
     # ------------------------------------------------------------------
     # Streaming helpers

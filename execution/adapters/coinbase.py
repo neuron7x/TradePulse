@@ -68,6 +68,25 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         self._api_key = ""
         self._api_secret = ""
         self._passphrase = ""
+        self._time_offset = 0.0
+        self._last_time_sync = 0.0
+        self._time_sync_interval = 120.0
+        self._rate_weights: dict[str, int] = {
+            "POST /orders": 1,
+            "GET /orders": 1,
+            "GET /orders/open": 1,
+            "GET /accounts": 1,
+            "DELETE /orders": 1,
+            "POST /orders/cancel": 1,
+            "POST /orders/edit": 1,
+        }
+
+    def connect(self, credentials: Mapping[str, str] | None = None) -> None:  # type: ignore[override]
+        super().connect(credentials)
+        try:
+            self._synchronize_time(force=True)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.warning("Failed to synchronize Coinbase server time", extra={"error": str(exc)})
 
     # ------------------------------------------------------------------
     def _resolve_credentials(self, credentials: Mapping[str, str] | None) -> Mapping[str, str]:
@@ -90,6 +109,10 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         headers.setdefault("Content-Type", "application/json")
         return headers
 
+    def _weight_for(self, method: str, path: str) -> int:
+        key = f"{method.upper()} {path}"
+        return self._rate_weights.get(key, 1)
+
     def _sign_request(
         self,
         method: str,
@@ -99,7 +122,8 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         json_payload: Dict[str, Any] | None,
         headers: Dict[str, str],
     ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str]]:
-        timestamp = str(int(time.time()))
+        self._ensure_time_sync()
+        timestamp = str(self._timestamp())
         body = json.dumps(json_payload or {}) if json_payload is not None else ""
         request_path = path if path.startswith("/") else f"/{path}"
         message = f"{timestamp}{method.upper()}{request_path}{body}"
@@ -121,19 +145,35 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
                 "market_market_ioc": None,
             },
         }
-        if order.order_type in {OrderType.LIMIT, OrderType.STOP_LIMIT}:
-            payload["order_configuration"] = {
-                "limit_limit_gtc": {
-                    "base_size": f"{order.quantity:.10f}",
-                    "limit_price": f"{order.price or 0:.10f}",
-                }
-            }
-        else:
+        size = f"{order.quantity:.10f}"
+        if order.order_type is OrderType.MARKET:
             payload["order_configuration"] = {
                 "market_market_ioc": {
-                    "base_size": f"{order.quantity:.10f}",
+                    "base_size": size,
                 }
             }
+        elif order.order_type is OrderType.LIMIT:
+            if order.price is None:
+                raise ValueError("Limit orders require price")
+            payload["order_configuration"] = {
+                "limit_limit_gtc": {
+                    "base_size": size,
+                    "limit_price": f"{order.price:.10f}",
+                }
+            }
+        elif order.order_type in {OrderType.STOP, OrderType.STOP_LIMIT}:
+            if order.stop_price is None:
+                raise ValueError("Stop orders require stop_price")
+            limit_price = order.price if order.price is not None else order.stop_price
+            payload["order_configuration"] = {
+                "stop_limit_stop_limit_gtc": {
+                    "base_size": size,
+                    "limit_price": f"{limit_price:.10f}",
+                    "stop_price": f"{order.stop_price:.10f}",
+                }
+            }
+        else:  # pragma: no cover - defensive guard
+            raise ValueError(f"Unsupported order type: {order.order_type}")
         return payload
 
     def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:  # type: ignore[override]
@@ -242,6 +282,64 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
             return OrderType(raw)
         except ValueError:
             return original.order_type if original is not None else OrderType.MARKET
+
+    def _timestamp(self) -> int:
+        return int(time.time() + self._time_offset)
+
+    def _ensure_time_sync(self) -> None:
+        now = time.monotonic()
+        if now - self._last_time_sync < self._time_sync_interval:
+            return
+        self._synchronize_time()
+
+    def _synchronize_time(self, *, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._last_time_sync < self._time_sync_interval:
+            return
+        url = "https://api.coinbase.com/v2/time"
+        response = self._http_client.get(url) if self._http_client is not None else None
+        if response is None:
+            return
+        response.raise_for_status()
+        payload = response.json()
+        epoch = payload.get("epoch") or (payload.get("data", {}).get("epoch") if isinstance(payload.get("data"), Mapping) else None)
+        if epoch is None:
+            raise ValueError("Coinbase time endpoint returned invalid payload")
+        self._time_offset = float(epoch) - time.time()
+        self._last_time_sync = now
+
+    def cancel_replace_order(
+        self,
+        order_id: str,
+        new_order: Order,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Order:  # type: ignore[override]
+        payload = self._build_place_payload(new_order, idempotency_key)
+        client_order_id = payload.get("client_order_id") or idempotency_key or order_id
+        request_body = {
+            "order_id": order_id,
+            "client_order_id": client_order_id,
+            "product_id": payload["product_id"],
+            "side": payload["side"],
+            "order_configuration": payload["order_configuration"],
+        }
+        response = self._request(
+            "POST",
+            "/orders/edit",
+            json_payload=request_body,
+            signed=True,
+        )
+        order_payload = response.get("order") if isinstance(response, Mapping) else None
+        if not isinstance(order_payload, Mapping):
+            order_payload = response
+        parsed = self._parse_order(order_payload, original=new_order)
+        with self._lock:
+            if parsed.order_id:
+                self._orders[parsed.order_id] = parsed
+            if idempotency_key:
+                self._idempotency_cache[idempotency_key] = parsed
+        return parsed
 
 
 __all__ = ["CoinbaseRESTConnector"]

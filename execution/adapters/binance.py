@@ -3,10 +3,11 @@
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import os
 import time
+import threading
 from typing import Any, Dict, Mapping
 from urllib.parse import urlencode
 
@@ -61,6 +62,36 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         self._api_key = ""
         self._api_secret = ""
         self._listen_key: str | None = None
+        self._time_offset = 0.0
+        self._last_time_sync = 0.0
+        self._time_sync_interval = 60.0
+        self._listen_key_stop = threading.Event()
+        self._listen_key_thread: threading.Thread | None = None
+        self._listen_key_refresh_interval = 30 * 60.0
+        self._symbol_info: dict[str, Mapping[str, Any]] = {}
+        self._rate_weights: dict[str, int] = {
+            "GET /api/v3/time": 1,
+            "GET /api/v3/exchangeInfo": 10,
+            "POST /api/v3/order": 1,
+            "DELETE /api/v3/order": 1,
+            "GET /api/v3/order": 2,
+            "GET /api/v3/openOrders": 3,
+            "GET /api/v3/account": 10,
+            "POST /api/v3/userDataStream": 1,
+            "PUT /api/v3/userDataStream": 1,
+            "POST /api/v3/order/cancelReplace": 1,
+        }
+
+    def connect(self, credentials: Mapping[str, str] | None = None) -> None:  # type: ignore[override]
+        super().connect(credentials)
+        try:
+            self._synchronize_time(force=True)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.warning("Failed to synchronize Binance server time", extra={"error": str(exc)})
+        try:
+            self._refresh_exchange_info()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.warning("Failed to refresh Binance exchange info", extra={"error": str(exc)})
 
     # ------------------------------------------------------------------
     # Abstract hook implementations
@@ -84,6 +115,10 @@ class BinanceRESTConnector(RESTWebSocketConnector):
             headers["X-MBX-APIKEY"] = self._api_key
         return headers
 
+    def _weight_for(self, method: str, path: str) -> int:
+        key = f"{method.upper()} {path}"
+        return self._rate_weights.get(key, 1)
+
     def _sign_request(
         self,
         method: str,
@@ -94,7 +129,8 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         headers: Dict[str, str],
     ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str]]:
         params = dict(params)
-        params.setdefault("timestamp", str(int(time.time() * 1000)))
+        self._ensure_time_sync()
+        params.setdefault("timestamp", str(self._timestamp_ms()))
         recv_window = self._credentials.get("recv_window") if hasattr(self, "_credentials") else None
         if recv_window and "recvWindow" not in params:
             params["recvWindow"] = str(recv_window)
@@ -107,17 +143,25 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         return "/api/v3/order"
 
     def _build_place_payload(self, order: Order, idempotency_key: str | None) -> Dict[str, Any]:
+        order_type = order.order_type
+        binance_type = order_type.value.upper()
+        if order_type is OrderType.STOP:
+            binance_type = "STOP_LOSS" if order.side is OrderSide.SELL else "TAKE_PROFIT"
+        elif order_type is OrderType.STOP_LIMIT:
+            binance_type = "STOP_LOSS_LIMIT" if order.side is OrderSide.SELL else "TAKE_PROFIT_LIMIT"
         payload: Dict[str, Any] = {
             "symbol": order.symbol.upper(),
             "side": order.side.value.upper(),
-            "type": order.order_type.value.upper(),
+            "type": binance_type,
             "quantity": f"{order.quantity:.10f}",
         }
-        if order.order_type in {OrderType.LIMIT, OrderType.STOP_LIMIT} and order.price is not None:
+        if order_type in {OrderType.LIMIT, OrderType.STOP_LIMIT} and order.price is not None:
             payload["price"] = f"{order.price:.10f}"
             payload["timeInForce"] = "GTC"
         if order.stop_price is not None:
             payload["stopPrice"] = f"{order.stop_price:.10f}"
+            if order_type is OrderType.STOP and order.price is not None:
+                payload["price"] = f"{order.price:.10f}"
         if idempotency_key:
             payload["newClientOrderId"] = idempotency_key
         return payload
@@ -200,6 +244,7 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         if not isinstance(listen_key, str) or not listen_key:
             raise ValueError("Binance userDataStream did not return listenKey")
         self._listen_key = listen_key
+        self._start_listen_key_maintenance()
         return f"{self._stream_base}/{listen_key}"
 
     def _handle_stream_message(self, payload: Mapping[str, Any]) -> None:
@@ -241,6 +286,130 @@ class BinanceRESTConnector(RESTWebSocketConnector):
             return OrderType(raw)
         except ValueError:
             return original.order_type if original is not None else OrderType.MARKET
+
+    def _timestamp_ms(self) -> int:
+        return int((time.time() + self._time_offset) * 1000)
+
+    def _ensure_time_sync(self) -> None:
+        now = time.monotonic()
+        if now - self._last_time_sync < self._time_sync_interval:
+            return
+        self._synchronize_time()
+
+    def _synchronize_time(self, *, force: bool = False) -> None:
+        if self._http_client is None:
+            return
+        now = time.monotonic()
+        if not force and now - self._last_time_sync < self._time_sync_interval:
+            return
+        response = self._http_client.get("/api/v3/time")
+        response.raise_for_status()
+        payload = response.json()
+        server_time = float(payload.get("serverTime", 0.0))
+        if not server_time:
+            raise ValueError("Binance time endpoint returned invalid payload")
+        self._time_offset = server_time / 1000.0 - time.time()
+        self._last_time_sync = now
+
+    def _refresh_exchange_info(self) -> None:
+        if self._http_client is None:
+            return
+        response = self._http_client.get("/api/v3/exchangeInfo")
+        response.raise_for_status()
+        payload = response.json()
+        symbols = payload.get("symbols") or []
+        if not isinstance(symbols, list):
+            return
+        info: dict[str, Mapping[str, Any]] = {}
+        for entry in symbols:
+            if not isinstance(entry, Mapping):
+                continue
+            symbol = str(entry.get("symbol") or "").upper()
+            if not symbol:
+                continue
+            info[symbol] = entry
+        self._symbol_info = info
+
+    def cancel_replace_order(
+        self,
+        order_id: str,
+        new_order: Order,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Order:  # type: ignore[override]
+        payload = self._build_place_payload(new_order, idempotency_key)
+        symbol = payload.get("symbol") or self._lookup_symbol(order_id)
+        payload["symbol"] = symbol
+        payload["cancelOrderId"] = order_id
+        payload.setdefault("cancelReplaceMode", "STOP_ON_FAILURE")
+        response = self._request(
+            "POST",
+            "/api/v3/order/cancelReplace",
+            params=payload,
+            signed=True,
+        )
+        order_payload = response.get("newOrderResponse") if isinstance(response, Mapping) else None
+        if not isinstance(order_payload, Mapping):
+            order_payload = response
+        parsed = self._parse_order(order_payload, original=new_order)
+        with self._lock:
+            if parsed.order_id:
+                self._orders[parsed.order_id] = parsed
+            if idempotency_key:
+                self._idempotency_cache[idempotency_key] = parsed
+        return parsed
+
+    def _start_listen_key_maintenance(self) -> None:
+        if self._listen_key_thread and self._listen_key_thread.is_alive():
+            return
+        self._listen_key_stop.clear()
+
+        def _maintain() -> None:
+            while not self._listen_key_stop.wait(self._listen_key_refresh_interval):
+                listen_key = self._listen_key
+                if not listen_key or not self._connected or self._http_client is None:
+                    continue
+                try:
+                    response = self._http_client.put("/api/v3/userDataStream", params={"listenKey": listen_key})
+                    response.raise_for_status()
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    self._logger.warning(
+                        "Failed to refresh Binance listen key", extra={"error": str(exc)}
+                    )
+                    try:
+                        response = self._http_client.post("/api/v3/userDataStream", params={})
+                        response.raise_for_status()
+                        new_key = response.json().get("listenKey")
+                        if isinstance(new_key, str) and new_key:
+                            self._listen_key = new_key
+                            self._restart_stream(new_key)
+                    except Exception as inner_exc:  # pragma: no cover - defensive logging
+                        self._logger.error(
+                            "Failed to reacquire Binance listen key", extra={"error": str(inner_exc)}
+                        )
+
+        self._listen_key_thread = threading.Thread(
+            target=_maintain,
+            name="binance-listen-key",
+            daemon=True,
+        )
+        self._listen_key_thread.start()
+
+    def _restart_stream(self, listen_key: str) -> None:
+        url = f"{self._stream_base}/{listen_key}"
+        self._ws_stop.set()
+        thread = self._ws_thread
+        if thread is not None:
+            thread.join(timeout=5.0)
+        self._ws_stop.clear()
+        self._start_stream(url)
+
+    def disconnect(self) -> None:  # type: ignore[override]
+        self._listen_key_stop.set()
+        if self._listen_key_thread is not None:
+            self._listen_key_thread.join(timeout=5.0)
+            self._listen_key_thread = None
+        super().disconnect()
 
 
 __all__ = ["BinanceRESTConnector"]

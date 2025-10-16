@@ -53,6 +53,23 @@ class ExecutionConnector:
     def get_positions(self) -> List[dict]:
         raise NotImplementedError
 
+    def cancel_replace_order(
+        self,
+        order_id: str,
+        new_order: Order,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Order:
+        """Atomically cancel an existing order while submitting a replacement.
+
+        Concrete connectors backed by venues offering transactional cancel/replace
+        endpoints should override this method. Implementations that cannot
+        guarantee atomic semantics should raise :class:`NotImplementedError` or
+        fallback to sequential cancel/place with appropriate safeguards.
+        """
+
+        raise NotImplementedError
+
 
 class SimulatedExchangeConnector(ExecutionConnector):
     """Base class providing deterministic sandbox behaviour."""
@@ -140,6 +157,19 @@ class SimulatedExchangeConnector(ExecutionConnector):
         order = self.fetch_order(order_id)
         order.record_fill(quantity, price)
         return order
+
+    def cancel_replace_order(
+        self,
+        order_id: str,
+        new_order: Order,
+        *,
+        idempotency_key: str | None = None,
+    ) -> Order:
+        """Sandbox implementation performing cancel/replace sequentially."""
+
+        if not self.cancel_order(order_id):
+            raise OrderError(f"Unknown order_id: {order_id}")
+        return self.place_order(new_order, idempotency_key=idempotency_key)
 
 
 class BinanceConnector(SimulatedExchangeConnector):
