@@ -40,7 +40,7 @@
             "team": "trade-ops"
           },
           "annotations": {
-            "summary": "Signal → ack latency breaching 400 ms",
+            "summary": "Signal \u2192 ack latency breaching 400 ms",
             "description": "p95 signal to acknowledgement latency exceeded 400 ms for 5 minutes"
           }
         },
@@ -53,7 +53,7 @@
             "team": "trade-ops"
           },
           "annotations": {
-            "summary": "Signal → fill latency breaching 650 ms",
+            "summary": "Signal \u2192 fill latency breaching 650 ms",
             "description": "p99 signal to fill latency exceeded 650 ms for 5 minutes"
           }
         }
@@ -119,6 +119,64 @@
           "annotations": {
             "summary": "Strategy optimisation running slowly",
             "description": "Average optimisation duration exceeded two minutes"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tradepulse.platform",
+      "interval": "30s",
+      "rules": [
+        {
+          "alert": "TradePulseHostCpuSaturation",
+          "expr": "avg(1 - rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) > 0.9",
+          "for": "10m",
+          "labels": {
+            "severity": "critical",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Host CPU saturation above 90%",
+            "description": "Average CPU utilisation exceeded 90% for 10 minutes. Investigate noisy neighbours or scale the cluster."
+          }
+        },
+        {
+          "alert": "TradePulseHostMemoryPressure",
+          "expr": "(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.1",
+          "for": "5m",
+          "labels": {
+            "severity": "critical",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Host memory availability below 10%",
+            "description": "Remaining node memory dropped below 10% for 5 minutes. Check for leaks or adjust limits."
+          }
+        },
+        {
+          "alert": "TradePulseFilesystemFilling",
+          "expr": "predict_linear(node_filesystem_avail_bytes{fstype!~\"tmpfs|overlay\"}[6h], 4 * 3600) < 0",
+          "for": "0m",
+          "labels": {
+            "severity": "warning",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Filesystem forecasted to fill within four hours",
+            "description": "Disk space trend indicates the filesystem will run out of space in less than four hours."
+          }
+        },
+        {
+          "alert": "TradePulsePodCrashLoop",
+          "expr": "increase(kube_pod_container_status_restarts_total[15m]) > 3",
+          "for": "15m",
+          "labels": {
+            "severity": "critical",
+            "team": "platform"
+          },
+          "annotations": {
+            "summary": "Pod experiencing repeated restarts",
+            "description": "A pod restarted more than three times in 15 minutes. Check application logs and resource limits."
           }
         }
       ]

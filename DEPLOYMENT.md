@@ -35,43 +35,41 @@ Before deploying, install the following tools:
 
 ## Docker Compose Deployment
 
-The repository ships with a lightweight Compose stack that builds the TradePulse container and runs Prometheus for metrics scraping.【F:docker-compose.yml†L1-L12】
+The repository ships with a production-ready Compose stack that builds the TradePulse application container and provisions the full observability toolchain (Prometheus, Alertmanager, Grafana, node-exporter, and cAdvisor).【F:docker-compose.yml†L1-L86】
 
-1. **Build images** (only required when you change the application code):
+1. **Compile observability artefacts** whenever dashboards or alert definitions change:
+   ```bash
+   python -m tools.observability.builder --output-dir observability/generated
+   ```
+2. **Build images** (required after modifying application code or dependencies):
    ```bash
    docker compose build tradepulse
    ```
-2. **Start the stack** using your `.env` file:
+3. **Provide alert routing secrets** before booting the stack:
+   ```bash
+   export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
+   export PAGERDUTY_ROUTING_KEY="pd_routing_key"
+   ```
+4. **Start the stack** using your `.env` file:
    ```bash
    docker compose --env-file .env up -d
    ```
-3. **Verify runtime state**:
+5. **Verify runtime state**:
    ```bash
    docker compose ps
    docker compose logs -f tradepulse
+   docker compose logs -f prometheus
    ```
-4. **Stop and remove** the stack when done:
+6. **Stop and remove** the stack when done:
    ```bash
    docker compose down -v
    ```
 
+The Compose configuration exposes Prometheus on `http://localhost:9090`, Grafana on `http://localhost:3000`, Alertmanager on `http://localhost:9093`, and cAdvisor on `http://localhost:8080`. Grafana auto-imports all dashboards generated under `observability/generated/dashboards`, so rebuilding the bundle keeps the UI in sync with Git.【F:docker-compose.yml†L33-L86】【F:deploy/grafana/provisioning/dashboards/dashboards.yaml†L1-L9】
+
 ### Compose Health Check
 
-Expose an HTTP health endpoint from the TradePulse service (e.g., `/metrics` or `/healthz` on port 8001) and add the following to the `tradepulse` service to integrate with Compose status reporting:
-
-```yaml
-services:
-  tradepulse:
-    # ...existing settings...
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/metrics"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 15s
-```
-
-Prometheus is preconfigured to scrape the TradePulse metrics endpoint on port 8001, so a failing health check will surface quickly in dashboards.【F:deploy/prometheus.yml†L2-L7】
+The `tradepulse` container image includes a baked-in health check that hits `/metrics`. When running in Compose, the same command is duplicated in the service definition so failures surface through `docker compose ps` and Prometheus alerting quickly.【F:Dockerfile†L53-L66】【F:docker-compose.yml†L6-L15】
 
 ## Kubernetes Deployment with Helm
 

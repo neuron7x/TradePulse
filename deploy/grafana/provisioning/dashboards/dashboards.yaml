@@ -1,0 +1,9 @@
+# SPDX-License-Identifier: MIT
+apiVersion: 1
+disableDeletion: false
+duplicateUIDs: false
+folders:
+  - name: TradePulse
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards
