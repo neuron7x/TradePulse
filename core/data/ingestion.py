@@ -19,8 +19,12 @@ from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
 from interfaces.ingestion import DataIngestionService
 from observability.tracing import pipeline_span
+from core.utils.metrics import get_metrics_collector
 
 __all__ = ["Ticker", "DataIngestor", "BinanceStreamHandle"]
+
+
+_METRICS_COLLECTOR = get_metrics_collector()
 
 
 class BinanceStreamHandle:
@@ -84,31 +88,54 @@ class DataIngestor(DataIngestionService):
             symbol=symbol,
             venue=venue,
         ):
-            with resolved_path.open("r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                if reader.fieldnames is None:
-                    raise ValueError("CSV file must include a header row")
-                missing = [field for field in required_fields if field not in reader.fieldnames]
-                if missing:
-                    raise ValueError(f"CSV missing required columns: {', '.join(missing)}")
-                for row_number, row in enumerate(reader, start=2):
-                    try:
-                        ts_raw = float(row["ts"])
-                        price = row["price"]
-                        volume = row.get("volume", 0.0) or 0.0
-                        timestamp = normalize_timestamp(ts_raw, market=market)
-                        tick = Ticker.create(
-                            symbol=symbol,
-                            venue=venue,
-                            price=price,
-                            timestamp=timestamp,
-                            volume=volume,
-                            instrument_type=instrument_type,
-                        )
-                    except (TypeError, ValueError, InvalidOperation) as exc:
-                        logger.warning("Skipping malformed row %s in %s: %s", row_number, path, exc)
-                        continue
-                    on_tick(tick)
+            with _METRICS_COLLECTOR.measure_data_ingestion("csv", symbol) as ctx:
+                ctx.update(
+                    {
+                        "venue": venue,
+                        "path": str(resolved_path),
+                        "instrument_type": instrument_type.value,
+                    }
+                )
+                if market is not None:
+                    ctx["market"] = market
+
+                try:
+                    with resolved_path.open("r", encoding="utf-8") as f:
+                        reader = csv.DictReader(f)
+                        if reader.fieldnames is None:
+                            raise ValueError("CSV file must include a header row")
+                        missing = [field for field in required_fields if field not in reader.fieldnames]
+                        if missing:
+                            raise ValueError(
+                                f"CSV missing required columns: {', '.join(missing)}"
+                            )
+                        for row_number, row in enumerate(reader, start=2):
+                            try:
+                                ts_raw = float(row["ts"])
+                                price = row["price"]
+                                volume = row.get("volume", 0.0) or 0.0
+                                timestamp = normalize_timestamp(ts_raw, market=market)
+                                tick = Ticker.create(
+                                    symbol=symbol,
+                                    venue=venue,
+                                    price=price,
+                                    timestamp=timestamp,
+                                    volume=volume,
+                                    instrument_type=instrument_type,
+                                )
+                            except (TypeError, ValueError, InvalidOperation) as exc:
+                                logger.warning(
+                                    "Skipping malformed row %s in %s: %s",
+                                    row_number,
+                                    path,
+                                    exc,
+                                )
+                                continue
+                            on_tick(tick)
+                            _METRICS_COLLECTOR.record_tick_processed("csv", symbol)
+                except Exception:
+                    ctx["status"] = "error"
+                    raise
 
     def binance_ws(self, symbol: str, on_tick: Callable[[Ticker], None], *, interval: str = "1m") -> object:
         if BinanceWS is None:
@@ -135,6 +162,7 @@ class DataIngestor(DataIngestionService):
                 logger.warning("Failed to parse websocket payload: %s", exc)
                 return
             on_tick(tick)
+            _METRICS_COLLECTOR.record_tick_processed("binance_ws", symbol)
 
         with pipeline_span(
             "ingest.live_stream",
@@ -142,6 +170,12 @@ class DataIngestor(DataIngestionService):
             symbol=symbol,
             interval=interval,
         ):
-            handle.start(symbol=symbol, interval=interval, callback=_callback)
+            with _METRICS_COLLECTOR.measure_data_ingestion("binance_ws", symbol) as ctx:
+                ctx.update({"venue": "BINANCE", "interval": interval})
+                try:
+                    handle.start(symbol=symbol, interval=interval, callback=_callback)
+                except Exception:
+                    ctx["status"] = "error"
+                    raise
         setattr(ws, "stream_handle", handle)
         return ws
