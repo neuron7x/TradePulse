@@ -44,6 +44,8 @@ def _log_debug_enabled() -> bool:
 
 try:
     import networkx as nx
+    NetworkXError = nx.NetworkXError
+    NetworkXNoPath = nx.NetworkXNoPath
 except Exception:  # pragma: no cover - fallback for lightweight environments
     class _SimpleGraph:
         def __init__(self) -> None:
@@ -146,6 +148,11 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         Graph = _SimpleGraph
 
     nx = _NXModule()  # type: ignore[assignment]
+    class NetworkXError(Exception):
+        """Fallback NetworkXError when networkx is unavailable."""
+
+    class NetworkXNoPath(NetworkXError):
+        """Fallback NetworkXNoPath when networkx is unavailable."""
 
 try:  # pragma: no cover - SciPy optional
     from scipy.spatial.distance import wasserstein_distance as W1
@@ -290,12 +297,39 @@ def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
 
     def _call_shortest_path(graph: nx.Graph, weight: str | None) -> float:
         if hasattr(graph, "shortest_path_length"):
-            return graph.shortest_path_length(x, y, weight=weight)
+            candidate = getattr(graph, "shortest_path_length")
+            if not callable(candidate):
+                raise TypeError("shortest_path_length attribute is not callable")
+            if weight is None:
+                return candidate(x, y)
+            try:
+                return candidate(x, y, weight=weight)
+            except TypeError as type_exc:
+                message = str(type_exc).lower()
+                if "weight" in message or "positional" in message:
+                    return candidate(x, y)
+                raise
+        if weight is None:
+            return nx.shortest_path_length(graph, x, y)
         return nx.shortest_path_length(graph, x, y, weight=weight)
+
+    def _should_fallback(exc: Exception) -> bool:
+        if isinstance(exc, ValueError):
+            return True
+        if isinstance(exc, TypeError):
+            message = str(exc).lower()
+            return "weight" in message or "positional" in message
+        if isinstance(exc, NetworkXError):
+            return "weight" in str(exc).lower()
+        return False
 
     try:
         return float(_call_shortest_path(G, "weight"))
-    except ValueError as exc:
+    except NetworkXNoPath:
+        return float("inf")
+    except Exception as exc:
+        if not _should_fallback(exc):
+            raise
         if _log_debug_enabled():
             _logger.debug(
                 "ricci.shortest_path: falling back to unweighted distance for edge (%s,%s)",
@@ -305,6 +339,8 @@ def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
             )
         try:
             return float(_call_shortest_path(G, None))
+        except NetworkXNoPath:
+            return float("inf")
         except Exception:
             return float("inf")
 

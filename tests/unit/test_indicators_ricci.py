@@ -15,6 +15,7 @@ Tests verify:
 """
 from __future__ import annotations
 
+import networkx as nx
 import numpy as np
 import pytest
 
@@ -218,3 +219,28 @@ def test_ricci_curvature_edge_warns_without_scipy(monkeypatch: pytest.MonkeyPatc
         curvature = ricci_curvature_edge(graph, x, y)
 
     assert curvature == pytest.approx(expected_fallback)
+
+
+def test_shortest_path_safe_handles_stub_graph_without_weight_support() -> None:
+    class StubGraph:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int]] = []
+
+        def shortest_path_length(self, source: int, target: int, **kwargs: object) -> int:
+            if "weight" in kwargs:
+                raise TypeError("unexpected keyword argument 'weight'")
+            self.calls.append((source, target))
+            return 3
+
+    graph = StubGraph()
+    distance = ricci_module._shortest_path_length_safe(graph, 0, 4)
+
+    assert distance == pytest.approx(3.0)
+    assert graph.calls == [(0, 4)]
+
+
+def test_shortest_path_safe_returns_infinity_when_no_path_exists() -> None:
+    graph = nx.Graph()
+    graph.add_nodes_from((0, 1))
+
+    assert ricci_module._shortest_path_length_safe(graph, 0, 1) == float("inf")
