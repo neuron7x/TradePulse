@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -139,6 +140,144 @@ def test_get_cached_frame_supports_ranges() -> None:
     assert subset.shape[0] == 3
     assert subset.index[0] == ticks[2].timestamp
     assert subset.index[-1] == ticks[4].timestamp
+
+
+def test_cache_ticks_rejects_blank_timeframe() -> None:
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    ticks = [_tick(base.replace(minute=i), 100.0 + i) for i in range(2)]
+    service = DataIngestionCacheService()
+
+    with pytest.raises(ValueError, match="timeframe must be a non-empty string"):
+        service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="   ")
+
+
+def test_cache_frame_normalises_timezone_naive_index() -> None:
+    index = pd.DatetimeIndex(
+        [
+            datetime(2024, 1, 1, 0, 0),
+            datetime(2024, 1, 1, 0, 1),
+            datetime(2024, 1, 1, 0, 2),
+        ]
+    )
+    frame = pd.DataFrame({"price": [100.0, 101.0, 102.0], "volume": [1.0, 1.0, 1.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    cached = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="ETHUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.index.tz is not None
+    assert cached.index.tz.tzname(None) == "UTC"
+    assert cached.index.is_monotonic_increasing
+    metadata = service.metadata_for(layer="raw", symbol="ETHUSD", venue="BINANCE", timeframe="1min")
+    assert metadata is not None and metadata.rows == 3
+
+
+def test_cache_frame_rejects_non_numeric_values() -> None:
+    index = pd.DatetimeIndex(
+        [
+            datetime(2024, 1, 1, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, minute=1, tzinfo=timezone.utc),
+        ]
+    )
+    frame = pd.DataFrame({"price": ["100.0", "invalid"], "volume": [1.0, 2.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    with pytest.raises(DataIntegrityError, match="non-numeric"):
+        service.cache_frame(
+            frame,
+            layer="raw",
+            symbol="BTCUSD",
+            venue="BINANCE",
+            timeframe="1min",
+        )
+
+
+def test_cache_frame_rejects_non_finite_values() -> None:
+    index = pd.DatetimeIndex(
+        [
+            datetime(2024, 1, 1, tzinfo=timezone.utc),
+            datetime(2024, 1, 1, minute=1, tzinfo=timezone.utc),
+        ]
+    )
+    frame = pd.DataFrame({"price": [100.0, np.inf], "volume": [1.0, 2.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    with pytest.raises(DataIntegrityError, match="non-finite"):
+        service.cache_frame(
+            frame,
+            layer="raw",
+            symbol="BTCUSD",
+            venue="BINANCE",
+            timeframe="1min",
+        )
+
+
+def test_cache_frame_accepts_unparseable_feature_frequency() -> None:
+    index = pd.date_range(
+        start=datetime(2024, 1, 1, tzinfo=timezone.utc),
+        periods=4,
+        freq="5min",
+    )
+    frame = pd.DataFrame({"price": [100.0, 101.0, 102.0, 103.0]}, index=index)
+    service = DataIngestionCacheService()
+
+    cached = service.cache_frame(
+        frame,
+        layer="features",
+        symbol="ETHUSD",
+        venue="BINANCE",
+        timeframe="not-a-timedelta",
+    )
+
+    assert cached.index.equals(index)
+
+
+def test_get_cached_frame_coerces_boundary_timezones() -> None:
+    base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    ticks = [_tick(base.replace(minute=i), 100.0 + i) for i in range(5)]
+    service = DataIngestionCacheService()
+    service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+
+    start = datetime(2024, 1, 1, 0, 1)
+    end = datetime(2024, 1, 1, 2, 3, tzinfo=timezone(timedelta(hours=2)))
+
+    subset = service.get_cached_frame(
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+        start=start,
+        end=end,
+    )
+
+    assert list(subset.index) == [ticks[1].timestamp, ticks[2].timestamp, ticks[3].timestamp]
+
+
+def test_cache_frame_records_empty_frame_metadata() -> None:
+    frame = pd.DataFrame(
+        columns=["price", "volume"],
+        index=pd.DatetimeIndex([], tz="UTC"),
+    )
+    service = DataIngestionCacheService()
+
+    cached = service.cache_frame(
+        frame,
+        layer="raw",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="1min",
+    )
+
+    assert cached.empty
+    metadata = service.metadata_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    assert metadata is not None
+    assert metadata.rows == 0
+    assert metadata.start is None and metadata.end is None
 
 
 def test_ingest_csv_populates_cache(tmp_path: Path) -> None:
