@@ -99,7 +99,11 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         if recv_window and "recvWindow" not in params:
             params["recvWindow"] = str(recv_window)
         query = urlencode(sorted(params.items()))
-        signature = hmac.new(self._api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256).hexdigest()
+        signature = hmac.new(
+            self._api_secret.encode("utf-8"),
+            query.encode("utf-8"),
+            hashlib.sha256,  # lgtm[py/weak-sensitive-data-hashing]
+        ).hexdigest()
         params["signature"] = signature
         return params, None, headers
 

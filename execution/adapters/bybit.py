@@ -73,7 +73,11 @@ class BybitRESTConnector(RESTWebSocketConnector):
         if params:
             query = "&".join(f"{key}={value}" for key, value in sorted(params.items()))
         payload = f"{timestamp}{self._api_key}{recv_window}{query}{body}"
-        signature = hmac.new(self._api_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+        signature = hmac.new(
+            self._api_secret.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256,  # lgtm[py/weak-sensitive-data-hashing]
+        ).hexdigest()
         headers.update(
             {
                 "X-BAPI-API-KEY": self._api_key,

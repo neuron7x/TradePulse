@@ -104,7 +104,11 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         request_path = path if path.startswith("/") else f"/{path}"
         message = f"{timestamp}{method.upper()}{request_path}{body}"
         secret = base64.b64decode(self._api_secret)
-        signature = hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()
+        signature = hmac.new(
+            secret,
+            message.encode("utf-8"),
+            hashlib.sha256,  # lgtm[py/weak-sensitive-data-hashing]
+        ).digest()
         headers["CB-ACCESS-TIMESTAMP"] = timestamp
         headers["CB-ACCESS-SIGN"] = base64.b64encode(signature).decode("utf-8")
         return params, json_payload, headers
