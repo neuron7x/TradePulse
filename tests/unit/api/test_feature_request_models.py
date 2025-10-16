@@ -7,6 +7,9 @@ import pandas as pd
 
 os.environ.setdefault("TRADEPULSE_ADMIN_TOKEN", "test-token")
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-secret-value")
+os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "test-audience")
+os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.example.com")
+os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.example.com/jwks.json")
 
 from application.api.service import FeatureRequest, MarketBar
 
