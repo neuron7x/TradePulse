@@ -7,14 +7,23 @@ filebeat.inputs:
       - /var/lib/docker/containers/*/*.log
     parsers:
       - ndjson:
-          target: json
+          target: ""
+          overwrite_keys: true
+          add_error_key: true
+          message_key: log
     processors:
       - add_docker_metadata: ~
       - decode_json_fields:
+          when:
+            has_fields: ["message"]
           fields: ["message"]
+          target: ""
+          overwrite_keys: true
           process_array: false
           max_depth: 1
-          target: "json"
+      - drop_fields:
+          fields: ["log", "stream", "time"]
+          ignore_missing: true
 
 output.logstash:
   hosts: ["logstash:5044"]

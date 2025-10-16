@@ -6,6 +6,11 @@ services:
     ports:
       - "8001:8001"
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
     labels:
       - "co.elastic.logs/enabled=true"
       - "co.elastic.logs/module=tradepulse"
