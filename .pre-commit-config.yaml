@@ -10,6 +10,15 @@ repos:
     hooks:
       - id: black
         language_version: python3
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile=black"]
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.1.1
+    hooks:
+      - id: flake8
   - repo: https://github.com/mvdan/sh
     rev: v3.7.0
     hooks:
@@ -32,6 +41,11 @@ repos:
         language: python
         additional_dependencies:
           - slotscheck==0.19.1
+        pass_filenames: false
+      - id: eslint
+        name: eslint (dashboard UI)
+        entry: npm run lint --prefix ui/dashboard
+        language: system
         pass_filenames: false
   - repo: https://github.com/Yelp/detect-secrets
     rev: v1.5.0
