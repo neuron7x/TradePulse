@@ -21,7 +21,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, s
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
@@ -31,6 +31,7 @@ from application.api.security import get_api_security_settings, verify_request_i
 from application.api.rate_limit import RateLimiterSnapshot, SlidingWindowRateLimiter, build_rate_limiter
 from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
 from application.trading import signal_to_dto
+from core.utils.metrics import MetricsCollector, get_metrics_collector
 from domain import Signal, SignalAction
 from execution.risk import (
     PostgresKillSwitchStateStore,
@@ -969,6 +970,21 @@ def create_app(
     app.state.ttl_cache = ttl_cache
     app.state.dependency_probes = dependency_probe_map
     app.state.health_server = health_server
+    metrics_registry = None
+    try:  # Lazy import to avoid hard dependency during tests without prometheus_client
+        from prometheus_client import REGISTRY as prometheus_registry  # type: ignore
+    except Exception:  # pragma: no cover - optional dependency
+        metrics_registry = None
+    else:
+        metrics_registry = prometheus_registry
+
+    metrics_module = __import__("core.utils.metrics", fromlist=["MetricsCollector"])
+    metrics = get_metrics_collector(metrics_registry)
+    if metrics_registry is not None and getattr(metrics, "registry", None) is None:
+        refreshed_metrics = metrics_module.MetricsCollector(metrics_registry)
+        metrics.__dict__.update(refreshed_metrics.__dict__)
+        setattr(metrics_module, "_collector", metrics)
+    app.state.metrics = metrics
 
     async def enforce_rate_limit(
         request: Request,
@@ -1007,6 +1023,8 @@ def create_app(
 
     @app.get("/health", tags=["health"], summary="Health probe", response_model=HealthResponse)
     async def health_check(response: Response) -> HealthResponse:
+        overall_start = perf_counter()
+        metrics: MetricsCollector | None = getattr(app.state, "metrics", None)
         components: dict[str, ComponentHealth] = {}
 
         risk_manager: RiskManager = app.state.risk_manager
@@ -1132,7 +1150,35 @@ def create_app(
             for name, component in components.items():
                 health_state.update_component(name, component.healthy, component.detail)
 
+        if metrics and metrics.enabled:
+            duration = perf_counter() - overall_start
+            metrics.observe_health_check_latency("api.overall", duration)
+            metrics.set_health_check_status("api.overall", severity == "ready")
+            for name, component in components.items():
+                metrics.set_health_check_status(f"component.{name}", component.healthy)
+
         return health_payload
+
+    @app.get(
+        "/metrics",
+        tags=["health"],
+        summary="Prometheus metrics",
+        response_class=PlainTextResponse,
+    )
+    async def prometheus_metrics() -> PlainTextResponse:
+        metrics: MetricsCollector | None = getattr(app.state, "metrics", None)
+        if metrics is None:
+            metrics = get_metrics_collector()
+
+        if not metrics.enabled:
+            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Prometheus metrics are disabled")
+
+        payload = metrics.render_prometheus()
+        return PlainTextResponse(
+            payload,
+            media_type="text/plain; version=0.0.4; charset=utf-8",
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.post(
         "/features",
