@@ -8,6 +8,7 @@ import {
   DASHBOARD_STYLES,
   formatCurrency,
   formatPercent,
+  createRouter,
 } from '../src/core/index.js';
 import {
   TRACEPARENT_HEADER,
@@ -15,6 +16,14 @@ import {
   ensureTraceHeaders,
   extractTraceparent,
 } from '../src/core/telemetry.js';
+import { renderPositionsView } from '../src/views/positions.js';
+import { renderOrdersView } from '../src/views/orders.js';
+import { renderPnlQuotesView } from '../src/views/pnl_quotes.js';
+import { renderAreaChart } from '../src/components/area_chart.js';
+import { createLiveTable, LiveTable } from '../src/components/live_table.js';
+import { escapeHtml, formatNumber, formatTimestamp } from '../src/core/formatters.js';
+
+// --- Core strategy + reporting utilities ------------------------------------------------------
 
 const configurator = createStrategyConfigurator([
   { name: 'trend', defaults: { lookback: 20, threshold: 0.6 } },
@@ -89,7 +98,13 @@ state.addBacktest({ metadata: { id: 'bt-3', strategy: 'volatility' }, metrics: {
 const exportedMarkdown = state.export('markdown');
 assert.ok(exportedMarkdown.includes('volatility'));
 
-console.log('dashboard tests passed');
+assert.strictEqual(escapeHtml('<script>'), '&lt;script&gt;');
+assert.strictEqual(formatNumber(1250.567, { maximumFractionDigits: 1 }), '1,250.6');
+assert.strictEqual(formatTimestamp(0), '1970-01-01 00:00:00.000 UTC');
+
+console.log('core reporting tests passed');
+
+// --- Telemetry helpers -----------------------------------------------------------------------
 
 const generatedTraceparent = createTraceparent();
 assert.ok(generatedTraceparent.startsWith('00-'));
@@ -98,47 +113,263 @@ assert.strictEqual(headers[TRACEPARENT_HEADER], generatedTraceparent);
 assert.strictEqual(extractTraceparent(headers), generatedTraceparent);
 console.log('telemetry tests passed');
 
-const dashboardView = renderDashboard({
-  title: 'Execution Control Center',
-  subtitle: 'Live oversight across strategies.',
-  tags: ['derivatives', 'equities'],
-  currency: 'USD',
-  metrics: [
-    { label: 'Net Exposure', value: 1250000, kind: 'currency', change: 0.012 },
-    { label: 'Open Positions', value: 12 },
+const now = Date.now();
+const orderEvents = [
+  {
+    event_id: 'order-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 120000,
+    order_id: 'ord-1',
+    side: 'BUY',
+    order_type: 'LIMIT',
+    quantity: 100,
+    price: 150.25,
+    time_in_force: 'DAY',
+    routing: 'XNAS',
+    metadata: {},
+  },
+  {
+    event_id: 'order-2',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 90000,
+    order_id: 'ord-2',
+    side: 'SELL',
+    order_type: 'LIMIT',
+    quantity: 50,
+    price: 311.4,
+    time_in_force: 'DAY',
+    routing: 'XNAS',
+    metadata: {},
+  },
+];
+
+const fillEvents = [
+  {
+    event_id: 'fill-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 60000,
+    order_id: 'ord-1',
+    fill_id: 'fill-1',
+    status: 'PARTIAL',
+    filled_qty: 60,
+    fill_price: 149.9,
+    fees: 1.2,
+    liquidity: 'MAKER',
+    metadata: {},
+  },
+  {
+    event_id: 'fill-2',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 30000,
+    order_id: 'ord-1',
+    fill_id: 'fill-2',
+    status: 'FILLED',
+    filled_qty: 40,
+    fill_price: 150.75,
+    metadata: {},
+  },
+  {
+    event_id: 'fill-3',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 15000,
+    order_id: 'ord-2',
+    fill_id: 'fill-3',
+    status: 'FILLED',
+    filled_qty: 50,
+    fill_price: 310.95,
+    metadata: {},
+  },
+];
+
+const ticks = [
+  {
+    event_id: 'tick-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 5000,
+    bid_price: 151.1,
+    ask_price: 151.3,
+    last_price: 151.2,
+  },
+  {
+    event_id: 'tick-2',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 4000,
+    bid_price: 310.5,
+    ask_price: 310.7,
+    last_price: 310.6,
+  },
+];
+
+const pnlPoints = [
+  { timestamp: now - 3600000, value: 12500 },
+  { timestamp: now - 1800000, value: 16850 },
+  { timestamp: now - 600000, value: 17200 },
+  { timestamp: now - 300000, value: 18120 },
+  { timestamp: now, value: 18750 },
+];
+
+const quotes = ticks.map((tick) => ({
+  event_id: `quote-${tick.symbol}`,
+  schema_version: '1',
+  symbol: tick.symbol,
+  timestamp: tick.timestamp,
+  bid_price: tick.bid_price,
+  ask_price: tick.ask_price,
+  last_price: tick.last_price,
+}));
+
+// --- Live table component -------------------------------------------------------------------
+
+const table = createLiveTable({
+  columns: [
+    { id: 'symbol', label: 'Symbol' },
+    { id: 'pnl', label: 'PnL', sortValue: (row) => row.pnl, formatter: (value) => `<strong>${escapeHtml(value)}</strong>`, align: 'right' },
   ],
-  pnlSeries: [
-    { label: 'Today', value: 18250, change: 0.024, target: 25000 },
-    { label: 'MTD', value: -12250, change: -0.018, target: 30000 },
+  rows: [
+    { symbol: 'XYZ', pnl: 10 },
+    { symbol: 'ABC', pnl: 20 },
   ],
-  statusItems: [
-    { label: 'Exchange Connectivity', state: 'Operational', level: 'ok', description: 'All exchanges responding within latency budget.' },
-    { label: 'Risk Engine', state: 'Degraded', level: 'warning', description: 'Position limits approaching 80% threshold.' },
-  ],
+  sortBy: 'pnl',
+  sortDirection: 'asc',
+  pageSize: 1,
 });
 
-assert.ok(dashboardView.html.includes('PnL Overview'), 'rendered dashboard should include PnL panel heading');
-assert.ok(dashboardView.html.includes('System Status'), 'rendered dashboard should include status panel heading');
-assert.ok(dashboardView.html.includes('Operational'), 'status label should be present');
-assert.ok(dashboardView.html.includes('−1.80%'), 'negative change should use minus symbol and percentage');
-assert.ok(dashboardView.styles.includes('.tp-dashboard'), 'styles should expose dashboard root selector');
+assert.ok(table instanceof LiveTable, 'createLiveTable should return a LiveTable instance');
+
+const ascRows = table.getSortedRows();
+assert.deepStrictEqual(ascRows.map((row) => row.symbol), ['XYZ', 'ABC']);
+
+table.setSort('pnl', 'desc');
+const descRows = table.getSortedRows();
+assert.deepStrictEqual(descRows.map((row) => row.symbol), ['ABC', 'XYZ']);
+
+const { page, pageCount, html: tableHtml } = table.render(10);
+assert.strictEqual(page, 2, 'page should clamp to the last available page');
+assert.strictEqual(pageCount, 2);
+assert.ok(tableHtml.includes('<table'), 'render should output a table element');
+
+table.setPageSize(2);
+table.setRows([{ symbol: 'AAA', pnl: 5 }]);
+const emptyTable = table.render();
+assert.strictEqual(emptyTable.totalRows, 1);
+assert.ok(!emptyTable.html.includes('No data available'), 'table renders populated rows when present');
+
+assert.throws(() => new LiveTable({ columns: [] }), /at least one column/);
+assert.throws(() => table.setPageSize(0), /positive number/);
+
+console.log('live table tests passed');
+
+// --- Area chart component -------------------------------------------------------------------
+
+const areaChart = renderAreaChart({
+  id: 'test',
+  width: 100,
+  height: 50,
+  series: [
+    { timestamp: 1, value: 100 },
+    { timestamp: 2, value: 100 },
+  ],
+});
+assert.ok(areaChart.html.includes('tp-area-chart'));
+assert.strictEqual(areaChart.min, 99, 'identical values should expand range symmetrically');
+assert.strictEqual(areaChart.max, 101);
+
+const emptyChart = renderAreaChart({ series: [{ timestamp: 3, value: NaN }] });
+assert.strictEqual(emptyChart.points.length, 0, 'non-finite values should be filtered out');
+assert.ok(emptyChart.html.includes('Chart data is not available'), 'empty charts should display placeholder');
+
+console.log('area chart tests passed');
+
+// --- Dashboard shell + views ----------------------------------------------------------------
+
+const dashboardView = renderDashboard({
+  route: 'positions',
+  header: {
+    title: 'Execution Control Center',
+    subtitle: 'Live oversight across strategies.',
+    tags: ['derivatives', 'equities'],
+  },
+  positions: { fills: fillEvents, orders: orderEvents, ticks },
+  orders: { orders: orderEvents, fills: fillEvents },
+  pnl: { pnlPoints, quotes },
+});
+
+assert.ok(dashboardView.html.includes('PnL &amp; Quotes'), 'navigation should expose pnl route');
+assert.ok(dashboardView.html.includes('Open Positions'), 'positions component should be rendered for active route');
+assert.ok(dashboardView.styles.includes('.tp-live-table'), 'styles should include live table classes');
 assert.strictEqual(dashboardView.styles, DASHBOARD_STYLES, 'render should expose shared stylesheet reference');
+assert.strictEqual(dashboardView.route, 'positions');
+
+const navigationLinks = (dashboardView.html.match(/<a class=\"tp-nav__link/g) || []).length;
+assert.strictEqual(navigationLinks, 3, 'dashboard should render all navigation links');
+
+const applePosition = dashboardView.view.rows.find((row) => row.symbol === 'AAPL');
+assert.ok(applePosition, 'positions view should aggregate AAPL position');
+assert.strictEqual(Math.round(applePosition.netQuantity), 100);
+assert.ok(applePosition.exposure > 0, 'exposure should be positive for long positions');
+
+const ordersView = renderOrdersView({ orders: orderEvents, fills: fillEvents });
+assert.ok(ordersView.html.includes('Order Blotter'));
+const orderProgress = ordersView.table.getSortedRows()[0];
+assert.ok(orderProgress.progress <= 1, 'order progress must be clamped');
+assert.ok(orderProgress.remaining >= 0, 'remaining quantity should never be negative');
+
+const pnlView = renderPnlQuotesView({ pnlPoints, quotes });
+assert.ok(pnlView.html.includes('Net PnL'));
+assert.ok(pnlView.charts.pnl.points.length > 0);
+assert.ok(pnlView.charts.quotes.points.every((point, index, arr) => index === 0 || arr[index - 1].timestamp <= point.timestamp));
+
+const router = createRouter({
+  defaultRoute: 'orders',
+  routes: {
+    orders: () => renderOrdersView({ orders: orderEvents, fills: fillEvents }),
+    pnl: () => pnlView,
+  },
+});
+const active = router.navigate('pnl');
+assert.strictEqual(active.name, 'pnl');
+assert.ok(active.view.html.includes('PnL & Quotes Intelligence'));
+assert.deepStrictEqual(router.list().sort(), ['orders', 'pnl']);
+assert.throws(() => router.register('invalid route', () => null), /Invalid route name/);
+assert.throws(() => router.register('bad', 123), /must be a function/);
+assert.throws(() => router.navigate('missing'), /Unknown route/);
+assert.strictEqual(router.navigate(null).name, 'orders', 'null navigation should fallback to default route');
 
 assert.strictEqual(formatCurrency(10500), '$10,500');
 assert.strictEqual(formatPercent(0.256), '25.6%');
 assert.strictEqual(formatPercent(0.025), '2.50%');
 console.log('dashboard ui rendering tests passed');
 
-const sanitizedView = renderDashboard({
-  statusItems: [
+const sanitizedView = renderPositionsView({
+  fills: [
     {
-      label: '<b>Automation</b>',
-      state: '<script>alert(1)</script>',
-      level: 'critical',
-      description: 'Check <i>agent</i> response.',
+      event_id: 'fill-sanitized',
+      schema_version: '1',
+      symbol: '<b>Automation</b>',
+      timestamp: now,
+      order_id: 'ord-x',
+      fill_id: 'fill-x',
+      status: 'FILLED',
+      filled_qty: 10,
+      fill_price: 100,
+      metadata: { side: 'BUY' },
     },
   ],
+  orders: [],
+  ticks: [],
 });
 
-assert.ok(!sanitizedView.html.includes('<script>'), 'dashboard should escape script tags');
+assert.ok(!sanitizedView.html.includes('<script>'), 'positions view should escape script tags');
 assert.ok(sanitizedView.html.includes('&lt;b&gt;Automation&lt;/b&gt;'), 'escaped HTML should remain visible as text');
+
+const pnlStats = renderPnlQuotesView({ pnlPoints: [], quotes: [] });
+assert.ok(pnlStats.html.includes('Chart data is not available'), 'empty series should surface chart placeholder');
+
+console.log('view sanitisation tests passed');
