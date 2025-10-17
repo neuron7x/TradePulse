@@ -106,6 +106,27 @@ def test_tick_stream_aggregator_backfills_gaps_via_callback() -> None:
     ] == pytest.approx(30020.0)
 
 
+def test_tick_stream_aggregator_skips_closed_calendar_windows() -> None:
+    cache_service = DataIngestionCacheService()
+    aggregator = TickStreamAggregator(
+        cache_service=cache_service, timeframe="1min", market="NYSE"
+    )
+
+    weekend_start = datetime(2024, 3, 9, tzinfo=UTC)
+    weekend_end = datetime(2024, 3, 10, 23, 59, tzinfo=UTC)
+
+    result = aggregator.synchronise(
+        symbol="AAPL",
+        venue="NYSE",
+        instrument_type=InstrumentType.SPOT,
+        start=weekend_start,
+        end=weekend_end,
+    )
+
+    assert result.frame.empty
+    assert not result.backfill_plan.gaps
+
+
 def test_tick_stream_aggregator_rejects_mismatched_metadata() -> None:
     cache_service = DataIngestionCacheService()
     aggregator = TickStreamAggregator(cache_service=cache_service, timeframe="1min")

@@ -17,7 +17,7 @@ from core.data.backfill import (
 )
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.models import InstrumentType, PriceTick
-from core.data.timeutils import normalize_timestamp
+from core.data.timeutils import get_market_calendar, normalize_timestamp
 
 from .ingestion_service import DataIngestionCacheService
 
@@ -145,7 +145,7 @@ class TickStreamAggregator:
                 key=canonical_key, frame=cached, backfill_plan=plan
             )
 
-        expected_index = self._build_expected_index(*window)
+        expected_index = self._build_expected_index(*window, market=market_hint)
         if expected_index.empty:
             plan = BackfillPlan()
             return AggregationResult(
@@ -153,7 +153,11 @@ class TickStreamAggregator:
             )
 
         planner = self._get_planner()
-        plan = planner.plan(canonical_key, expected_index=expected_index)
+        plan = planner.plan(
+            canonical_key,
+            expected_index=expected_index,
+            frequency=self._frequency,
+        )
         if plan.gaps and gap_fetcher is not None:
             gap_frames: list[pd.DataFrame] = []
             for gap in plan.gaps:
@@ -178,7 +182,11 @@ class TickStreamAggregator:
                     instrument_type=instrument_type,
                 )
                 planner = self._get_planner()
-                plan = planner.plan(canonical_key, expected_index=expected_index)
+                plan = planner.plan(
+                    canonical_key,
+                    expected_index=expected_index,
+                    frequency=self._frequency,
+                )
 
         return AggregationResult(key=canonical_key, frame=cached, backfill_plan=plan)
 
@@ -278,8 +286,56 @@ class TickStreamAggregator:
             raise ValueError("end timestamp must be greater than or equal to start")
         return resolved_start, resolved_end
 
-    def _build_expected_index(self, start: datetime, end: datetime) -> pd.DatetimeIndex:
-        return pd.date_range(start=start, end=end, freq=self._frequency, tz=UTC)
+    def _build_expected_index(
+        self, start: datetime, end: datetime, *, market: str | None
+    ) -> pd.DatetimeIndex:
+        start_ts = pd.Timestamp(start)
+        if start_ts.tz is None:
+            start_ts = start_ts.tz_localize(UTC)
+        else:
+            start_ts = start_ts.tz_convert(UTC)
+
+        end_ts = pd.Timestamp(end)
+        if end_ts.tz is None:
+            end_ts = end_ts.tz_localize(UTC)
+        else:
+            end_ts = end_ts.tz_convert(UTC)
+
+        base_index = pd.date_range(
+            start=start_ts, end=end_ts, freq=self._frequency, tz=UTC
+        )
+        base_index.name = "timestamp"
+        if base_index.empty or not market:
+            return base_index
+
+        try:
+            calendar = get_market_calendar(market)
+        except KeyError:
+            return base_index
+
+        exchange_calendar = calendar.exchange_calendar
+        minute = pd.Timedelta(minutes=1)
+        if (
+            exchange_calendar is None
+            or not hasattr(exchange_calendar, "minutes_in_range")
+            or self._frequency < minute
+            or self._frequency % minute != pd.Timedelta(0)
+        ):
+            return base_index
+
+        start_floor = start_ts.floor("min")
+        end_ceiling = end_ts.ceil("min")
+        trading_minutes = exchange_calendar.minutes_in_range(start_floor, end_ceiling)
+        if trading_minutes.empty:
+            return pd.DatetimeIndex([], tz=UTC, name="timestamp")
+
+        stride = max(int(self._frequency / minute), 1)
+        resampled = trading_minutes[::stride]
+        mask = (resampled >= start_ts) & (resampled <= end_ts)
+        aligned = resampled[mask]
+        aligned = aligned.tz_convert(UTC)
+        aligned.name = "timestamp"
+        return aligned
 
     def _validate_tick_metadata(
         self,
