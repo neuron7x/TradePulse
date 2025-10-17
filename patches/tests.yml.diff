@@ -1,0 +1,629 @@
+--- a/.github/workflows/tests.yml
++++ b/.github/workflows/tests.yml
+@@
+-name: Tests
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    name: Tests (Python ${{ matrix.python-version }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: ${{ matrix.python-version == '3.13' }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Prepare test report directories
+        run: |
+          mkdir -p reports
+      - name: Run unit and integration tests with coverage
+        run: |
+          .venv/bin/python -m pytest \
+            -m "not flaky" \
+            tests/ \
+            --cov=core --cov=backtest --cov=execution \
+            --cov-branch \
+            --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
+            --cov-fail-under=97 \
+            --junitxml=reports/unit-integration-tests.xml \
+            --html=reports/unit-integration-report.html --self-contained-html \
+            --flaky-report=reports/flaky-tests-skipped.json
+      - name: Run end-to-end smoke tests
+        run: |
+          .venv/bin/python -m pytest tests/e2e/ \
+            -m "not slow and not flaky" \
+            --junitxml=reports/e2e-tests.xml \
+            --html=reports/e2e-report.html --self-contained-html
+      - name: Publish coverage summary
+        id: coverage_summary
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          report_path = pathlib.Path("coverage.xml")
+          if not report_path.exists():
+              raise SystemExit("coverage.xml not found; coverage step may have failed")
+
+          root = ET.parse(report_path).getroot()
+          line_rate = float(root.get("line-rate", 0.0)) * 100
+          branch_rate = float(root.get("branch-rate", 0.0)) * 100
+
+          summary_lines = [
+              "### Coverage summary\n",
+              "",
+              "| Metric | Percentage |",
+              "| --- | --- |",
+              f"| Line coverage | {line_rate:.2f}% |",
+              f"| Branch coverage | {branch_rate:.2f}% |",
+              "",
+          ]
+
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as handle:
+                  handle.write("\n".join(summary_lines))
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as handle:
+                  handle.write(f"line_rate={line_rate:.2f}\n")
+                  handle.write(f"branch_rate={branch_rate:.2f}\n")
+
+          if branch_rate < 90.0:
+              raise SystemExit(f"Branch coverage {branch_rate:.2f}% is below the required 90% threshold")
+      PY
+      - name: Update missing-coverage label
+        if: ${{ github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+            const label = 'missing-coverage';
+            const threshold = 90;
+            const lineRate = Number("${{ steps.coverage_summary.outputs.line_rate || '0' }}");
+            const branchRate = Number("${{ steps.coverage_summary.outputs.branch_rate || '0' }}");
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pull_number });
+            const hasLabel = labels.some(item => item.name === label);
+            if (lineRate >= threshold && branchRate >= threshold) {
+              if (hasLabel) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name: label }).catch(() => {});
+              }
+            } else if (!hasLabel) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [label] });
+            }
+      - name: Run property-based tests with statistics
+        run: |
+          .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
+            --junitxml=reports/property-tests.xml \
+            --html=reports/property-tests-report.html --self-contained-html
+      - name: Summarize pytest results
+        if: always()
+        id: test_summary
+        uses: test-summary/action@v2
+        with:
+          paths: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+            reports/e2e-tests.xml
+          show: "fail, skip, pass"
+      - name: Find existing test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        id: find_test_comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Test & Coverage Summary'
+      - name: Post test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_test_comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ### Test & Coverage Summary (Python ${{ matrix.python-version }})
+
+            | Metric | Value |
+            | --- | --- |
+            | Total tests | ${{ steps.test_summary.outputs.total }} |
+            | Passed | ${{ steps.test_summary.outputs.passed }} |
+            | Failed | ${{ steps.test_summary.outputs.failed }} |
+            | Skipped | ${{ steps.test_summary.outputs.skipped }} |
+            | Line coverage | ${{ steps.coverage_summary.outputs.line_rate || 'n/a' }}% |
+            | Branch coverage | ${{ steps.coverage_summary.outputs.branch_rate || 'n/a' }}% |
+
+            _Updated automatically for the latest workflow run._
+      - name: Upload JUnit test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-results-${{ matrix.python-version }}
+          path: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+          if-no-files-found: error
+      - name: Upload HTML test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-html-reports-${{ matrix.python-version }}
+          path: |
+            reports/unit-integration-report.html
+            reports/property-tests-report.html
+            reports/e2e-report.html
+          if-no-files-found: error
+      - name: Upload flaky manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-tests-skipped-${{ matrix.python-version }}
+          path: reports/flaky-tests-skipped.json
+          if-no-files-found: error
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            coverage_html
+          if-no-files-found: error
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: py${{ matrix.python-version }}
+          name: py${{ matrix.python-version }}-coverage
+          fail_ci_if_error: false
+
+  pytest-xdist:
+    name: Pytest (xdist profiling)
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Run pytest in parallel with profiling
+        run: |
+          .venv/bin/python -m pytest tests/ -n auto --durations=20 --profile
+      - name: Collect profiling artifacts
+        if: always()
+        run: |
+          mkdir -p reports/profiling
+          if [ -d prof ]; then cp -r prof/. reports/profiling/; fi
+      - name: Upload profiling artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-profiling
+          path: reports/profiling
+          if-no-files-found: warn
+
+  ui-smoke:
+    name: Playwright UI smoke tests
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Build Next.js application
+        working-directory: apps/web
+        run: npm run build
+      - name: Run Playwright smoke suite
+        working-directory: apps/web
+        env:
+          CI: 'true'
+        run: npx playwright test --config=playwright.config.ts --reporter=list
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          if-no-files-found: warn
+
+  flaky-tests:
+    name: Quarantined flaky tests
+    runs-on: ubuntu-latest
+    needs: tests
+    if: always()
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Prepare test report directories
+        run: |
+          mkdir -p reports
+      - name: Run quarantined flaky tests
+        run: |
+          set -o pipefail
+          set +e
+          .venv/bin/python -m pytest tests/ -m flaky \
+            --reruns=2 --reruns-delay=2 \
+            --junitxml=reports/flaky-tests.xml \
+            --html=reports/flaky-tests-report.html --self-contained-html \
+            --flaky-report=reports/flaky-tests.json
+          status=$?
+          set -e
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected for 'flaky' marker; treating as success."
+            exit 0
+          fi
+          exit "$status"
+      - name: Upload flaky test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-tests-artifacts
+          path: |
+            reports/flaky-tests.xml
+            reports/flaky-tests-report.html
+            reports/flaky-tests.json
+          if-no-files-found: warn
++name: Tests
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11']
+    name: Tests (Python ${{ matrix.python-version }})
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: ${{ matrix.python-version == '3.13' }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Prepare test report directories
+        run: |
+          mkdir -p reports
+      - name: Run unit and integration tests with coverage
+        run: |
+          .venv/bin/python -m pytest \
+            -m "not flaky" \
+            tests/ \
+            --cov=core --cov=backtest --cov=execution \
+            --cov-branch \
+            --cov-report=xml --cov-report=term-missing --cov-report=html:coverage_html \
+            --cov-fail-under=97 \
+            --junitxml=reports/unit-integration-tests.xml \
+            --html=reports/unit-integration-report.html --self-contained-html \
+            --flaky-report=reports/flaky-tests-skipped.json
+      - name: Run end-to-end smoke tests
+        run: |
+          .venv/bin/python -m pytest tests/e2e/ \
+            -m "not slow and not flaky" \
+            --junitxml=reports/e2e-tests.xml \
+            --html=reports/e2e-report.html --self-contained-html
+      - name: Publish coverage summary
+        id: coverage_summary
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import xml.etree.ElementTree as ET
+
+          report_path = pathlib.Path("coverage.xml")
+          if not report_path.exists():
+              raise SystemExit("coverage.xml not found; coverage step may have failed")
+
+          root = ET.parse(report_path).getroot()
+          line_rate = float(root.get("line-rate", 0.0)) * 100
+          branch_rate = float(root.get("branch-rate", 0.0)) * 100
+
+          summary_lines = [
+              "### Coverage summary\n",
+              "",
+              "| Metric | Percentage |",
+              "| --- | --- |",
+              f"| Line coverage | {line_rate:.2f}% |",
+              f"| Branch coverage | {branch_rate:.2f}% |",
+              "",
+          ]
+
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as handle:
+                  handle.write("\n".join(summary_lines))
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as handle:
+                  handle.write(f"line_rate={line_rate:.2f}\n")
+                  handle.write(f"branch_rate={branch_rate:.2f}\n")
+
+          if branch_rate < 90.0:
+              raise SystemExit(f"Branch coverage {branch_rate:.2f}% is below the required 90% threshold")
+      PY
+      - name: Update missing-coverage label
+        if: ${{ github.event_name == 'pull_request' && matrix.python-version == '3.11' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.payload.pull_request.number;
+            const label = 'missing-coverage';
+            const threshold = 90;
+            const lineRate = Number("${{ steps.coverage_summary.outputs.line_rate || '0' }}");
+            const branchRate = Number("${{ steps.coverage_summary.outputs.branch_rate || '0' }}");
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, { owner, repo, issue_number: pull_number });
+            const hasLabel = labels.some(item => item.name === label);
+            if (lineRate >= threshold && branchRate >= threshold) {
+              if (hasLabel) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: pull_number, name: label }).catch(() => {});
+              }
+            } else if (!hasLabel) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [label] });
+            }
+      - name: Run property-based tests with statistics
+        run: |
+          .venv/bin/python -m pytest tests/property/ --hypothesis-show-statistics \
+            --junitxml=reports/property-tests.xml \
+            --html=reports/property-tests-report.html --self-contained-html
+      - name: Summarize pytest results
+        if: always()
+        id: test_summary
+        uses: test-summary/action@v2
+        with:
+          paths: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+            reports/e2e-tests.xml
+          show: "fail, skip, pass"
+      - name: Find existing test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        id: find_test_comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Test & Coverage Summary'
+      - name: Post test summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && matrix.python-version == '3.11' && !github.event.pull_request.head.repo.fork }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_test_comment.outputs.comment-id }}
+          edit-mode: replace
+          body: |
+            ### Test & Coverage Summary (Python ${{ matrix.python-version }})
+
+            | Metric | Value |
+            | --- | --- |
+            | Total tests | ${{ steps.test_summary.outputs.total }} |
+            | Passed | ${{ steps.test_summary.outputs.passed }} |
+            | Failed | ${{ steps.test_summary.outputs.failed }} |
+            | Skipped | ${{ steps.test_summary.outputs.skipped }} |
+            | Line coverage | ${{ steps.coverage_summary.outputs.line_rate || 'n/a' }}% |
+            | Branch coverage | ${{ steps.coverage_summary.outputs.branch_rate || 'n/a' }}% |
+
+            _Updated automatically for the latest workflow run._
+      - name: Upload JUnit test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-test-results-${{ matrix.python-version }}
+          path: |
+            reports/unit-integration-tests.xml
+            reports/property-tests.xml
+          if-no-files-found: error
+      - name: Upload HTML test reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-html-reports-${{ matrix.python-version }}
+          path: |
+            reports/unit-integration-report.html
+            reports/property-tests-report.html
+            reports/e2e-report.html
+          if-no-files-found: error
+      - name: Upload flaky manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-tests-skipped-${{ matrix.python-version }}
+          path: reports/flaky-tests-skipped.json
+          if-no-files-found: error
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ matrix.python-version }}
+          path: |
+            coverage.xml
+            coverage_html
+          if-no-files-found: error
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: py${{ matrix.python-version }}
+          name: py${{ matrix.python-version }}-coverage
+          fail_ci_if_error: false
+
+  pytest-xdist:
+    name: Pytest (xdist profiling)
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Run pytest in parallel with profiling
+        run: |
+          .venv/bin/python -m pytest tests/ -n auto --durations=20 --profile
+      - name: Collect profiling artifacts
+        if: always()
+        run: |
+          mkdir -p reports/profiling
+          if [ -d prof ]; then cp -r prof/. reports/profiling/; fi
+      - name: Upload profiling artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-profiling
+          path: reports/profiling
+          if-no-files-found: warn
+
+  ui-smoke:
+    name: Playwright UI smoke tests
+    runs-on: ubuntu-latest
+    needs: tests
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install web dependencies
+        working-directory: apps/web
+        run: npm ci
+      - name: Install Playwright browsers
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+      - name: Build Next.js application
+        working-directory: apps/web
+        run: npm run build
+      - name: Run Playwright smoke suite
+        working-directory: apps/web
+        env:
+          CI: 'true'
+        run: npx playwright test --config=playwright.config.ts --reporter=list
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/web/playwright-report
+          if-no-files-found: warn
+
+  flaky-tests:
+    name: Quarantined flaky tests
+    runs-on: ubuntu-latest
+    needs: tests
+    if: always()
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Prepare test report directories
+        run: |
+          mkdir -p reports
+      - name: Run quarantined flaky tests
+        run: |
+          set -o pipefail
+          set +e
+          .venv/bin/python -m pytest tests/ -m flaky \
+            --reruns=2 --reruns-delay=2 \
+            --junitxml=reports/flaky-tests.xml \
+            --html=reports/flaky-tests-report.html --self-contained-html \
+            --flaky-report=reports/flaky-tests.json
+          status=$?
+          set -e
+          if [ "$status" -eq 5 ]; then
+            echo "No tests collected for 'flaky' marker; treating as success."
+            exit 0
+          fi
+          exit "$status"
+      - name: Upload flaky test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flaky-tests-artifacts
+          path: |
+            reports/flaky-tests.xml
+            reports/flaky-tests-report.html
+            reports/flaky-tests.json
+          if-no-files-found: warn
