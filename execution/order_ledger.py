@@ -98,39 +98,41 @@ class OrderLedger:
         """Append a new entry to the ledger and return the structured event."""
 
         timestamp = datetime.now(timezone.utc).isoformat()
-        payload: dict[str, Any] = {
-            "sequence": self._next_sequence,
-            "event": str(event),
-            "timestamp": timestamp,
-            "order_id": None,
-            "correlation_id": correlation_id,
-            "metadata": _coerce(metadata or {}),
-            "order_snapshot": None,
-            "state_snapshot": None,
-            "state_hash": None,
-            "previous_digest": self._tail_digest,
-        }
-        if order is not None:
-            order_snapshot = _coerce(order)
-            payload["order_snapshot"] = order_snapshot
-            payload["order_id"] = _coerce(order.get("order_id"))
-        if state_snapshot is not None:
-            coerced_state = _coerce(state_snapshot)
-            payload["state_snapshot"] = coerced_state
-            payload["state_hash"] = sha256(
-                _canonical_dumps(coerced_state).encode("utf-8")
-            ).hexdigest()
-
-        digest_source = dict(payload)
-        digest = sha256(_canonical_dumps(digest_source).encode("utf-8")).hexdigest()
-        payload["digest"] = digest
-
-        record = json.dumps(payload, sort_keys=True, ensure_ascii=False)
         with self._lock:
+            sequence = self._next_sequence
+            previous_digest = self._tail_digest
+            payload: dict[str, Any] = {
+                "sequence": sequence,
+                "event": str(event),
+                "timestamp": timestamp,
+                "order_id": None,
+                "correlation_id": correlation_id,
+                "metadata": _coerce(metadata or {}),
+                "order_snapshot": None,
+                "state_snapshot": None,
+                "state_hash": None,
+                "previous_digest": previous_digest,
+            }
+            if order is not None:
+                order_snapshot = _coerce(order)
+                payload["order_snapshot"] = order_snapshot
+                payload["order_id"] = _coerce(order.get("order_id"))
+            if state_snapshot is not None:
+                coerced_state = _coerce(state_snapshot)
+                payload["state_snapshot"] = coerced_state
+                payload["state_hash"] = sha256(
+                    _canonical_dumps(coerced_state).encode("utf-8")
+                ).hexdigest()
+
+            digest_source = dict(payload)
+            digest = sha256(_canonical_dumps(digest_source).encode("utf-8")).hexdigest()
+            payload["digest"] = digest
+
+            record = json.dumps(payload, sort_keys=True, ensure_ascii=False)
             with self._path.open("a", encoding="utf-8") as handle:
                 handle.write(record + "\n")
             event_obj = OrderLedgerEvent(
-                sequence=self._next_sequence,
+                sequence=sequence,
                 event=str(event),
                 timestamp=timestamp,
                 order_id=payload["order_id"],
@@ -139,10 +141,10 @@ class OrderLedger:
                 order_snapshot=payload["order_snapshot"],
                 state_snapshot=payload["state_snapshot"],
                 state_hash=payload["state_hash"],
-                previous_digest=self._tail_digest,
+                previous_digest=previous_digest,
                 digest=digest,
             )
-            self._next_sequence += 1
+            self._next_sequence = sequence + 1
             self._tail_digest = digest
         return event_obj
 
