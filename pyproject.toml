@@ -67,7 +67,9 @@ feature_store = [
 ]
 dev = [
     "black>=25.9.0",
+    "flake8>=7.1.1",
     "ruff>=0.14.0",
+    "isort>=5.13.2",
     "mypy>=1.18.2",
     "pytest>=8.4.2",
     "pytest-benchmark>=5.1.0",
@@ -161,6 +163,14 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]
 ignore = ["E203"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.flake8]
+max-line-length = 100
+extend-ignore = ["E203", "W503"]
 
 [tool.mypy]
 ignore_missing_imports = true
