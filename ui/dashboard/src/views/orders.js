@@ -35,6 +35,17 @@ function aggregateFills(fills = []) {
   return map;
 }
 
+function normaliseStatusModifier(value) {
+  if (value == null) {
+    return 'unknown';
+  }
+  const slug = String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9_-]+/g, '-');
+  return slug || 'unknown';
+}
+
 function buildOrderRows(orders = [], fills = []) {
   const fillIndex = aggregateFills(fills);
   return orders.map((order) => {
@@ -135,7 +146,7 @@ export function renderOrdersView({ orders = [], fills = [], pageSize = 12, page 
         id: 'status',
         label: 'Status',
         accessor: (row) => row.status,
-        formatter: (value) => `<span class="tp-status tp-status--${String(value).toLowerCase()}">${escapeHtml(value)}</span>`,
+        formatter: (value) => `<span class="tp-status tp-status--${normaliseStatusModifier(value)}">${escapeHtml(value)}</span>`,
       },
       {
         id: 'lastFill',
