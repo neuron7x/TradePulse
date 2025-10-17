@@ -172,6 +172,10 @@ class StrategyOrchestrator:
                 self._pending.discard(flow.name)
             raise TimeoutError("Timed out while waiting to enqueue strategy flow") from exc
 
+        if self._is_shutdown():
+            self._reject_submitted_flow(flow.name, future, task)
+            raise RuntimeError("StrategyOrchestrator has been shut down")
+
         return future
 
     def run_flows(
@@ -250,6 +254,37 @@ class StrategyOrchestrator:
                         self._active.discard(flow.name)
             finally:
                 self._queue.task_done()
+
+    def _is_shutdown(self) -> bool:
+        with self._lock:
+            return self._shutdown
+
+    def _reject_submitted_flow(
+        self,
+        flow_name: str,
+        future: Future[list[EvaluationResult]],
+        task: tuple[int, int, StrategyFlow | object, Future | None],
+    ) -> None:
+        future.cancel()
+        with self._lock:
+            self._pending.discard(flow_name)
+
+        to_requeue: list[tuple[int, int, StrategyFlow | object, Future | None]] = []
+        removed = False
+        while True:
+            try:
+                candidate = self._queue.get_nowait()
+            except Empty:
+                break
+
+            if not removed and candidate == task:
+                removed = True
+            else:
+                to_requeue.append(candidate)
+            self._queue.task_done()
+
+        for item in to_requeue:
+            self._queue.put(item)
 
     def _drain_pending(self) -> None:
         while True:
