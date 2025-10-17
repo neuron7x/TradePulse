@@ -653,7 +653,8 @@ def create_app(
     metrics_module = __import__("core.utils.metrics", fromlist=["MetricsCollector"])
     metrics = get_metrics_collector(metrics_registry)
     if metrics_registry is not None and getattr(metrics, "registry", None) is None:
-        metrics = metrics_module.MetricsCollector(metrics_registry)
+        refreshed_metrics = metrics_module.MetricsCollector(metrics_registry)
+        metrics.__dict__.update(refreshed_metrics.__dict__)
         setattr(metrics_module, "_collector", metrics)
     app.state.metrics = metrics
 
