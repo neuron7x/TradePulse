@@ -19,6 +19,20 @@ kill_switch_rate_limit_threshold = 3
 [metrics]
 port = 9000
 
+[kafka.ingestion]
+topic = "tradepulse.market-data"
+bootstrap_servers = "${env.KAFKA_BOOTSTRAP_SERVERS}"
+group_id = "tradepulse-live-consumer"
+client_id = "tradepulse-live-ingestor"
+transactional_id = "tradepulse-live-ingestor"
+security_protocol = "${env.KAFKA_SECURITY_PROTOCOL:-SSL}"
+ssl_cafile = "${env.KAFKA_SSL_CAFILE}"
+ssl_certfile = "${env.KAFKA_SSL_CERTFILE}"
+ssl_keyfile = "${env.KAFKA_SSL_KEYFILE}"
+sasl_mechanism = "${env.KAFKA_SASL_MECHANISM:-PLAIN}"
+sasl_username = "${env.KAFKA_SASL_USERNAME}"
+sasl_password = "${env.KAFKA_SASL_PASSWORD}"
+
 [[venues]]
 name = "binance"
 class = "execution.adapters.BinanceRESTConnector"

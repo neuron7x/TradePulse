@@ -96,6 +96,58 @@ Warm starts resume trading after a controlled shutdown or short outage.
   path until entries expire; purge or expand the cache capacity if this state
   persists.
 
+## Kafka Operations
+
+Kafka is now a tier-one dependency for ingesting market data. Coordinate changes
+with the data engineering on-call before performing the procedures below.
+
+### Broker Scaling
+
+1. **Review Terraform state** – confirm the desired broker count in
+   `infra/terraform/eks/environments/<env>.tfvars` under `msk_config.number_of_broker_nodes`.
+2. **Apply infrastructure changes** – run `terraform -chdir=infra/terraform/eks apply -var-file=environments/<env>.tfvars`
+   to let the MSK module resize the cluster. Terraform will orchestrate rolling
+   replacements that preserve client connectivity.
+3. **Update client configuration** – capture the refreshed
+   `kafka_bootstrap_brokers_tls` output and update the `KAFKA_BOOTSTRAP_SERVERS`
+   environment variable or `configs/live/default.toml`. Redeploy TradePulse if
+   the endpoint list changed.
+4. **Validate health** – monitor the MSK console for `BrokerNotAvailable` or
+   storage pressure alarms and verify that ingestion metrics (`kafka.consumer_lag`
+   and `kafka.records_per_second`) stabilise within five minutes.
+
+### Partition Reassignment
+
+1. **Plan reassignment** – export the current partition layout using
+   `kafka-topics.sh --bootstrap-server $BOOTSTRAP --describe --topic tradepulse.market-data`.
+2. **Generate proposal** – create a JSON reassignment plan sized for the new
+   broker set. Use `kafka-reassign-partitions.sh --bootstrap-server $BOOTSTRAP \
+   --topics-to-move-json-file plan.json --generate`.
+3. **Apply** – execute the reassignment with the generated JSON and monitor
+   progress (`--verify`) until completion. Ensure each partition has at least two
+   in-sync replicas; if replication falls behind, pause producers until ISR
+   recovers.
+4. **Terraform sync** – document the updated replication targets in
+   `msk_config.configuration_properties` (for example `default.replication.factor`)
+   so that future applies preserve the new layout.
+
+### Lag Monitoring and Remediation
+
+1. **Dashboards** – watch the ingestion lag panels sourced from
+   `KafkaIngestionService` hot cache metrics. Spikes above 60 seconds should page
+   the on-call.
+2. **Correlate with MSK metrics** – inspect `aws.msk.brokerTopicMetrics.*` in
+   CloudWatch (enabled by the Terraform module). Focus on `MessagesInPerSec` and
+   `BytesInPerSec` per partition.
+3. **Execute lag drain** – apply a temporary override to
+   `KafkaIngestionConfig.max_batch_size` and `linger_ms` via the live config
+   (`configs/live/default.toml`) and redeploy ingestion to accelerate catch-up.
+   Scale the values back once lag returns to baseline to minimise memory
+   pressure.
+4. **Escalate** – if lag persists beyond 10 minutes, engage the infrastructure
+   team to review broker CPU and storage. Scaling guidance is in the section
+   above.
+
 ## Failure Handling
 
 - **Connector disconnects** – heartbeat failures trigger exponential backoff

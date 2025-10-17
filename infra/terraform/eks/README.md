@@ -55,6 +55,22 @@ infra/terraform/eks/
 4. The Kubernetes and Helm providers depend on the cluster being created in the same apply operation. Terraform waits
    for the control plane to become available before attempting to configure add-ons.
 
+### Managed Kafka (MSK)
+
+Set the optional `msk_config` object in your environment `tfvars` to provision an AWS MSK cluster with the [modules/msk](../modules/msk/README.md) module. The module emits TLS and SASL bootstrap endpoints via the Terraform outputs:
+
+```hcl
+msk_config = {
+  cluster_name           = "tradepulse-staging-msk"
+  number_of_broker_nodes = 3
+  broker_subnet_ids      = module.vpc.private_subnets
+  client_tls_certificate_authority_arns = [aws_acmpca_certificate_authority.kafka.arn]
+  client_sasl_scram_secret_arns         = [aws_secretsmanager_secret.kafka_scram.arn]
+}
+```
+
+After `terraform apply`, capture the `kafka_bootstrap_brokers_tls` or `kafka_bootstrap_brokers_sasl_scram` outputs and feed them into the application configuration (`configs/live/default.toml` or the `KAFKA_BOOTSTRAP_SERVERS` environment variable).
+
 ### Cluster Autoscaler
 
 The Cluster Autoscaler installation can be disabled by setting `enable_cluster_autoscaler = false`. The IAM role for

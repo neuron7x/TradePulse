@@ -26,6 +26,8 @@ locals {
       taints = []
     }
   }
+
+  msk_config = var.msk_config == null ? [] : [var.msk_config]
 }
 
 check "subnet_cidr_alignment" {
@@ -107,6 +109,34 @@ module "eks" {
   node_security_group_tags = {
     "kubernetes.io/cluster/${var.cluster_name}" = "owned"
   }
+}
+
+module "msk" {
+  count  = length(local.msk_config)
+  source = "../modules/msk"
+
+  cluster_name           = local.msk_config[0].cluster_name
+  kafka_version          = local.msk_config[0].kafka_version
+  number_of_broker_nodes = local.msk_config[0].number_of_broker_nodes
+  instance_type          = local.msk_config[0].instance_type
+  broker_subnet_ids = length(local.msk_config[0].broker_subnet_ids) > 0 ? local.msk_config[0].broker_subnet_ids : module.vpc.private_subnets
+  security_group_ids = length(local.msk_config[0].security_group_ids) > 0 ? local.msk_config[0].security_group_ids : [module.vpc.default_security_group_id]
+  configuration_properties = merge({
+    "auto.create.topics.enable"        = "false"
+    "default.replication.factor"       = tostring(min(3, local.msk_config[0].number_of_broker_nodes))
+    "min.insync.replicas"              = local.msk_config[0].number_of_broker_nodes > 2 ? "2" : "1"
+    "unclean.leader.election.enable"   = "false"
+    "log.retention.hours"              = "168"
+  }, local.msk_config[0].configuration_properties)
+  encryption_in_transit_client_broker  = local.msk_config[0].encryption_in_transit_client_broker
+  encryption_at_rest_kms_key_arn       = local.msk_config[0].encryption_at_rest_kms_key_arn
+  client_tls_certificate_authority_arns = local.msk_config[0].client_tls_certificate_authority_arns
+  client_sasl_scram_secret_arns        = local.msk_config[0].client_sasl_scram_secret_arns
+  cloudwatch_logs_enabled              = local.msk_config[0].cloudwatch_logs_enabled
+  cloudwatch_logs_log_group            = coalesce(local.msk_config[0].cloudwatch_logs_log_group, "${var.cluster_name}-kafka")
+  open_monitoring_prometheus           = local.msk_config[0].open_monitoring_prometheus
+  enhanced_monitoring                  = local.msk_config[0].enhanced_monitoring
+  tags                                 = local.tags
 }
 
 data "aws_caller_identity" "current" {}

@@ -7,6 +7,8 @@ resources:
   - ../../namespaces/production
   - priorityclass.yaml
   - ../../base
+  - ../../components/kafka
+  - kafka-secrets.yaml
 
 images:
   - name: ghcr.io/neuron7x/tradepulse

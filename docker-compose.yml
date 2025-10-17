@@ -6,6 +6,15 @@ services:
     ports:
       - "8001:8001"
     restart: unless-stopped
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: "kafka:9092"
+      KAFKA_SECURITY_PROTOCOL: "SSL"
+      KAFKA_SSL_CAFILE: "/opt/tradepulse/certs/kafka/ca.crt"
+      KAFKA_SSL_CERTFILE: "/opt/tradepulse/certs/kafka/client.crt"
+      KAFKA_SSL_KEYFILE: "/opt/tradepulse/certs/kafka/client.key"
+      KAFKA_SASL_MECHANISM: "PLAIN"
+      KAFKA_SASL_USERNAME: "tradepulse"
+      KAFKA_SASL_PASSWORD: "tradepulse-secret"
     healthcheck:
       test:
         - "CMD"
@@ -20,8 +29,44 @@ services:
       - "co.elastic.logs/enabled=true"
       - "co.elastic.logs/module=tradepulse"
     depends_on:
+      - kafka
       - prometheus
       - logstash
+    volumes:
+      - ./configs/local/kafka:/opt/tradepulse/certs/kafka:ro
+  kafka:
+    image: docker.io/bitnami/kafka:3.6
+    restart: unless-stopped
+    ports:
+      - "19092:9093"
+    environment:
+      KAFKA_CFG_NODE_ID: "1"
+      KAFKA_CFG_PROCESS_ROLES: "broker,controller"
+      KAFKA_CFG_CONTROLLER_QUORUM_VOTERS: "1@kafka:9094"
+      KAFKA_ENABLE_KRAFT: "yes"
+      KAFKA_KRAFT_CLUSTER_ID: "TrdPlsClusterLocal001"
+      KAFKA_CFG_LISTENERS: "INTERNAL://:9092,EXTERNAL://:9093,CONTROLLER://:9094"
+      KAFKA_CFG_ADVERTISED_LISTENERS: "INTERNAL://kafka:9092,EXTERNAL://localhost:19092"
+      KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP: "INTERNAL:SSL,EXTERNAL:SSL,CONTROLLER:PLAINTEXT"
+      KAFKA_CFG_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+      KAFKA_CFG_INTER_BROKER_LISTENER_NAME: "INTERNAL"
+      KAFKA_CFG_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_CFG_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      KAFKA_CFG_SSL_CLIENT_AUTH: "required"
+      KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_TLS_TYPE: "PEM"
+      KAFKA_TLS_CERT: "/etc/kafka/certs/server.crt"
+      KAFKA_TLS_KEY: "/etc/kafka/certs/server.key"
+      KAFKA_TLS_CA_CERT: "/etc/kafka/certs/ca.crt"
+      KAFKA_CLIENT_USERS: "tradepulse"
+      KAFKA_CLIENT_PASSWORDS: "tradepulse-secret"
+      KAFKA_CFG_SASL_ENABLED_MECHANISMS: "PLAIN"
+      KAFKA_CFG_SASL_MECHANISM_INTER_BROKER_PROTOCOL: "PLAIN"
+      KAFKA_CFG_SUPER_USERS: "User:tradepulse"
+      KAFKA_HEAP_OPTS: "-Xms512m -Xmx512m"
+    volumes:
+      - ./configs/local/kafka:/etc/kafka/certs:ro
   prometheus:
     image: prom/prometheus
     volumes:

@@ -82,3 +82,28 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "msk_config" {
+  description = <<-DESC
+    Optional configuration for provisioning an AWS MSK (Managed Streaming for Apache Kafka) cluster alongside EKS.
+    When null, no Kafka resources are created. See modules/msk/README.md for supported settings.
+  DESC
+  type = object({
+    cluster_name                         = string
+    kafka_version                        = optional(string, "3.6.0")
+    number_of_broker_nodes               = optional(number, 3)
+    instance_type                        = optional(string, "kafka.m7g.large")
+    broker_subnet_ids                    = optional(list(string), [])
+    security_group_ids                   = optional(list(string), [])
+    configuration_properties             = optional(map(string), {})
+    encryption_in_transit_client_broker  = optional(string, "TLS")
+    encryption_at_rest_kms_key_arn       = optional(string)
+    client_tls_certificate_authority_arns = optional(list(string), [])
+    client_sasl_scram_secret_arns        = optional(list(string), [])
+    cloudwatch_logs_enabled              = optional(bool, true)
+    cloudwatch_logs_log_group            = optional(string)
+    open_monitoring_prometheus           = optional(bool, true)
+    enhanced_monitoring                  = optional(string, "PER_TOPIC_PER_PARTITION")
+  })
+  default = null
+}

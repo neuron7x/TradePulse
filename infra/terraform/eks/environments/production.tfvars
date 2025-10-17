@@ -31,3 +31,14 @@ tags = {
   "CostCenter" = "tradepulse-production"
   "Availability" = "mission-critical"
 }
+
+# To provision the production Kafka cluster, uncomment and populate the block
+# below with production subnet IDs and secret ARNs. Keep credentials segregated
+# per environment.
+# msk_config = {
+#   cluster_name           = "tradepulse-production-msk"
+#   number_of_broker_nodes = 4
+#   broker_subnet_ids      = ["subnet-prod-aaaa", "subnet-prod-bbbb", "subnet-prod-cccc"]
+#   client_tls_certificate_authority_arns = ["arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/prod"]
+#   client_sasl_scram_secret_arns         = ["arn:aws:secretsmanager:us-east-1:123456789012:secret:kafka/prod/scram"]
+# }

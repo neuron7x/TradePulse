@@ -25,6 +25,7 @@ identity requirements that underpin these controls.
 ### Kafka Broker Security Configuration
 
 - TradePulse expects Kafka clusters to expose TLS endpoints (`security_protocol` of `SSL` or `SASL_SSL`). Provide the CA bundle path via `EventBusConfig.ssl_cafile` and, when using mutual TLS, supply the signed client certificate and key files.
+- The Terraform stack under `infra/terraform/eks` emits the authoritative Kafka bootstrap strings (`kafka_bootstrap_brokers_tls` and `kafka_bootstrap_brokers_sasl_scram`). Propagate these values to `KAFKA_BOOTSTRAP_SERVERS` or `configs/live/default.toml` after each apply to keep ingestion aligned with the cluster topology.
 - Rotate broker and client certificates on a fixed cadence (e.g., quarterly). Deploy new files alongside the old ones, then restart services to reload credentials before revoking the previous certificates.
 - When SASL is enabled, configure ACLs per topic and per consumer group. Bind the SASL principal used by TradePulse to the event topics defined in `core/messaging/event_bus.py` and deny wild-card access to minimise blast radius.
 - Document the certificate and ACL owners in your runbooks so incident responders know who to contact when a rotation or ACL change is required.

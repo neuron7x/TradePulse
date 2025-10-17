@@ -6,6 +6,8 @@ namespace: tradepulse-staging
 resources:
   - ../../namespaces/staging
   - ../../base
+  - ../../components/kafka
+  - kafka-secrets.yaml
 
 images:
   - name: ghcr.io/neuron7x/tradepulse
