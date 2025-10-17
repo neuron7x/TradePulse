@@ -15,12 +15,12 @@ attributable—an explicit requirement in ``docs/quality_gates.md``.
 
 from __future__ import annotations
 
-import queue
 import sqlite3
 import threading
 import time
 from abc import ABC, abstractmethod
 from collections import deque
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -33,8 +33,15 @@ from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 from interfaces.execution import PortfolioRiskAnalyzer, RiskController
-from libs.db.access import DataAccessLayer
-from libs.db.postgres import create_postgres_connection
+from libs.db import (
+    DatabasePoolConfig,
+    DatabaseRuntimeConfig,
+    DatabaseSettings,
+    KillSwitchStateRepository,
+    RetryPolicy,
+    SessionManager,
+    create_engine_from_config,
+)
 
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 
@@ -401,201 +408,33 @@ class SQLiteKillSwitchStateStore(BaseKillSwitchStateStore):
         self._with_retry(_save, write=True)
 
 
-class _PooledCursor:
-    """Wrap a DB-API cursor and mark the owning connection as compromised on errors."""
+class KillSwitchRepository(Protocol):
+    """Minimal interface implemented by kill-switch persistence adapters."""
 
-    def __init__(self, cursor: object, owner: "_PooledConnection") -> None:
-        self._cursor = cursor
-        self._owner = owner
+    def load(self) -> object | None:
+        """Return the persisted kill-switch payload, if available."""
 
-    def execute(self, query: str, params: object | None = None) -> object:
-        try:
-            return self._cursor.execute(query, params)
-        except Exception:
-            self._owner.mark_discard()
-            raise
-
-    def fetchone(self) -> object | None:
-        return self._cursor.fetchone()
-
-    def fetchall(self) -> list[object]:
-        return self._cursor.fetchall()
-
-    @property
-    def rowcount(self) -> int:
-        return int(getattr(self._cursor, "rowcount", -1))
-
-    def close(self) -> None:
-        close = getattr(self._cursor, "close", None)
-        if callable(close):
-            close()
-
-
-class _PooledConnection:
-    """Thin wrapper returning connections to the pool once closed."""
-
-    def __init__(self, raw_connection: object, pool: "_ConnectionPool") -> None:
-        self._conn = raw_connection
-        self._pool = pool
-        self._discard = False
-        self._committed = False
-
-    def cursor(self) -> _PooledCursor:
-        cursor = self._conn.cursor()
-        return _PooledCursor(cursor, self)
-
-    def commit(self) -> None:
-        try:
-            self._conn.commit()
-            self._committed = True
-        except Exception:
-            self._discard = True
-            raise
-
-    def rollback(self) -> None:
-        try:
-            self._conn.rollback()
-        except Exception:
-            self._discard = True
-            raise
-        finally:
-            self._committed = False
-
-    def close(self) -> None:
-        if self._conn is None:
-            return
-        if not self._committed and not self._discard:
-            try:
-                self._conn.rollback()
-            except Exception:
-                self._discard = True
-        if self._discard:
-            self._pool.discard(self._conn)
-        else:
-            self._pool.release(self._conn)
-        self._conn = None
-
-    def mark_discard(self) -> None:
-        self._discard = True
-
-
-class _ConnectionPool:
-    """Simple thread-safe connection pool used by the PostgreSQL store."""
-
-    def __init__(
-        self,
-        connection_factory: Callable[[], object],
-        *,
-        max_size: int,
-        acquire_timeout: float | None = None,
-    ) -> None:
-        if max_size <= 0:
-            raise ValueError("max_size must be positive")
-
-        self._factory = connection_factory
-        self._max_size = int(max_size)
-        self._queue: queue.Queue[object] = queue.Queue(maxsize=self._max_size)
-        self._created = 0
-        self._lock = threading.Lock()
-        self._closed = False
-        self._default_timeout = acquire_timeout
-
-    def acquire(self, timeout: float | None = None) -> object:
-        effective_timeout = self._default_timeout if timeout is None else timeout
-        if self._closed:
-            raise RuntimeError("connection pool is closed")
-        try:
-            return self._queue.get_nowait()
-        except queue.Empty:
-            pass
-
-        with self._lock:
-            if self._closed:
-                raise RuntimeError("connection pool is closed")
-            if self._created < self._max_size:
-                connection = self._factory()
-                self._created += 1
-                return connection
-
-        try:
-            if effective_timeout is None:
-                connection = self._queue.get()
-            else:
-                connection = self._queue.get(timeout=max(0.0, effective_timeout))
-        except queue.Empty as exc:  # pragma: no cover - defensive guard
-            raise TimeoutError("timed out waiting for a database connection") from exc
-        return connection
-
-    def release(self, connection: object) -> None:
-        if self._closed:
-            close = getattr(connection, "close", None)
-            if callable(close):
-                close()
-            with self._lock:
-                self._created = max(0, self._created - 1)
-            return
-        try:
-            self._queue.put_nowait(connection)
-        except queue.Full:
-            close = getattr(connection, "close", None)
-            if callable(close):
-                close()
-            with self._lock:
-                self._created = max(0, self._created - 1)
-
-    def discard(self, connection: object) -> None:
-        try:
-            close = getattr(connection, "close", None)
-            if callable(close):
-                close()
-        finally:
-            with self._lock:
-                self._created = max(0, self._created - 1)
-
-    def warmup(self, initial_size: int) -> None:
-        target = min(max(0, int(initial_size)), self._max_size)
-        preallocated: list[object] = []
-        for _ in range(target):
-            preallocated.append(self.acquire())
-        for connection in preallocated:
-            self.release(connection)
-
-    def close(self) -> None:
-        self._closed = True
-        while True:
-            try:
-                connection = self._queue.get_nowait()
-            except queue.Empty:
-                break
-            close = getattr(connection, "close", None)
-            if callable(close):
-                close()
-        with self._lock:
-            self._created = 0
+    def upsert(self, *, engaged: bool, reason: str) -> object:
+        """Persist the supplied state atomically and return the stored record."""
 
 
 class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
-    """PostgreSQL-backed kill-switch store with connection pooling."""
-
-    _UPSERT_STATEMENT = """
-        INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
-        VALUES (1, %(engaged)s, %(reason)s, NOW())
-        ON CONFLICT (id) DO UPDATE SET
-            engaged = EXCLUDED.engaged,
-            reason = EXCLUDED.reason,
-            updated_at = NOW()
-    """
+    """PostgreSQL-backed kill-switch store using pooled SQLAlchemy sessions."""
 
     def __init__(
         self,
         dsn: str,
         *,
         tls: PostgresTLSConfig | None = None,
+        read_replicas: Sequence[str] | None = None,
         pool_min_size: int = 1,
         pool_max_size: int = 4,
+        pool_max_overflow: int = 4,
         acquire_timeout: float | None = 2.0,
+        pool_recycle_seconds: float = 1_800.0,
         connect_timeout: float = 5.0,
-        statement_timeout_ms: int = 5000,
+        statement_timeout_ms: int = 5_000,
+        retry_policy: RetryPolicy | None = None,
         max_retries: int = 3,
         retry_interval: float = 0.1,
         backoff_multiplier: float = 2.0,
@@ -603,11 +442,11 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
         max_future_drift: float = 5.0,
         max_reason_length: int = 512,
         clock: Callable[[], datetime] | None = None,
-        connection_factory: Callable[[], object] | None = None,
-        pool_factory: (
-            Callable[[Callable[[], object], int, float | None], _ConnectionPool] | None
-        ) = None,
+        session_manager: SessionManager | None = None,
+        repository: KillSwitchRepository | None = None,
         ensure_schema: bool = True,
+        application_name: str = "tradepulse-kill-switch",
+        echo_statements: bool = False,
     ) -> None:
         if pool_min_size < 0:
             raise ValueError("pool_min_size must be non-negative")
@@ -615,12 +454,14 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
             raise ValueError("pool_max_size must be positive")
         if pool_min_size > pool_max_size:
             raise ValueError("pool_min_size cannot exceed pool_max_size")
+        if pool_max_overflow < 0:
+            raise ValueError("pool_max_overflow must be non-negative")
+        if acquire_timeout is not None and acquire_timeout < 0:
+            raise ValueError("acquire_timeout must be non-negative")
         if connect_timeout <= 0:
             raise ValueError("connect_timeout must be positive")
         if statement_timeout_ms <= 0:
             raise ValueError("statement_timeout_ms must be positive")
-        if max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
         if retry_interval < 0:
             raise ValueError("retry_interval must be non-negative")
         if backoff_multiplier < 1.0:
@@ -633,126 +474,120 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
             clock=clock,
         )
 
-        self._dsn = dsn
-        self._tls = tls
-        self._max_retries = int(max_retries)
-        self._retry_interval = float(retry_interval)
-        self._backoff_multiplier = float(backoff_multiplier)
-        self._acquire_timeout = acquire_timeout
+        effective_retry = retry_policy
+        if effective_retry is None:
+            total_attempts = max(int(max_retries), 0) + 1
+            initial_backoff = retry_interval if retry_interval > 0 else 0.05
+            computed_max = max(
+                initial_backoff,
+                retry_interval * (backoff_multiplier ** max(int(max_retries), 0)),
+            )
+            effective_retry = RetryPolicy(
+                attempts=total_attempts,
+                initial_backoff=initial_backoff,
+                max_backoff=computed_max,
+                max_jitter=min(initial_backoff, 0.5),
+            )
 
-        if connection_factory is None:
-            if tls is None:
-                raise ValueError(
-                    "tls must be provided when using the default PostgreSQL connection factory"
+        self._retry_policy = effective_retry
+        self._session_manager = session_manager
+        self._owns_session_manager = False
+
+        if repository is None:
+            if session_manager is None:
+                if tls is None:
+                    raise ValueError(
+                        "tls must be provided when using the default PostgreSQL connection factory"
+                    )
+                pool_config = DatabasePoolConfig(
+                    size=pool_max_size,
+                    max_overflow=pool_max_overflow,
+                    timeout=acquire_timeout,
+                    recycle=pool_recycle_seconds,
                 )
-
-            def default_connection_factory() -> object:
-                return self._create_connection(
-                    connect_timeout=connect_timeout,
+                runtime_config = DatabaseRuntimeConfig(
+                    application_name=application_name,
+                    connect_timeout_seconds=connect_timeout,
                     statement_timeout_ms=statement_timeout_ms,
                 )
-
-            connection_factory = default_connection_factory
-
-        if pool_factory is None:
-            self._pool = _ConnectionPool(
-                connection_factory,
-                max_size=pool_max_size,
-                acquire_timeout=acquire_timeout,
+                settings = DatabaseSettings(
+                    writer_dsn=dsn,
+                    reader_dsns=tuple(read_replicas or ()),
+                    tls=tls,
+                    pool=pool_config,
+                    runtime=runtime_config,
+                    echo_statements=echo_statements,
+                )
+                writer_engine = create_engine_from_config(
+                    settings.writer_dsn,
+                    tls=settings.tls,
+                    pool=settings.pool,
+                    runtime=settings.runtime,
+                    echo=settings.echo_statements,
+                )
+                reader_engines = [
+                    create_engine_from_config(
+                        replica,
+                        tls=settings.tls,
+                        pool=settings.pool,
+                        runtime=settings.runtime,
+                        echo=settings.echo_statements,
+                    )
+                    for replica in settings.reader_dsns
+                ]
+                session_manager = SessionManager(writer_engine, reader_engines)
+                session_manager.warmup(
+                    writer_connections=pool_min_size,
+                    reader_connections=pool_min_size if reader_engines else 0,
+                )
+                self._session_manager = session_manager
+                self._owns_session_manager = True
+            if self._session_manager is None:
+                raise RuntimeError("session_manager must be provided when repository is None")
+            repository = KillSwitchStateRepository(
+                self._session_manager,
+                retry_policy=effective_retry,
+                logger=get_logger(__name__),
             )
-        else:
-            self._pool = pool_factory(
-                connection_factory, pool_max_size, acquire_timeout
-            )
 
-        if pool_min_size:
-            self._pool.warmup(pool_min_size)
+        self._repository: KillSwitchRepository = repository
 
-        self._dal = DataAccessLayer(self._connection_from_pool)
         if ensure_schema:
-            self._ensure_schema()
-
-    def _connection_from_pool(self) -> _PooledConnection:
-        connection = self._pool.acquire()
-        return _PooledConnection(connection, self._pool)
+            ensure = getattr(self._repository, "ensure_schema", None)
+            if callable(ensure):
+                ensure()
 
     def close(self) -> None:
-        self._pool.close()
-
-    def _create_connection(
-        self, *, connect_timeout: float, statement_timeout_ms: int
-    ) -> object:
-        options = f"-c statement_timeout={int(statement_timeout_ms)} -c timezone=UTC"
-        return create_postgres_connection(
-            self._dsn,
-            self._tls,
-            connect_timeout=float(connect_timeout),
-            options=options,
-        )
-
-    def _ensure_schema(self) -> None:
-        self._execute_with_retry(
-            lambda: self._dal.execute(
-                """
-                CREATE TABLE IF NOT EXISTS kill_switch_state (
-                    id SMALLINT PRIMARY KEY CHECK (id = 1),
-                    engaged BOOLEAN NOT NULL,
-                    reason TEXT NOT NULL DEFAULT '',
-                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            ),
-            write=True,
-        )
+        if self._owns_session_manager and self._session_manager is not None:
+            self._session_manager.close()
+        closer = getattr(self._repository, "close", None)
+        if callable(closer):
+            closer()
 
     def _load_row(self) -> tuple[object, ...] | None:
-        return self._execute_with_retry(
-            lambda: self._dal.fetch_one(
-                "SELECT engaged, reason, updated_at FROM kill_switch_state WHERE id = 1"
+        payload = self._execute_with_retry(self._repository.load)
+        if payload is None:
+            return None
+        if isinstance(payload, tuple):
+            return payload
+        if hasattr(payload, "engaged") and hasattr(payload, "reason") and hasattr(payload, "updated_at"):
+            return (
+                bool(getattr(payload, "engaged")),
+                str(getattr(payload, "reason")),
+                getattr(payload, "updated_at"),
             )
-        )
+        raise DataQualityError("Unsupported payload type returned by repository")
 
     def _save_payload(self, engaged: bool, reason: str) -> None:
-        self._execute_with_retry(
-            lambda: self._dal.execute(
-                self._UPSERT_STATEMENT,
-                {"engaged": bool(engaged), "reason": reason},
-            ),
-            write=True,
-        )
+        self._execute_with_retry(lambda: self._repository.upsert(engaged=bool(engaged), reason=reason))
 
-    def _execute_with_retry(
-        self, operation: Callable[[], T], *, write: bool = False
-    ) -> T:
-        delay = self._retry_interval
-        attempts_remaining = self._max_retries
-        while True:
-            try:
+    def _execute_with_retry(self, operation: Callable[[], T]) -> T:
+        base_logger = getattr(self._logger, "logger", self._logger)
+        retrying = self._retry_policy.build(logger=base_logger)
+        for attempt in retrying:
+            with attempt:
                 return operation()
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - fallback when psycopg is absent
-                if not self._should_retry(exc) or attempts_remaining <= 0:
-                    raise
-                if delay > 0:
-                    time.sleep(delay)
-                attempts_remaining -= 1
-                delay *= self._backoff_multiplier
-
-    @staticmethod
-    def _should_retry(error: Exception) -> bool:
-        transient_indicators = {
-            "timeout",
-            "temporarily unavailable",
-            "connection reset",
-            "connection refused",
-            "closed",
-        }
-        if isinstance(error, (TimeoutError, ConnectionError, OSError)):
-            return True
-        message = str(error).lower()
-        return any(indicator in message for indicator in transient_indicators)
-
+        raise RuntimeError("Database retry loop exited unexpectedly")
 
 class KillSwitch:
     """Global kill-switch toggled on critical failures with optional persistence.
