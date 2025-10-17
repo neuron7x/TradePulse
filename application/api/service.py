@@ -1160,19 +1160,48 @@ def create_app(
             start_at=query.start_at,
             end_at=query.end_at,
         )
-        page, next_cursor = _paginate_frame(filtered, limit=query.limit, cursor=query.cursor)
+        ordered = filtered.sort_index(ascending=False)
+        if query.cursor is not None:
+            ordered = ordered[ordered.index < query.cursor]
 
         snapshots: list[FeatureSnapshot] = []
-        if not page.empty:
-            for timestamp, vector in predictor.normalised_feature_rows(page, strict=False):
-                values = _filter_feature_values(
-                    vector,
-                    feature_prefix=query.feature_prefix,
-                    feature_keys=query.feature_keys,
+        next_cursor: datetime | None = None
+        last_position: int | None = None
+        last_timestamp: pd.Timestamp | datetime | None = None
+
+        for position, (row_timestamp, raw_vector) in enumerate(ordered.iterrows()):
+            last_position = position
+            last_timestamp = row_timestamp
+            normalised = predictor._normalise_feature_row(raw_vector, strict=False)
+            if normalised is None:
+                continue
+            values = _filter_feature_values(
+                normalised,
+                feature_prefix=query.feature_prefix,
+                feature_keys=query.feature_keys,
+            )
+            if not values:
+                continue
+            python_ts = (
+                row_timestamp.to_pydatetime()
+                if hasattr(row_timestamp, "to_pydatetime")
+                else row_timestamp
+            )
+            snapshots.append(
+                FeatureSnapshot(timestamp=_ensure_timezone(python_ts), features=values)
+            )
+            if len(snapshots) >= query.limit:
+                break
+
+        if last_timestamp is not None and last_position is not None:
+            remaining = ordered.iloc[last_position + 1 :]
+            if not remaining.empty:
+                python_ts = (
+                    last_timestamp.to_pydatetime()
+                    if hasattr(last_timestamp, "to_pydatetime")
+                    else last_timestamp
                 )
-                if not values:
-                    continue
-                snapshots.append(FeatureSnapshot(timestamp=timestamp, features=values))
+                next_cursor = _ensure_timezone(python_ts)
 
         if not snapshots:
             raise HTTPException(
@@ -1195,7 +1224,7 @@ def create_app(
             feature_prefix=query.feature_prefix,
             feature_keys=query.feature_keys,
         )
-        feature_dict = snapshots[0].features
+        feature_dict = snapshots[0].features if snapshots else {}
         body = FeatureResponse(
             symbol=payload.symbol,
             features=feature_dict,
@@ -1237,28 +1266,55 @@ def create_app(
             start_at=query.start_at,
             end_at=query.end_at,
         )
-        page, next_cursor = _paginate_frame(filtered, limit=query.limit, cursor=query.cursor)
+        ordered = filtered.sort_index(ascending=False)
+        if query.cursor is not None:
+            ordered = ordered[ordered.index < query.cursor]
 
         predictions: list[PredictionSnapshot] = []
-        if not page.empty:
-            for timestamp, vector in predictor.normalised_feature_rows(page, strict=False):
-                signal, score = predictor.derive_signal(
-                    payload.symbol, vector, payload.horizon_seconds
+        next_cursor: datetime | None = None
+        last_position: int | None = None
+        last_timestamp: pd.Timestamp | datetime | None = None
+
+        for position, (row_timestamp, raw_vector) in enumerate(ordered.iterrows()):
+            last_position = position
+            last_timestamp = row_timestamp
+            normalised = predictor._normalise_feature_row(raw_vector, strict=False)
+            if normalised is None:
+                continue
+            signal, score = predictor.derive_signal(
+                payload.symbol, normalised, payload.horizon_seconds
+            )
+            if query.actions and signal.action not in query.actions:
+                continue
+            if (
+                query.min_confidence is not None
+                and float(signal.confidence) < query.min_confidence
+            ):
+                continue
+            python_ts = (
+                row_timestamp.to_pydatetime()
+                if hasattr(row_timestamp, "to_pydatetime")
+                else row_timestamp
+            )
+            predictions.append(
+                PredictionSnapshot(
+                    timestamp=_ensure_timezone(python_ts),
+                    score=score,
+                    signal=signal_to_dto(signal),
                 )
-                if query.actions and signal.action not in query.actions:
-                    continue
-                if (
-                    query.min_confidence is not None
-                    and float(signal.confidence) < query.min_confidence
-                ):
-                    continue
-                predictions.append(
-                    PredictionSnapshot(
-                        timestamp=timestamp,
-                        score=score,
-                        signal=signal_to_dto(signal),
-                    )
+            )
+            if len(predictions) >= query.limit:
+                break
+
+        if last_timestamp is not None and last_position is not None:
+            remaining = ordered.iloc[last_position + 1 :]
+            if not remaining.empty:
+                python_ts = (
+                    last_timestamp.to_pydatetime()
+                    if hasattr(last_timestamp, "to_pydatetime")
+                    else last_timestamp
                 )
+                next_cursor = _ensure_timezone(python_ts)
 
         if not predictions:
             raise HTTPException(
@@ -1281,12 +1337,12 @@ def create_app(
             actions=query.actions,
             min_confidence=query.min_confidence,
         )
-        head = predictions[0]
+        head = predictions[0] if predictions else None
         body = PredictionResponse(
             symbol=payload.symbol,
             horizon_seconds=payload.horizon_seconds,
-            score=head.score,
-            signal=head.signal,
+            score=head.score if head else None,
+            signal=head.signal if head else None,
             items=predictions,
             pagination=pagination,
             filters=filters,
