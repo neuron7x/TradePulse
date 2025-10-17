@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 import pytest
+from pandas.tseries.offsets import Minute
 
 from core.data.models import InstrumentType, PriceTick
 from src.data import DataIngestionCacheService, TickStreamAggregator
@@ -223,3 +224,30 @@ def test_tick_stream_aggregator_requires_positive_frequency() -> None:
 def test_tick_stream_aggregator_requires_non_empty_timeframe() -> None:
     with pytest.raises(ValueError, match="timeframe must be a non-empty string"):
         TickStreamAggregator(timeframe="   ")
+
+
+def test_tick_stream_aggregator_accepts_offset_frequency_and_calendar_alignment() -> None:
+    cache_service = DataIngestionCacheService()
+    aggregator = TickStreamAggregator(
+        cache_service=cache_service,
+        timeframe="1min",
+        market="NYSE",
+        frequency=Minute(1),
+    )
+
+    market_open = datetime(2024, 3, 11, 13, 30, tzinfo=UTC)
+    market_close = datetime(2024, 3, 11, 13, 35, tzinfo=UTC)
+
+    result = aggregator.synchronise(
+        symbol="AAPL",
+        venue="NYSE",
+        instrument_type=InstrumentType.SPOT,
+        start=market_open,
+        end=market_close,
+    )
+
+    assert result.backfill_plan.is_full_refresh is True
+    assert len(result.backfill_plan.gaps) == 1
+    gap = result.backfill_plan.gaps[0]
+    assert gap.start == pd.Timestamp(market_open)
+    assert gap.end == pd.Timestamp(market_close) + pd.Timedelta(minutes=1)

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Callable, Iterable, Sequence
 
 import pandas as pd
+from pandas.tseries.offsets import BaseOffset
 
 from core.data.backfill import (
     BackfillPlan,
@@ -58,7 +59,7 @@ class TickStreamAggregator:
         layer: str = "raw",
         timeframe: str = "1min",
         market: str | None = None,
-        frequency: str | pd.Timedelta | None = None,
+        frequency: str | pd.Timedelta | BaseOffset | None = None,
     ) -> None:
         if not timeframe or not timeframe.strip():
             raise ValueError("timeframe must be a non-empty string")
@@ -192,7 +193,9 @@ class TickStreamAggregator:
 
     # ------------------------------------------------------------------
     # Internal helpers
-    def _resolve_frequency(self, value: str | pd.Timedelta) -> pd.Timedelta:
+    def _resolve_frequency(
+        self, value: str | pd.Timedelta | BaseOffset
+    ) -> pd.Timedelta:
         try:
             freq = pd.to_timedelta(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive guard
