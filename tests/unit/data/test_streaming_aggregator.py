@@ -116,3 +116,78 @@ def test_tick_stream_aggregator_rejects_mismatched_metadata() -> None:
             start=BASE_TS,
             end=BASE_TS + timedelta(minutes=1),
         )
+
+
+def test_tick_stream_aggregator_validates_venue_and_instrument_metadata() -> None:
+    cache_service = DataIngestionCacheService()
+    aggregator = TickStreamAggregator(cache_service=cache_service, timeframe="1min")
+
+    venue_mismatch = [_make_tick(0, "30000", venue="COINBASE")]
+    with pytest.raises(ValueError, match="Tick venue does not match aggregation key"):
+        aggregator.synchronise(
+            symbol="BTC/USDT",
+            venue="BINANCE",
+            instrument_type=InstrumentType.SPOT,
+            historical=venue_mismatch,
+            start=BASE_TS,
+            end=BASE_TS + timedelta(minutes=1),
+        )
+
+    instrument_mismatch = [
+        _make_tick(0, "30000", symbol="AAPL", instrument_type=InstrumentType.FUTURES)
+    ]
+    with pytest.raises(ValueError, match="Tick instrument type does not match aggregation key"):
+        aggregator.synchronise(
+            symbol="AAPL",
+            venue="BINANCE",
+            instrument_type=InstrumentType.SPOT,
+            historical=instrument_mismatch,
+            start=BASE_TS,
+            end=BASE_TS + timedelta(minutes=1),
+        )
+
+
+def test_tick_stream_aggregator_rejects_non_datetime_dataframe_index() -> None:
+    cache_service = DataIngestionCacheService()
+    aggregator = TickStreamAggregator(cache_service=cache_service, timeframe="1min")
+
+    payload = pd.DataFrame({"price": [1.0], "volume": [1.0]}, index=pd.Index([0]))
+
+    with pytest.raises(TypeError, match="data frame index must be a DatetimeIndex"):
+        aggregator.synchronise(
+            symbol="BTC/USDT",
+            venue="BINANCE",
+            instrument_type=InstrumentType.SPOT,
+            historical=payload,
+            start=BASE_TS,
+            end=BASE_TS + timedelta(minutes=1),
+        )
+
+
+def test_tick_stream_aggregator_detects_inverted_time_window() -> None:
+    cache_service = DataIngestionCacheService()
+    aggregator = TickStreamAggregator(cache_service=cache_service, timeframe="1min")
+
+    historical = [_make_tick(0, "30000"), _make_tick(1, "30010")]
+
+    with pytest.raises(ValueError, match="end timestamp must be greater than or equal to start"):
+        aggregator.synchronise(
+            symbol="BTC/USDT",
+            venue="BINANCE",
+            instrument_type=InstrumentType.SPOT,
+            historical=historical,
+            start=BASE_TS + timedelta(minutes=2),
+            end=BASE_TS + timedelta(minutes=1),
+        )
+
+
+def test_tick_stream_aggregator_requires_positive_frequency() -> None:
+    cache_service = DataIngestionCacheService()
+
+    with pytest.raises(ValueError, match="frequency must be strictly positive"):
+        TickStreamAggregator(cache_service=cache_service, timeframe="1min", frequency="0min")
+
+
+def test_tick_stream_aggregator_requires_non_empty_timeframe() -> None:
+    with pytest.raises(ValueError, match="timeframe must be a non-empty string"):
+        TickStreamAggregator(timeframe="   ")
