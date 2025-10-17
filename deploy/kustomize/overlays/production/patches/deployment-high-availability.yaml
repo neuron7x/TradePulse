@@ -39,6 +39,35 @@ spec:
               value: production
             - name: TRADEPULSE_RATE_LIMIT_TPS
               value: "1200"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-kafka-client
+                  key: bootstrap.servers
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SASL_SSL
+            - name: KAFKA_SSL_CAFILE
+              value: /etc/tradepulse/kafka/ca.crt
+            - name: KAFKA_SSL_CERTFILE
+              value: /etc/tradepulse/kafka/client.crt
+            - name: KAFKA_SSL_KEYFILE
+              value: /etc/tradepulse/kafka/client.key
+            - name: KAFKA_SASL_MECHANISM
+              value: PLAIN
+            - name: KAFKA_SASL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-kafka-client
+                  key: sasl.username
+            - name: KAFKA_SASL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-kafka-client
+                  key: sasl.password
+          volumeMounts:
+            - name: kafka-client-tls
+              mountPath: /etc/tradepulse/kafka
+              readOnly: true
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -56,3 +85,7 @@ spec:
                     values:
                       - tradepulse-api
               topologyKey: kubernetes.io/hostname
+      volumes:
+        - name: kafka-client-tls
+          secret:
+            secretName: tradepulse-kafka-client
