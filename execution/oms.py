@@ -459,8 +459,14 @@ class OrderManagementSystem:
                 )
             else:
                 quantity_diff = fill.quantity - original_quantity
+                reference_price = (
+                    fill.average_price or original_average or order.price
+                )
+                quantity_discrepancy = False
+                price_discrepancy = False
                 if abs(quantity_diff) > quantity_tolerance:
                     had_discrepancy = True
+                    quantity_discrepancy = True
                     corrected = False
                     message = (
                         "Venue reports additional executed quantity."
@@ -484,9 +490,6 @@ class OrderManagementSystem:
                         message=message,
                     )
                     report.discrepancies.append(discrepancy)
-                    reference_price = fill.average_price or original_average or order.price
-                    if reference_price is not None:
-                        report.total_notional_delta += quantity_diff * float(reference_price)
                     self._audit.emit(
                         {
                             "event": "oms.reconciliation.discrepancy",
@@ -505,6 +508,7 @@ class OrderManagementSystem:
                     current_average = original_average
                     if current_average is None or abs(current_average - fill.average_price) > price_tolerance:
                         had_discrepancy = True
+                        price_discrepancy = True
                         corrected = False
                         if apply_corrections:
                             target_average = fill.average_price
@@ -513,7 +517,6 @@ class OrderManagementSystem:
                         delta_price = None
                         if current_average is not None:
                             delta_price = fill.average_price - current_average
-                            report.total_notional_delta += delta_price * target_quantity
                         discrepancy = ReconciliationDiscrepancy(
                             order_id=order_id,
                             field="average_price",
@@ -537,6 +540,17 @@ class OrderManagementSystem:
                                 "corrected": corrected,
                             }
                         )
+
+                if (quantity_discrepancy or price_discrepancy) and reference_price is not None:
+                    before_price = (
+                        original_average if original_average is not None else reference_price
+                    )
+                    after_price = (
+                        fill.average_price if fill.average_price is not None else reference_price
+                    )
+                    before_notional = original_quantity * float(before_price)
+                    after_notional = fill.quantity * float(after_price)
+                    report.total_notional_delta += after_notional - before_notional
 
             if not had_discrepancy:
                 report.matched += 1
