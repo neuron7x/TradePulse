@@ -73,24 +73,43 @@ jobs:
       name: staging
     outputs:
       deploy_enabled: ${{ steps.configure_kube.outputs.deploy_enabled }}
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_STAGING_ROLE_ARN: ${{ secrets.AWS_STAGING_ROLE_ARN }}
+      AWS_STAGING_CLUSTER_NAME: ${{ secrets.AWS_STAGING_CLUSTER_NAME }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Configure AWS credentials
+        id: configure_aws
+        if: env.AWS_STAGING_ROLE_ARN != ''
+        continue-on-error: true
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_STAGING_ROLE_ARN }}
+          role-session-name: GitHubActions-Deploy-Staging-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Configure kubeconfig
         id: configure_kube
-        env:
-          KUBE_CONFIG_STAGING: ${{ secrets.KUBE_CONFIG_STAGING }}
         run: |
           set -euo pipefail
-          if [ -z "${KUBE_CONFIG_STAGING:-}" ]; then
-            echo "KUBE_CONFIG_STAGING secret is not configured; skipping deployment" >&2
+          if [ -z "${AWS_REGION:-}" ] || [ -z "${AWS_STAGING_ROLE_ARN:-}" ] || [ -z "${AWS_STAGING_CLUSTER_NAME:-}" ]; then
+            echo "AWS OIDC credentials for staging are not configured; skipping deployment" >&2
+            echo "deploy_enabled=false" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ '${{ steps.configure_aws.outcome }}' != 'success' ]; then
+            echo "Unable to obtain AWS credentials for staging; skipping deployment" >&2
             echo "deploy_enabled=false" >>"$GITHUB_OUTPUT"
             exit 0
           fi
           mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG_STAGING" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
+          aws eks update-kubeconfig \
+            --name "$AWS_STAGING_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --alias tradepulse-staging
           echo "deploy_enabled=true" >>"$GITHUB_OUTPUT"
 
       - name: Install kubectl
@@ -228,9 +247,20 @@ PY
       - deploy-staging
     environment:
       name: production
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_PRODUCTION_ROLE_ARN: ${{ secrets.AWS_PRODUCTION_ROLE_ARN }}
+      AWS_PRODUCTION_CLUSTER_NAME: ${{ secrets.AWS_PRODUCTION_CLUSTER_NAME }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.AWS_PRODUCTION_ROLE_ARN }}
+          role-session-name: GitHubActions-Deploy-Production-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Install kubectl
         uses: azure/setup-kubectl@v4
@@ -255,17 +285,17 @@ PY
 
       - name: Configure kubeconfig
         id: configure_kube
-        env:
-          KUBE_CONFIG_PRODUCTION: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
         run: |
           set -euo pipefail
-          if [ -z "${KUBE_CONFIG_PRODUCTION:-}" ]; then
-            echo "KUBE_CONFIG_PRODUCTION secret is not configured" >&2
+          if [ -z "${AWS_REGION:-}" ] || [ -z "${AWS_PRODUCTION_ROLE_ARN:-}" ] || [ -z "${AWS_PRODUCTION_CLUSTER_NAME:-}" ]; then
+            echo "AWS OIDC credentials for production are not fully configured" >&2
             exit 1
           fi
           mkdir -p "$HOME/.kube"
-          echo "$KUBE_CONFIG_PRODUCTION" | base64 -d > "$HOME/.kube/config"
-          chmod 600 "$HOME/.kube/config"
+          aws eks update-kubeconfig \
+            --name "$AWS_PRODUCTION_CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --alias tradepulse-production
 
       - name: Diff manifest against cluster
         run: |
