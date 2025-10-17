@@ -7,10 +7,16 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timezone
 from functools import lru_cache
 from typing import Dict, FrozenSet, Iterable, Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
-from exchange_calendars import ExchangeCalendar, always_open, errors, get_calendar, resolve_alias
-from zoneinfo import ZoneInfo
+from exchange_calendars import (
+    ExchangeCalendar,
+    always_open,
+    errors,
+    get_calendar,
+    resolve_alias,
+)
 
 __all__ = [
     "MarketCalendar",
@@ -25,7 +31,9 @@ __all__ = [
 ]
 
 
-def _ensure_iterable(values: Iterable[int] | None, *, default: Iterable[int]) -> FrozenSet[int]:
+def _ensure_iterable(
+    values: Iterable[int] | None, *, default: Iterable[int]
+) -> FrozenSet[int]:
     if values is None:
         return frozenset(default)
     return frozenset(values)
@@ -56,7 +64,9 @@ class MarketCalendar:
     weekend_closure: Iterable[int] | None = field(default_factory=lambda: {5, 6})
     holidays: Iterable[date] | None = None
     calendar_name: str | None = None
-    _calendar: ExchangeCalendar | None = field(default=None, init=False, repr=False, compare=False)
+    _calendar: ExchangeCalendar | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if not self.market:
@@ -80,7 +90,11 @@ class MarketCalendar:
             if not self.timezone:
                 raise ValueError("timezone must be a non-empty string")
             default_weekend = (5, 6)
-        object.__setattr__(self, "weekend_closure", _ensure_iterable(self.weekend_closure, default=default_weekend))
+        object.__setattr__(
+            self,
+            "weekend_closure",
+            _ensure_iterable(self.weekend_closure, default=default_weekend),
+        )
         holidays = tuple(self.holidays or ())
         object.__setattr__(self, "holidays", holidays)
 
@@ -130,7 +144,9 @@ _CALENDAR_TIMEZONE_OVERRIDES: Dict[str, str] = {
 }
 
 
-_BINANCE_CALENDAR = MarketCalendar(market="BINANCE", calendar_name="ALWAYS_OPEN", weekend_closure=())
+_BINANCE_CALENDAR = MarketCalendar(
+    market="BINANCE", calendar_name="ALWAYS_OPEN", weekend_closure=()
+)
 _NYSE_CALENDAR = MarketCalendar(market="NYSE", calendar_name="XNYS")
 _NASDAQ_CALENDAR = MarketCalendar(market="NASDAQ", calendar_name="XNAS")
 _CME_CALENDAR = MarketCalendar(market="CME", calendar_name="CMES")
@@ -201,7 +217,9 @@ def to_utc(ts: datetime) -> datetime:
     return ts.astimezone(timezone.utc)
 
 
-def normalize_timestamp(value: datetime | float | int, *, market: str | None = None) -> datetime:
+def normalize_timestamp(
+    value: datetime | float | int, *, market: str | None = None
+) -> datetime:
     """Normalise raw timestamp inputs to a timezone-aware UTC datetime."""
 
     if isinstance(value, (int, float)):
@@ -292,11 +310,15 @@ def validate_bar_alignment(
     try:
         start_loc = trading_minutes.get_loc(index[0])
     except KeyError as exc:
-        raise ValueError(f"{index[0]} is not a valid trading minute for {market}") from exc
+        raise ValueError(
+            f"{index[0]} is not a valid trading minute for {market}"
+        ) from exc
     try:
         end_loc = trading_minutes.get_loc(index[-1])
     except KeyError as exc:
-        raise ValueError(f"{index[-1]} is not a valid trading minute for {market}") from exc
+        raise ValueError(
+            f"{index[-1]} is not a valid trading minute for {market}"
+        ) from exc
 
     step = int(freq / one_minute)
     expected = trading_minutes[start_loc : end_loc + 1 : step]
@@ -310,4 +332,3 @@ def validate_bar_alignment(
             "timestamps do not align with the trading calendar; "
             f"missing={missing_repr}, extra={extra_repr}",
         ) from None
-

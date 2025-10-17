@@ -1,8 +1,8 @@
 """Checksum helpers for verifying downloaded artefacts."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import hashlib
 from pathlib import Path
 
@@ -26,7 +26,9 @@ def compute_checksum(path: Path | str, *, algorithm: str = "sha256") -> str:
     return hasher.hexdigest()
 
 
-def verify_checksum(path: Path | str, expected: str, *, algorithm: str = "sha256") -> None:
+def verify_checksum(
+    path: Path | str, expected: str, *, algorithm: str = "sha256"
+) -> None:
     """Raise :class:`ChecksumMismatchError` if the checksum differs from *expected*."""
 
     actual = compute_checksum(path, algorithm=algorithm)

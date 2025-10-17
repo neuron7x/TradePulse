@@ -47,7 +47,9 @@ def kyles_lambda(returns: Sequence[float], signed_volume: Sequence[float]) -> fl
     return float(np.dot(q, r) / denom)
 
 
-def hasbrouck_information_impulse(returns: Sequence[float], signed_volume: Sequence[float]) -> float:
+def hasbrouck_information_impulse(
+    returns: Sequence[float], signed_volume: Sequence[float]
+) -> float:
     """Estimate Hasbrouck's information content using signed square-root volume.
 
     The statistic is effectively the correlation between centered returns and the
@@ -107,7 +109,9 @@ def build_symbol_microstructure_report(
     rows = []
     for symbol, group in grouped:
         qi = queue_imbalance(group[bid_col].to_numpy(), group[ask_col].to_numpy())
-        k_lambda = kyles_lambda(group[returns_col].to_numpy(), group[signed_volume_col].to_numpy())
+        k_lambda = kyles_lambda(
+            group[returns_col].to_numpy(), group[signed_volume_col].to_numpy()
+        )
         impulse = hasbrouck_information_impulse(
             group[returns_col].to_numpy(), group[signed_volume_col].to_numpy()
         )
@@ -131,4 +135,3 @@ __all__ = [
     "kyles_lambda",
     "queue_imbalance",
 ]
-

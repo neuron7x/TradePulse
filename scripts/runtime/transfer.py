@@ -1,8 +1,8 @@
 """Reliable transfer helpers supporting resume and checksum verification."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import os
 from pathlib import Path
 from typing import BinaryIO
@@ -28,7 +28,9 @@ def _is_url(source: str | os.PathLike[str]) -> bool:
 def _local_path_from_url(url: str) -> Path:
     parsed = urlparse(url)
     if parsed.scheme != "file":
-        raise TransferError(f"Unsupported URL scheme for local path conversion: {parsed.scheme}")
+        raise TransferError(
+            f"Unsupported URL scheme for local path conversion: {parsed.scheme}"
+        )
     return Path(parsed.path)
 
 
@@ -69,9 +71,10 @@ def transfer_with_resume(
             raise TransferError(f"Source file does not exist: {source_path}")
         total_size = source_path.stat().st_size
         start_offset = _prepare_destination(destination_path, expected_size=total_size)
-        with _open_source_file(source_path, offset=start_offset) as input_handle, destination_path.open(
-            "ab" if start_offset else "wb"
-        ) as output_handle:
+        with (
+            _open_source_file(source_path, offset=start_offset) as input_handle,
+            destination_path.open("ab" if start_offset else "wb") as output_handle,
+        ):
             if progress:
                 progress.total = total_size
                 progress.update(start_offset)
@@ -80,7 +83,9 @@ def transfer_with_resume(
                 if progress:
                     progress.advance(len(chunk))
         if expected_checksum:
-            verify_checksum(destination_path, expected_checksum, algorithm=checksum_algorithm)
+            verify_checksum(
+                destination_path, expected_checksum, algorithm=checksum_algorithm
+            )
         return destination_path
 
     session = session or requests.Session()
@@ -108,7 +113,9 @@ def transfer_with_resume(
     if response.status_code in {206, 200}:
         pass
     elif response.status_code in {429, 500, 502, 503, 504}:
-        raise TransferError(f"Remote server returned retryable status {response.status_code}")
+        raise TransferError(
+            f"Remote server returned retryable status {response.status_code}"
+        )
     elif response.status_code >= 400:
         raise TransferError(f"Download failed with status {response.status_code}")
 
@@ -126,6 +133,8 @@ def transfer_with_resume(
     response.close()
 
     if expected_checksum:
-        verify_checksum(destination_path, expected_checksum, algorithm=checksum_algorithm)
+        verify_checksum(
+            destination_path, expected_checksum, algorithm=checksum_algorithm
+        )
 
     return destination_path

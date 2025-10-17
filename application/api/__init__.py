@@ -7,8 +7,8 @@ from typing import Any
 from .system_access import (
     OrderRequest,
     OrderResponse,
-    PositionsResponse,
     PositionSnapshot,
+    PositionsResponse,
     StatusResponse,
     SystemAccess,
     create_system_app,
@@ -33,4 +33,3 @@ __all__ = [
     "OrderResponse",
     "create_system_app",
 ]
-

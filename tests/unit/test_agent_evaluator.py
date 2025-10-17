@@ -22,7 +22,9 @@ class _SleepyStrategy(Strategy):
         super().__init__(name=name, params={})
         self.delay = delay
 
-    def simulate_performance(self, data: Any) -> float:  # pragma: no cover - exercised in tests
+    def simulate_performance(
+        self, data: Any
+    ) -> float:  # pragma: no cover - exercised in tests
         time.sleep(self.delay)
         return self.delay
 
@@ -31,7 +33,9 @@ class _FailingStrategy(Strategy):
     def __init__(self, name: str) -> None:
         super().__init__(name=name, params={})
 
-    def simulate_performance(self, data: Any) -> float:  # pragma: no cover - exercised in tests
+    def simulate_performance(
+        self, data: Any
+    ) -> float:  # pragma: no cover - exercised in tests
         raise RuntimeError(f"boom: {self.name}")
 
 

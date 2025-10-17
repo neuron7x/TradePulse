@@ -10,15 +10,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-omegaconf = pytest.importorskip("omegaconf")
-OmegaConf = omegaconf.OmegaConf
-
 from analytics.runner import (
     apply_reproducibility_settings,
     collect_run_metadata,
     run_pipeline,
     set_random_seeds,
 )
+
+omegaconf = pytest.importorskip("omegaconf")
+OmegaConf = omegaconf.OmegaConf
 
 
 def test_set_random_seeds_is_repeatable(monkeypatch) -> None:

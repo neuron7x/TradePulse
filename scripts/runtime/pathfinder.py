@@ -1,8 +1,8 @@
 """Utilities for locating input resources across different environments."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 from pathlib import Path
 from typing import Iterable, Iterator, Sequence
 
@@ -18,7 +18,9 @@ def _iter_roots(roots: Sequence[str | Path] | None) -> Iterable[Path]:
         yield path
 
 
-def find_resources(pattern: str, roots: Sequence[str | Path] | None = None) -> Iterator[Path]:
+def find_resources(
+    pattern: str, roots: Sequence[str | Path] | None = None
+) -> Iterator[Path]:
     """Yield files matching *pattern* using :meth:`Path.rglob` for robustness."""
 
     seen: set[Path] = set()

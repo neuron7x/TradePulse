@@ -112,4 +112,3 @@ def test_configure_logging_emits_json_payload() -> None:
     assert payload["logger"] == "tradepulse.tests"
     assert payload["message"] == "hello world"
     assert "timestamp" in payload
-

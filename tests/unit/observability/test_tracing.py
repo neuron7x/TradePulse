@@ -182,7 +182,9 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
             self.ratio = ratio
             self.calls = []
 
-        def should_sample(self, parent_context, trace_id, name, kind, attributes, links):
+        def should_sample(
+            self, parent_context, trace_id, name, kind, attributes, links
+        ):
             self.calls.append(
                 {
                     "parent_context": parent_context,
@@ -215,9 +217,13 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     otlp_mod = types.ModuleType("opentelemetry.exporter.otlp")
     proto_mod = types.ModuleType("opentelemetry.exporter.otlp.proto")
     grpc_mod = types.ModuleType("opentelemetry.exporter.otlp.proto.grpc")
-    trace_exporter_mod = types.ModuleType("opentelemetry.exporter.otlp.proto.grpc.trace_exporter")
+    trace_exporter_mod = types.ModuleType(
+        "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
+    )
     trace_exporter_mod.OTLPSpanExporter = OTLPSpanExporter
-    sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = trace_exporter_mod
+    sys.modules["opentelemetry.exporter.otlp.proto.grpc.trace_exporter"] = (
+        trace_exporter_mod
+    )
     sys.modules["opentelemetry.exporter.otlp.proto.grpc"] = grpc_mod
     sys.modules["opentelemetry.exporter.otlp.proto"] = proto_mod
     sys.modules["opentelemetry.exporter.otlp"] = otlp_mod
@@ -246,9 +252,15 @@ def test_selective_sampler_routes_hot_spans(tracing_module):
         hot_ratio=0.9,
     )
 
-    sampler.should_sample(None, 1, "signals.order", None, {"pipeline.hot_path": True}, None)
-    sampler.should_sample(None, 2, "signals.cool", None, {"pipeline.hot_path": "true"}, None)
-    sampler.should_sample(None, 3, "features.calc", None, {"pipeline.hot_path": False}, None)
+    sampler.should_sample(
+        None, 1, "signals.order", None, {"pipeline.hot_path": True}, None
+    )
+    sampler.should_sample(
+        None, 2, "signals.cool", None, {"pipeline.hot_path": "true"}, None
+    )
+    sampler.should_sample(
+        None, 3, "features.calc", None, {"pipeline.hot_path": False}, None
+    )
     sampler.should_sample(None, 4, "warm.path", None, {}, None)
 
     assert len(sampler._hot_sampler.calls) == 2
@@ -340,4 +352,3 @@ def test_trace_context_helpers_roundtrip(tracing_module):
         assert injected["traceparent"] == traceparent
 
     assert tracing_module.current_traceparent() is None
-

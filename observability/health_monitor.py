@@ -1,4 +1,5 @@
 """Periodic health monitoring utilities for TradePulse services."""
+
 from __future__ import annotations
 
 import logging
@@ -24,7 +25,12 @@ class HealthCheckResult:
     metrics: Mapping[str, object] | None = None
 
 
-ProbeReturn = HealthCheckResult | bool | tuple[bool, str | None] | tuple[bool, str | None, Mapping[str, object]]
+ProbeReturn = (
+    HealthCheckResult
+    | bool
+    | tuple[bool, str | None]
+    | tuple[bool, str | None, Mapping[str, object]]
+)
 Probe = Callable[[], ProbeReturn]
 
 
@@ -151,7 +157,9 @@ class PeriodicHealthMonitor:
         self._server.set_ready(overall)
 
     @staticmethod
-    def _normalise_result(result: ProbeReturn) -> tuple[bool, str | None, Mapping[str, object] | None]:
+    def _normalise_result(
+        result: ProbeReturn,
+    ) -> tuple[bool, str | None, Mapping[str, object] | None]:
         if isinstance(result, HealthCheckResult):
             return result.healthy, result.detail, result.metrics
         if isinstance(result, tuple):
@@ -177,4 +185,3 @@ class PeriodicHealthMonitor:
 
 
 __all__ = ["HealthCheck", "HealthCheckResult", "PeriodicHealthMonitor"]
-

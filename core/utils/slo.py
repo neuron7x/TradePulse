@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
+import logging
+import math
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-import logging
-import math
 from typing import Callable, Deque, Dict, Iterable, Optional
-
 
 _logger = logging.getLogger(__name__)
 
@@ -142,7 +141,9 @@ class AutoRollbackGuard:
         summary: Dict[str, float] = {
             "error_rate": float(error_rate),
             "latency_p95_ms": float(latency_p95_ms),
-            "total_requests": float(total_requests) if total_requests is not None else math.nan,
+            "total_requests": (
+                float(total_requests) if total_requests is not None else math.nan
+            ),
             "window_seconds": self.config.evaluation_period.total_seconds(),
         }
 
@@ -171,11 +172,13 @@ class AutoRollbackGuard:
 
         self._last_triggered_at = now
         enriched_summary = dict(summary)
-        enriched_summary.update({
-            "reason": reason,
-            "triggered_at": now.timestamp(),
-            "cooldown_seconds": self.config.cooldown.total_seconds(),
-        })
+        enriched_summary.update(
+            {
+                "reason": reason,
+                "triggered_at": now.timestamp(),
+                "cooldown_seconds": self.config.cooldown.total_seconds(),
+            }
+        )
         self._last_summary = enriched_summary
 
         _logger.warning(

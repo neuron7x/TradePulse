@@ -49,7 +49,9 @@ def _canonical_json(payload: Mapping[str, Any]) -> str:
         payload,
         sort_keys=True,
         separators=(",", ":"),
-        default=lambda value: value.isoformat() if isinstance(value, datetime) else value,
+        default=lambda value: (
+            value.isoformat() if isinstance(value, datetime) else value
+        ),
     )
 
 
@@ -63,7 +65,10 @@ def _redact_sensitive_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
 
     def _redact(value: Any, *, parent_key: str | None = None) -> Any:
         if isinstance(value, Mapping):
-            return {inner_key: _redact(inner_value, parent_key=inner_key) for inner_key, inner_value in value.items()}
+            return {
+                inner_key: _redact(inner_value, parent_key=inner_key)
+                for inner_key, inner_value in value.items()
+            }
         if isinstance(value, list):
             return [_redact(item, parent_key=parent_key) for item in value]
         if parent_key is not None and _is_sensitive_key(parent_key):
@@ -86,7 +91,9 @@ class AuditRecord(BaseModel):
     details: dict[str, Any] = Field(
         default_factory=dict, description="Additional structured context for the event."
     )
-    signature: str = Field(..., description="HMAC-SHA256 signature of the event payload.")
+    signature: str = Field(
+        ..., description="HMAC-SHA256 signature of the event payload."
+    )
 
     model_config = ConfigDict(frozen=True)
 
@@ -119,7 +126,10 @@ class AuditLogger:
             assert secret is not None
             if not secret:
                 raise ValueError("secret must be provided for audit logging")
-            provider = lambda secret=secret: secret
+
+            def provider(secret: str = secret) -> str:
+                return secret
+
         self._secret_provider: Callable[[], str] = provider
         self._logger = logger or logging.getLogger("tradepulse.audit")
         self._sink = sink
@@ -360,7 +370,9 @@ class SiemAuditSink:
                 envelope = self._read_envelope(path)
             except Exception as exc:  # pragma: no cover - defensive logging path
                 self._logger.error(
-                    "Failed to load persisted audit envelope", exc_info=exc, extra={"envelope_path": str(path)}
+                    "Failed to load persisted audit envelope",
+                    exc_info=exc,
+                    extra={"envelope_path": str(path)},
                 )
                 self._move_to_dead_letter(path, reason="invalid-envelope")
                 continue
@@ -392,7 +404,9 @@ class SiemAuditSink:
         payload = record.model_dump(mode="json")
         response: httpx.Response | None = None
         try:
-            response = self._client.post(self._endpoint, json=payload, timeout=self._timeout)
+            response = self._client.post(
+                self._endpoint, json=payload, timeout=self._timeout
+            )
             response.raise_for_status()
         except Exception as exc:
             status_code = None
@@ -400,9 +414,7 @@ class SiemAuditSink:
                 status_code = exc.response.status_code
             elif response is not None:
                 status_code = response.status_code
-            raise RuntimeError(
-                f"SIEM delivery failed (status={status_code})"
-            ) from exc
+            raise RuntimeError(f"SIEM delivery failed (status={status_code})") from exc
 
     def _acknowledge(self, path: Path) -> None:
         try:
@@ -437,7 +449,9 @@ class SiemAuditSink:
         )
         pending_path = self._restore_pending_path(original_path, inflight_path)
         if attempts > self._max_retries:
-            self._move_to_dead_letter(pending_path, reason="max-retries", envelope=updated)
+            self._move_to_dead_letter(
+                pending_path, reason="max-retries", envelope=updated
+            )
             return
         retry_delay = self._compute_backoff(attempts)
         self._rewrite_envelope(pending_path, updated)

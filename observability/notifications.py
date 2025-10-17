@@ -57,7 +57,9 @@ class EmailSender:
         email["To"] = ", ".join(self._recipients)
         body = message
         if metadata:
-            details = "\n".join(f"- {key}: {value}" for key, value in sorted(metadata.items()))
+            details = "\n".join(
+                f"- {key}: {value}" for key, value in sorted(metadata.items())
+            )
             body = f"{message}\n\nDetails:\n{details}"
         email.set_content(body)
         await asyncio.to_thread(self._deliver, email)
@@ -158,13 +160,9 @@ class NotificationDispatcher:
     ) -> None:
         tasks = []
         if self._email_sender is not None:
-            tasks.append(
-                self._email_sender.send(subject, message, metadata=metadata)
-            )
+            tasks.append(self._email_sender.send(subject, message, metadata=metadata))
         if self._slack_notifier is not None:
-            tasks.append(
-                self._slack_notifier.send(subject, message, metadata=metadata)
-            )
+            tasks.append(self._slack_notifier.send(subject, message, metadata=metadata))
 
         if not tasks:
             self._logger.debug(
@@ -185,4 +183,3 @@ class NotificationDispatcher:
     async def aclose(self) -> None:
         if self._slack_notifier is not None:
             await self._slack_notifier.aclose()
-

@@ -96,10 +96,16 @@ class CredentialSettings(BaseModel):
     @model_validator(mode="after")
     def _normalise(self) -> "CredentialSettings":
         object.__setattr__(self, "env_prefix", str(self.env_prefix).upper())
-        object.__setattr__(self, "required", tuple(str(key).upper() for key in self.required))
-        object.__setattr__(self, "optional", tuple(str(key).upper() for key in self.optional))
+        object.__setattr__(
+            self, "required", tuple(str(key).upper() for key in self.required)
+        )
+        object.__setattr__(
+            self, "optional", tuple(str(key).upper() for key in self.optional)
+        )
         if self.secret_backend is None and self.vault_path_env:
-            backend = SecretBackendSettings(adapter="vault", path_env=self.vault_path_env)
+            backend = SecretBackendSettings(
+                adapter="vault", path_env=self.vault_path_env
+            )
             object.__setattr__(self, "secret_backend", backend)
         return self
 
@@ -127,7 +133,9 @@ def _import_string(path: str) -> type[ExecutionConnector]:
     try:
         obj = getattr(module, attribute)
     except AttributeError as exc:  # pragma: no cover - defensive
-        raise ImportError(f"Module '{module_path}' does not define '{attribute}'") from exc
+        raise ImportError(
+            f"Module '{module_path}' does not define '{attribute}'"
+        ) from exc
     if not isinstance(obj, type) or not issubclass(obj, ExecutionConnector):
         raise TypeError(f"{path} is not an ExecutionConnector class")
     return obj
@@ -153,7 +161,9 @@ class LiveTradingRunner:
     ) -> None:
         self._config_path = (config_path or DEFAULT_CONFIG_PATH).expanduser()
         if not self._config_path.exists():
-            raise FileNotFoundError(f"Live trading config not found: {self._config_path}")
+            raise FileNotFoundError(
+                f"Live trading config not found: {self._config_path}"
+            )
         raw_config = _load_toml(self._config_path)
         self._config_dir = self._config_path.parent
         self._raw_loop = dict(raw_config.get("loop", {}))
@@ -170,7 +180,11 @@ class LiveTradingRunner:
                 raise ValueError("Each venue must provide 'name' and 'class'")
             if requested and name.lower() not in requested:
                 continue
-            options = {k: v for k, v in entry.items() if k not in {"name", "class", "credentials"}}
+            options = {
+                k: v
+                for k, v in entry.items()
+                if k not in {"name", "class", "credentials"}
+            }
             credentials_cfg = entry.get("credentials")
             credentials: CredentialSettings | None = None
             if credentials_cfg:
@@ -181,7 +195,12 @@ class LiveTradingRunner:
                         f"Invalid credential configuration for venue '{name}': {exc}"
                     ) from exc
             self._venue_settings.append(
-                VenueSettings(name=name, class_path=class_path, options=options, credentials=credentials)
+                VenueSettings(
+                    name=name,
+                    class_path=class_path,
+                    options=options,
+                    credentials=credentials,
+                )
             )
 
         if requested and not self._venue_settings:
@@ -199,7 +218,8 @@ class LiveTradingRunner:
         self._credentials: Dict[str, Mapping[str, str]] = {}
         self._secret_manager = secret_manager
         self._inline_secret_backends: Dict[str, VaultResolver] = {
-            str(name).lower(): resolver for name, resolver in (secret_backends or {}).items()
+            str(name).lower(): resolver
+            for name, resolver in (secret_backends or {}).items()
         }
         if self._secret_manager is not None:
             for adapter, resolver in self._inline_secret_backends.items():
@@ -246,7 +266,9 @@ class LiveTradingRunner:
         self._kill_reason = None
         if self._loop_config is None:
             raise RuntimeError("Live loop configuration not initialised")
-        loop = LiveExecutionLoop(self._connectors, self.risk_manager, config=self._loop_config)
+        loop = LiveExecutionLoop(
+            self._connectors, self.risk_manager, config=self._loop_config
+        )
         loop.on_kill_switch.connect(self._handle_kill_switch)
         loop.on_reconnect.connect(self._handle_reconnect)
         loop.on_position_snapshot.connect(self._handle_position_snapshot)
@@ -266,7 +288,10 @@ class LiveTradingRunner:
 
     def request_stop(self, reason: str | None = None) -> None:
         if reason:
-            LOGGER.info("Stop requested", extra={"event": "live_runner.stop_requested", "reason": reason})
+            LOGGER.info(
+                "Stop requested",
+                extra={"event": "live_runner.stop_requested", "reason": reason},
+            )
         self._stop_event.set()
 
     def wait(self, timeout: float | None = None) -> bool:
@@ -276,7 +301,9 @@ class LiveTradingRunner:
         self._stop_event.set()
         if self._loop is None:
             return
-        LOGGER.info("Shutting down live trading runner", extra={"event": "live_runner.shutdown"})
+        LOGGER.info(
+            "Shutting down live trading runner", extra={"event": "live_runner.shutdown"}
+        )
         try:
             self._loop.shutdown()
         finally:
@@ -302,7 +329,10 @@ class LiveTradingRunner:
             self._signal_handlers[signum] = previous  # type: ignore[assignment]
 
             def handler(sig: int, frame: FrameType | None) -> None:
-                LOGGER.info("Signal received", extra={"event": "live_runner.signal", "signal": sig})
+                LOGGER.info(
+                    "Signal received",
+                    extra={"event": "live_runner.signal", "signal": sig},
+                )
                 self.request_stop(reason=f"signal:{sig}")
 
             signal.signal(signum, handler)
@@ -330,7 +360,9 @@ class LiveTradingRunner:
             raise RuntimeError(f"No secret backend registered for adapter '{adapter}'")
         return resolver
 
-    def _wrap_backend_resolver(self, venue: str, backend: SecretBackendSettings) -> VaultResolver:
+    def _wrap_backend_resolver(
+        self, venue: str, backend: SecretBackendSettings
+    ) -> VaultResolver:
         base_resolver = self._get_backend_resolver(backend.adapter)
         field_mapping = dict(backend.field_mapping)
 
@@ -367,7 +399,11 @@ class LiveTradingRunner:
                 resolver = self._wrap_backend_resolver(settings.name, backend_cfg)
                 resolved_path = backend_cfg.resolve_path()
                 if resolved_path is None:
-                    env_hint = f" from environment variable '{backend_cfg.path_env}'" if backend_cfg.path_env else ""
+                    env_hint = (
+                        f" from environment variable '{backend_cfg.path_env}'"
+                        if backend_cfg.path_env
+                        else ""
+                    )
                     raise RuntimeError(
                         f"Secret backend '{backend_cfg.adapter}' for venue '{settings.name}' did not resolve a path"
                         f"{env_hint}."
@@ -382,7 +418,9 @@ class LiveTradingRunner:
             try:
                 credentials = provider.load()
             except CredentialError as exc:
-                raise RuntimeError(f"Failed to load credentials for {settings.name}: {exc}") from exc
+                raise RuntimeError(
+                    f"Failed to load credentials for {settings.name}: {exc}"
+                ) from exc
             connector = self._connectors.get(settings.name)
             if connector is not None and hasattr(connector, "set_credential_provider"):
                 try:
@@ -390,7 +428,11 @@ class LiveTradingRunner:
                 except Exception as exc:  # pragma: no cover - defensive guard
                     LOGGER.debug(
                         "Connector did not accept injected credential provider",
-                        extra={"event": "live_runner.credentials", "venue": settings.name, "error": str(exc)},
+                        extra={
+                            "event": "live_runner.credentials",
+                            "venue": settings.name,
+                            "error": str(exc),
+                        },
                     )
             self._credentials[settings.name] = credentials
 
@@ -431,7 +473,8 @@ class LiveTradingRunner:
             start_metrics_server(int(self._metrics_port))
         except Exception as exc:  # pragma: no cover - defensive guard
             LOGGER.warning(
-                "Failed to start metrics server", extra={"event": "live_runner.metrics_error", "error": str(exc)}
+                "Failed to start metrics server",
+                extra={"event": "live_runner.metrics_error", "error": str(exc)},
             )
         else:
             LOGGER.info(
@@ -447,7 +490,9 @@ class LiveTradingRunner:
         )
         self.request_stop(reason="kill_switch")
 
-    def _handle_reconnect(self, venue: str, attempt: int, delay: float, exc: Exception | None) -> None:
+    def _handle_reconnect(
+        self, venue: str, attempt: int, delay: float, exc: Exception | None
+    ) -> None:
         payload: Dict[str, Any] = {
             "event": "live_runner.reconnect",
             "venue": venue,
@@ -458,11 +503,17 @@ class LiveTradingRunner:
             payload["error"] = str(exc)
         LOGGER.warning("Connector reconnect triggered", extra=payload)
 
-    def _handle_position_snapshot(self, venue: str, positions: Iterable[Mapping[str, Any]]) -> None:
+    def _handle_position_snapshot(
+        self, venue: str, positions: Iterable[Mapping[str, Any]]
+    ) -> None:
         count = sum(1 for _ in positions)
         LOGGER.debug(
             "Position snapshot received",
-            extra={"event": "live_runner.positions", "venue": venue, "positions": count},
+            extra={
+                "event": "live_runner.positions",
+                "venue": venue,
+                "positions": count,
+            },
         )
 
 

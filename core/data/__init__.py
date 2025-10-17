@@ -10,14 +10,17 @@ if not hasattr(_np, "float_"):
 
 from .catalog import normalize_symbol, normalize_venue
 from .feature_catalog import CatalogEntry, FeatureCatalog
-from .feature_store import FeatureStoreIntegrityError, IntegrityReport, OnlineFeatureStore
+from .feature_store import (
+    FeatureStoreIntegrityError,
+    IntegrityReport,
+    OnlineFeatureStore,
+)
 from .materialization import (
     Checkpoint,
     CheckpointStore,
     InMemoryCheckpointStore,
     StreamMaterializer,
 )
-from .versioning import DataVersionManager, VersioningError
 from .models import (
     AggregateMetric,
     DataKind,
@@ -35,6 +38,8 @@ from .validation import (
     build_timeseries_schema,
     validate_timeseries_frame,
 )
+from .versioning import DataVersionManager, VersioningError
+
 try:
     from .timeutils import (
         MarketCalendar,
@@ -57,7 +62,9 @@ except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency gua
         )
 
     MarketCalendar = MarketCalendarRegistry = object  # type: ignore
-    convert_timestamp = get_market_calendar = get_timezone = is_market_open = _missing_dependency
+    convert_timestamp = get_market_calendar = get_timezone = is_market_open = (
+        _missing_dependency
+    )
     normalize_timestamp = to_utc = validate_bar_alignment = _missing_dependency
 
 __all__ = [

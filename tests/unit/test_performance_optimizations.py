@@ -31,7 +31,11 @@ import pytest
 from core.data.preprocess import normalize_df, scale_series
 from core.indicators.entropy import EntropyFeature, entropy
 from core.indicators.hurst import HurstFeature, hurst_exponent
-from core.indicators.kuramoto import KuramotoOrderFeature, compute_phase, compute_phase_gpu
+from core.indicators.kuramoto import (
+    KuramotoOrderFeature,
+    compute_phase,
+    compute_phase_gpu,
+)
 from core.indicators.ricci import MeanRicciFeature, build_price_graph, mean_ricci
 
 
@@ -91,18 +95,20 @@ class TestFloat32Support:
 
     def test_normalize_df_float32(self):
         """Test DataFrame normalization with float32."""
-        df = pd.DataFrame({
-            'ts': pd.date_range('2024-01-01', periods=100, freq='1h'),
-            'price': np.random.randn(100) * 10 + 100,
-            'volume': np.random.randint(100, 1000, 100)
-        })
+        df = pd.DataFrame(
+            {
+                "ts": pd.date_range("2024-01-01", periods=100, freq="1h"),
+                "price": np.random.randn(100) * 10 + 100,
+                "volume": np.random.randint(100, 1000, 100),
+            }
+        )
 
         df64 = normalize_df(df)
         df32 = normalize_df(df, use_float32=True)
 
-        assert df64['price'].dtype == np.float64
-        assert df32['price'].dtype == np.float32
-        assert np.allclose(df64['price'], df32['price'], atol=1e-5)
+        assert df64["price"].dtype == np.float64
+        assert df32["price"].dtype == np.float32
+        assert np.allclose(df64["price"], df32["price"], atol=1e-5)
 
     def test_ricci_float32(self):
         """Test Ricci curvature with float32."""
@@ -220,11 +226,7 @@ class TestFeatureClassOptimizations:
         """Test MeanRicciFeature with optimizations."""
         data = np.random.randn(200) + 100
 
-        feat = MeanRicciFeature(
-            delta=0.005,
-            chunk_size=10,
-            use_float32=True
-        )
+        feat = MeanRicciFeature(delta=0.005, chunk_size=10, use_float32=True)
         result = feat.transform(data)
 
         assert result.name == "mean_ricci"
@@ -305,6 +307,7 @@ class TestEdgeCases:
     def test_ricci_empty_graph(self):
         """Test Ricci with graph with no edges."""
         import networkx as nx
+
         G = nx.Graph()
         G.add_nodes_from([1, 2, 3])
 
@@ -335,10 +338,12 @@ class TestBackwardCompatibility:
 
     def test_normalize_df_without_params(self):
         """Test normalize_df works without new parameters."""
-        df = pd.DataFrame({
-            'ts': pd.date_range('2024-01-01', periods=100),
-            'price': np.random.randn(100) * 10 + 100
-        })
+        df = pd.DataFrame(
+            {
+                "ts": pd.date_range("2024-01-01", periods=100),
+                "price": np.random.randn(100) * 10 + 100,
+            }
+        )
         normalized = normalize_df(df)
         assert isinstance(normalized, pd.DataFrame)
 

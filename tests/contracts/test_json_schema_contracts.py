@@ -16,7 +16,6 @@ from application.api.service import (  # noqa: E402  - environment variables mus
     PredictionResponse,
 )
 
-
 BASELINE_DIR = Path("schemas/http/json/1.0.0")
 
 

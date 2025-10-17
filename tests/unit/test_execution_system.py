@@ -3,20 +3,28 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 import json
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
 from domain import Order, OrderSide, OrderStatus, OrderType
-from execution.algorithms import POVAlgorithm, TWAPAlgorithm, VWAPAlgorithm, aggregate_fills
-from execution.connectors import BinanceConnector, OrderError
+from execution.algorithms import (
+    POVAlgorithm,
+    TWAPAlgorithm,
+    VWAPAlgorithm,
+    aggregate_fills,
+)
+from execution.audit import ExecutionAuditLogger
 from execution.compliance import ComplianceMonitor, ComplianceViolation
-from execution.normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
+from execution.connectors import BinanceConnector, OrderError
+from execution.normalization import (
+    NormalizationError,
+    SymbolNormalizer,
+    SymbolSpecification,
+)
 from execution.oms import OMSConfig, OrderManagementSystem
 from execution.risk import RiskLimits, RiskManager
-from execution.audit import ExecutionAuditLogger
 
 
 @pytest.fixture()
@@ -25,13 +33,21 @@ def risk_manager() -> RiskManager:
     return RiskManager(limits)
 
 
-def test_oms_idempotent_submission_and_recovery(tmp_path, risk_manager: RiskManager) -> None:
+def test_oms_idempotent_submission_and_recovery(
+    tmp_path, risk_manager: RiskManager
+) -> None:
     state_path = tmp_path / "oms_state.json"
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=20_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=20_000,
+        order_type=OrderType.LIMIT,
+    )
 
     first = oms.submit(order, correlation_id="abc123")
     assert first is order
@@ -53,7 +69,13 @@ def test_oms_register_fill_updates_risk(tmp_path, risk_manager: RiskManager) -> 
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=2.0, price=25_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=2.0,
+        price=25_000,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="fill-1")
     placed = oms.process_next()
     assert placed.order_id is not None
@@ -73,11 +95,15 @@ def test_oms_compliance_blocking_triggers_audit(tmp_path) -> None:
     audit_path = tmp_path / "compliance_audit.jsonl"
     audit = ExecutionAuditLogger(audit_path)
     specs = {
-        "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1)
+        "BTCUSDT": SymbolSpecification(
+            "BTCUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1
+        )
     }
     normalizer = SymbolNormalizer(specifications=specs)
     compliance = ComplianceMonitor(normalizer, strict=True)
-    risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit)
+    risk = RiskManager(
+        RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit
+    )
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(
@@ -88,13 +114,23 @@ def test_oms_compliance_blocking_triggers_audit(tmp_path) -> None:
         audit_logger=audit,
     )
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.001, price=20_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.001,
+        price=20_000,
+        order_type=OrderType.LIMIT,
+    )
 
     with pytest.raises(ComplianceViolation):
         oms.submit(order, correlation_id="compliance-block")
 
-    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
-    compliance_events = [entry for entry in entries if entry.get("event") == "compliance_check"]
+    entries = [
+        json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()
+    ]
+    compliance_events = [
+        entry for entry in entries if entry.get("event") == "compliance_check"
+    ]
     assert compliance_events
     last_event = compliance_events[-1]
     assert last_event["status"] == "blocked"
@@ -106,11 +142,15 @@ def test_oms_audit_records_successful_flow(tmp_path) -> None:
     audit_path = tmp_path / "audit_success.jsonl"
     audit = ExecutionAuditLogger(audit_path)
     specs = {
-        "ETHUSDT": SymbolSpecification("ETHUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1)
+        "ETHUSDT": SymbolSpecification(
+            "ETHUSDT", min_qty=0.01, min_notional=10, step_size=0.01, tick_size=0.1
+        )
     }
     normalizer = SymbolNormalizer(specifications=specs)
     compliance = ComplianceMonitor(normalizer, strict=True)
-    risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit)
+    risk = RiskManager(
+        RiskLimits(max_notional=1_000_000, max_position=1_000), audit_logger=audit
+    )
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(
@@ -121,11 +161,21 @@ def test_oms_audit_records_successful_flow(tmp_path) -> None:
         audit_logger=audit,
     )
 
-    order = Order(symbol="ETHUSDT", side=OrderSide.BUY, quantity=0.05, price=2_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="ETHUSDT",
+        side=OrderSide.BUY,
+        quantity=0.05,
+        price=2_000,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="audit-pass")
 
-    entries = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
-    compliance_event = next(entry for entry in entries if entry.get("event") == "compliance_check")
+    entries = [
+        json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()
+    ]
+    compliance_event = next(
+        entry for entry in entries if entry.get("event") == "compliance_check"
+    )
     risk_event = next(
         entry
         for entry in entries
@@ -139,21 +189,35 @@ def test_oms_audit_records_successful_flow(tmp_path) -> None:
 
 
 def test_execution_algorithms_split_quantities() -> None:
-    parent = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=4.0, price=21_500, order_type=OrderType.LIMIT)
+    parent = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        quantity=4.0,
+        price=21_500,
+        order_type=OrderType.LIMIT,
+    )
     twap = TWAPAlgorithm(duration=timedelta(minutes=4), slices=4)
     children = twap.schedule(parent)
     assert len(children) == 4
-    assert sum(child.order.quantity for child in children) == pytest.approx(parent.quantity)
+    assert sum(child.order.quantity for child in children) == pytest.approx(
+        parent.quantity
+    )
 
     vwap = VWAPAlgorithm(volume_profile=[1, 2, 1], duration=timedelta(minutes=3))
     vwap_children = vwap.schedule(parent)
     assert len(vwap_children) == 3
-    assert sum(child.order.quantity for child in vwap_children) == pytest.approx(parent.quantity)
+    assert sum(child.order.quantity for child in vwap_children) == pytest.approx(
+        parent.quantity
+    )
 
-    pov = POVAlgorithm(participation=0.25, forecast_volume=[4, 4, 8], duration=timedelta(minutes=3))
+    pov = POVAlgorithm(
+        participation=0.25, forecast_volume=[4, 4, 8], duration=timedelta(minutes=3)
+    )
     pov_children = pov.schedule(parent)
     assert len(pov_children) == 3
-    assert sum(child.order.quantity for child in pov_children) == pytest.approx(parent.quantity)
+    assert sum(child.order.quantity for child in pov_children) == pytest.approx(
+        parent.quantity
+    )
 
     for child in pov_children:
         child.order.record_fill(child.order.quantity, parent.price)
@@ -162,7 +226,9 @@ def test_execution_algorithms_split_quantities() -> None:
 
 def test_symbol_normalizer_enforces_constraints() -> None:
     specs = {
-        "BTCUSDT": SymbolSpecification("BTCUSDT", min_qty=0.001, min_notional=10, step_size=0.001, tick_size=0.1)
+        "BTCUSDT": SymbolSpecification(
+            "BTCUSDT", min_qty=0.001, min_notional=10, step_size=0.001, tick_size=0.1
+        )
     }
     normalizer = SymbolNormalizer(specifications=specs)
 
@@ -180,9 +246,13 @@ def test_symbol_normalizer_enforces_constraints() -> None:
 
 def test_symbol_normalizer_handles_symbol_aliases_and_notional_checks() -> None:
     specs = {
-        "BTC-USD": SymbolSpecification("BTC-USD", min_qty=0.0001, min_notional=5, step_size=0.0001, tick_size=0.01)
+        "BTC-USD": SymbolSpecification(
+            "BTC-USD", min_qty=0.0001, min_notional=5, step_size=0.0001, tick_size=0.01
+        )
     }
-    normalizer = SymbolNormalizer(symbol_map={"BTCUSD": "BTC-USD"}, specifications=specs)
+    normalizer = SymbolNormalizer(
+        symbol_map={"BTCUSD": "BTC-USD"}, specifications=specs
+    )
 
     assert normalizer.exchange_symbol("btc_usd") == "BTC-USD"
     assert normalizer.specification("BTCUSD").min_qty == pytest.approx(0.0001)
@@ -196,11 +266,19 @@ def test_symbol_normalizer_handles_symbol_aliases_and_notional_checks() -> None:
 
 def test_simulated_exchange_connector_lifecycle() -> None:
     connector = BinanceConnector()
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.0025, price=20_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.0025,
+        price=20_000,
+        order_type=OrderType.LIMIT,
+    )
 
     placed = connector.place_order(order)
     assert placed is not order
-    assert placed.order_id is not None and placed.order_id.startswith("BinanceConnector-")
+    assert placed.order_id is not None and placed.order_id.startswith(
+        "BinanceConnector-"
+    )
     assert placed.quantity == pytest.approx(0.0025)
 
     fetched = connector.fetch_order(placed.order_id)
@@ -230,20 +308,40 @@ def test_execution_algorithm_parameter_validation() -> None:
     with pytest.raises(ValueError):
         VWAPAlgorithm(volume_profile=[-1, 1], duration=timedelta(minutes=1))
     with pytest.raises(ValueError):
-        POVAlgorithm(participation=0, forecast_volume=[1], duration=timedelta(minutes=1))
+        POVAlgorithm(
+            participation=0, forecast_volume=[1], duration=timedelta(minutes=1)
+        )
     with pytest.raises(ValueError):
-        POVAlgorithm(participation=0.5, forecast_volume=[], duration=timedelta(minutes=1))
+        POVAlgorithm(
+            participation=0.5, forecast_volume=[], duration=timedelta(minutes=1)
+        )
 
-    algorithm = POVAlgorithm(participation=0.5, forecast_volume=[1, 1, 1], duration=timedelta(minutes=3))
-    parent = Order(symbol="ETHUSDT", side=OrderSide.SELL, quantity=5, price=1_500, order_type=OrderType.LIMIT)
+    algorithm = POVAlgorithm(
+        participation=0.5, forecast_volume=[1, 1, 1], duration=timedelta(minutes=3)
+    )
+    parent = Order(
+        symbol="ETHUSDT",
+        side=OrderSide.SELL,
+        quantity=5,
+        price=1_500,
+        order_type=OrderType.LIMIT,
+    )
     children = algorithm.schedule(parent)
     assert len(children) == 3
     assert children[-1].order.quantity == pytest.approx(4.0)
-    assert sum(child.order.quantity for child in children) == pytest.approx(parent.quantity)
+    assert sum(child.order.quantity for child in children) == pytest.approx(
+        parent.quantity
+    )
 
 
 def test_vwap_algorithm_backfills_rounding_residuals() -> None:
-    parent = Order(symbol="ETHUSDT", side=OrderSide.BUY, quantity=7.0, price=1_450, order_type=OrderType.LIMIT)
+    parent = Order(
+        symbol="ETHUSDT",
+        side=OrderSide.BUY,
+        quantity=7.0,
+        price=1_450,
+        order_type=OrderType.LIMIT,
+    )
     # Construct a volume profile that induces floating point drift
     profile = [1, 1, 1, 1, 1, 1, 1]
     algo = VWAPAlgorithm(volume_profile=profile, duration=timedelta(minutes=7))
@@ -256,9 +354,13 @@ def test_vwap_algorithm_backfills_rounding_residuals() -> None:
     assert children[-1].order.quantity > baseline
 
 
-def test_oms_rejection_and_empty_queue_behaviour(tmp_path, risk_manager: RiskManager) -> None:
+def test_oms_rejection_and_empty_queue_behaviour(
+    tmp_path, risk_manager: RiskManager
+) -> None:
     class FailingConnector(BinanceConnector):
-        def place_order(self, order: Order, *, idempotency_key: str | None = None) -> Order:
+        def place_order(
+            self, order: Order, *, idempotency_key: str | None = None
+        ) -> Order:
             raise OrderError("venue unavailable")
 
     state_path = tmp_path / "reject_state.json"
@@ -269,7 +371,13 @@ def test_oms_rejection_and_empty_queue_behaviour(tmp_path, risk_manager: RiskMan
     with pytest.raises(LookupError):
         oms.process_next()
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=1.0, price=20_500, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        quantity=1.0,
+        price=20_500,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="fail-order")
     rejected = oms.process_next()
     assert rejected.status.name == "REJECTED"
@@ -282,7 +390,13 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=21_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=21_000,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="cancel-1")
     placed = oms.process_next()
 
@@ -307,13 +421,21 @@ def test_oms_cancel_and_reload_state(tmp_path, risk_manager: RiskManager) -> Non
         (OrderStatus.REJECTED, "venue rejected"),
     ],
 )
-def test_oms_sync_remote_terminal_state(tmp_path, risk_manager: RiskManager, status: OrderStatus, rejection: str | None) -> None:
+def test_oms_sync_remote_terminal_state(
+    tmp_path, risk_manager: RiskManager, status: OrderStatus, rejection: str | None
+) -> None:
     state_path = tmp_path / "sync_state.json"
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=20_500, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=20_500,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="sync-1")
     placed = oms.process_next()
     assert placed.order_id is not None
@@ -346,13 +468,21 @@ def test_oms_sync_remote_terminal_state(tmp_path, risk_manager: RiskManager, sta
     assert stored[placed.order_id]["status"] == status.value
 
 
-def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManager) -> None:
+def test_oms_requeue_and_adopt_recovery_paths(
+    tmp_path, risk_manager: RiskManager
+) -> None:
     state_path = tmp_path / "recovery_state.json"
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    original = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.5, price=21_500, order_type=OrderType.LIMIT)
+    original = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.5,
+        price=21_500,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(original, correlation_id="recover-1")
     placed = oms.process_next()
     assert placed.order_id is not None
@@ -364,7 +494,13 @@ def test_oms_requeue_and_adopt_recovery_paths(tmp_path, risk_manager: RiskManage
     assert replacement.status.name == "OPEN"
 
     adopted = connector.place_order(
-        Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.25, price=21_600, order_type=OrderType.LIMIT)
+        Order(
+            symbol="BTCUSDT",
+            side=OrderSide.SELL,
+            quantity=0.25,
+            price=21_600,
+            order_type=OrderType.LIMIT,
+        )
     )
     oms.adopt_open_order(adopted, correlation_id="adopt-1")
     assert oms.correlation_for(adopted.order_id) == "adopt-1"
@@ -377,7 +513,13 @@ def test_oms_retries_transient_failures(tmp_path, risk_manager: RiskManager) -> 
     connector = BinanceConnector(failure_plan=["network"])
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.5, price=20_100, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.5,
+        price=20_100,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="retry-1")
     placed = oms.process_next()
 
@@ -385,37 +527,60 @@ def test_oms_retries_transient_failures(tmp_path, risk_manager: RiskManager) -> 
     assert placed.filled_quantity == pytest.approx(0.0)
 
     duplicate = connector.place_order(
-        Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.5, price=20_100, order_type=OrderType.LIMIT),
+        Order(
+            symbol="BTCUSDT",
+            side=OrderSide.BUY,
+            quantity=1.5,
+            price=20_100,
+            order_type=OrderType.LIMIT,
+        ),
         idempotency_key="retry-1",
     )
     assert duplicate is placed
 
 
-def test_oms_rejects_after_exhausting_retries(tmp_path, risk_manager: RiskManager) -> None:
+def test_oms_rejects_after_exhausting_retries(
+    tmp_path, risk_manager: RiskManager
+) -> None:
     state_path = tmp_path / "retry_fail_state.json"
     config = OMSConfig(state_path=state_path, max_retries=2)
     connector = BinanceConnector(failure_plan=["429", "timeout", "network"])
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.5, price=20_500, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        quantity=0.5,
+        price=20_500,
+        order_type=OrderType.LIMIT,
+    )
     oms.submit(order, correlation_id="retry-fail")
     rejected = oms.process_next()
 
     assert rejected.status.name == "REJECTED"
-    assert "rate limited" in (rejected.rejection_reason or "") or "timeout" in (rejected.rejection_reason or "")
+    assert "rate limited" in (rejected.rejection_reason or "") or "timeout" in (
+        rejected.rejection_reason or ""
+    )
     assert not oms._queue
 
 
-def test_oms_submit_is_idempotent_for_pending_orders(tmp_path, risk_manager: RiskManager) -> None:
+def test_oms_submit_is_idempotent_for_pending_orders(
+    tmp_path, risk_manager: RiskManager
+) -> None:
     state_path = tmp_path / "pending_state.json"
     config = OMSConfig(state_path=state_path)
     connector = BinanceConnector()
     oms = OrderManagementSystem(connector, risk_manager, config)
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=19_900, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=19_900,
+        order_type=OrderType.LIMIT,
+    )
     first = oms.submit(order, correlation_id="dup-1")
     second = oms.submit(order, correlation_id="dup-1")
 
     assert first is second
     assert len(oms._queue) == 1
-

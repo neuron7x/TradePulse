@@ -4,21 +4,27 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-import os
 from pathlib import Path
 from threading import Lock
 from typing import Any, AsyncIterator, Deque, Optional
 from uuid import uuid4
 
-from core.data.adapters.base import IngestionAdapter, RateLimitConfig, RetryConfig, TimeoutConfig
+from core.data.adapters.base import (
+    IngestionAdapter,
+    RateLimitConfig,
+    RetryConfig,
+    TimeoutConfig,
+)
 from core.data.adapters.ccxt import CCXTIngestionAdapter
 from core.data.adapters.polygon import PolygonIngestionAdapter
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.events import TickEvent
 from core.messaging.schema_registry import EventSchemaRegistry, SchemaFormat
 from core.utils.logging import get_logger
@@ -61,7 +67,9 @@ class DeadLetterQueue:
             raise ValueError("max_items must be positive")
         self._items: Deque[DeadLetterItem] = deque(maxlen=max_items)
         self._max_items = max_items
-        self._persistent_path = Path(persistent_path) if persistent_path is not None else None
+        self._persistent_path = (
+            Path(persistent_path) if persistent_path is not None else None
+        )
         self._lock = Lock()
         if self._persistent_path is not None:
             self._persistent_path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +85,9 @@ class DeadLetterQueue:
             pass
         else:
             payload = repr(payload)
-        item = DeadLetterItem(payload=payload, error=message, context=context, timestamp=time.time())
+        item = DeadLetterItem(
+            payload=payload, error=message, context=context, timestamp=time.time()
+        )
         self._items.append(item)
         logger.debug("dead_letter_enqueued", size=len(self._items), context=context)
         self._persist_item(item)
@@ -156,7 +166,9 @@ class BaseMarketDataConnector:
     ) -> None:
         self._adapter = adapter
         self._dead_letters = dead_letter_queue or DeadLetterQueue()
-        self._registry = schema_registry or EventSchemaRegistry.from_directory(DEFAULT_SCHEMA_ROOT)
+        self._registry = schema_registry or EventSchemaRegistry.from_directory(
+            DEFAULT_SCHEMA_ROOT
+        )
         schema_info = self._registry.latest(event_type, SchemaFormat.AVRO)
         self._schema_version = schema_info.version_str
         schema_doc = schema_info.load()
@@ -182,7 +194,9 @@ class BaseMarketDataConnector:
             try:
                 event = self._convert_tick(tick)
                 self._validate_event(event)
-            except Exception as exc:  # pragma: no cover - resilience path exercised in tests
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - resilience path exercised in tests
                 logger.warning(
                     "tick_conversion_failed",
                     error=str(exc),
@@ -215,9 +229,11 @@ class BaseMarketDataConnector:
                         self._dead_letters.push(tick, exc, context="stream")
                         continue
                     yield event
-            except Exception as exc:  # pragma: no cover - exercised in tests via dummy adapters
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - exercised in tests via dummy adapters
                 attempt += 1
-                backoff = min(2 ** attempt, 60)
+                backoff = min(2**attempt, 60)
                 logger.warning(
                     "stream_restart",
                     attempt=attempt,
@@ -257,7 +273,9 @@ class BaseMarketDataConnector:
     async def aclose(self) -> None:
         await self._adapter.aclose()
 
-    async def __aenter__(self) -> "BaseMarketDataConnector":  # pragma: no cover - trivial
+    async def __aenter__(
+        self,
+    ) -> "BaseMarketDataConnector":  # pragma: no cover - trivial
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:  # pragma: no cover - trivial
@@ -280,7 +298,10 @@ class BinanceMarketDataConnector(BaseMarketDataConnector):
         retry = retry or RetryConfig()
         rate_limit = rate_limit or RateLimitConfig(rate=1200, period_seconds=60.0)
         ccxt_adapter = adapter or CCXTIngestionAdapter(
-            exchange_id="binance", retry=retry, rate_limit=rate_limit, client_params=client_params
+            exchange_id="binance",
+            retry=retry,
+            rate_limit=rate_limit,
+            client_params=client_params,
         )
         super().__init__(
             ccxt_adapter,
@@ -306,7 +327,10 @@ class CoinbaseMarketDataConnector(BaseMarketDataConnector):
         rate_limit = rate_limit or RateLimitConfig(rate=10, period_seconds=1.0)
         params = client_params or {"enableRateLimit": True}
         ccxt_adapter = adapter or CCXTIngestionAdapter(
-            exchange_id="coinbasepro", retry=retry, rate_limit=rate_limit, client_params=params
+            exchange_id="coinbasepro",
+            retry=retry,
+            rate_limit=rate_limit,
+            client_params=params,
         )
         super().__init__(
             ccxt_adapter,
@@ -412,4 +436,3 @@ def _is_nullable(avro_type: Any) -> bool:
     if isinstance(avro_type, dict):
         return avro_type.get("type") == "null"
     return avro_type == "null"
-

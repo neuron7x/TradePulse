@@ -12,6 +12,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.metrics import (  # noqa: E402  pylint: disable=wrong-import-position
+    build_symbol_microstructure_report,
+    hasbrouck_information_impulse,
+    kyles_lambda,
+    queue_imbalance,
+)
 from markets.orderbook.src import (  # noqa: E402  pylint: disable=wrong-import-position
     LinearImpactModel,
     Order,
@@ -19,12 +25,6 @@ from markets.orderbook.src import (  # noqa: E402  pylint: disable=wrong-import-
     PriceTimeOrderBook,
     QueueAwareSlippage,
     Side,
-)
-from core.metrics import (  # noqa: E402  pylint: disable=wrong-import-position
-    build_symbol_microstructure_report,
-    hasbrouck_information_impulse,
-    kyles_lambda,
-    queue_imbalance,
 )
 
 

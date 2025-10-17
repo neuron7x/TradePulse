@@ -7,7 +7,7 @@ import time
 
 import pytest
 
-from core.agent.bandits import EpsilonGreedy, UCB1
+from core.agent.bandits import UCB1, EpsilonGreedy
 from core.agent.memory import StrategyMemory, StrategyRecord
 from core.agent.strategy import PiAgent, Strategy
 
@@ -33,7 +33,9 @@ def test_epsilon_greedy_explores(monkeypatch: pytest.MonkeyPatch) -> None:
     assert agent.select() == "b"
 
 
-def test_strategy_memory_topk_orders_by_freshness(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_strategy_memory_topk_orders_by_freshness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     memory = StrategyMemory(decay_lambda=0.0)
     now = time.time()
     rec_old = StrategyRecord("old", (0, 0, 0, 0, 0), score=0.2, ts=now - 10)
@@ -68,7 +70,9 @@ def test_strategy_simulate_performance_within_expected_range() -> None:
 
 
 def test_pi_agent_detects_instability_and_repair() -> None:
-    agent = PiAgent(strategy=Strategy(name="s", params={"alpha": 1.0, "beta": math.nan}))
+    agent = PiAgent(
+        strategy=Strategy(name="s", params={"alpha": 1.0, "beta": math.nan})
+    )
     state = {"R": 0.8, "delta_H": -0.1, "kappa_mean": -0.05}
     assert agent.evaluate_and_adapt(state) == "enter"
     agent.repair()

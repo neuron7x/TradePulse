@@ -15,7 +15,7 @@ preserve backwards compatibility with existing ingestion pipelines.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from enum import Enum
 from typing import Any, Literal, Optional, Union
@@ -25,10 +25,10 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictStr,
+    ValidationInfo,
     field_serializer,
     field_validator,
     model_validator,
-    ValidationInfo,
 )
 
 from core.data.catalog import normalize_symbol, normalize_venue
@@ -69,7 +69,11 @@ def _to_decimal(value: Union[Decimal, float, int, str]) -> Decimal:
         raise TypeError("boolean values are not valid decimal inputs")
     try:
         return Decimal(str(value))
-    except (InvalidOperation, ValueError, TypeError) as exc:  # pragma: no cover - defensive guard
+    except (
+        InvalidOperation,
+        ValueError,
+        TypeError,
+    ) as exc:  # pragma: no cover - defensive guard
         raise TypeError(f"Unable to convert {value!r} to Decimal") from exc
 
 
@@ -94,7 +98,9 @@ class _FrozenModel(BaseModel):
 class MarketMetadata(_FrozenModel):
     """Common metadata shared by all market data payloads."""
 
-    symbol: StrictStr = Field(..., min_length=1, description="Instrument symbol, e.g. BTCUSD")
+    symbol: StrictStr = Field(
+        ..., min_length=1, description="Instrument symbol, e.g. BTCUSD"
+    )
     venue: StrictStr = Field(..., min_length=1, description="Market venue identifier")
     instrument_type: InstrumentType = Field(
         default=InstrumentType.SPOT,
@@ -103,9 +109,7 @@ class MarketMetadata(_FrozenModel):
 
     @field_validator("symbol", mode="before")
     @classmethod
-    def _normalize_symbol(
-        cls, value: str, info: ValidationInfo
-    ) -> str:
+    def _normalize_symbol(cls, value: str, info: ValidationInfo) -> str:
         instrument_type = info.data.get("instrument_type")
         return normalize_symbol(value, instrument_type_hint=instrument_type)
 
@@ -187,8 +191,12 @@ class PriceTick(MarketDataPoint):
     """Tick-level price update."""
 
     price: Decimal = Field(..., description="Last traded price")
-    volume: Decimal = Field(default=Decimal("0"), description="Trade volume at the tick")
-    trade_id: Optional[str] = Field(default=None, description="Exchange trade identifier")
+    volume: Decimal = Field(
+        default=Decimal("0"), description="Trade volume at the tick"
+    )
+    trade_id: Optional[str] = Field(
+        default=None, description="Exchange trade identifier"
+    )
     kind: Literal[DataKind.TICK] = DataKind.TICK
 
     @field_validator("price", mode="before")
@@ -253,7 +261,9 @@ class PriceTick(MarketDataPoint):
     ) -> "PriceTick":
         """Factory helper that builds the metadata block for convenience."""
 
-        meta = MarketMetadata(symbol=symbol, venue=venue, instrument_type=instrument_type)
+        meta = MarketMetadata(
+            symbol=symbol, venue=venue, instrument_type=instrument_type
+        )
         return cls(
             metadata=meta,
             timestamp=timestamp,

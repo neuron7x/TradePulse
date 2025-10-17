@@ -231,9 +231,10 @@ def get_api_security_settings() -> ApiSecuritySettings:
     return get_api_security_settings._instance  # type: ignore[attr-defined]
 
 
-def verify_request_identity(
-    *, require_client_certificate: bool = False
-) -> Callable[[Request, HTTPAuthorizationCredentials | None, ApiSecuritySettings], Awaitable[AdminIdentity]]:
+def verify_request_identity(*, require_client_certificate: bool = False) -> Callable[
+    [Request, HTTPAuthorizationCredentials | None, ApiSecuritySettings],
+    Awaitable[AdminIdentity],
+]:
     """Return a dependency that authenticates requests via OAuth2 bearer tokens."""
 
     async def dependency(
@@ -301,4 +302,3 @@ def verify_request_identity(
         return AdminIdentity(subject=subject, roles=roles)
 
     return dependency
-

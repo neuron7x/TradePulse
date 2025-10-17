@@ -2,16 +2,15 @@
 """Edge case and error handling tests for core modules."""
 from __future__ import annotations
 
-import math
 import numpy as np
 import pandas as pd
 import pytest
 
 from core.agent.memory import StrategyMemory, StrategyRecord
-from core.agent.strategy import Strategy, PiAgent
+from core.agent.strategy import PiAgent, Strategy
 from core.data.preprocess import normalize_df, scale_series
-from core.indicators.entropy import entropy, delta_entropy
-from core.phase.detector import phase_flags, composite_transition
+from core.indicators.entropy import delta_entropy, entropy
+from core.phase.detector import composite_transition, phase_flags
 
 
 class TestMemoryEdgeCases:
@@ -21,10 +20,10 @@ class TestMemoryEdgeCases:
         """Memory should handle multiple strategies with same state."""
         memory = StrategyMemory()
         state = (0.5, 0.1, -0.2, 1.0, 0.0)
-        
+
         memory.add("strategy1", state, 0.8)
         memory.add("strategy2", state, 0.9)
-        
+
         # Second add with same state should update, not duplicate
         results = memory.topk(k=2)
         # Should have at most 2 records
@@ -35,14 +34,14 @@ class TestMemoryEdgeCases:
         memory = StrategyMemory(decay_lambda=0.5)
         state1 = (0.5, 0.1, -0.2, 1.0, 0.0)
         state2 = (0.6, 0.2, -0.3, 1.1, 0.1)
-        
+
         # Add older record
         record1 = StrategyRecord(name="old", signature=state1, score=0.8, ts=100.0)
         memory.records = [record1]
-        
+
         # Add newer record
         memory.add("new", state2, 0.7)
-        
+
         results = memory.topk(k=2)
         # Both should be present
         assert len(results) == 2
@@ -52,7 +51,7 @@ class TestMemoryEdgeCases:
         memory = StrategyMemory(decay_lambda=0.0)  # No decay
         memory.add("good", (0, 0, 0, 0, 0), 0.5)
         memory.add("bad", (0, 0, 0, 0, 1), -0.5)
-        
+
         memory.cleanup(min_score=0.0)
         names = {r.name for r in memory.records}
         assert "good" in names
@@ -64,19 +63,13 @@ class TestPreprocessEdgeCases:
 
     def test_normalize_df_handles_constant_timestamps(self) -> None:
         """Normalization with constant timestamps should work."""
-        df = pd.DataFrame({
-            "ts": [1000] * 10,
-            "price": [100.0 + i for i in range(10)]
-        })
+        df = pd.DataFrame({"ts": [1000] * 10, "price": [100.0 + i for i in range(10)]})
         result = normalize_df(df)
         assert len(result) == len(df)
 
     def test_normalize_df_handles_duplicates(self) -> None:
         """Normalization should remove duplicate rows."""
-        df = pd.DataFrame({
-            "ts": [1, 2, 2, 3],
-            "price": [100.0, 101.0, 101.0, 102.0]
-        })
+        df = pd.DataFrame({"ts": [1, 2, 2, 3], "price": [100.0, 101.0, 101.0, 102.0]})
         result = normalize_df(df)
         assert len(result) < len(df)
 
@@ -140,9 +133,6 @@ class TestMetricsEdgeCases:
 
     def test_metrics_modules_exist(self) -> None:
         """Verify metrics modules are present."""
-        import core.metrics.direction_index
-        import core.metrics.ism  
-        import core.metrics.volume_profile
         assert True
 
 
@@ -215,17 +205,19 @@ class TestAgentEdgeCases:
 
     def test_agent_cooldown_decrements_correctly(self) -> None:
         """Agent cooldown should decrement over multiple calls."""
-        agent = PiAgent(strategy=Strategy(name="test", params={"instability_threshold": 0.05}))
-        
+        agent = PiAgent(
+            strategy=Strategy(name="test", params={"instability_threshold": 0.05})
+        )
+
         # Trigger cooldown
         high_instability = {"R": 0.9, "delta_H": -0.5, "kappa_mean": -0.5}
         agent.detect_instability(high_instability)
-        
+
         # Check cooldown decrements
         low_instability = {"R": 0.1, "delta_H": 0.0, "kappa_mean": 0.0}
         for _ in range(5):
             agent.detect_instability(low_instability)
-        
+
         # After 3+ calls, cooldown should be reset
         # (Implementation detail - just ensure no crash)
         assert True
@@ -239,7 +231,7 @@ class TestNumericalStability:
         strategy = Strategy(name="test", params={"lookback": 10})
         prices = pd.Series([100.0, 101.0, np.nan, 103.0, 104.0] * 10)
         df = pd.DataFrame({"close": prices})
-        
+
         # Should not crash, though behavior depends on implementation
         try:
             score = strategy.simulate_performance(df)
@@ -253,7 +245,7 @@ class TestNumericalStability:
         strategy = Strategy(name="test", params={"lookback": 10})
         prices = pd.Series([100.0, 101.0, np.inf, 103.0, 104.0] * 10)
         df = pd.DataFrame({"close": prices})
-        
+
         try:
             score = strategy.simulate_performance(df)
             assert np.isfinite(score)

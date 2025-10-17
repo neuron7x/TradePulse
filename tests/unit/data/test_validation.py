@@ -44,12 +44,16 @@ def valid_frame() -> pd.DataFrame:
     )
 
 
-def test_validate_timeseries_frame_success(base_config: TimeSeriesValidationConfig, valid_frame: pd.DataFrame) -> None:
+def test_validate_timeseries_frame_success(
+    base_config: TimeSeriesValidationConfig, valid_frame: pd.DataFrame
+) -> None:
     validated = validate_timeseries_frame(valid_frame, base_config)
     pd.testing.assert_frame_equal(validated, valid_frame)
 
 
-def test_validate_timeseries_frame_rejects_nan(base_config: TimeSeriesValidationConfig, valid_frame: pd.DataFrame) -> None:
+def test_validate_timeseries_frame_rejects_nan(
+    base_config: TimeSeriesValidationConfig, valid_frame: pd.DataFrame
+) -> None:
     frame = valid_frame.copy()
     frame.loc[2, "close"] = float("nan")
 

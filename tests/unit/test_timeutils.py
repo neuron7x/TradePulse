@@ -1,9 +1,9 @@
-from datetime import date, datetime, time, timezone, timedelta
-
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import pytest
+from exchange_calendars import always_open, errors
 
 from core.data.timeutils import (
     MarketCalendar,
@@ -16,7 +16,6 @@ from core.data.timeutils import (
     to_utc,
     validate_bar_alignment,
 )
-from exchange_calendars import always_open, errors
 
 
 def test_normalize_timestamp_from_float() -> None:
@@ -97,14 +96,54 @@ def test_is_market_open_respects_holidays() -> None:
 @pytest.mark.parametrize(
     ("market", "timestamp", "expected", "reason"),
     (
-        ("NYSE", datetime(2024, 3, 8, 14, 35, tzinfo=timezone.utc), True, "Open before US DST change"),
-        ("NYSE", datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc), True, "Open after US DST change"),
-        ("NYSE", datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc), False, "Closed for Independence Day"),
-        ("NASDAQ", datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc), True, "NASDAQ mirrors NYSE DST"),
-        ("NASDAQ", datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc), False, "NASDAQ holiday closure"),
-        ("CME", datetime(2024, 3, 11, 21, 55, tzinfo=timezone.utc), False, "Minutes before CME evening reopen"),
-        ("CME", datetime(2024, 3, 11, 22, 5, tzinfo=timezone.utc), True, "CME open after DST shift"),
-        ("BINANCE", datetime(2024, 3, 11, 0, 0, tzinfo=timezone.utc), True, "24/7 venue unaffected"),
+        (
+            "NYSE",
+            datetime(2024, 3, 8, 14, 35, tzinfo=timezone.utc),
+            True,
+            "Open before US DST change",
+        ),
+        (
+            "NYSE",
+            datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc),
+            True,
+            "Open after US DST change",
+        ),
+        (
+            "NYSE",
+            datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc),
+            False,
+            "Closed for Independence Day",
+        ),
+        (
+            "NASDAQ",
+            datetime(2024, 3, 11, 13, 35, tzinfo=timezone.utc),
+            True,
+            "NASDAQ mirrors NYSE DST",
+        ),
+        (
+            "NASDAQ",
+            datetime(2024, 7, 4, 15, 0, tzinfo=timezone.utc),
+            False,
+            "NASDAQ holiday closure",
+        ),
+        (
+            "CME",
+            datetime(2024, 3, 11, 21, 55, tzinfo=timezone.utc),
+            False,
+            "Minutes before CME evening reopen",
+        ),
+        (
+            "CME",
+            datetime(2024, 3, 11, 22, 5, tzinfo=timezone.utc),
+            True,
+            "CME open after DST shift",
+        ),
+        (
+            "BINANCE",
+            datetime(2024, 3, 11, 0, 0, tzinfo=timezone.utc),
+            True,
+            "24/7 venue unaffected",
+        ),
     ),
 )
 def test_is_market_open_covers_dst_and_holiday_edges(
@@ -134,10 +173,16 @@ def test_is_market_open_session_boundaries(
         return local_dt.replace(tzinfo=zone).astimezone(timezone.utc)
 
     trading_day = datetime(2024, 3, 11, 0, 0)
-    before_open_local = trading_day.replace(hour=open_time.hour, minute=open_time.minute) - timedelta(minutes=1)
+    before_open_local = trading_day.replace(
+        hour=open_time.hour, minute=open_time.minute
+    ) - timedelta(minutes=1)
     open_local = trading_day.replace(hour=open_time.hour, minute=open_time.minute)
-    just_before_close_local = trading_day.replace(hour=close_time.hour, minute=close_time.minute) - timedelta(minutes=1)
-    after_close_local = trading_day.replace(hour=close_time.hour, minute=close_time.minute)
+    just_before_close_local = trading_day.replace(
+        hour=close_time.hour, minute=close_time.minute
+    ) - timedelta(minutes=1)
+    after_close_local = trading_day.replace(
+        hour=close_time.hour, minute=close_time.minute
+    )
 
     before_open = to_utc(before_open_local)
     at_open = to_utc(open_local)
@@ -183,13 +228,17 @@ def test_market_calendar_ensures_weekend_defaults() -> None:
 
 
 def test_market_calendar_uses_exchange_calendar_metadata() -> None:
-    cal = MarketCalendar(market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None)
+    cal = MarketCalendar(
+        market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None
+    )
     assert cal.timezone == "UTC"
     assert cal.weekend_closure == frozenset()
 
 
 def test_market_calendar_tzinfo_requires_timezone() -> None:
-    cal = MarketCalendar(market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None)
+    cal = MarketCalendar(
+        market="ALWAYS", calendar_name="ALWAYS_OPEN", weekend_closure=None
+    )
     object.__setattr__(cal, "timezone", None)
 
     with pytest.raises(ValueError):
@@ -202,14 +251,18 @@ def test_exchange_aliases_are_supported() -> None:
     assert get_market_calendar("24/7").market == "BINANCE"
 
 
-def test_load_exchange_calendar_falls_back_to_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_exchange_calendar_falls_back_to_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from core.data import timeutils as tu
 
     def fake_resolve(name: str) -> str:
         raise errors.InvalidCalendarName()
 
     monkeypatch.setattr(tu, "resolve_alias", fake_resolve)
-    monkeypatch.setattr(tu, "get_calendar", lambda name: always_open.AlwaysOpenCalendar())
+    monkeypatch.setattr(
+        tu, "get_calendar", lambda name: always_open.AlwaysOpenCalendar()
+    )
 
     calendar = tu._load_exchange_calendar("custom")
     assert isinstance(calendar, always_open.AlwaysOpenCalendar)

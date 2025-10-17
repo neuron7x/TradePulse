@@ -7,7 +7,9 @@ import pytest
 from src.audit.audit_logger import AuditLogger
 
 
-def test_audit_logger_redacts_sensitive_values_from_logs(caplog: pytest.LogCaptureFixture) -> None:
+def test_audit_logger_redacts_sensitive_values_from_logs(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     sensitive_details = {
         "api_key": "s3cr3t-token",
         "nested": {"refreshToken": "refresh-123"},

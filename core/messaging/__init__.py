@@ -1,6 +1,12 @@
 """Messaging primitives for TradePulse event streaming."""
 
-from .event_bus import EventBusConfig, EventEnvelope, EventTopic, KafkaEventBus, NATSEventBus
+from .event_bus import (
+    EventBusConfig,
+    EventEnvelope,
+    EventTopic,
+    KafkaEventBus,
+    NATSEventBus,
+)
 from .idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore
 from .schema_registry import EventSchemaRegistry, SchemaCompatibilityError, SchemaFormat
 

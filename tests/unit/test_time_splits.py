@@ -55,7 +55,9 @@ def test_purged_walk_forward_removes_overlaps():
     )
     for train_idx, test_idx in splitter.split(frame):
         test_end = frame.loc[test_idx, "label_end"].max()
-        train_overlaps = frame.loc[train_idx, "label_end"] >= frame.loc[test_idx, "timestamp"].min()
+        train_overlaps = (
+            frame.loc[train_idx, "label_end"] >= frame.loc[test_idx, "timestamp"].min()
+        )
         assert not train_overlaps.any()
         assert frame.loc[train_idx, "timestamp"].max() < test_end
 

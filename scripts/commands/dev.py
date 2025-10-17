@@ -1,8 +1,8 @@
 """Manage local development infrastructure."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import logging
 from argparse import _SubParsersAction
 
@@ -47,4 +47,3 @@ def handle_down(args: object) -> int:  # noqa: ARG001 - required signature
     run_subprocess([*DOCKER_COMPOSE_COMMAND, "down"])
     LOGGER.info("Services stopped successfully.")
     return 0
-

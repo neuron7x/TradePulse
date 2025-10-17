@@ -69,4 +69,3 @@ def require_roles(
         return identity
 
     return _dependency
-

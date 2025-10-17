@@ -17,20 +17,32 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from backtest.engine import walk_forward, Result  # noqa: E402
+from backtest.engine import Result, walk_forward  # noqa: E402
 from core.data.ingestion import DataIngestor, Ticker  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the TradePulse smoke E2E pipeline.")
-    parser.add_argument("--csv", type=Path, default=ROOT / "data" / "sample.csv", help="Path to CSV source data.")
+    parser = argparse.ArgumentParser(
+        description="Run the TradePulse smoke E2E pipeline."
+    )
+    parser.add_argument(
+        "--csv",
+        type=Path,
+        default=ROOT / "data" / "sample.csv",
+        help="Path to CSV source data.",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,
         default=ROOT / "reports" / "smoke-e2e",
         help="Directory for smoke pipeline artifacts.",
     )
-    parser.add_argument("--seed", type=int, default=20240615, help="Seed used for deterministic outputs.")
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=20240615,
+        help="Seed used for deterministic outputs.",
+    )
     parser.add_argument(
         "--fee",
         type=float,
@@ -71,7 +83,9 @@ def run_cli_analyze(csv_path: Path, seed: int) -> Dict[str, Any]:
 def ingest_prices(csv_path: Path) -> list[Ticker]:
     ingestor = DataIngestor(allowed_roots=[csv_path.resolve().parent])
     ticks: list[Ticker] = []
-    ingestor.historical_csv(str(csv_path), ticks.append, required_fields=("ts", "price", "volume"))
+    ingestor.historical_csv(
+        str(csv_path), ticks.append, required_fields=("ts", "price", "volume")
+    )
     if not ticks:
         raise RuntimeError("No ticks ingested from CSV")
     return ticks
@@ -110,11 +124,15 @@ def build_signal_function(
     return _signal
 
 
-def run_backtest(prices: np.ndarray, signal_fn: Callable[[np.ndarray], np.ndarray], fee: float) -> Result:
+def run_backtest(
+    prices: np.ndarray, signal_fn: Callable[[np.ndarray], np.ndarray], fee: float
+) -> Result:
     return walk_forward(prices, signal_fn, fee=fee, strategy_name="smoke_e2e")
 
 
-def summarise_result(result: Result, ticks: list[Ticker], metrics: Dict[str, Any]) -> Dict[str, Any]:
+def summarise_result(
+    result: Result, ticks: list[Ticker], metrics: Dict[str, Any]
+) -> Dict[str, Any]:
     report_path = result.report_path
     report_payload: Dict[str, Any] | None = None
     if report_path and report_path.exists():
@@ -136,7 +154,6 @@ def write_artifacts(summary: Dict[str, Any], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     summary_path = output_dir / "summary.json"
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-
 
 
 def main() -> None:

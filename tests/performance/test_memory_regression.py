@@ -1,4 +1,5 @@
 """Memory regression tests for large indicator windows."""
+
 from __future__ import annotations
 
 import gc
@@ -8,13 +9,14 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from core.indicators.hierarchical_features import FeatureBufferCache, compute_hierarchical_features
-from core.indicators.kuramoto import compute_phase
-from core.indicators.pipeline import IndicatorPipeline
-from core.indicators.hurst import HurstFeature
 from core.indicators.entropy import EntropyFeature
-from core.indicators.kuramoto import KuramotoOrderFeature
-
+from core.indicators.hierarchical_features import (
+    FeatureBufferCache,
+    compute_hierarchical_features,
+)
+from core.indicators.hurst import HurstFeature
+from core.indicators.kuramoto import KuramotoOrderFeature, compute_phase
+from core.indicators.pipeline import IndicatorPipeline
 
 pytestmark = [pytest.mark.slow]
 
@@ -41,7 +43,9 @@ def test_compute_phase_peak_memory() -> None:
 
     peak_bytes = _measure_peak_bytes(_run, iterations=5)
     # Allow up to ~48 MiB peak including FFT scratch buffers.
-    assert peak_bytes < 50 * 1024 * 1024, f"compute_phase peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"
+    assert (
+        peak_bytes < 50 * 1024 * 1024
+    ), f"compute_phase peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"
 
 
 def test_indicator_pipeline_releases_buffers() -> None:
@@ -62,7 +66,9 @@ def test_indicator_pipeline_releases_buffers() -> None:
 
     peak_bytes = _measure_peak_bytes(_run, iterations=6)
     # Pipeline reuses the underlying buffer; peak should stay comfortably below 64 MiB.
-    assert peak_bytes < 64 * 1024 * 1024, f"IndicatorPipeline peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"
+    assert (
+        peak_bytes < 64 * 1024 * 1024
+    ), f"IndicatorPipeline peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"
 
 
 def test_hierarchical_features_memory_leak_free() -> None:
@@ -82,11 +88,17 @@ def test_hierarchical_features_memory_leak_free() -> None:
         },
         index=index,
     )
-    ohlcv = {"1m": frame, "5m": frame.resample("5min").last().ffill(), "15m": frame.resample("15min").last().ffill()}
+    ohlcv = {
+        "1m": frame,
+        "5m": frame.resample("5min").last().ffill(),
+        "15m": frame.resample("15min").last().ffill(),
+    }
 
     def _run() -> None:
         cache = FeatureBufferCache()
         compute_hierarchical_features(ohlcv, cache=cache)
 
     peak_bytes = _measure_peak_bytes(_run, iterations=4)
-    assert peak_bytes < 80 * 1024 * 1024, f"Hierarchical features peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"
+    assert (
+        peak_bytes < 80 * 1024 * 1024
+    ), f"Hierarchical features peak {peak_bytes / (1024 ** 2):.2f} MiB exceeds budget"

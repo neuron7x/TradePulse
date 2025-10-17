@@ -18,7 +18,9 @@ SNAPSHOT_DIR = Path(__file__).parent / "__snapshots__"
 SNAPSHOT_DIR.mkdir(exist_ok=True)
 
 _DURATION_RE = re.compile(r"\(\d+\.\d+s\)")
-_TIMESTAMP_RE = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?")
+_TIMESTAMP_RE = re.compile(
+    r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?"
+)
 _SHA_RE = re.compile(r"sha256=[0-9a-f]{64}")
 
 
@@ -58,14 +60,18 @@ def _write_yaml(path: Path, payload: Dict[str, object]) -> None:
     path.write_text(yaml.safe_dump(payload), encoding="utf-8")
 
 
-def _render_config(manager: ConfigTemplateManager, command: str, destination: Path) -> Dict[str, object]:
+def _render_config(
+    manager: ConfigTemplateManager, command: str, destination: Path
+) -> Dict[str, object]:
     manager.render(command, destination)
     import yaml
 
     return yaml.safe_load(destination.read_text(encoding="utf-8"))
 
 
-def _run_and_assert(command: str, args: list[str], snapshot_name: str, tmp_path: Path) -> None:
+def _run_and_assert(
+    command: str, args: list[str], snapshot_name: str, tmp_path: Path
+) -> None:
     runner = CliRunner()
     result = runner.invoke(cli, [command, *args])
     assert result.exit_code == 0, result.output
@@ -107,9 +113,13 @@ def test_backtest_golden(tmp_path: Path, sample_prices: Path) -> None:
 def test_report_golden(tmp_path: Path, sample_prices: Path) -> None:
     manager = ConfigTemplateManager(Path("configs/templates"))
     backtest_results = tmp_path / "backtest.json"
-    backtest_results.write_text(json.dumps({"stats": {"trades": 0}}, indent=2), encoding="utf-8")
+    backtest_results.write_text(
+        json.dumps({"stats": {"trades": 0}}, indent=2), encoding="utf-8"
+    )
     exec_results = tmp_path / "exec.json"
-    exec_results.write_text(json.dumps({"latest_signal": 1}, indent=2), encoding="utf-8")
+    exec_results.write_text(
+        json.dumps({"latest_signal": 1}, indent=2), encoding="utf-8"
+    )
 
     cfg_path = tmp_path / "report.yaml"
     cfg = _render_config(manager, "report", cfg_path)

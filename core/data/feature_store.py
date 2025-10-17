@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from decimal import Decimal, InvalidOperation
-from datetime import UTC
 import hashlib
 import hmac
 import math
-from io import BytesIO
 import os
 import shutil
 import sqlite3
-from pathlib import Path
 import ssl
+from dataclasses import dataclass, field
+from datetime import UTC
+from decimal import Decimal, InvalidOperation
+from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Literal, Mapping, Protocol
 from urllib.parse import urlparse
 
 import pandas as pd
-from pandas.api import types as pd_types
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from pandas.api import types as pd_types
 
 from core.utils.dataframe_io import (
     purge_dataframe_artifacts,
@@ -84,11 +84,12 @@ class _RetentionManager:
             if missing:
                 joined = ", ".join(sorted(missing))
                 raise KeyError(
-                    "Retention policy with max_versions requires columns: "
-                    f"{joined}"
+                    "Retention policy with max_versions requires columns: " f"{joined}"
                 )
             ordered = result.sort_values(by=["entity_id", "ts"], kind="mergesort")
-            limited = ordered.groupby("entity_id", as_index=False).tail(self._policy.max_versions)
+            limited = ordered.groupby("entity_id", as_index=False).tail(
+                self._policy.max_versions
+            )
             result = limited.sort_values(by=["entity_id", "ts"], kind="mergesort")
 
         return result.reset_index(drop=True)
@@ -100,7 +101,9 @@ class _RetentionManager:
             return None
 
         total_seconds = self._policy.ttl.total_seconds()
-        if total_seconds <= 0:  # pragma: no cover - RetentionPolicy enforces positive TTL
+        if (
+            total_seconds <= 0
+        ):  # pragma: no cover - RetentionPolicy enforces positive TTL
             return None
 
         return max(1, math.ceil(total_seconds))
@@ -109,14 +112,11 @@ class _RetentionManager:
 class KeyValueClient(Protocol):
     """Minimal protocol for key-value stores such as Redis."""
 
-    def get(self, key: str) -> bytes | None:
-        ...
+    def get(self, key: str) -> bytes | None: ...
 
-    def set(self, key: str, value: bytes) -> None:
-        ...
+    def set(self, key: str, value: bytes) -> None: ...
 
-    def delete(self, key: str) -> None:
-        ...
+    def delete(self, key: str) -> None: ...
 
 
 class InMemoryKeyValueClient:
@@ -256,7 +256,9 @@ class RedisOnlineFeatureStore:
 
         if mode == "overwrite":
             stored = self._write(feature_view, offline_frame)
-            report = OnlineFeatureStore._build_report(feature_view, offline_frame, stored)
+            report = OnlineFeatureStore._build_report(
+                feature_view, offline_frame, stored
+            )
         else:
             existing = self.load(feature_view)
             if not existing.empty:
@@ -276,7 +278,9 @@ class RedisOnlineFeatureStore:
                 online_delta = stored.tail(delta_rows).reset_index(drop=True)
             else:
                 online_delta = stored.iloc[0:0]
-            report = OnlineFeatureStore._build_report(feature_view, offline_frame, online_delta)
+            report = OnlineFeatureStore._build_report(
+                feature_view, offline_frame, online_delta
+            )
 
         if validate:
             report.ensure_valid()
@@ -364,21 +368,29 @@ class _SQLiteEncryptionEnvelope:
     def encrypt(self, payload: bytes) -> bytes:
         nonce = os.urandom(_NONCE_SIZE)
         ciphertext = self._primary_key.encrypt(nonce, payload, self._key_id_bytes)
-        header = _ENVELOPE_PREFIX + bytes([len(self._key_id_bytes)]) + self._key_id_bytes
+        header = (
+            _ENVELOPE_PREFIX + bytes([len(self._key_id_bytes)]) + self._key_id_bytes
+        )
         return header + nonce + ciphertext
 
     def decrypt(self, payload: bytes, *, allow_plaintext: bool | None = None) -> bytes:
-        allow_plaintext = self._allow_plaintext if allow_plaintext is None else allow_plaintext
+        allow_plaintext = (
+            self._allow_plaintext if allow_plaintext is None else allow_plaintext
+        )
         if payload.startswith(_ENVELOPE_PREFIX):
             cursor = len(_ENVELOPE_PREFIX)
             if cursor >= len(payload):
-                raise FeatureStoreConfigurationError("Encrypted payload header is truncated")
+                raise FeatureStoreConfigurationError(
+                    "Encrypted payload header is truncated"
+                )
 
             key_id_length = payload[cursor]
             cursor += 1
             key_id_bytes = payload[cursor : cursor + key_id_length]
             if len(key_id_bytes) != key_id_length:
-                raise FeatureStoreConfigurationError("Encrypted payload missing key identifier")
+                raise FeatureStoreConfigurationError(
+                    "Encrypted payload missing key identifier"
+                )
             cursor += key_id_length
 
             if len(payload) < cursor + _NONCE_SIZE:
@@ -447,7 +459,9 @@ def reencrypt_sqlite_payloads(
     transformed: list[tuple[str, bytes]] = []
     for name, payload in rows:
         if not isinstance(payload, (bytes, bytearray)):
-            raise FeatureStoreConfigurationError("Stored payload must be bytes for migration")
+            raise FeatureStoreConfigurationError(
+                "Stored payload must be bytes for migration"
+            )
         raw: bytes
         if source_envelope is None:
             raw = bytes(payload)
@@ -493,7 +507,9 @@ class SQLiteOnlineFeatureStore:
 
     def purge(self, feature_view: str) -> None:
         with self._connection:
-            self._connection.execute("DELETE FROM feature_views WHERE name = ?", (feature_view,))
+            self._connection.execute(
+                "DELETE FROM feature_views WHERE name = ?", (feature_view,)
+            )
 
     def load(self, feature_view: str) -> pd.DataFrame:
         cursor = self._connection.execute(
@@ -524,7 +540,9 @@ class SQLiteOnlineFeatureStore:
 
         if mode == "overwrite":
             stored = self._write(feature_view, offline_frame)
-            report = OnlineFeatureStore._build_report(feature_view, offline_frame, stored)
+            report = OnlineFeatureStore._build_report(
+                feature_view, offline_frame, stored
+            )
         else:
             existing = self.load(feature_view)
             if not existing.empty:
@@ -544,7 +562,9 @@ class SQLiteOnlineFeatureStore:
                 online_delta = stored.tail(delta_rows).reset_index(drop=True)
             else:
                 online_delta = stored.iloc[0:0]
-            report = OnlineFeatureStore._build_report(feature_view, offline_frame, online_delta)
+            report = OnlineFeatureStore._build_report(
+                feature_view, offline_frame, online_delta
+            )
 
         if validate:
             report.ensure_valid()
@@ -568,8 +588,7 @@ class SQLiteOnlineFeatureStore:
 class OfflineTableSource(Protocol):
     """Protocol describing offline tables used as the source of truth."""
 
-    def load(self) -> pd.DataFrame:
-        ...
+    def load(self) -> pd.DataFrame: ...
 
 
 @dataclass(frozen=True)
@@ -761,7 +780,9 @@ class OnlineFeatureStore:
             report.ensure_valid()
         return report
 
-    def compute_integrity(self, feature_view: str, frame: pd.DataFrame) -> IntegrityReport:
+    def compute_integrity(
+        self, feature_view: str, frame: pd.DataFrame
+    ) -> IntegrityReport:
         """Compare ``frame`` against the currently persisted dataset."""
 
         online = self.load(feature_view)
@@ -777,7 +798,9 @@ class OnlineFeatureStore:
         )
         return combined
 
-    def _write_frame(self, feature_view: str, path: Path, frame: pd.DataFrame) -> pd.DataFrame:
+    def _write_frame(
+        self, feature_view: str, path: Path, frame: pd.DataFrame
+    ) -> pd.DataFrame:
         prepared = frame.reset_index(drop=True)
         written = write_dataframe(prepared, path, index=False, allow_json_fallback=True)
 
@@ -873,7 +896,9 @@ class OnlineFeatureStore:
                     coerced_datetime = pd.to_datetime(series, utc=True, errors="raise")
                 except (TypeError, ValueError):
                     coerced_datetime = None
-                if coerced_datetime is not None and pd_types.is_datetime64_any_dtype(coerced_datetime):
+                if coerced_datetime is not None and pd_types.is_datetime64_any_dtype(
+                    coerced_datetime
+                ):
                     normalized[column] = coerced_datetime
                     continue
 

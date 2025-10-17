@@ -7,16 +7,29 @@ import csv
 from datetime import datetime, timezone
 from decimal import InvalidOperation
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Iterable, Mapping, Optional, Tuple
-
-from core.utils.logging import get_logger
-from core.utils.metrics import get_metrics_collector
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    AsyncIterator,
+    Callable,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+)
 
 from core.data.connectors.market import BaseMarketDataConnector
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.path_guard import DataPathGuard
 from core.data.timeutils import normalize_timestamp
+from core.utils.logging import get_logger
+from core.utils.metrics import get_metrics_collector
 from interfaces.ingestion import AsyncDataIngestionService
+
+if TYPE_CHECKING:
+    from core.events import TickEvent
 
 __all__ = ["AsyncDataIngestor", "AsyncWebSocketStream", "Ticker", "merge_streams"]
 
@@ -72,7 +85,7 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         delay_ms: int = 0,
     ) -> AsyncIterator[Ticker]:
         """Async CSV reader that yields ticks.
-        
+
         Args:
             path: Path to CSV file
             symbol: Trading symbol for the data
@@ -81,10 +94,10 @@ class AsyncDataIngestor(AsyncDataIngestionService):
             market: Optional market calendar identifier for timezone normalization
             chunk_size: Number of rows to read at a time
             delay_ms: Optional delay between chunks (for simulation)
-            
+
         Yields:
             Ticker objects from CSV
-            
+
         Raises:
             ValueError: If CSV is missing required columns
         """
@@ -94,15 +107,15 @@ class AsyncDataIngestor(AsyncDataIngestionService):
             try:
                 with resolved_path.open("r", encoding="utf-8") as f:
                     reader = csv.DictReader(f)
-                    
+
                     if reader.fieldnames is None:
                         raise ValueError("CSV file must include a header row")
-                        
+
                     required = {"ts", "price"}
                     missing = required - set(reader.fieldnames)
                     if missing:
                         raise ValueError(f"CSV missing columns: {', '.join(missing)}")
-                        
+
                     chunk: List[Ticker] = []
                     for row_number, row in enumerate(reader, start=2):
                         try:
@@ -119,33 +132,33 @@ class AsyncDataIngestor(AsyncDataIngestionService):
                                 instrument_type=instrument_type,
                             )
                             chunk.append(tick)
-                            
+
                             if len(chunk) >= chunk_size:
                                 for tick in chunk:
                                     yield tick
                                     metrics.record_tick_processed("csv", symbol)
                                 chunk = []
-                                
+
                                 if delay_ms > 0:
                                     await asyncio.sleep(delay_ms / 1000.0)
-                                    
+
                         except (TypeError, ValueError, InvalidOperation) as exc:
                             logger.warning(
                                 f"Skipping malformed row {row_number}",
                                 path=path,
-                                error=str(exc)
+                                error=str(exc),
                             )
                             continue
-                            
+
                     # Yield remaining ticks
                     for tick in chunk:
                         yield tick
                         metrics.record_tick_processed("csv", symbol)
-                        
+
             except Exception as exc:
                 logger.error("CSV ingestion failed", path=path, error=str(exc))
                 raise
-                
+
     async def stream_ticks(
         self,
         source: str,
@@ -181,8 +194,12 @@ class AsyncDataIngestor(AsyncDataIngestionService):
 
         count = 0
         try:
-            with logger.operation("async_stream_ticks", source=source, symbol=symbol, mode="connector"):
-                async for event in connector.stream_ticks(symbol=symbol, instrument_type=instrument_type):
+            with logger.operation(
+                "async_stream_ticks", source=source, symbol=symbol, mode="connector"
+            ):
+                async for event in connector.stream_ticks(
+                    symbol=symbol, instrument_type=instrument_type
+                ):
                     tick = _tick_event_to_price_tick(
                         event,
                         venue=source.upper(),
@@ -204,26 +221,26 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         batch_size: int = 100,
     ) -> int:
         """Process ticks in batches with async callback.
-        
+
         Args:
             ticks: Async iterator of ticks
             callback: Function to call with each batch
             batch_size: Number of ticks per batch
-            
+
         Returns:
             Total number of ticks processed
         """
         batch: list[Ticker] = []
         total = 0
-        
+
         async for tick in ticks:
             batch.append(tick)
             total += 1
-            
+
             if len(batch) >= batch_size:
                 callback(batch)
                 batch = []
-                
+
         # Process remaining ticks
         if batch:
             callback(batch)
@@ -242,7 +259,9 @@ class AsyncDataIngestor(AsyncDataIngestionService):
 
         connector, should_close = self._resolve_market_connector(source)
         if connector is None:
-            raise ValueError(f"No market data connector configured for source '{source}'")
+            raise ValueError(
+                f"No market data connector configured for source '{source}'"
+            )
 
         params = dict(kwargs)
         params.setdefault("symbol", symbol)
@@ -266,14 +285,18 @@ class AsyncDataIngestor(AsyncDataIngestionService):
             metrics.record_tick_processed(source, symbol)
         return ticks
 
-    def _resolve_market_connector(self, source: str) -> Tuple[Optional[BaseMarketDataConnector], bool]:
+    def _resolve_market_connector(
+        self, source: str
+    ) -> Tuple[Optional[BaseMarketDataConnector], bool]:
         entry = self._market_connectors.get(source.lower())
         if entry is None:
             return None, False
         if callable(entry):
             connector = entry()
             if not isinstance(connector, BaseMarketDataConnector):
-                raise TypeError("Connector factory must return a BaseMarketDataConnector instance")
+                raise TypeError(
+                    "Connector factory must return a BaseMarketDataConnector instance"
+                )
             return connector, True
         return entry, False
 
@@ -286,7 +309,9 @@ class AsyncDataIngestor(AsyncDataIngestionService):
         interval_ms: int,
         max_ticks: Optional[int],
     ) -> AsyncIterator[Ticker]:
-        with logger.operation("async_stream_ticks", source=source, symbol=symbol, mode="synthetic"):
+        with logger.operation(
+            "async_stream_ticks", source=source, symbol=symbol, mode="synthetic"
+        ):
             count = 0
 
             while max_ticks is None or count < max_ticks:
@@ -308,10 +333,10 @@ class AsyncDataIngestor(AsyncDataIngestionService):
 
 class AsyncWebSocketStream:
     """Async WebSocket stream handler (base class for exchange-specific implementations)."""
-    
+
     def __init__(self, url: str, symbol: str):
         """Initialize WebSocket stream.
-        
+
         Args:
             url: WebSocket URL
             symbol: Trading symbol to subscribe to
@@ -319,23 +344,23 @@ class AsyncWebSocketStream:
         self.url = url
         self.symbol = symbol
         self._running = False
-        
+
     async def connect(self) -> None:
         """Connect to WebSocket (to be implemented by subclasses)."""
         raise NotImplementedError
-        
+
     async def disconnect(self) -> None:
         """Disconnect from WebSocket (to be implemented by subclasses)."""
         raise NotImplementedError
-        
+
     async def subscribe(self) -> AsyncIterator[Ticker]:
         """Subscribe to tick updates (to be implemented by subclasses).
-        
+
         Yields:
             Ticker objects from WebSocket
         """
         raise NotImplementedError
-        
+
 
 async def merge_streams(*streams: AsyncIterator[Ticker]) -> AsyncIterator[Ticker]:
     """Merge multiple async tick streams into one resilient iterator.
@@ -346,7 +371,6 @@ async def merge_streams(*streams: AsyncIterator[Ticker]) -> AsyncIterator[Ticker
     Yields:
         Ticks from all streams in arrival order, skipping streams that fail.
     """
-    from typing import Any
 
     pending_tasks: dict[Any, AsyncIterator[Ticker]] = {}
 
@@ -391,12 +415,14 @@ __all__ = [
 
 
 def _tick_event_to_price_tick(
-    event: "TickEvent",
+    event: TickEvent,
     *,
     venue: str,
     instrument_type: InstrumentType,
 ) -> Ticker:
-    from core.events import TickEvent  # Local import to avoid circular dependencies at module import time
+    from core.events import (
+        TickEvent,  # Local import to avoid circular dependencies at module import time
+    )
 
     if not isinstance(event, TickEvent):
         raise TypeError("Expected TickEvent from connector stream")

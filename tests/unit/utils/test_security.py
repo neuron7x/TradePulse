@@ -12,7 +12,9 @@ from core.utils.security import SecretDetector, check_for_hardcoded_secrets
 def test_secret_detector_masks_findings() -> None:
     workspace = Path(tempfile.mkdtemp(prefix="secretdetector"))
     target = workspace / "config.py"
-    target.write_text("API_KEY = 'abcd1234'\npassword='verysecretvalue'\n", encoding="utf-8")
+    target.write_text(
+        "API_KEY = 'abcd1234'\npassword='verysecretvalue'\n", encoding="utf-8"
+    )
 
     detector = SecretDetector()
     findings = detector.scan_file(target)
@@ -37,7 +39,9 @@ def test_secret_detector_ignores_documentation(tmp_path: Path) -> None:
 
 def test_scan_directory_respects_extension_filter() -> None:
     repo = Path(tempfile.mkdtemp(prefix="secdir"))
-    (repo / "config.yaml").write_text("secret: 'should-be-detected'\n", encoding="utf-8")
+    (repo / "config.yaml").write_text(
+        "secret: 'should-be-detected'\n", encoding="utf-8"
+    )
     (repo / "image.png").write_bytes(b"binary-data")
 
     detector = SecretDetector()
@@ -46,7 +50,9 @@ def test_scan_directory_respects_extension_filter() -> None:
     assert "image.png" not in results
 
 
-def test_check_for_hardcoded_secrets_reports_findings(capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_for_hardcoded_secrets_reports_findings(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     workspace = Path(tempfile.mkdtemp(prefix="secretrepo"))
     env_file = workspace / "service.env"
     env_file.write_text('API_SECRET="supersecretvalue"\n', encoding="utf-8")
@@ -60,7 +66,9 @@ def test_check_for_hardcoded_secrets_reports_findings(capsys: pytest.CaptureFixt
     assert "********" in captured.out
 
 
-def test_check_for_hardcoded_secrets_returns_false_when_clean(capsys: pytest.CaptureFixture[str]) -> None:
+def test_check_for_hardcoded_secrets_returns_false_when_clean(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     workspace = Path(tempfile.mkdtemp(prefix="cleanrepo"))
     (workspace / "README.md").write_text("no secrets here", encoding="utf-8")
 

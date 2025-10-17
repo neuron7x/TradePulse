@@ -129,7 +129,9 @@ class TradePulseOrchestrator:
 
         market = self.ingest_market_data(source)
         features = self.build_features(market)
-        signals = self._system.generate_signals(features, strategy=strategy, symbol=source.symbol)
+        signals = self._system.generate_signals(
+            features, strategy=strategy, symbol=source.symbol
+        )
         payloads = self._system.signals_to_dtos(signals)
         return StrategyRun(market, features, signals, payloads)
 

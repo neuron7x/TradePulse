@@ -1,17 +1,13 @@
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Iterator
 from datetime import datetime, timezone
-from typing import Callable
-
-from collections import deque
-from typing import Iterator
 
 import pytest
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.testclient import TestClient
 from starlette.requests import Request as StarletteRequest
-
 
 from execution.risk import RiskLimits, RiskManager
 from src.admin.remote_control import (
@@ -120,7 +116,9 @@ def test_kill_switch_endpoint_reflects_facade_state() -> None:
 
     app = FastAPI()
     app.include_router(
-        create_remote_control_router(facade, audit_logger, identity_dependency=identity_dependency)
+        create_remote_control_router(
+            facade, audit_logger, identity_dependency=identity_dependency
+        )
     )
     client = TestClient(app)
     try:
@@ -223,7 +221,9 @@ def test_identity_dependency_errors_are_propagated() -> None:
     risk_manager = RiskManagerFacade(RiskManager(RiskLimits()))
 
     async def failing_identity(_: Request) -> AdminIdentity:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid cert")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid cert"
+        )
 
     app = FastAPI()
     app.include_router(
@@ -243,7 +243,10 @@ def _request_from_headers(headers: dict[str, str]) -> Request:
         "type": "http",
         "method": "GET",
         "path": "/admin/kill-switch",
-        "headers": [(key.lower().encode("utf-8"), value.encode("utf-8")) for key, value in headers.items()],
+        "headers": [
+            (key.lower().encode("utf-8"), value.encode("utf-8"))
+            for key, value in headers.items()
+        ],
         "client": ("10.0.0.99", 443),
     }
     return StarletteRequest(scope)

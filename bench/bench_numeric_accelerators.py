@@ -33,6 +33,7 @@ else:  # pragma: no cover - executed when numba is available
 
 
 if NUMBA_AVAILABLE:
+
     @njit(cache=True)
     def _numba_sliding_windows(
         data: np.ndarray, window: int, step: int
@@ -70,7 +71,10 @@ if NUMBA_AVAILABLE:
                 result[i] = sorted_data[lower]
             else:
                 weight = position - lower
-                result[i] = sorted_data[lower] + (sorted_data[upper] - sorted_data[lower]) * weight
+                result[i] = (
+                    sorted_data[lower]
+                    + (sorted_data[upper] - sorted_data[lower]) * weight
+                )
         return result
 
     @njit(cache=True)
@@ -83,7 +87,9 @@ if NUMBA_AVAILABLE:
         return result
 
     @njit(cache=True)
-    def _numba_convolve(signal: np.ndarray, kernel: np.ndarray, mode_code: int) -> np.ndarray:
+    def _numba_convolve(
+        signal: np.ndarray, kernel: np.ndarray, mode_code: int
+    ) -> np.ndarray:
         full = _numba_full_convolution(signal, kernel)
         n = signal.shape[0]
         m = kernel.shape[0]
@@ -146,11 +152,17 @@ def _register_sliding_windows(
         ("python", lambda: sliding_windows_python_backend(data, window, step)),
     ]
     if numpy_available():
-        registrations.append(("numpy", lambda: sliding_windows_numpy_backend(data, window, step)))
+        registrations.append(
+            ("numpy", lambda: sliding_windows_numpy_backend(data, window, step))
+        )
     if NUMBA_AVAILABLE:
-        registrations.append(("numba", lambda: _numba_sliding_windows(data, window, step)))
+        registrations.append(
+            ("numba", lambda: _numba_sliding_windows(data, window, step))
+        )
     if rust_available():
-        registrations.append(("rust", lambda: sliding_windows_rust_backend(data, window, step)))
+        registrations.append(
+            ("rust", lambda: sliding_windows_rust_backend(data, window, step))
+        )
     return registrations
 
 
@@ -161,12 +173,16 @@ def _register_quantiles(
         ("python", lambda: quantiles_python_backend(data, probabilities)),
     ]
     if numpy_available():
-        registrations.append(("numpy", lambda: quantiles_numpy_backend(data, probabilities)))
+        registrations.append(
+            ("numpy", lambda: quantiles_numpy_backend(data, probabilities))
+        )
     if NUMBA_AVAILABLE:
         probs_np = np.asarray(list(probabilities), dtype=np.float64)
         registrations.append(("numba", lambda: _numba_quantiles(data, probs_np)))
     if rust_available():
-        registrations.append(("rust", lambda: quantiles_rust_backend(data, probabilities)))
+        registrations.append(
+            ("rust", lambda: quantiles_rust_backend(data, probabilities))
+        )
     return registrations
 
 
@@ -177,18 +193,26 @@ def _register_convolution(
         ("python", lambda: convolve_python_backend(signal, kernel, mode=mode)),
     ]
     if numpy_available():
-        registrations.append(("numpy", lambda: convolve_numpy_backend(signal, kernel, mode=mode)))
+        registrations.append(
+            ("numpy", lambda: convolve_numpy_backend(signal, kernel, mode=mode))
+        )
     if NUMBA_AVAILABLE:
         mode_code = NUMBA_MODE_MAP[mode]
-        registrations.append(("numba", lambda: _numba_convolve(signal, kernel, mode_code)))
+        registrations.append(
+            ("numba", lambda: _numba_convolve(signal, kernel, mode_code))
+        )
     if rust_available():
-        registrations.append(("rust", lambda: convolve_rust_backend(signal, kernel, mode=mode)))
+        registrations.append(
+            ("rust", lambda: convolve_rust_backend(signal, kernel, mode=mode))
+        )
     return registrations
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--size", type=int, default=200_000, help="Length of the random data vector")
+    parser.add_argument(
+        "--size", type=int, default=200_000, help="Length of the random data vector"
+    )
     parser.add_argument("--window", type=int, default=64, help="Sliding window size")
     parser.add_argument("--step", type=int, default=4, help="Sliding window step")
     parser.add_argument(
@@ -198,7 +222,9 @@ def main() -> None:
         help="Convolution mode to benchmark",
     )
     parser.add_argument("--repeat", type=int, default=5, help="Benchmark repetitions")
-    parser.add_argument("--warmup", type=int, default=1, help="Warmup iterations before timing")
+    parser.add_argument(
+        "--warmup", type=int, default=1, help="Warmup iterations before timing"
+    )
     args = parser.parse_args()
 
     if not numpy_available():
@@ -229,15 +255,21 @@ def main() -> None:
         print(f"== {suite_name} ==")
         for backend, func in registrations:
             try:
-                elapsed = _benchmark(f"{suite_name}:{backend}", func, args.repeat, args.warmup)
+                elapsed = _benchmark(
+                    f"{suite_name}:{backend}", func, args.repeat, args.warmup
+                )
             except Exception as exc:
                 print(f"  {backend:>8}: error ({exc})")
                 continue
             throughput = args.size / elapsed / 1e6 if elapsed > 0 else float("inf")
-            print(f"  {backend:>8}: {elapsed * 1e3:8.3f} ms  ({throughput:8.3f} M items/s)")
+            print(
+                f"  {backend:>8}: {elapsed * 1e3:8.3f} ms  ({throughput:8.3f} M items/s)"
+            )
         print()
 
-    print("Tip: run with `python bench/bench_numeric_accelerators.py --help` for options.")
+    print(
+        "Tip: run with `python bench/bench_numeric_accelerators.py --help` for options."
+    )
 
 
 if __name__ == "__main__":

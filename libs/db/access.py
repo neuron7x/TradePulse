@@ -52,7 +52,9 @@ class SupportsCursorClose(Protocol):
     def close(self) -> None:  # pragma: no cover - runtime duck typing
         """Close the cursor."""
 
-    def execute(self, query: str, params: Params = None) -> Any:  # pragma: no cover - runtime duck typing
+    def execute(
+        self, query: str, params: Params = None
+    ) -> Any:  # pragma: no cover - runtime duck typing
         """Execute a SQL query."""
 
     def fetchone(self) -> RowT | None:  # pragma: no cover - runtime duck typing
@@ -132,7 +134,9 @@ class DataAccessLayer:
 
     # ------------------------------------------------------------------
     # Internal helpers
-    def _run(self, command: Callable[[SupportsCursorClose], RowT], *, commit_on_success: bool) -> RowT:
+    def _run(
+        self, command: Callable[[SupportsCursorClose], RowT], *, commit_on_success: bool
+    ) -> RowT:
         connection = self.connection_factory()
         try:
             cursor = connection.cursor()
@@ -151,4 +155,3 @@ class DataAccessLayer:
                     close()
         finally:
             connection.close()
-

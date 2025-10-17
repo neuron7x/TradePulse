@@ -41,15 +41,22 @@ class Position:
         signed_qty = quantity if side is OrderSide.BUY else -quantity
         previous_qty = self.quantity
 
-        if previous_qty == 0 or (previous_qty > 0 and signed_qty > 0) or (previous_qty < 0 and signed_qty < 0):
+        if (
+            previous_qty == 0
+            or (previous_qty > 0 and signed_qty > 0)
+            or (previous_qty < 0 and signed_qty < 0)
+        ):
             # Adding to existing exposure or opening a new one
             total_abs = abs(previous_qty) + quantity
             if total_abs == 0:
                 self.entry_price = price
             else:
                 self.entry_price = (
-                    self.entry_price * abs(previous_qty) + price * quantity
-                ) / total_abs if abs(previous_qty) > 0 else price
+                    (self.entry_price * abs(previous_qty) + price * quantity)
+                    / total_abs
+                    if abs(previous_qty) > 0
+                    else price
+                )
             self.quantity = previous_qty + signed_qty
         else:
             # Reducing or flipping exposure
@@ -82,7 +89,9 @@ class Position:
             self.unrealized_pnl = 0.0
             return
         direction = 1.0 if self.quantity > 0 else -1.0
-        self.unrealized_pnl = direction * abs(self.quantity) * (price - self.entry_price)
+        self.unrealized_pnl = (
+            direction * abs(self.quantity) * (price - self.entry_price)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize into primitives for upper layers."""

@@ -14,7 +14,8 @@ from core.indicators.kuramoto import compute_phase, kuramoto_order, multi_asset_
 from core.indicators.ricci import build_price_graph, mean_ricci
 
 try:  # Optional dependency during lightweight installs
-    from hypothesis import HealthCheck, given, settings, strategies as st
+    from hypothesis import HealthCheck, given, settings
+    from hypothesis import strategies as st
 except ImportError:  # pragma: no cover - nightly suites require hypothesis
     HealthCheck = None  # type: ignore[assignment]
     given = None  # type: ignore[assignment]
@@ -82,7 +83,9 @@ def test_long_backtest_with_heavy_indicators() -> None:
         signal = np.tanh(phase_velocity * curvature_scale * entropy_scale * order_scale)
         return np.clip(signal, -1.0, 1.0)
 
-    result = walk_forward(prices, heavy_signal, fee=0.0004, strategy_name="nightly-heavy")
+    result = walk_forward(
+        prices, heavy_signal, fee=0.0004, strategy_name="nightly-heavy"
+    )
 
     assert result.trades > prices.size * 0.02
     assert np.isfinite(result.pnl)
@@ -119,10 +122,11 @@ def test_multi_asset_kuramoto_high_cardinality() -> None:
         for seed in range(8)
     ]
     shifted: Iterable[np.ndarray] = (
-        asset + rng.normal(0.0, 0.05, asset.shape)
-        for asset in assets
+        asset + rng.normal(0.0, 0.05, asset.shape) for asset in assets
     )
-    order_value = multi_asset_kuramoto(tuple(np.asarray(x, dtype=float) for x in shifted))
+    order_value = multi_asset_kuramoto(
+        tuple(np.asarray(x, dtype=float) for x in shifted)
+    )
     assert 0.0 <= order_value <= 1.0 or np.isclose(order_value, 1.0)
 
 
@@ -150,7 +154,6 @@ if _HYPOTHESIS_AVAILABLE:
         assert phases.shape == series.shape
         finite_phases = np.nan_to_num(phases, nan=0.0, copy=False)
         assert np.all(np.isfinite(finite_phases))
-
 
     @settings(
         max_examples=15,

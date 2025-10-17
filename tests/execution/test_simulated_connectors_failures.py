@@ -16,7 +16,11 @@ class DummyConnector(SimulatedExchangeConnector):
     def __init__(self, *, failure_plan: deque[str | Exception] | None = None) -> None:
         specs = {
             "BTCUSD": SymbolSpecification(
-                "BTCUSD", min_qty=0.001, min_notional=10.0, step_size=0.001, tick_size=0.5
+                "BTCUSD",
+                min_qty=0.001,
+                min_notional=10.0,
+                step_size=0.001,
+                tick_size=0.5,
             )
         }
         super().__init__(
@@ -54,7 +58,9 @@ def test_simulated_connector_respects_idempotency_cache() -> None:
         ("timeout", TimeoutError),
     ],
 )
-def test_simulated_connector_failure_plan_tokens(token: str, expected_exception: type[BaseException]) -> None:
+def test_simulated_connector_failure_plan_tokens(
+    token: str, expected_exception: type[BaseException]
+) -> None:
     connector = DummyConnector(failure_plan=deque([token]))
     with pytest.raises(expected_exception):
         connector.place_order(_order())

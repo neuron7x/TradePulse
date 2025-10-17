@@ -1,5 +1,4 @@
 from datetime import date, datetime, time
-
 from zoneinfo import ZoneInfo
 
 from backtest.market_calendar import MarketCalendar, SessionHours

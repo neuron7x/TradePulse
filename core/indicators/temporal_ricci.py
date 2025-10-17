@@ -11,14 +11,13 @@ dependencies.
 
 from __future__ import annotations
 
+import warnings
 from collections import deque
 from dataclasses import dataclass
 from typing import Deque, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-import warnings
-
 
 # ---------------------------------------------------------------------------
 # Lightweight graph abstraction
@@ -210,7 +209,9 @@ class PriceLevelGraph:
         self.n_levels = int(max(n_levels, 1))
         self.connection_threshold = float(np.clip(connection_threshold, 0.0, 1.0))
 
-    def build(self, prices: np.ndarray, volumes: Optional[np.ndarray] = None) -> LightGraph:
+    def build(
+        self, prices: np.ndarray, volumes: Optional[np.ndarray] = None
+    ) -> LightGraph:
         price_array = np.asarray(prices, dtype=float)
         if price_array.size == 0:
             return LightGraph(self.n_levels)
@@ -236,7 +237,9 @@ class PriceLevelGraph:
                 vol = vol[:-1]
             if vol.size != indices.size - 1:
                 raise ValueError("volumes length must match len(prices) - 1")
-            weights = np.maximum(np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0), 0.0)
+            weights = np.maximum(
+                np.nan_to_num(vol, nan=0.0, posinf=0.0, neginf=0.0), 0.0
+            )
 
         transitions = np.column_stack((indices[:-1], indices[1:])).astype(int)
         mask = transitions[:, 0] != transitions[:, 1]
@@ -284,10 +287,16 @@ class TemporalRicciAnalyzer:
         self.connection_threshold = connection_threshold
 
         self.ricci = OllivierRicciCurvatureLite(alpha=0.5)
-        self.builder = PriceLevelGraph(n_levels=self.n_levels, connection_threshold=connection_threshold)
-        self.history: Deque[GraphSnapshot] = deque(maxlen=self.n_snapshots if retain_history else None)
+        self.builder = PriceLevelGraph(
+            n_levels=self.n_levels, connection_threshold=connection_threshold
+        )
+        self.history: Deque[GraphSnapshot] = deque(
+            maxlen=self.n_snapshots if retain_history else None
+        )
 
-    def _snapshot(self, prices: np.ndarray, volumes: Optional[np.ndarray], ts: pd.Timestamp) -> GraphSnapshot:
+    def _snapshot(
+        self, prices: np.ndarray, volumes: Optional[np.ndarray], ts: pd.Timestamp
+    ) -> GraphSnapshot:
         graph = self.builder.build(prices, volumes)
         curvatures = self.ricci.compute_all_curvatures(graph)
         avg_curvature = float(np.mean(list(curvatures.values()))) if curvatures else 0.0
@@ -322,13 +331,18 @@ class TemporalRicciAnalyzer:
 
         metrics: List[List[float]] = []
         for snapshot in self.history:
-            degrees = [len(snapshot.graph.neighbors(i)) for i in range(snapshot.graph.number_of_nodes())]
+            degrees = [
+                len(snapshot.graph.neighbors(i))
+                for i in range(snapshot.graph.number_of_nodes())
+            ]
             active = [deg for deg in degrees if deg > 0]
-            metrics.append([
-                float(snapshot.graph.number_of_edges()),
-                float(np.mean(active)) if active else 0.0,
-                snapshot.avg_curvature,
-            ])
+            metrics.append(
+                [
+                    float(snapshot.graph.number_of_edges()),
+                    float(np.mean(active)) if active else 0.0,
+                    snapshot.avg_curvature,
+                ]
+            )
 
         matrix = np.array(metrics, dtype=float)
         diffs = np.abs(np.diff(matrix, axis=0))
@@ -340,10 +354,20 @@ class TemporalRicciAnalyzer:
         normalised = diffs / normaliser
         base_score = float(np.mean(normalised))
 
-        curvatures = np.array([snap.avg_curvature for snap in self.history], dtype=float)
-        curvature_component = float(np.clip(np.std(np.diff(curvatures)), 0.0, 1.0)) if curvatures.size >= 2 else 0.0
+        curvatures = np.array(
+            [snap.avg_curvature for snap in self.history], dtype=float
+        )
+        curvature_component = (
+            float(np.clip(np.std(np.diff(curvatures)), 0.0, 1.0))
+            if curvatures.size >= 2
+            else 0.0
+        )
 
-        volatility_series = [np.std(np.diff(snap.price_levels)) for snap in self.history if snap.price_levels.size >= 2]
+        volatility_series = [
+            np.std(np.diff(snap.price_levels))
+            for snap in self.history
+            if snap.price_levels.size >= 2
+        ]
         if len(volatility_series) >= 2:
             if len(volatility_series) > 2:
                 baseline = float(np.mean(volatility_series[:-2]))
@@ -357,7 +381,9 @@ class TemporalRicciAnalyzer:
 
         beta = 8.0
         transition = 1.0 / (1.0 + np.exp(-beta * (base_score - 0.15)))
-        return float(np.clip(transition + 0.2 * curvature_component + 0.2 * vol_diff, 0.0, 1.0))
+        return float(
+            np.clip(transition + 0.2 * curvature_component + 0.2 * vol_diff, 0.0, 1.0)
+        )
 
     def _stability(self) -> float:
         if len(self.history) < 2:
@@ -482,4 +508,3 @@ __all__ = [
     "TemporalRicciAnalyzer",
     "TemporalRicciResult",
 ]
-

@@ -1,13 +1,12 @@
 """Execution connectors, order management, and risk tooling."""
 
 from .canary import CanaryConfig, CanaryController, CanaryDecision, MetricThreshold
-from .connectors import ExecutionConnector, OrderError
-from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
+from .connectors import ExecutionConnector, OrderError
+from .live_loop import LiveExecutionLoop, LiveLoopConfig
+from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .oms import OMSConfig, OrderManagementSystem
 from .order_lifecycle import OrderEvent, OrderLifecycle, OrderLifecycleStore
-from .live_loop import LiveExecutionLoop, LiveLoopConfig
-from .watchdog import Watchdog
 from .risk import (
     IdempotentRetryExecutor,
     KillSwitch,
@@ -18,6 +17,7 @@ from .risk import (
     RiskManager,
     SQLiteKillSwitchStateStore,
 )
+from .watchdog import Watchdog
 
 __all__ = [
     "CanaryConfig",

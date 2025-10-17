@@ -11,9 +11,9 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from enum import Enum, auto
 from queue import Empty, Queue
 from typing import Any, Callable, Dict, Iterable, Mapping
 
@@ -22,6 +22,7 @@ import httpx
 try:  # pragma: no cover - optional dependency guard
     from dotenv import load_dotenv
 except Exception:  # pragma: no cover - library not installed
+
     def load_dotenv(*_: object, **__: object) -> None:
         """Fallback noop when python-dotenv is not available."""
 
@@ -29,8 +30,7 @@ else:
     load_dotenv()
 
 
-from execution.connectors import ExecutionConnector, OrderError, TransientOrderError
-
+from execution.connectors import ExecutionConnector
 
 VaultResolver = Callable[[str], Mapping[str, str]]
 RotationHook = Callable[[Mapping[str, str]], None]
@@ -96,7 +96,9 @@ class CredentialProvider:
             return {}
         payload = self.vault_resolver(vault_path)
         if not isinstance(payload, Mapping):
-            raise CredentialError("Vault resolver must return a mapping of credential keys to values")
+            raise CredentialError(
+                "Vault resolver must return a mapping of credential keys to values"
+            )
         return {str(k).upper(): str(v) for k, v in payload.items()}
 
     def load(self, *, force: bool = False) -> Mapping[str, str]:
@@ -117,10 +119,13 @@ class CredentialProvider:
     def rotate(self, new_values: Mapping[str, str] | None = None) -> Mapping[str, str]:
         if new_values is not None:
             normalized = {k.upper(): v for k, v in new_values.items()}
-            missing = [key for key in self.required_keys if key.upper() not in normalized]
+            missing = [
+                key for key in self.required_keys if key.upper() not in normalized
+            ]
             if missing:
                 raise CredentialError(
-                    "Cannot rotate credentials because required keys are missing: " + ", ".join(missing)
+                    "Cannot rotate credentials because required keys are missing: "
+                    + ", ".join(missing)
                 )
             with self._lock:
                 self._cache = normalized
@@ -141,7 +146,9 @@ class HMACSigner:
         self.algorithm = algorithm
 
     def sign(self, payload: str) -> str:
-        digest = hmac.new(self.secret, payload.encode(), getattr(hashlib, self.algorithm))
+        digest = hmac.new(
+            self.secret, payload.encode(), getattr(hashlib, self.algorithm)
+        )
         return digest.hexdigest()
 
 
@@ -182,7 +189,9 @@ class HTTPBackoffController:
     def backoff(self, response: httpx.Response | None = None) -> None:
         with self._lock:
             self._attempts += 1
-            exponential = min(self.base_delay * (2 ** (self._attempts - 1)), self.max_delay)
+            exponential = min(
+                self.base_delay * (2 ** (self._attempts - 1)), self.max_delay
+            )
             delay = random.uniform(self.base_delay, exponential)
             if response is not None:
                 retry_after = response.headers.get("Retry-After")
@@ -303,7 +312,9 @@ class DuplicateResponseDetector:
         self._lock = threading.Lock()
         self._records: "OrderedDict[str, _DuplicateRecord]" = OrderedDict()
 
-    def register(self, fingerprint: str, response: httpx.Response) -> tuple[bool, float | None]:
+    def register(
+        self, fingerprint: str, response: httpx.Response
+    ) -> tuple[bool, float | None]:
         payload = response.content
         digest = hashlib.sha256(payload).hexdigest()
         now = self._clock()
@@ -314,14 +325,20 @@ class DuplicateResponseDetector:
                 existing.last_seen = now
                 self._records.move_to_end(fingerprint)
                 return True, existing.first_seen
-            self._records[fingerprint] = _DuplicateRecord(digest=digest, first_seen=now, last_seen=now)
+            self._records[fingerprint] = _DuplicateRecord(
+                digest=digest, first_seen=now, last_seen=now
+            )
             if len(self._records) > self._max_entries:
                 self._records.popitem(last=False)
             return False, None
 
     def _purge(self, now: float) -> None:
         expiration = now - self._ttl
-        expired = [key for key, record in self._records.items() if record.last_seen < expiration]
+        expired = [
+            key
+            for key, record in self._records.items()
+            if record.last_seen < expiration
+        ]
         for key in expired:
             self._records.pop(key, None)
 
@@ -389,10 +406,16 @@ def parse_server_time(response: httpx.Response) -> float | None:
             parsed = None
         if parsed is not None:
             return parsed.timestamp()
-    server_time = response.headers.get("X-Server-Time") or response.headers.get("Server-Time")
+    server_time = response.headers.get("X-Server-Time") or response.headers.get(
+        "Server-Time"
+    )
     if server_time:
         try:
-            return float(server_time) / 1000 if len(server_time) > 11 else float(server_time)
+            return (
+                float(server_time) / 1000
+                if len(server_time) > 11
+                else float(server_time)
+            )
         except ValueError:
             return None
     return None
@@ -441,8 +464,10 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
     ) -> None:
         super().__init__(sandbox=sandbox)
         self.env_prefix = env_prefix
-        self._base_url = (sandbox_url if sandbox and sandbox_url else base_url).rstrip("/")
-        self._ws_url = (sandbox_ws_url if sandbox and sandbox_ws_url else ws_url)
+        self._base_url = (sandbox_url if sandbox and sandbox_url else base_url).rstrip(
+            "/"
+        )
+        self._ws_url = sandbox_ws_url if sandbox and sandbox_ws_url else ws_url
         self._timeout = timeout
         self._transport = transport
         if max_retries <= 0:
@@ -483,7 +508,9 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
             self._credentials = self._credential_provider.load()
         self._signer = self._create_signer(self.credentials)
         if self._http_client is None:
-            timeout_config = httpx.Timeout(self._timeout, connect=self._timeout, read=self._timeout * 3)
+            timeout_config = httpx.Timeout(
+                self._timeout, connect=self._timeout, read=self._timeout * 3
+            )
             self._http_client = httpx.Client(
                 base_url=self._base_url,
                 timeout=timeout_config,
@@ -534,7 +561,10 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
                 for key, val in sorted(value.items(), key=lambda item: str(item[0]))
             }
         if isinstance(value, (list, tuple, set)):
-            return [AuthenticatedRESTExecutionConnector._normalise_component(item) for item in value]
+            return [
+                AuthenticatedRESTExecutionConnector._normalise_component(item)
+                for item in value
+            ]
         if isinstance(value, (bytes, bytearray)):
             try:
                 return value.decode()
@@ -586,15 +616,29 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         params = dict(params or {})
         headers = dict(headers or {})
         request_kwargs = dict(kwargs)
-        timeout_override = request_timeout if request_timeout is not None else request_kwargs.pop("timeout", None)
-        effective_timeout = timeout_override if timeout_override is not None else self._timeout
+        timeout_override = (
+            request_timeout
+            if request_timeout is not None
+            else request_kwargs.pop("timeout", None)
+        )
+        effective_timeout = (
+            timeout_override if timeout_override is not None else self._timeout
+        )
         normalized_method = method.upper()
         if idempotent is None:
-            idempotent = normalized_method in {"GET", "HEAD", "OPTIONS", "DELETE", "PUT"}
+            idempotent = normalized_method in {
+                "GET",
+                "HEAD",
+                "OPTIONS",
+                "DELETE",
+                "PUT",
+            }
             if normalized_method in {"POST", "PATCH"} and idempotency_key is not None:
                 idempotent = True
         max_attempts = self._max_retries if allow_retry and idempotent else 1
-        fingerprint = self._fingerprint_request(normalized_method, path, params, body, idempotency_key)
+        fingerprint = self._fingerprint_request(
+            normalized_method, path, params, body, idempotency_key
+        )
         attempt = 0
         last_error: Exception | None = None
         while attempt < max_attempts:
@@ -660,7 +704,9 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
             self._rotation_attempted = False
             self._backoff.reset()
             self._circuit_breaker.record_success()
-            duplicate, first_seen = self._duplicate_detector.register(fingerprint, response)
+            duplicate, first_seen = self._duplicate_detector.register(
+                fingerprint, response
+            )
             response.extensions["tradepulse_duplicate"] = duplicate
             if duplicate and first_seen is not None:
                 response.extensions["tradepulse_duplicate_first_seen"] = first_seen
@@ -695,7 +741,9 @@ class AuthenticatedRESTExecutionConnector(ExecutionConnector):
         try:
             from websockets.sync.client import connect  # type: ignore
         except Exception as exc:  # pragma: no cover - optional dependency guard
-            raise RuntimeError("websockets library is required for streaming support") from exc
+            raise RuntimeError(
+                "websockets library is required for streaming support"
+            ) from exc
         return connect(url)
 
     def _ws_loop(self) -> None:

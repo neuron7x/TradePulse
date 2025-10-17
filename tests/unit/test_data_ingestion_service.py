@@ -9,7 +9,8 @@ import pandas as pd
 import pytest
 
 from core.data.ingestion import DataIngestor
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from src.data.ingestion_service import (
     CacheEntrySnapshot,
     DataIngestionCacheService,
@@ -17,7 +18,9 @@ from src.data.ingestion_service import (
 )
 
 
-def _tick(ts: datetime, price: float, *, symbol: str = "BTCUSD", venue: str = "BINANCE") -> Ticker:
+def _tick(
+    ts: datetime, price: float, *, symbol: str = "BTCUSD", venue: str = "BINANCE"
+) -> Ticker:
     return Ticker.create(
         symbol=symbol,
         venue=venue,
@@ -44,11 +47,15 @@ def test_cache_ticks_records_metadata() -> None:
     )
     service = DataIngestionCacheService(clock=clock)
 
-    cached = service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    cached = service.cache_ticks(
+        ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
 
     assert isinstance(cached, pd.DataFrame)
     assert list(cached.columns) == ["price", "volume"]
-    metadata = service.metadata_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    metadata = service.metadata_for(
+        layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
     assert isinstance(metadata, CacheEntrySnapshot)
     assert metadata.rows == 3
     assert metadata.start == ticks[0].timestamp
@@ -63,7 +70,9 @@ def test_cache_ticks_validates_symbol_and_venue() -> None:
     service = DataIngestionCacheService()
 
     with pytest.raises(ValueError):
-        service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+        service.cache_ticks(
+            ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+        )
 
 
 def test_cache_frame_rejects_nan_values() -> None:
@@ -73,7 +82,9 @@ def test_cache_frame_rejects_nan_values() -> None:
             datetime(2024, 1, 1, minute=1, tzinfo=timezone.utc),
         ]
     )
-    frame = pd.DataFrame({"price": [100.0, float("nan")], "volume": [1.0, 2.0]}, index=index)
+    frame = pd.DataFrame(
+        {"price": [100.0, float("nan")], "volume": [1.0, 2.0]}, index=index
+    )
     service = DataIngestionCacheService()
 
     with pytest.raises(DataIntegrityError, match="NaN"):
@@ -126,7 +137,9 @@ def test_get_cached_frame_supports_ranges() -> None:
     base = datetime(2024, 1, 1, tzinfo=timezone.utc)
     ticks = [_tick(base.replace(minute=i), 100.0 + i) for i in range(5)]
     service = DataIngestionCacheService()
-    service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    service.cache_ticks(
+        ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
 
     subset = service.get_cached_frame(
         layer="raw",
@@ -148,7 +161,9 @@ def test_cache_ticks_rejects_blank_timeframe() -> None:
     service = DataIngestionCacheService()
 
     with pytest.raises(ValueError, match="timeframe must be a non-empty string"):
-        service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="   ")
+        service.cache_ticks(
+            ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="   "
+        )
 
 
 def test_cache_frame_normalises_timezone_naive_index() -> None:
@@ -159,7 +174,9 @@ def test_cache_frame_normalises_timezone_naive_index() -> None:
             datetime(2024, 1, 1, 0, 2),
         ]
     )
-    frame = pd.DataFrame({"price": [100.0, 101.0, 102.0], "volume": [1.0, 1.0, 1.0]}, index=index)
+    frame = pd.DataFrame(
+        {"price": [100.0, 101.0, 102.0], "volume": [1.0, 1.0, 1.0]}, index=index
+    )
     service = DataIngestionCacheService()
 
     cached = service.cache_frame(
@@ -173,7 +190,9 @@ def test_cache_frame_normalises_timezone_naive_index() -> None:
     assert cached.index.tz is not None
     assert cached.index.tz.tzname(None) == "UTC"
     assert cached.index.is_monotonic_increasing
-    metadata = service.metadata_for(layer="raw", symbol="ETHUSD", venue="BINANCE", timeframe="1min")
+    metadata = service.metadata_for(
+        layer="raw", symbol="ETHUSD", venue="BINANCE", timeframe="1min"
+    )
     assert metadata is not None and metadata.rows == 3
 
 
@@ -184,7 +203,9 @@ def test_cache_frame_rejects_non_numeric_values() -> None:
             datetime(2024, 1, 1, minute=1, tzinfo=timezone.utc),
         ]
     )
-    frame = pd.DataFrame({"price": ["100.0", "invalid"], "volume": [1.0, 2.0]}, index=index)
+    frame = pd.DataFrame(
+        {"price": ["100.0", "invalid"], "volume": [1.0, 2.0]}, index=index
+    )
     service = DataIngestionCacheService()
 
     with pytest.raises(DataIntegrityError, match="non-numeric"):
@@ -241,7 +262,9 @@ def test_get_cached_frame_coerces_boundary_timezones() -> None:
     base = datetime(2024, 1, 1, tzinfo=timezone.utc)
     ticks = [_tick(base.replace(minute=i), 100.0 + i) for i in range(5)]
     service = DataIngestionCacheService()
-    service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    service.cache_ticks(
+        ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
 
     start = datetime(2024, 1, 1, 0, 1)
     end = datetime(2024, 1, 1, 2, 3, tzinfo=timezone(timedelta(hours=2)))
@@ -255,7 +278,11 @@ def test_get_cached_frame_coerces_boundary_timezones() -> None:
         end=end,
     )
 
-    assert list(subset.index) == [ticks[1].timestamp, ticks[2].timestamp, ticks[3].timestamp]
+    assert list(subset.index) == [
+        ticks[1].timestamp,
+        ticks[2].timestamp,
+        ticks[3].timestamp,
+    ]
 
 
 def test_cache_frame_records_empty_frame_metadata() -> None:
@@ -274,7 +301,9 @@ def test_cache_frame_records_empty_frame_metadata() -> None:
     )
 
     assert cached.empty
-    metadata = service.metadata_for(layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    metadata = service.metadata_for(
+        layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
     assert metadata is not None
     assert metadata.rows == 0
     assert metadata.start is None and metadata.end is None
@@ -302,7 +331,9 @@ def test_ingest_csv_populates_cache(tmp_path: Path) -> None:
     )
 
     assert frame.shape[0] == 2
-    metadata = service.metadata_for(layer="raw", symbol="BTCUSD", venue="CSV", timeframe="1min")
+    metadata = service.metadata_for(
+        layer="raw", symbol="BTCUSD", venue="CSV", timeframe="1min"
+    )
     assert metadata is not None
     assert metadata.rows == 2
     assert metadata.start == frame.index.min().to_pydatetime()
@@ -316,9 +347,17 @@ def test_cache_snapshot_returns_sorted_entries() -> None:
         datetime(2024, 1, 6, tzinfo=timezone.utc),
     )
     service = DataIngestionCacheService(clock=clock)
-    service.cache_ticks(ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min")
+    service.cache_ticks(
+        ticks, layer="raw", symbol="BTCUSD", venue="BINANCE", timeframe="1min"
+    )
     feature_ticks = [_tick(base.replace(minute=i * 5), 100.0 + i) for i in range(2)]
-    service.cache_ticks(feature_ticks, layer="features", symbol="BTCUSD", venue="BINANCE", timeframe="5min")
+    service.cache_ticks(
+        feature_ticks,
+        layer="features",
+        symbol="BTCUSD",
+        venue="BINANCE",
+        timeframe="5min",
+    )
 
     snapshot = service.cache_snapshot()
 
@@ -329,4 +368,7 @@ def test_cache_snapshot_returns_sorted_entries() -> None:
 
 def test_metadata_for_unknown_key_returns_none() -> None:
     service = DataIngestionCacheService()
-    assert service.metadata_for(layer="raw", symbol="AAA", venue="BBB", timeframe="1min") is None
+    assert (
+        service.metadata_for(layer="raw", symbol="AAA", venue="BBB", timeframe="1min")
+        is None
+    )

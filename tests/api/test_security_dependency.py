@@ -17,7 +17,9 @@ from starlette.requests import Request
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
 os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
-os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
+os.environ.setdefault(
+    "TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks"
+)
 
 from application.api.security import get_api_security_settings, verify_request_identity
 from application.settings import ApiSecuritySettings
@@ -65,9 +67,7 @@ def oauth2_context(monkeypatch: pytest.MonkeyPatch) -> OAuthContext:
             return jwk_dict
         return None
 
-    monkeypatch.setattr(
-        "application.api.security._jwks_resolver.get_key", fake_get_key
-    )
+    monkeypatch.setattr("application.api.security._jwks_resolver.get_key", fake_get_key)
 
     def mint_token(
         *,
@@ -292,7 +292,9 @@ async def test_missing_kid_in_header_is_rejected(
         header.pop("kid", None)
         return header
 
-    monkeypatch.setattr("application.api.security.jwt.get_unverified_header", fake_get_unverified_header)
+    monkeypatch.setattr(
+        "application.api.security.jwt.get_unverified_header", fake_get_unverified_header
+    )
     request = _make_request()
     credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=token)
 
@@ -308,10 +310,14 @@ async def test_tampered_signature_is_rejected(oauth2_context: OAuthContext) -> N
     dependency = verify_request_identity()
     token = oauth2_context.mint_token()
     header, payload, signature = token.split(".")
-    tampered_signature = (signature[:-2] + "AA") if signature.endswith("==") else ("A" * len(signature))
+    tampered_signature = (
+        (signature[:-2] + "AA") if signature.endswith("==") else ("A" * len(signature))
+    )
     tampered_token = ".".join([header, payload, tampered_signature])
     request = _make_request()
-    credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=tampered_token)
+    credentials = HTTPAuthorizationCredentials(
+        scheme="Bearer", credentials=tampered_token
+    )
 
     with pytest.raises(HTTPException) as exc:
         await dependency(request, credentials, oauth2_context.settings)
@@ -381,4 +387,3 @@ async def test_unsupported_signing_key_type_is_rejected(
 
     assert exc.value.status_code == 401
     assert exc.value.detail == "Unsupported signing key type for bearer token."
-

@@ -56,7 +56,9 @@ def test_auto_rollback_guard_respects_cooldown(base_time: datetime) -> None:
         evaluation_period=timedelta(minutes=5),
         cooldown=timedelta(seconds=30),
     )
-    guard = AutoRollbackGuard(config=config, rollback_callback=lambda r, s: triggered.append(r))
+    guard = AutoRollbackGuard(
+        config=config, rollback_callback=lambda r, s: triggered.append(r)
+    )
 
     first_trigger_time = base_time + timedelta(seconds=1)
     guard.record_outcome(200.0, True, timestamp=base_time)
@@ -64,20 +66,26 @@ def test_auto_rollback_guard_respects_cooldown(base_time: datetime) -> None:
     assert triggered == ["latency"]
 
     within_cooldown = first_trigger_time + timedelta(seconds=10)
-    assert guard.evaluate_snapshot(
-        error_rate=0.5,
-        latency_p95_ms=1000.0,
-        timestamp=within_cooldown,
-        total_requests=100,
-    ) is False
+    assert (
+        guard.evaluate_snapshot(
+            error_rate=0.5,
+            latency_p95_ms=1000.0,
+            timestamp=within_cooldown,
+            total_requests=100,
+        )
+        is False
+    )
 
     outside_cooldown = first_trigger_time + timedelta(seconds=45)
-    assert guard.evaluate_snapshot(
-        error_rate=0.6,
-        latency_p95_ms=900.0,
-        timestamp=outside_cooldown,
-        total_requests=120,
-    ) is True
+    assert (
+        guard.evaluate_snapshot(
+            error_rate=0.6,
+            latency_p95_ms=900.0,
+            timestamp=outside_cooldown,
+            total_requests=120,
+        )
+        is True
+    )
     assert triggered == ["latency", "error_rate"]
 
 
@@ -100,4 +108,7 @@ def test_prune_discards_old_samples(base_time: datetime) -> None:
     old_event = RequestSample(base_time - timedelta(seconds=60), 100.0, True)
     guard._events.append(old_event)
     guard.record_outcome(120.0, True, timestamp=base_time)
-    assert all(sample.timestamp >= base_time - timedelta(seconds=30) for sample in guard._events)
+    assert all(
+        sample.timestamp >= base_time - timedelta(seconds=30)
+        for sample in guard._events
+    )

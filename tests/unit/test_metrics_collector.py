@@ -11,7 +11,9 @@ from prometheus_client import CollectorRegistry
 from core.utils.metrics import MetricsCollector
 
 
-def _sample_value(registry: CollectorRegistry, name: str, labels: dict[str, str] | None = None) -> float | None:
+def _sample_value(
+    registry: CollectorRegistry, name: str, labels: dict[str, str] | None = None
+) -> float | None:
     """Helper to extract metric samples from the registry."""
 
     return registry.get_sample_value(name, labels or {})
@@ -37,7 +39,13 @@ def _p2_quantile(samples: Iterable[float], probability: float) -> float:
 
     ordered = sorted(values[:5])
     positions = [1, 2, 3, 4, 5]
-    desired = [1.0, 1.0 + 2 * probability, 1.0 + 4 * probability, 3.0 + 2 * probability, 5.0]
+    desired = [
+        1.0,
+        1.0 + 2 * probability,
+        1.0 + 4 * probability,
+        3.0 + 2 * probability,
+        5.0,
+    ]
     increments = [0.0, probability / 2.0, probability, (1.0 + probability) / 2.0, 1.0]
 
     for x in values[5:]:
@@ -64,19 +72,31 @@ def _p2_quantile(samples: Iterable[float], probability: float) -> float:
 
         for i in range(1, 4):
             d = desired[i] - positions[i]
-            if (d >= 1 and positions[i + 1] - positions[i] > 1) or (d <= -1 and positions[i - 1] - positions[i] < -1):
+            if (d >= 1 and positions[i + 1] - positions[i] > 1) or (
+                d <= -1 and positions[i - 1] - positions[i] < -1
+            ):
                 d_sign = 1 if d > 0 else -1
-                new_height = ordered[i] + d_sign / (positions[i + 1] - positions[i - 1]) * (
-                    (positions[i] - positions[i - 1] + d_sign) * (ordered[i + 1] - ordered[i]) / (positions[i + 1] - positions[i])
-                    + (positions[i + 1] - positions[i] - d_sign) * (ordered[i] - ordered[i - 1]) / (positions[i] - positions[i - 1])
+                new_height = ordered[i] + d_sign / (
+                    positions[i + 1] - positions[i - 1]
+                ) * (
+                    (positions[i] - positions[i - 1] + d_sign)
+                    * (ordered[i + 1] - ordered[i])
+                    / (positions[i + 1] - positions[i])
+                    + (positions[i + 1] - positions[i] - d_sign)
+                    * (ordered[i] - ordered[i - 1])
+                    / (positions[i] - positions[i - 1])
                 )
                 if ordered[i - 1] < new_height < ordered[i + 1]:
                     ordered[i] = new_height
                 else:
                     if d_sign > 0:
-                        ordered[i] += (ordered[i + 1] - ordered[i]) / (positions[i + 1] - positions[i])
+                        ordered[i] += (ordered[i + 1] - ordered[i]) / (
+                            positions[i + 1] - positions[i]
+                        )
                     else:
-                        ordered[i] += (ordered[i - 1] - ordered[i]) / (positions[i - 1] - positions[i])
+                        ordered[i] += (ordered[i - 1] - ordered[i]) / (
+                            positions[i - 1] - positions[i]
+                        )
                 positions[i] += d_sign
 
     return float(ordered[2])
@@ -129,7 +149,9 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     collector.set_strategy_score("alpha", 0.87)
     collector.set_strategy_memory_size(4)
     collector.record_tick_processed("csv", "ETH-USDT", count=3)
-    collector.record_order_placed("binance", "ETH-USDT", "market", status="success", count=2)
+    collector.record_order_placed(
+        "binance", "ETH-USDT", "market", status="success", count=2
+    )
 
     duration_count = _sample_value(
         registry,
@@ -139,7 +161,12 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     rejected_total = _sample_value(
         registry,
         "tradepulse_orders_placed_total",
-        {"exchange": "binance", "symbol": "ETH-USDT", "order_type": "limit", "status": "rejected"},
+        {
+            "exchange": "binance",
+            "symbol": "ETH-USDT",
+            "order_type": "limit",
+            "status": "rejected",
+        },
     )
     open_positions = _sample_value(
         registry,
@@ -160,7 +187,12 @@ def test_order_placement_context_uses_custom_status_and_updates_gauges() -> None
     market_orders = _sample_value(
         registry,
         "tradepulse_orders_placed_total",
-        {"exchange": "binance", "symbol": "ETH-USDT", "order_type": "market", "status": "success"},
+        {
+            "exchange": "binance",
+            "symbol": "ETH-USDT",
+            "order_type": "market",
+            "status": "success",
+        },
     )
 
     assert duration_count == 1.0
@@ -376,7 +408,10 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
     [
         ("data_ingestion_latency_quantiles", {"source": "csv", "symbol": "BTC-USDT"}),
         ("signal_generation_latency_quantiles", {"strategy": "trend"}),
-        ("order_submission_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
+        (
+            "order_submission_latency_quantiles",
+            {"exchange": "demo", "symbol": "ETH-USDT"},
+        ),
         ("order_fill_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
         ("order_ack_latency_quantiles", {"exchange": "demo", "symbol": "ETH-USDT"}),
         (
@@ -385,7 +420,9 @@ def test_signal_generation_latency_and_equity_curve_gauge() -> None:
         ),
     ],
 )
-def test_deterministic_quantiles_match_numpy_and_benchmark(gauge_name: str, labels: dict[str, str]) -> None:
+def test_deterministic_quantiles_match_numpy_and_benchmark(
+    gauge_name: str, labels: dict[str, str]
+) -> None:
     registry = CollectorRegistry()
     collector = MetricsCollector(registry)
 

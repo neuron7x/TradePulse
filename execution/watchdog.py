@@ -175,7 +175,9 @@ class Watchdog:
         """Register and immediately start a worker."""
 
         if self._stopping:
-            raise RuntimeError("Cannot register workers after watchdog has been stopped")
+            raise RuntimeError(
+                "Cannot register workers after watchdog has been stopped"
+            )
 
         if args is None:
             args = ()
@@ -199,16 +201,25 @@ class Watchdog:
                 spec.target(*spec.args, **spec.kwargs)
             except Exception as exc:  # pragma: no cover - defensive logging path
                 LOGGER.exception(
-                    "Worker crashed", extra={"event": "watchdog.worker_crash", "worker": name, "error": str(exc)}
+                    "Worker crashed",
+                    extra={
+                        "event": "watchdog.worker_crash",
+                        "worker": name,
+                        "error": str(exc),
+                    },
                 )
 
-        thread = threading.Thread(target=_runner, name=f"{self._name}-{name}", daemon=True)
+        thread = threading.Thread(
+            target=_runner, name=f"{self._name}-{name}", daemon=True
+        )
         spec.thread = thread
         thread.start()
 
     def _monitor_loop(self) -> None:
         next_heartbeat = time.monotonic() + self._heartbeat_interval
-        next_probe = time.monotonic() + self._health_probe_interval if self._health_url else None
+        next_probe = (
+            time.monotonic() + self._health_probe_interval if self._health_url else None
+        )
 
         while not self._stop_event.wait(self._monitor_interval):
             self._check_workers()
@@ -241,7 +252,12 @@ class Watchdog:
 
             spec.restarts += 1
             LOGGER.warning(
-                "Restarting worker", extra={"event": "watchdog.worker_restart", "worker": name, "restarts": spec.restarts}
+                "Restarting worker",
+                extra={
+                    "event": "watchdog.worker_restart",
+                    "worker": name,
+                    "restarts": spec.restarts,
+                },
             )
             self._metrics.record_watchdog_restart(self._name, name)
             self._start_worker(name, spec)
@@ -251,11 +267,15 @@ class Watchdog:
             name: bool(spec.thread and spec.thread.is_alive())
             for name, spec in list(self._workers.items())
         }
-        payload = json.dumps({"watchdog": self._name, "timestamp": time.time(), "workers": status})
+        payload = json.dumps(
+            {"watchdog": self._name, "timestamp": time.time(), "workers": status}
+        )
         try:
             if self._redis_client is not None and self._heartbeat_channel:
                 self._redis_client.publish(self._heartbeat_channel, payload)
-        except Exception as exc:  # pragma: no cover - redis outages only exercised in production
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - redis outages only exercised in production
             LOGGER.warning(
                 "Failed to publish watchdog heartbeat",
                 extra={"event": "watchdog.heartbeat_error", "error": str(exc)},
@@ -280,7 +300,10 @@ class Watchdog:
             if not healthy:
                 LOGGER.error(
                     "Watchdog live probe reported unhealthy",  # pragma: no cover - requires unhealthy endpoint
-                    extra={"event": "watchdog.live_probe_unhealthy", "status": response.status_code},
+                    extra={
+                        "event": "watchdog.live_probe_unhealthy",
+                        "status": response.status_code,
+                    },
                 )
 
         timestamp = time.time()

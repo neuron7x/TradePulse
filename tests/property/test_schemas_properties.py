@@ -1,14 +1,15 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import string
+from dataclasses import dataclass, field
 from typing import Optional
 
 import pytest
 
 try:
-    from hypothesis import given, strategies as st
+    from hypothesis import given
+    from hypothesis import strategies as st
 except Exception:  # pragma: no cover - hypothesis optional in runtime envs
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
@@ -40,11 +41,11 @@ _TAG_VALUES = ("ops", "latency", "risk", "alpha", "beta", "compliance", "infra")
     timestamp=st.floats(allow_nan=False, allow_infinity=False, width=32),
     price=st.floats(allow_nan=False, allow_infinity=False, width=32),
     symbol=st.sampled_from(_SYMBOLS),
-    tags=st.lists(
-        st.sampled_from(_TAG_VALUES), min_size=0, max_size=5
-    ),
+    tags=st.lists(st.sampled_from(_TAG_VALUES), min_size=0, max_size=5),
     metadata=st.lists(
-        st.tuples(st.sampled_from(_METADATA_KEYS), st.integers(min_value=0, max_value=1000)),
+        st.tuples(
+            st.sampled_from(_METADATA_KEYS), st.integers(min_value=0, max_value=1000)
+        ),
         min_size=0,
         max_size=5,
     ).map(lambda items: {key: value for key, value in items}),

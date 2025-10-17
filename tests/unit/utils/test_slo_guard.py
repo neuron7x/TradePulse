@@ -1,9 +1,9 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
+import math
 from datetime import datetime, timedelta, timezone
 
-import math
 import pytest
 
 from core.utils.slo import AutoRollbackGuard, SLOConfig

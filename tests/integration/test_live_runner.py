@@ -84,6 +84,7 @@ def test_runner_cold_start_and_reconciliation(tmp_path: Path) -> None:
     runner.start(cold_start=False)
 
     try:
+
         def adopted() -> bool:
             outstanding = runner.loop._contexts["binance"].oms.outstanding()
             return any(o.order_id == stray.order_id for o in outstanding)

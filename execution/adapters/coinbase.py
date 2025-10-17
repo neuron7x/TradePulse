@@ -15,7 +15,6 @@ from domain import Order, OrderSide, OrderStatus, OrderType
 
 from .base import RESTWebSocketConnector
 
-
 _STATUS_MAP = {
     "OPEN": OrderStatus.OPEN,
     "PENDING": OrderStatus.OPEN,
@@ -50,7 +49,11 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         http_client=None,
         ws_factory=None,
     ) -> None:
-        base_url = "https://api-public.sandbox.exchange.coinbase.com" if sandbox else "https://api.coinbase.com"
+        base_url = (
+            "https://api-public.sandbox.exchange.coinbase.com"
+            if sandbox
+            else "https://api.coinbase.com"
+        )
         if not sandbox:
             base_url = "https://api.coinbase.com"
         api_base = f"{base_url.rstrip('/')}/api/v3/brokerage"
@@ -64,7 +67,9 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         )
         self._stream_base = "wss://advanced-trade-ws.coinbase.com"
         if sandbox:
-            self._stream_base = "wss://advanced-trade-ws-public.sandbox.exchange.coinbase.com"
+            self._stream_base = (
+                "wss://advanced-trade-ws-public.sandbox.exchange.coinbase.com"
+            )
         self._api_key = ""
         self._api_secret = ""
         self._passphrase = ""
@@ -86,16 +91,22 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         try:
             self._synchronize_time(force=True)
         except Exception as exc:  # pragma: no cover - defensive logging
-            self._logger.warning("Failed to synchronize Coinbase server time", extra={"error": str(exc)})
+            self._logger.warning(
+                "Failed to synchronize Coinbase server time", extra={"error": str(exc)}
+            )
 
     # ------------------------------------------------------------------
-    def _resolve_credentials(self, credentials: Mapping[str, str] | None) -> Mapping[str, str]:
+    def _resolve_credentials(
+        self, credentials: Mapping[str, str] | None
+    ) -> Mapping[str, str]:
         supplied = {str(k).lower(): str(v) for k, v in (credentials or {}).items()}
         api_key = supplied.get("api_key") or os.getenv("COINBASE_API_KEY")
         api_secret = supplied.get("api_secret") or os.getenv("COINBASE_API_SECRET")
         passphrase = supplied.get("passphrase") or os.getenv("COINBASE_API_PASSPHRASE")
         if not api_key or not api_secret or not passphrase:
-            raise ValueError("Coinbase credentials must provide api_key, api_secret, and passphrase")
+            raise ValueError(
+                "Coinbase credentials must provide api_key, api_secret, and passphrase"
+            )
         self._api_key = api_key
         self._api_secret = api_secret
         self._passphrase = passphrase
@@ -136,7 +147,9 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
     def _order_endpoint(self) -> str:
         return "/orders"
 
-    def _build_place_payload(self, order: Order, idempotency_key: str | None) -> Dict[str, Any]:
+    def _build_place_payload(
+        self, order: Order, idempotency_key: str | None
+    ) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
             "client_order_id": idempotency_key or order.order_id or "",
             "product_id": order.symbol.replace("_", "-"),
@@ -180,7 +193,9 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         if idempotency_key and idempotency_key in self._idempotency_cache:
             return self._idempotency_cache[idempotency_key]
         payload = self._build_place_payload(order, idempotency_key)
-        response = self._request("POST", self._order_endpoint(), json_payload=payload, signed=True)
+        response = self._request(
+            "POST", self._order_endpoint(), json_payload=payload, signed=True
+        )
         submitted = self._parse_order(response, original=order)
         with self._lock:
             self._orders[submitted.order_id or ""] = submitted
@@ -188,37 +203,63 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
                 self._idempotency_cache[idempotency_key] = submitted
         return submitted
 
-    def _parse_order(self, payload: Mapping[str, Any], *, original: Order | None = None) -> Order:
+    def _parse_order(
+        self, payload: Mapping[str, Any], *, original: Order | None = None
+    ) -> Order:
         if "order" in payload and isinstance(payload["order"], Mapping):
             payload = payload["order"]
         symbol = str(payload.get("product_id") or (original.symbol if original else ""))
         if not symbol:
             raise ValueError("Order payload missing product identifier")
-        side = str(payload.get("side") or (original.side.value if original else "buy")).lower()
+        side = str(
+            payload.get("side") or (original.side.value if original else "buy")
+        ).lower()
         order_type = self._coerce_order_type(
-            str(payload.get("order_type") or payload.get("type") or (original.order_type.value if original else "market")),
+            str(
+                payload.get("order_type")
+                or payload.get("type")
+                or (original.order_type.value if original else "market")
+            ),
             original,
         )
-        order_id = str(payload.get("order_id") or payload.get("id") or payload.get("orderId") or "")
+        order_id = str(
+            payload.get("order_id") or payload.get("id") or payload.get("orderId") or ""
+        )
         if not order_id:
             raise ValueError("Order payload missing identifier")
-        size_value = payload.get("size") or payload.get("base_size") or payload.get("filled_size")
+        size_value = (
+            payload.get("size")
+            or payload.get("base_size")
+            or payload.get("filled_size")
+        )
         quantity = float(size_value or (original.quantity if original else 0.0))
-        filled_value = payload.get("filled_size") or payload.get("executed_value") or 0.0
+        filled_value = (
+            payload.get("filled_size") or payload.get("executed_value") or 0.0
+        )
         try:
             filled = float(filled_value)
         except (TypeError, ValueError):
             filled = 0.0
-        price_value = payload.get("price") or payload.get("limit_price") or (original.price if original else None)
+        price_value = (
+            payload.get("price")
+            or payload.get("limit_price")
+            or (original.price if original else None)
+        )
         price = float(price_value) if price_value not in (None, "") else None
-        avg_price_val = payload.get("average_filled_price") or payload.get("average_price")
-        average_price = float(avg_price_val) if avg_price_val not in (None, "") else None
+        avg_price_val = payload.get("average_filled_price") or payload.get(
+            "average_price"
+        )
+        average_price = (
+            float(avg_price_val) if avg_price_val not in (None, "") else None
+        )
         status_value = str(payload.get("status") or "OPEN").upper()
         status = _STATUS_MAP.get(status_value, OrderStatus.OPEN)
         return Order(
             symbol=symbol,
             side=OrderSide(side),
-            quantity=quantity if quantity > 0 else (original.quantity if original else 0.0),
+            quantity=(
+                quantity if quantity > 0 else (original.quantity if original else 0.0)
+            ),
             price=price,
             order_type=order_type,
             order_id=order_id,
@@ -253,7 +294,9 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
             if not qty:
                 continue
             asset = str(account.get("currency", "")).upper()
-            positions.append({"symbol": asset, "qty": qty, "side": "long", "price": 0.0})
+            positions.append(
+                {"symbol": asset, "qty": qty, "side": "long", "price": 0.0}
+            )
         return positions
 
     def _stream_url(self) -> str | None:
@@ -302,7 +345,11 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
             return
         response.raise_for_status()
         payload = response.json()
-        epoch = payload.get("epoch") or (payload.get("data", {}).get("epoch") if isinstance(payload.get("data"), Mapping) else None)
+        epoch = payload.get("epoch") or (
+            payload.get("data", {}).get("epoch")
+            if isinstance(payload.get("data"), Mapping)
+            else None
+        )
         if epoch is None:
             raise ValueError("Coinbase time endpoint returned invalid payload")
         self._time_offset = float(epoch) - time.time()

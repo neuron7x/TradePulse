@@ -22,7 +22,9 @@ class DataVersionManager:
     def __init__(self, config: VersioningConfig) -> None:
         self.config = config
 
-    def snapshot(self, artifact_path: Path, metadata: Optional[Dict[str, object]] = None) -> Dict[str, object]:
+    def snapshot(
+        self, artifact_path: Path, metadata: Optional[Dict[str, object]] = None
+    ) -> Dict[str, object]:
         artifact_path = Path(artifact_path)
         info = {
             "backend": self.config.backend,
@@ -33,5 +35,7 @@ class DataVersionManager:
         if self.config.backend != "none":
             info["repo_path"] = str(self.config.repo_path)
         version_path = artifact_path.with_suffix(f"{artifact_path.suffix}.version.json")
-        version_path.write_text(json.dumps(info, indent=2, sort_keys=True), encoding="utf-8")
+        version_path.write_text(
+            json.dumps(info, indent=2, sort_keys=True), encoding="utf-8"
+        )
         return info

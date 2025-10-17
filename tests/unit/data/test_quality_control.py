@@ -89,4 +89,3 @@ def test_temporal_contract_flags_stale_batches():
     assert report.contract_breaches
     with pytest.raises(QualityGateError):
         report.raise_if_blocked()
-

@@ -1,22 +1,21 @@
 # SPDX-License-Identifier: MIT
 from __future__ import annotations
 
-import asyncio
-
 import numpy as np
 import pytest
-
-from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 from core.indicators.base import BaseFeature, FeatureResult, ParallelFeatureBlock
 from core.indicators.entropy import entropy
 from core.indicators.pipeline import IndicatorPipeline
 from core.indicators.ricci import MeanRicciFeature, build_price_graph, mean_ricci
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 
 class _SumFeature(BaseFeature):
     def transform(self, data: np.ndarray, **_: object) -> FeatureResult:
-        return FeatureResult(name=self.name, value=float(np.sum(data)), metadata={"buffer_id": id(data)})
+        return FeatureResult(
+            name=self.name, value=float(np.sum(data)), metadata={"buffer_id": id(data)}
+        )
 
 
 def test_indicator_pipeline_reuses_float32_pool() -> None:
@@ -49,7 +48,11 @@ def test_indicator_pipeline_exposes_features_property() -> None:
 
 def test_indicator_pipeline_thread_execution_matches_sequential() -> None:
     series = np.linspace(0.0, 1.0, num=64, dtype=np.float64)
-    features = [_SumFeature(name="sum_a"), _SumFeature(name="sum_b"), _SumFeature(name="sum_c")]
+    features = [
+        _SumFeature(name="sum_a"),
+        _SumFeature(name="sum_b"),
+        _SumFeature(name="sum_c"),
+    ]
 
     sequential = IndicatorPipeline(features)
     threaded = IndicatorPipeline(features, execution="thread", max_workers=2)
@@ -66,7 +69,9 @@ def test_indicator_pipeline_thread_execution_matches_sequential() -> None:
 
 def test_indicator_pipeline_close_reinitialises_executor() -> None:
     series = np.arange(16, dtype=np.float32)
-    pipeline = IndicatorPipeline([_SumFeature(name="sum")], execution="thread", max_workers=2)
+    pipeline = IndicatorPipeline(
+        [_SumFeature(name="sum")], execution="thread", max_workers=2
+    )
 
     first = pipeline.run(series)
     first.release()
@@ -89,7 +94,9 @@ def test_parallel_feature_block_thread_executes_all_features() -> None:
     assert outputs["sum"] == pytest.approx(8.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
 
 
-def test_parallel_feature_block_process_uses_executor(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallel_feature_block_process_uses_executor(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[FeatureResult] = []
 
     class ImmediateFuture:
@@ -100,7 +107,9 @@ def test_parallel_feature_block_process_uses_executor(monkeypatch: pytest.Monkey
             return self._value
 
     class DummyExecutor:
-        def __init__(self, *args, **kwargs) -> None:  # noqa: D401 - signature matches executor
+        def __init__(
+            self, *args, **kwargs
+        ) -> None:  # noqa: D401 - signature matches executor
             self.args = args
             self.kwargs = kwargs
 
@@ -110,7 +119,9 @@ def test_parallel_feature_block_process_uses_executor(monkeypatch: pytest.Monkey
         def __exit__(self, exc_type, exc, tb) -> None:
             return None
 
-        def submit(self, fn, feature, data, kwargs):  # noqa: ANN001 - interface compatibility
+        def submit(
+            self, fn, feature, data, kwargs
+        ):  # noqa: ANN001 - interface compatibility
             result = fn(feature, data, kwargs)
             captured.append(result)
             return ImmediateFuture(result)
@@ -124,7 +135,9 @@ def test_parallel_feature_block_process_uses_executor(monkeypatch: pytest.Monkey
     assert captured and all(isinstance(item, FeatureResult) for item in captured)
 
 
-def test_parallel_feature_block_handles_running_event_loop(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_parallel_feature_block_handles_running_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import core.indicators.base as base_module
 
     def fake_asyncio_run(coro):
@@ -148,7 +161,9 @@ def test_entropy_parallel_modes_match_cpu() -> None:
     gpu_fallback = entropy(series, bins=64, backend="gpu")
 
     assert process == pytest.approx(base_chunked, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
-    assert async_value == pytest.approx(base_chunked, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert async_value == pytest.approx(
+        base_chunked, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
     assert gpu_fallback == pytest.approx(
         entropy(series, bins=64), rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
     )
@@ -159,7 +174,9 @@ def test_mean_ricci_async_matches_sequential() -> None:
     graph = build_price_graph(prices, delta=0.01)
     sequential = mean_ricci(graph)
     async_result = mean_ricci(graph, parallel="async")
-    assert async_result == pytest.approx(sequential, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert async_result == pytest.approx(
+        sequential, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
 
 
 def test_mean_ricci_feature_async_metadata() -> None:

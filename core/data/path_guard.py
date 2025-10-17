@@ -39,7 +39,9 @@ class DataPathGuard:
             if not root.exists():
                 raise FileNotFoundError(f"Allowed data root does not exist: {root}")
             if not root.is_dir():
-                raise NotADirectoryError(f"Allowed data root is not a directory: {root}")
+                raise NotADirectoryError(
+                    f"Allowed data root is not a directory: {root}"
+                )
             resolved_roots.append(root)
 
         if not resolved_roots:
@@ -104,7 +106,9 @@ class DataPathGuard:
 
         resolved = candidate.resolve(strict=False)
 
-        if not any(self._is_within_root(resolved, root) for root in self._allowed_roots):
+        if not any(
+            self._is_within_root(resolved, root) for root in self._allowed_roots
+        ):
             allowed = ", ".join(str(root) for root in self._allowed_roots)
             raise PermissionError(
                 f"{description.capitalize()} {candidate} is outside allowed directories: {allowed}"
@@ -135,4 +139,3 @@ class DataPathGuard:
 
 
 __all__ = ["DataPathGuard"]
-

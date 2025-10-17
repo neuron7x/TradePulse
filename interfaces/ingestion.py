@@ -5,7 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import AsyncIterator, Callable, Iterable, Optional
 
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 
 
 class DataIngestionService(ABC):

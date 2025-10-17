@@ -42,7 +42,11 @@ def test_loader_reads_yaml_values() -> None:
             "graph": {"n_levels": 12, "connection_threshold": 0.2},
         },
         "composite": {
-            "thresholds": {"R_strong_emergent": 0.9, "R_proto_emergent": 0.5, "coherence_min": 0.7},
+            "thresholds": {
+                "R_strong_emergent": 0.9,
+                "R_proto_emergent": 0.5,
+                "coherence_min": 0.7,
+            },
             "signals": {"min_confidence": 0.65},
         },
     }
@@ -74,7 +78,9 @@ def test_loader_reads_yaml_values() -> None:
 
 def test_invalid_thresholds_raise_error() -> None:
     payload = {
-        "composite": {"thresholds": {"R_proto_emergent": 0.8, "R_strong_emergent": 0.7}},
+        "composite": {
+            "thresholds": {"R_proto_emergent": 0.8, "R_strong_emergent": 0.7}
+        },
     }
 
     with pytest.raises(ConfigError):
@@ -82,11 +88,13 @@ def test_invalid_thresholds_raise_error() -> None:
 
 
 def test_parse_cli_overrides_supports_nested_assignments() -> None:
-    overrides = parse_cli_overrides([
-        "kuramoto.base_window=128",
-        "composite.thresholds.R_strong_emergent=0.9",
-        "kuramoto.timeframes=['M1','M5']",
-    ])
+    overrides = parse_cli_overrides(
+        [
+            "kuramoto.base_window=128",
+            "composite.thresholds.R_strong_emergent=0.9",
+            "kuramoto.timeframes=['M1','M5']",
+        ]
+    )
 
     assert overrides["kuramoto"]["base_window"] == 128
     assert overrides["composite"]["thresholds"]["R_strong_emergent"] == 0.9

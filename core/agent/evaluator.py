@@ -7,16 +7,16 @@ import math
 import os
 import time
 from concurrent.futures import Executor, ThreadPoolExecutor
+from dataclasses import dataclass
 from queue import Queue
 from threading import Lock
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
-from .strategy import Strategy
 from ..utils.metrics import get_metrics_collector
+from .strategy import Strategy
 
 DatasetPreparer = Callable[[Any], Any]
 ExecutorFactory = Callable[[int], Executor]
@@ -71,7 +71,9 @@ class StrategyEvaluationError(RuntimeError):
 
     def __init__(self, failures: Sequence[EvaluationResult]):
         message = ", ".join(f"{res.strategy.name}: {res.error}" for res in failures)
-        super().__init__(f"Strategy evaluation failed for {len(failures)} strategy(ies): {message}")
+        super().__init__(
+            f"Strategy evaluation failed for {len(failures)} strategy(ies): {message}"
+        )
         self.failures = list(failures)
 
 

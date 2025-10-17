@@ -8,8 +8,13 @@ from typing import Callable, Iterable, Sequence
 
 import pandas as pd
 
-from core.data.backfill import BackfillPlan, CacheKey, Gap, GapFillPlanner
-from core.data.backfill import normalise_index
+from core.data.backfill import (
+    BackfillPlan,
+    CacheKey,
+    Gap,
+    GapFillPlanner,
+    normalise_index,
+)
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.models import InstrumentType, PriceTick
 from core.data.timeutils import normalize_timestamp
@@ -116,7 +121,9 @@ class TickStreamAggregator:
 
         frames = [
             existing,
-            self._coerce_to_frame(historical, canonical_key, instrument_type, market_hint),
+            self._coerce_to_frame(
+                historical, canonical_key, instrument_type, market_hint
+            ),
             self._coerce_to_frame(live, canonical_key, instrument_type, market_hint),
         ]
 
@@ -134,20 +141,28 @@ class TickStreamAggregator:
         window = self._resolve_window(cached, start, end, market_hint)
         if window is None:
             plan = BackfillPlan()
-            return AggregationResult(key=canonical_key, frame=cached, backfill_plan=plan)
+            return AggregationResult(
+                key=canonical_key, frame=cached, backfill_plan=plan
+            )
 
         expected_index = self._build_expected_index(*window)
         if expected_index.empty:
             plan = BackfillPlan()
-            return AggregationResult(key=canonical_key, frame=cached, backfill_plan=plan)
+            return AggregationResult(
+                key=canonical_key, frame=cached, backfill_plan=plan
+            )
 
         planner = self._get_planner()
         plan = planner.plan(canonical_key, expected_index=expected_index)
         if plan.gaps and gap_fetcher is not None:
             gap_frames: list[pd.DataFrame] = []
             for gap in plan.gaps:
-                payload = gap_fetcher(gap.start.to_pydatetime(), gap.end.to_pydatetime())
-                gap_frame = self._coerce_to_frame(payload, canonical_key, instrument_type, market_hint)
+                payload = gap_fetcher(
+                    gap.start.to_pydatetime(), gap.end.to_pydatetime()
+                )
+                gap_frame = self._coerce_to_frame(
+                    payload, canonical_key, instrument_type, market_hint
+                )
                 if not gap_frame.empty:
                     gap_frames.append(gap_frame)
 
@@ -184,7 +199,9 @@ class TickStreamAggregator:
         venue: str,
         instrument_type: InstrumentType,
     ) -> CacheKey:
-        canonical_symbol = normalize_symbol(symbol, instrument_type_hint=instrument_type)
+        canonical_symbol = normalize_symbol(
+            symbol, instrument_type_hint=instrument_type
+        )
         canonical_venue = normalize_venue(venue)
         return CacheKey(
             layer=self._layer,
@@ -216,7 +233,9 @@ class TickStreamAggregator:
             return self._empty_frame()
         self._validate_tick_metadata(ticks, key, instrument_type)
 
-        timestamps = [self._normalise_tick_timestamp(tick.timestamp, market) for tick in ticks]
+        timestamps = [
+            self._normalise_tick_timestamp(tick.timestamp, market) for tick in ticks
+        ]
         index = pd.DatetimeIndex(pd.to_datetime(timestamps, utc=True))
         index.name = "timestamp"
         frame = pd.DataFrame(
@@ -229,7 +248,9 @@ class TickStreamAggregator:
         return normalise_index(frame, market=market).sort_index()
 
     def _merge_frames(self, frames: Sequence[pd.DataFrame]) -> pd.DataFrame:
-        candidates = [frame for frame in frames if frame is not None and not frame.empty]
+        candidates = [
+            frame for frame in frames if frame is not None and not frame.empty
+        ]
         if not candidates:
             return self._empty_frame()
         combined = pd.concat(candidates)
@@ -267,7 +288,9 @@ class TickStreamAggregator:
         instrument_type: InstrumentType,
     ) -> None:
         for tick in ticks:
-            canonical_symbol = normalize_symbol(tick.symbol, instrument_type_hint=tick.instrument_type)
+            canonical_symbol = normalize_symbol(
+                tick.symbol, instrument_type_hint=tick.instrument_type
+            )
             if canonical_symbol != key.symbol:
                 raise ValueError(
                     "Tick symbol does not match aggregation key: "
@@ -317,4 +340,3 @@ class TickStreamAggregator:
 
 
 __all__ = ["AggregationResult", "TickStreamAggregator"]
-

@@ -1,8 +1,8 @@
 """Cross-platform data synchronisation helper with resilience features."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import argparse
 import json
 import sys
@@ -13,9 +13,9 @@ from typing import Iterable
 from urllib.parse import urlparse
 
 from scripts.runtime import (
+    EXIT_CODES,
     ArtifactManager,
     ChecksumMismatchError,
-    EXIT_CODES,
     ProgressBar,
     create_artifact_manager,
     create_resilient_session,
@@ -151,7 +151,12 @@ def _transfer_one(
                 progress=progress,
             )
         except ChecksumMismatchError:
-            return SyncResult(source=source, destination=destination, checksum=checksum, status="checksum_mismatch")
+            return SyncResult(
+                source=source,
+                destination=destination,
+                checksum=checksum,
+                status="checksum_mismatch",
+            )
         except TransferError as exc:
             return SyncResult(
                 source=source,
@@ -159,7 +164,9 @@ def _transfer_one(
                 checksum=checksum,
                 status=f"transfer_error:{exc}",
             )
-    return SyncResult(source=source, destination=destination, checksum=checksum, status="ok")
+    return SyncResult(
+        source=source, destination=destination, checksum=checksum, status="ok"
+    )
 
 
 def main(argv: Iterable[str] | None = None) -> int:
@@ -185,7 +192,8 @@ def main(argv: Iterable[str] | None = None) -> int:
     results: list[SyncResult] = []
 
     destinations: dict[str, Path] = {
-        source: manager.path_for(_destination_name(source)) for source in resolved_sources
+        source: manager.path_for(_destination_name(source))
+        for source in resolved_sources
     }
 
     with task_queue(max_workers=max(1, args.max_workers)) as queue:
@@ -204,7 +212,9 @@ def main(argv: Iterable[str] | None = None) -> int:
         for source, future in futures:
             try:
                 result = future.result()
-            except Exception as exc:  # pragma: no cover - defensive catch for unexpected failures
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - defensive catch for unexpected failures
                 results.append(
                     SyncResult(
                         source=source,
@@ -221,7 +231,9 @@ def main(argv: Iterable[str] | None = None) -> int:
         if result.status != "ok":
             has_failures = True
         status_message = "✅" if result.status == "ok" else "❌"
-        print(f"{status_message} {result.source} → {result.destination} ({result.status})")
+        print(
+            f"{status_message} {result.source} → {result.destination} ({result.status})"
+        )
 
     if args.json:
         payload = [

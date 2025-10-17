@@ -5,16 +5,16 @@ backtesting. It models latency, order queueing, partial fills, market halts,
 and multiple time-in-force semantics so strategy authors can evaluate
 microstructure-aware behaviours without leaving the offline environment.
 """
+
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from enum import Enum
 import heapq
 import itertools
+from dataclasses import dataclass, field
+from enum import Enum
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from observability.tracing import pipeline_span
-
 
 EPSILON = 1e-12
 
@@ -166,10 +166,12 @@ class MatchingEngine:
             order.status = OrderStatus.QUEUED
             heapq.heappush(self._pending, (ready_at, next(self._counter), order))
             if span is not None:
-                span.set_attributes({
-                    "order.status": order.status.value,
-                    "order.ready_at": int(ready_at),
-                })
+                span.set_attributes(
+                    {
+                        "order.status": order.status.value,
+                        "order.ready_at": int(ready_at),
+                    }
+                )
             return order
 
     def process_until(self, timestamp: int) -> List[Order]:
@@ -194,7 +196,12 @@ class MatchingEngine:
         return processed
 
     def add_passive_liquidity(
-        self, symbol: str, side: OrderSide | str, price: float, qty: float, timestamp: int
+        self,
+        symbol: str,
+        side: OrderSide | str,
+        price: float,
+        qty: float,
+        timestamp: int,
     ) -> None:
         """Seed the order book with resting liquidity."""
 
@@ -206,7 +213,9 @@ class MatchingEngine:
             raise ValueError("Liquidity price must be positive")
 
         book = self._books.setdefault(symbol, _OrderBook())
-        entry = _BookEntry(price=price, qty=qty, order_id="liquidity", timestamp=timestamp)
+        entry = _BookEntry(
+            price=price, qty=qty, order_id="liquidity", timestamp=timestamp
+        )
         target = book.bids if side is OrderSide.BUY else book.asks
         target.append(entry)
         self._sort_book_side(target, side)
@@ -282,13 +291,17 @@ class MatchingEngine:
 
         if order.order_type == OrderType.IOC:
             order.status = (
-                OrderStatus.PARTIALLY_FILLED if order.filled_qty > EPSILON else OrderStatus.CANCELLED
+                OrderStatus.PARTIALLY_FILLED
+                if order.filled_qty > EPSILON
+                else OrderStatus.CANCELLED
             )
             return
 
         if order.order_type == OrderType.MARKET:
             order.status = (
-                OrderStatus.PARTIALLY_FILLED if order.filled_qty > EPSILON else OrderStatus.CANCELLED
+                OrderStatus.PARTIALLY_FILLED
+                if order.filled_qty > EPSILON
+                else OrderStatus.CANCELLED
             )
             return
 
@@ -315,7 +328,9 @@ class MatchingEngine:
         )
         self._sort_book_side(same_side, order.side)
         order.status = (
-            OrderStatus.PARTIALLY_FILLED if order.filled_qty > EPSILON else OrderStatus.NEW
+            OrderStatus.PARTIALLY_FILLED
+            if order.filled_qty > EPSILON
+            else OrderStatus.NEW
         )
 
     def _available_qty(

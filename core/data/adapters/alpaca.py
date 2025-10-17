@@ -8,8 +8,14 @@ from typing import AsyncIterator, Iterable, Optional
 
 import httpx
 
-from core.data.adapters.base import IngestionAdapter, RateLimitConfig, RetryConfig, TimeoutConfig
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.adapters.base import (
+    IngestionAdapter,
+    RateLimitConfig,
+    RetryConfig,
+    TimeoutConfig,
+)
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from core.utils.logging import get_logger
 
@@ -109,16 +115,22 @@ class AlpacaIngestionAdapter(IngestionAdapter):
             raise RuntimeError("websockets is required for Alpaca streaming") from exc
 
         attempt = 0
-        auth_payload = json.dumps({
-            "action": "auth",
-            "key": self._api_key,
-            "secret": self._api_secret,
-        })
-        subscribe_payload = json.dumps({"action": "subscribe", "trades": list(channels)})
+        auth_payload = json.dumps(
+            {
+                "action": "auth",
+                "key": self._api_key,
+                "secret": self._api_secret,
+            }
+        )
+        subscribe_payload = json.dumps(
+            {"action": "subscribe", "trades": list(channels)}
+        )
 
         while True:
             try:
-                async with websockets.connect(self._stream_url, ping_interval=20, ping_timeout=20) as ws:
+                async with websockets.connect(
+                    self._stream_url, ping_interval=20, ping_timeout=20
+                ) as ws:
                     attempt = 0
                     await ws.send(auth_payload)
                     await ws.send(subscribe_payload)

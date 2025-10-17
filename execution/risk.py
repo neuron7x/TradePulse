@@ -226,7 +226,8 @@ class BaseKillSwitchStateStore(KillSwitchStateStore, ABC):
     def _check_not_quarantined(self) -> None:
         if self._quarantined:
             raise DataQualityError(
-                self._quarantine_reason or "kill-switch store quarantined due to invalid state"
+                self._quarantine_reason
+                or "kill-switch store quarantined due to invalid state"
             )
 
     def _quarantine(self, reason: str, *, exc: Exception | None = None) -> None:
@@ -282,7 +283,9 @@ class BaseKillSwitchStateStore(KillSwitchStateStore, ABC):
 
     def _enforce_outgoing_contracts(self, engaged: bool, reason: str) -> None:
         if engaged and not reason:
-            raise DataQualityError("reason must be supplied when engaging the kill-switch")
+            raise DataQualityError(
+                "reason must be supplied when engaging the kill-switch"
+            )
         if len(reason) > self._max_reason_length:
             raise DataQualityError(
                 f"reason exceeds allowed length {len(reason)} > {self._max_reason_length}"
@@ -354,7 +357,9 @@ class SQLiteKillSwitchStateStore(BaseKillSwitchStateStore):
                 """
             )
 
-    def _with_retry(self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False) -> T:
+    def _with_retry(
+        self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False
+    ) -> T:
         delay = self._retry_interval
         attempts_remaining = self._max_retries
         while True:
@@ -599,8 +604,9 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
         max_reason_length: int = 512,
         clock: Callable[[], datetime] | None = None,
         connection_factory: Callable[[], object] | None = None,
-        pool_factory: Callable[[Callable[[], object], int, float | None], _ConnectionPool]
-        | None = None,
+        pool_factory: (
+            Callable[[Callable[[], object], int, float | None], _ConnectionPool] | None
+        ) = None,
         ensure_schema: bool = True,
     ) -> None:
         if pool_min_size < 0:
@@ -639,10 +645,14 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
                 raise ValueError(
                     "tls must be provided when using the default PostgreSQL connection factory"
                 )
-            connection_factory = lambda: self._create_connection(
-                connect_timeout=connect_timeout,
-                statement_timeout_ms=statement_timeout_ms,
-            )
+
+            def default_connection_factory() -> object:
+                return self._create_connection(
+                    connect_timeout=connect_timeout,
+                    statement_timeout_ms=statement_timeout_ms,
+                )
+
+            connection_factory = default_connection_factory
 
         if pool_factory is None:
             self._pool = _ConnectionPool(
@@ -651,7 +661,9 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
                 acquire_timeout=acquire_timeout,
             )
         else:
-            self._pool = pool_factory(connection_factory, pool_max_size, acquire_timeout)
+            self._pool = pool_factory(
+                connection_factory, pool_max_size, acquire_timeout
+            )
 
         if pool_min_size:
             self._pool.warmup(pool_min_size)
@@ -667,7 +679,9 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
     def close(self) -> None:
         self._pool.close()
 
-    def _create_connection(self, *, connect_timeout: float, statement_timeout_ms: int) -> object:
+    def _create_connection(
+        self, *, connect_timeout: float, statement_timeout_ms: int
+    ) -> object:
         options = f"-c statement_timeout={int(statement_timeout_ms)} -c timezone=UTC"
         return create_postgres_connection(
             self._dsn,
@@ -707,13 +721,17 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
             write=True,
         )
 
-    def _execute_with_retry(self, operation: Callable[[], T], *, write: bool = False) -> T:
+    def _execute_with_retry(
+        self, operation: Callable[[], T], *, write: bool = False
+    ) -> T:
         delay = self._retry_interval
         attempts_remaining = self._max_retries
         while True:
             try:
                 return operation()
-            except Exception as exc:  # pragma: no cover - fallback when psycopg is absent
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - fallback when psycopg is absent
                 if not self._should_retry(exc) or attempts_remaining <= 0:
                     raise
                 if delay > 0:
@@ -809,7 +827,9 @@ class KillSwitch:
         if self._store is not None:
             self._refresh_from_store()
         if self._triggered:
-            raise RiskError(f"Kill-switch engaged: {self._reason or 'unspecified reason'}")
+            raise RiskError(
+                f"Kill-switch engaged: {self._reason or 'unspecified reason'}"
+            )
 
 
 class RiskManager(RiskController):
@@ -852,10 +872,11 @@ class RiskManager(RiskController):
             self._submissions.popleft()
         if len(self._submissions) >= self.limits.max_orders_per_interval:
             self._throttle_violation_streak += 1
-            reason = (
-                f"Order throttle exceeded: {len(self._submissions)} submissions in {window}s"
-            )
-            if self._throttle_violation_streak >= self.limits.kill_switch_rate_limit_threshold:
+            reason = f"Order throttle exceeded: {len(self._submissions)} submissions in {window}s"
+            if (
+                self._throttle_violation_streak
+                >= self.limits.kill_switch_rate_limit_threshold
+            ):
                 self._trigger_kill_switch(
                     reason,
                     symbol=symbol,
@@ -964,7 +985,9 @@ class RiskManager(RiskController):
         try:
             self._kill_switch.guard()
         except RiskError as exc:
-            self._metrics.record_risk_validation(canonical_symbol, "kill_switch_blocked")
+            self._metrics.record_risk_validation(
+                canonical_symbol, "kill_switch_blocked"
+            )
             self._record_risk_audit(
                 symbol=canonical_symbol,
                 side=side.lower(),
@@ -1174,7 +1197,9 @@ class IdempotentRetryExecutor:
                         time.sleep(delay)
         if last_error is not None:
             raise last_error
-        raise RuntimeError("IdempotentRetryExecutor terminated without executing the callable")
+        raise RuntimeError(
+            "IdempotentRetryExecutor terminated without executing the callable"
+        )
 
 
 class DefaultPortfolioRiskAnalyzer(PortfolioRiskAnalyzer):

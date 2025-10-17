@@ -9,7 +9,6 @@ os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-secret-value")
 from application.api import service
 from application.api.service import FeatureResponse, TTLCache
 
-
 pytestmark = pytest.mark.asyncio
 
 
@@ -44,7 +43,9 @@ async def test_expired_entry_is_removed(frozen_datetime: "FrozenDateTime") -> No
     assert "key" not in cache._entries
 
 
-async def test_capacity_eviction_removes_oldest_entry(frozen_datetime: "FrozenDateTime") -> None:
+async def test_capacity_eviction_removes_oldest_entry(
+    frozen_datetime: "FrozenDateTime",
+) -> None:
     cache = TTLCache(ttl_seconds=30, max_entries=2)
 
     payload1 = FeatureResponse(symbol="AAA", features={})
@@ -62,7 +63,9 @@ async def test_capacity_eviction_removes_oldest_entry(frozen_datetime: "FrozenDa
     assert set(cache._entries.keys()) == {"key-2", "key-3"}
 
 
-async def test_get_returns_cached_entry_when_not_expired(frozen_datetime: "FrozenDateTime") -> None:
+async def test_get_returns_cached_entry_when_not_expired(
+    frozen_datetime: "FrozenDateTime",
+) -> None:
     cache = TTLCache(ttl_seconds=60)
     payload = FeatureResponse(symbol="XYZ", features={"value": 42.0})
 

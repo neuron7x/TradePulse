@@ -6,8 +6,8 @@ import pytest
 
 from core.data.adapters.unified import (
     BackoffPolicy,
-    RateLimitRule,
     RateLimiter,
+    RateLimitRule,
     RestIngestionAdapter,
     WebSocketIngestionAdapter,
 )
@@ -121,4 +121,3 @@ def test_websocket_adapter_context_injection():
 
     list(adapter.messages())
     assert seen[0]["traceparent"] == "00-ws"
-

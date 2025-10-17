@@ -7,8 +7,14 @@ from typing import AsyncIterator, Iterable, Optional
 
 import httpx
 
-from core.data.adapters.base import IngestionAdapter, RateLimitConfig, RetryConfig, TimeoutConfig
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.adapters.base import (
+    IngestionAdapter,
+    RateLimitConfig,
+    RetryConfig,
+    TimeoutConfig,
+)
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from core.utils.logging import get_logger
 
@@ -51,7 +57,9 @@ class PolygonIngestionAdapter(IngestionAdapter):
     ) -> list[Ticker]:
         """Fetch aggregated bars and map them into tick level representation."""
 
-        endpoint = f"/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start}/{end}"
+        endpoint = (
+            f"/v2/aggs/ticker/{symbol}/range/{multiplier}/{timespan}/{start}/{end}"
+        )
 
         async def _call() -> httpx.Response:
             return await self._client.get(
@@ -107,10 +115,16 @@ class PolygonIngestionAdapter(IngestionAdapter):
 
         while True:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=20
+                ) as ws:
                     attempt = 0
-                    await ws.send(json.dumps({"action": "auth", "params": self._api_key}))
-                    await ws.send(json.dumps({"action": "subscribe", "params": channel_param}))
+                    await ws.send(
+                        json.dumps({"action": "auth", "params": self._api_key})
+                    )
+                    await ws.send(
+                        json.dumps({"action": "subscribe", "params": channel_param})
+                    )
 
                     while True:
                         payload = await self._run_with_policy(ws.recv)

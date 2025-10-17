@@ -1,4 +1,5 @@
 """End-to-end regression covering ingest → features → signal → report."""
+
 from __future__ import annotations
 
 import json
@@ -7,7 +8,12 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from cli.tradepulse_cli import _load_prices, _resolve_strategy, _run_backtest, _write_frame
+from cli.tradepulse_cli import (
+    _load_prices,
+    _resolve_strategy,
+    _run_backtest,
+    _write_frame,
+)
 from core.config.cli_models import (
     BacktestConfig,
     DataSourceConfig,
@@ -17,7 +23,11 @@ from core.config.cli_models import (
     ReportConfig,
     StrategyConfig,
 )
-from core.reporting import generate_markdown_report, render_markdown_to_html, render_markdown_to_pdf
+from core.reporting import (
+    generate_markdown_report,
+    render_markdown_to_html,
+    render_markdown_to_pdf,
+)
 from tests.tolerances import FLOAT_ABS_TOL
 
 
@@ -36,7 +46,9 @@ def test_pipeline_from_scratch(tmp_path) -> None:
     artifacts_dir = tmp_path / "artifacts"
     ingest_cfg = IngestConfig(
         name="qa-ingest",
-        source=DataSourceConfig(kind="csv", path=raw_path, timestamp_field="timestamp", value_field="price"),
+        source=DataSourceConfig(
+            kind="csv", path=raw_path, timestamp_field="timestamp", value_field="price"
+        ),
         destination=artifacts_dir / "ingested.csv",
     )
 
@@ -55,7 +67,10 @@ def test_pipeline_from_scratch(tmp_path) -> None:
     backtest_cfg = BacktestConfig(
         name="qa-backtest",
         data=DataSourceConfig(
-            kind="csv", path=features_path, timestamp_field="timestamp", value_field="price"
+            kind="csv",
+            path=features_path,
+            timestamp_field="timestamp",
+            value_field="price",
         ),
         strategy=StrategyConfig(
             entrypoint="core.strategies.signals:moving_average_signal",
@@ -74,7 +89,10 @@ def test_pipeline_from_scratch(tmp_path) -> None:
     exec_cfg = ExecConfig(
         name="qa-exec",
         data=DataSourceConfig(
-            kind="csv", path=features_path, timestamp_field="timestamp", value_field="price"
+            kind="csv",
+            path=features_path,
+            timestamp_field="timestamp",
+            value_field="price",
         ),
         strategy=backtest_cfg.strategy,
         results_path=artifacts_dir / "signal.json",
@@ -85,7 +103,9 @@ def test_pipeline_from_scratch(tmp_path) -> None:
     signals = strategy_fn(prices_array)
     latest_signal = float(signals[-1])
     exec_payload = {"latest_signal": latest_signal, "count": int(signals.size)}
-    exec_cfg.results_path.write_text(json.dumps(exec_payload, indent=2, sort_keys=True), encoding="utf-8")
+    exec_cfg.results_path.write_text(
+        json.dumps(exec_payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
     assert abs(latest_signal) <= 1.0 + FLOAT_ABS_TOL
     assert exec_cfg.results_path.exists()
 
@@ -104,7 +124,9 @@ def test_pipeline_from_scratch(tmp_path) -> None:
 
     assert len(signals) == len(prices_array)
     assert "### Backtest" in markdown_report
-    assert report_cfg.html_output_path.read_text(encoding="utf-8").startswith("<!doctype html>")
+    assert report_cfg.html_output_path.read_text(encoding="utf-8").startswith(
+        "<!doctype html>"
+    )
     pdf_bytes = report_cfg.pdf_output_path.read_bytes()
     assert pdf_bytes.startswith(b"%PDF")
     assert pdf_bytes.rstrip().endswith(b"%%EOF")

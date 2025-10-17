@@ -51,7 +51,9 @@ def test_convolve_rejects_invalid_mode() -> None:
         convolve(signal, kernel, mode="diagonal", use_rust=False)
 
 
-def test_python_vector_validator_rejects_nested_sequence(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_python_vector_validator_rejects_nested_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setitem(sys.modules, "numpy", None)
     importlib.invalidate_caches()
     sys.modules.pop("core.accelerators.numeric", None)

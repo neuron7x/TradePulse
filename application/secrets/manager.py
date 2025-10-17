@@ -95,13 +95,18 @@ class ManagedSecret:
         if self._config.path is None:
             return
         now = time.monotonic()
-        if not force and self._refresh_interval and now - self._last_refresh < self._refresh_interval:
+        if (
+            not force
+            and self._refresh_interval
+            and now - self._last_refresh < self._refresh_interval
+        ):
             return
         try:
             secret = self._config.path.read_text(encoding="utf-8").strip()
         except FileNotFoundError as exc:
             self._logger.warning(
-                "Managed secret file missing", extra={"secret": self._config.name, "path": str(self._config.path)}
+                "Managed secret file missing",
+                extra={"secret": self._config.name, "path": str(self._config.path)},
             )
             if self._value is not None:
                 self._last_refresh = now
@@ -111,7 +116,8 @@ class ManagedSecret:
             ) from exc
         if not secret:
             self._logger.warning(
-                "Managed secret file is empty", extra={"secret": self._config.name, "path": str(self._config.path)}
+                "Managed secret file is empty",
+                extra={"secret": self._config.name, "path": str(self._config.path)},
             )
             if self._value is not None:
                 self._last_refresh = now
@@ -132,7 +138,8 @@ class ManagedSecret:
             raise
         if secret != self._value:
             self._logger.info(
-                "Managed secret rotated", extra={"secret": self._config.name, "path": str(self._config.path)}
+                "Managed secret rotated",
+                extra={"secret": self._config.name, "path": str(self._config.path)},
             )
         self._value = secret
         self._last_refresh = now
@@ -185,7 +192,9 @@ class SecretManager:
         self._audit_state = threading.local()
         self._audit_logger: AuditLogger | None = None
         if audit_logger is not None and audit_logger_factory is not None:
-            raise ValueError("Provide either audit_logger or audit_logger_factory, not both")
+            raise ValueError(
+                "Provide either audit_logger or audit_logger_factory, not both"
+            )
         if audit_logger is not None:
             self._audit_logger = audit_logger
         elif audit_logger_factory is not None:
@@ -221,9 +230,13 @@ class SecretManager:
             try:
                 value = secret.get_secret()
             except SecretManagerError:
-                self._audit_operation(name=name, operation="provider_access", status="error")
+                self._audit_operation(
+                    name=name, operation="provider_access", status="error"
+                )
                 raise
-            self._audit_operation(name=name, operation="provider_access", status="success")
+            self._audit_operation(
+                name=name, operation="provider_access", status="success"
+            )
             return value
 
         return _resolver
@@ -231,7 +244,9 @@ class SecretManager:
     def force_refresh(self, name: str) -> None:
         secret = self._secrets.get(name)
         if secret is None:
-            self._audit_operation(name=name, operation="force_refresh", status="missing")
+            self._audit_operation(
+                name=name, operation="force_refresh", status="missing"
+            )
             raise SecretManagerError(f"Unknown secret '{name}'")
         try:
             secret.force_refresh()
@@ -274,7 +289,9 @@ class SecretManager:
         finally:
             setattr(self._audit_state, "active", False)
 
-    def _describe_secret(self, name: str, secret: ManagedSecret | None) -> dict[str, Any]:
+    def _describe_secret(
+        self, name: str, secret: ManagedSecret | None
+    ) -> dict[str, Any]:
         if secret is None:
             return {"name": name, "managed": False}
         metadata = secret.describe()
@@ -290,7 +307,9 @@ _SECRET_CALLER_CONTEXT: ContextVar[dict[str, str]] = ContextVar(
 
 
 @contextmanager
-def secret_caller_context(*, actor: str, ip_address: str, **extra: str) -> Iterator[None]:
+def secret_caller_context(
+    *, actor: str, ip_address: str, **extra: str
+) -> Iterator[None]:
     """Temporarily override the caller context for secret access auditing."""
 
     current = dict(_SECRET_CALLER_CONTEXT.get())

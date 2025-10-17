@@ -6,7 +6,7 @@ import json
 import os
 import threading
 from pathlib import Path
-from typing import Protocol, TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 if TYPE_CHECKING:
     from .audit_logger import AuditRecord

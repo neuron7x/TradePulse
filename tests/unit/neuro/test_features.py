@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from core.neuro.features import EWEntropy, EWEntropyConfig, ema_update, ewvar_update
 

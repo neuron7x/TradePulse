@@ -1,8 +1,8 @@
 """Execute the project's automated test suites."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import logging
 from argparse import _SubParsersAction
 from pathlib import Path
@@ -14,7 +14,9 @@ DEFAULT_TEST_ROOTS = (Path("domains"), Path("tests"))
 
 
 def build_parser(subparsers: _SubParsersAction[object]) -> None:
-    parser = subparsers.add_parser("test", help="Run automated tests across supported stacks")
+    parser = subparsers.add_parser(
+        "test", help="Run automated tests across supported stacks"
+    )
     parser.set_defaults(command="test", handler=handle)
     parser.add_argument(
         "--pytest-args",
@@ -63,4 +65,3 @@ def _run_node_tests() -> None:
 
     LOGGER.info("Running Node.js dashboard tests…")
     run_subprocess(["node", str(dashboard)])
-

@@ -54,7 +54,9 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight t
             return bool(result)
 
     class Column:  # type: ignore[override]
-        def __init__(self, dtype, nullable: bool = False, unique: bool = False, checks=None):
+        def __init__(
+            self, dtype, nullable: bool = False, unique: bool = False, checks=None
+        ):
             self.dtype = dtype
             self.nullable = nullable
             self.unique = unique
@@ -81,8 +83,12 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight t
                     raise SchemaError(f"{name} contains duplicate values")
                 for check in column.checks:
                     if not check(series):
-                        raise SchemaError(getattr(check, "error", f"Check failed for {name}"))
+                        raise SchemaError(
+                            getattr(check, "error", f"Check failed for {name}")
+                        )
             return frame
+
+
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -117,7 +123,9 @@ class ValueColumnConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, strict=True)
 
-    name: StrictStr = Field(..., min_length=1, description="Column name in the dataframe")
+    name: StrictStr = Field(
+        ..., min_length=1, description="Column name in the dataframe"
+    )
     dtype: Optional[StrictStr] = Field(
         default=None,
         description="Optional pandas-compatible dtype string enforced by pandera.",
@@ -217,7 +225,9 @@ def _coerce_timedelta(value: Optional[object]) -> Optional[pd.Timedelta]:
     try:
         return pd.Timedelta(str(value))
     except (ValueError, TypeError) as exc:  # pragma: no cover - defensive guard
-        raise TimeSeriesValidationError(f"Unable to coerce frequency {value!r} to Timedelta") from exc
+        raise TimeSeriesValidationError(
+            f"Unable to coerce frequency {value!r} to Timedelta"
+        ) from exc
 
 
 def _resolve_timezone(name: str) -> ZoneInfo:
@@ -293,7 +303,9 @@ def build_timeseries_schema(config: TimeSeriesValidationConfig) -> DataFrameSche
         tz_name = getattr(tz, "key", None) or str(tz)
         return tz_name == timezone_key
 
-    timestamp_checks.append(Check(_check_timezone, error=f"timestamps must be in {timezone_key}"))
+    timestamp_checks.append(
+        Check(_check_timezone, error=f"timestamps must be in {timezone_key}")
+    )
 
     columns: dict[str, Column] = {
         config.timestamp_column: Column(
@@ -308,9 +320,16 @@ def build_timeseries_schema(config: TimeSeriesValidationConfig) -> DataFrameSche
         columns[column.name] = Column(
             column.dtype or "float64",
             nullable=column.nullable,
-            checks=[Check(lambda s: not s.isna().any(), error=f"{column.name} contains NaN values")]
-            if not column.nullable
-            else None,
+            checks=(
+                [
+                    Check(
+                        lambda s: not s.isna().any(),
+                        error=f"{column.name} contains NaN values",
+                    )
+                ]
+                if not column.nullable
+                else None
+            ),
         )
 
     return DataFrameSchema(columns=columns, strict=not config.allow_extra_columns)

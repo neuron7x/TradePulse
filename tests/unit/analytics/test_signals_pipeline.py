@@ -98,8 +98,12 @@ def test_feature_pipeline_float_precision_consistency() -> None:
 
     stacked_64 = features_64.where(mask).stack()
     stacked_32 = features_32.where(mask).stack()
-    np.testing.assert_allclose(stacked_64.values, stacked_32.values, rtol=5e-4, atol=1e-6)
-    assert not np.isinf(features_32.to_numpy(dtype=float)).any(), "No overflow should occur in float32 path"
+    np.testing.assert_allclose(
+        stacked_64.values, stacked_32.values, rtol=5e-4, atol=1e-6
+    )
+    assert not np.isinf(
+        features_32.to_numpy(dtype=float)
+    ).any(), "No overflow should occur in float32 path"
 
 
 def test_leakage_gate_alignment() -> None:
@@ -139,7 +143,9 @@ def test_leakage_gate_special_value_handling() -> None:
 def test_model_selector_walk_forward_runs() -> None:
     frame = _sample_market_frame(220)
     cfg = replace(FeaturePipelineConfig(), technical_windows=(5, 10))
-    features, target = build_supervised_learning_frame(frame, config=cfg, gate=LeakageGate(lag=0))
+    features, target = build_supervised_learning_frame(
+        frame, config=cfg, gate=LeakageGate(lag=0)
+    )
     splitter = WalkForwardSplitter(train_window=100, test_window=40, freq="h")
     candidates = [c for c in make_default_candidates() if c.name == "ols"]
     selector = SignalModelSelector(splitter, candidates=candidates)
@@ -190,26 +196,40 @@ def test_macd_signal_window_follows_configuration() -> None:
     assert "macd_signal" in default_features
     assert "macd_signal" in fast_signal_features
 
-    mask = default_features["macd_signal"].notna() & fast_signal_features["macd_signal"].notna()
+    mask = (
+        default_features["macd_signal"].notna()
+        & fast_signal_features["macd_signal"].notna()
+    )
     assert mask.any(), "Both pipelines should produce overlapping finite observations"
 
     default_values = default_features.loc[mask, "macd_signal"].to_numpy()
     fast_values = fast_signal_features.loc[mask, "macd_signal"].to_numpy()
 
-    assert not np.allclose(default_values, fast_values), "Signal smoothing should depend on the configured window"
+    assert not np.allclose(
+        default_values, fast_values
+    ), "Signal smoothing should depend on the configured window"
 
 
 def test_macd_pipeline_matches_golden_baseline() -> None:
     """Ensure MACD-related features stay aligned with the golden baseline."""
 
-    golden_path = Path(__file__).resolve().parents[3] / "data" / "golden" / "indicator_macd_baseline.csv"
+    golden_path = (
+        Path(__file__).resolve().parents[3]
+        / "data"
+        / "golden"
+        / "indicator_macd_baseline.csv"
+    )
     golden_frame = pd.read_csv(golden_path, parse_dates=["ts"])
     golden_frame.set_index("ts", inplace=True)
 
-    price_frame = pd.DataFrame({"close": golden_frame["close"]}, index=golden_frame.index)
+    price_frame = pd.DataFrame(
+        {"close": golden_frame["close"]}, index=golden_frame.index
+    )
 
     pipeline = SignalFeaturePipeline(
-        FeaturePipelineConfig(technical_windows=(), macd_fast=12, macd_slow=26, macd_signal=9)
+        FeaturePipelineConfig(
+            technical_windows=(), macd_fast=12, macd_slow=26, macd_signal=9
+        )
     )
     features = pipeline.transform(price_frame)
 
@@ -225,7 +245,13 @@ def test_macd_pipeline_matches_golden_baseline() -> None:
         assert feature_col in features, f"Missing feature column: {feature_col}"
         expected = golden_frame[golden_col].to_numpy(dtype=float)
         actual = features.loc[golden_frame.index, feature_col].to_numpy(dtype=float)
-        np.testing.assert_allclose(actual, expected, rtol=2e-6, atol=5e-7, err_msg=f"Mismatch for {feature_col}")
+        np.testing.assert_allclose(
+            actual,
+            expected,
+            rtol=2e-6,
+            atol=5e-7,
+            err_msg=f"Mismatch for {feature_col}",
+        )
 
 
 def test_feature_pipeline_handles_empty_frame() -> None:
@@ -240,7 +266,9 @@ def test_feature_pipeline_handles_empty_frame() -> None:
             "signed_volume": pd.Series(dtype=float),
         }
     )
-    pipeline = SignalFeaturePipeline(FeaturePipelineConfig(technical_windows=(3,), microstructure_window=4))
+    pipeline = SignalFeaturePipeline(
+        FeaturePipelineConfig(technical_windows=(3,), microstructure_window=4)
+    )
     features = pipeline.transform(frame)
 
     assert features.empty

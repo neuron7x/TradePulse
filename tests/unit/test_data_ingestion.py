@@ -31,7 +31,9 @@ def test_binance_ws_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None
         ingestor.binance_ws("BTCUSDT", lambda _: None)
 
 
-def test_binance_ws_emits_ticks_when_dependency_available(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_binance_ws_emits_ticks_when_dependency_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[Ticker] = []
 
     class DummyWS:
@@ -115,7 +117,9 @@ def test_binance_stream_handle_context_manager_closes_active_stream() -> None:
     assert ws.stop_calls == 1
 
 
-def test_binance_ws_ignores_messages_without_kline(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_binance_ws_ignores_messages_without_kline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     captured: list[Ticker] = []
 
     class DummyWS:
@@ -173,7 +177,9 @@ def test_binance_ws_logs_warning_on_invalid_payload(
         ws.kline_callback({"k": {"T": "bad-ts", "c": "not-a-number"}})  # type: ignore[operator]
 
     assert captured == []
-    assert any("Failed to parse websocket payload" in message for message in caplog.messages)
+    assert any(
+        "Failed to parse websocket payload" in message for message in caplog.messages
+    )
     ws.stream_handle.close()  # type: ignore[attr-defined]
 
 
@@ -199,7 +205,9 @@ def test_historical_csv_validates_required_columns(tmp_path: Path) -> None:
         ingestor.historical_csv(str(csv_path), lambda _: None)
 
 
-def test_historical_csv_skips_malformed_rows(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_historical_csv_skips_malformed_rows(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     csv_path = tmp_path / "history_malformed.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
@@ -247,7 +255,9 @@ def test_historical_csv_rejects_symlink(tmp_path: Path) -> None:
 
 def test_historical_csv_enforces_size_limit(tmp_path: Path) -> None:
     csv_path = tmp_path / "large.csv"
-    csv_path.write_text("ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8")
+    csv_path.write_text(
+        "ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8"
+    )
 
     ingestor = DataIngestor(allowed_roots=[tmp_path], max_csv_bytes=32)
 

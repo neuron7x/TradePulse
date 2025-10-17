@@ -11,7 +11,12 @@ from core.data.connectors.market import BaseMarketDataConnector
 
 @pytest.mark.asyncio
 async def test_polygon_adapter_replays_recorded_cassette(tmp_path):
-    cassette_path = Path(__file__).resolve().parent.parent / "fixtures" / "cassettes" / "polygon_agg.json"
+    cassette_path = (
+        Path(__file__).resolve().parent.parent
+        / "fixtures"
+        / "cassettes"
+        / "polygon_agg.json"
+    )
     payload = json.loads(cassette_path.read_text())
     requests: list[httpx.Request] = []
 
@@ -22,10 +27,16 @@ async def test_polygon_adapter_replays_recorded_cassette(tmp_path):
 
     transport = httpx.MockTransport(_handler)
 
-    async with httpx.AsyncClient(base_url="https://mock.polygon", transport=transport) as client:
-        adapter = PolygonIngestionAdapter(api_key="cassette", base_url="https://mock.polygon", client=client)
+    async with httpx.AsyncClient(
+        base_url="https://mock.polygon", transport=transport
+    ) as client:
+        adapter = PolygonIngestionAdapter(
+            api_key="cassette", base_url="https://mock.polygon", client=client
+        )
         connector = BaseMarketDataConnector(adapter)
-        events = await connector.fetch_snapshot(symbol="X:BTCUSD", start="2024-01-01", end="2024-01-02")
+        events = await connector.fetch_snapshot(
+            symbol="X:BTCUSD", start="2024-01-01", end="2024-01-02"
+        )
         expected_symbol = normalize_symbol("X:BTCUSD")
         assert len(events) == len(payload["results"])
         for event in events:

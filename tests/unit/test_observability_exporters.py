@@ -8,13 +8,17 @@ import pytest
 from observability import exporters
 
 
-def test_start_prometheus_exporter_requires_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_prometheus_exporter_requires_dependency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(exporters, "_PROM_AVAILABLE", False, raising=False)
     with pytest.raises(RuntimeError, match="prometheus_client is not installed"):
         exporters.start_prometheus_exporter_process()
 
 
-def test_start_prometheus_exporter_sets_ready_event(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_start_prometheus_exporter_sets_ready_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     events: list[Event] = []
 
     def fake_run(port: int, addr: str, ready: Event) -> None:
@@ -42,7 +46,11 @@ def test_start_prometheus_exporter_sets_ready_event(monkeypatch: pytest.MonkeyPa
         def is_alive(self) -> bool:
             return False
 
-    monkeypatch.setattr(exporters, "multiprocessing", SimpleNamespace(Event=Event, Process=lambda **kwargs: DummyProcess(**kwargs)))
+    monkeypatch.setattr(
+        exporters,
+        "multiprocessing",
+        SimpleNamespace(Event=Event, Process=lambda **kwargs: DummyProcess(**kwargs)),
+    )
     monkeypatch.setattr(exporters, "_PROM_AVAILABLE", True, raising=False)
     monkeypatch.setattr(exporters, "_run_prometheus_exporter", fake_run, raising=False)
 
@@ -51,7 +59,9 @@ def test_start_prometheus_exporter_sets_ready_event(monkeypatch: pytest.MonkeyPa
     assert events and events[0].is_set()
 
 
-def test_stop_exporter_process_handles_alive_process(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_exporter_process_handles_alive_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeProcess:
         def __init__(self) -> None:
             self.terminated = False
@@ -72,7 +82,9 @@ def test_stop_exporter_process_handles_alive_process(monkeypatch: pytest.MonkeyP
     assert proc.joined is True
 
 
-def test_stop_exporter_process_ignores_inactive(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_stop_exporter_process_ignores_inactive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     class FakeProcess:
         def is_alive(self) -> bool:
             return False
@@ -80,7 +92,9 @@ def test_stop_exporter_process_ignores_inactive(monkeypatch: pytest.MonkeyPatch)
         def terminate(self) -> None:  # pragma: no cover - not invoked
             raise AssertionError("should not terminate")
 
-        def join(self, timeout: float | None = None) -> None:  # pragma: no cover - not invoked
+        def join(
+            self, timeout: float | None = None
+        ) -> None:  # pragma: no cover - not invoked
             raise AssertionError("should not join")
 
     exporters.stop_exporter_process(FakeProcess())

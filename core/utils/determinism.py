@@ -1,9 +1,8 @@
+"""Utilities that keep numeric libraries deterministic across environments."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
-"""Utilities that keep numeric libraries deterministic across environments."""
-
 import os
 from typing import MutableMapping
 

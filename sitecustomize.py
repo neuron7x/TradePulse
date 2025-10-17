@@ -144,4 +144,3 @@ def _apply_patches() -> None:
 
 if not TYPE_CHECKING:
     _apply_patches()
-

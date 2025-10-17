@@ -8,12 +8,15 @@ import pytest
 
 os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
-os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
+os.environ.setdefault(
+    "TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks"
+)
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "import-audit-secret")
 
-from application.api.service import create_app  # noqa: E402  - env vars must be set before import
+from application.api.service import (
+    create_app,
+)  # noqa: E402  - env vars must be set before import
 from application.settings import AdminApiSettings
-
 
 BASELINE = Path("interfaces/http/openapi/0.2.0.json")
 

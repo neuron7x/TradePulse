@@ -4,7 +4,8 @@ from __future__ import annotations
 import pytest
 
 try:
-    from hypothesis import given, settings, strategies as st
+    from hypothesis import given, settings
+    from hypothesis import strategies as st
 except ImportError:  # pragma: no cover
     pytest.skip("hypothesis not installed", allow_module_level=True)
 
@@ -28,14 +29,14 @@ class TestPositionSizingProperties:
     ) -> None:
         """Position size must respect both balance and leverage limits."""
         size = position_sizing(balance, risk, price, max_leverage=max_leverage)
-        
+
         # Size should be non-negative
         assert size >= 0.0
-        
+
         # Position notional should not exceed balance * risk
         notional = size * price
         assert notional <= balance * risk * 1.01  # Small tolerance for floating point
-        
+
         # Position should not exceed leverage cap
         leverage_notional = size * price
         assert leverage_notional <= balance * max_leverage * 1.01
@@ -45,7 +46,9 @@ class TestPositionSizingProperties:
         balance=st.floats(min_value=100.0, max_value=10_000.0),
         price=st.floats(min_value=0.01, max_value=1000.0),
     )
-    def test_position_size_increases_with_risk(self, balance: float, price: float) -> None:
+    def test_position_size_increases_with_risk(
+        self, balance: float, price: float
+    ) -> None:
         """Higher risk should yield larger position sizes."""
         size_low = position_sizing(balance, 0.1, price)
         size_high = position_sizing(balance, 0.5, price)
@@ -65,12 +68,29 @@ class TestPortfolioHeatProperties:
     @settings(max_examples=100, deadline=None)
     @given(
         positions=st.lists(
-            st.fixed_dictionaries({
-                "qty": st.floats(min_value=-100.0, max_value=100.0, allow_nan=False, allow_infinity=False),
-                "price": st.floats(min_value=0.01, max_value=10_000.0, allow_nan=False, allow_infinity=False),
-                "risk_weight": st.floats(min_value=0.1, max_value=5.0, allow_nan=False, allow_infinity=False),
-                "side": st.sampled_from(["long", "short"]),
-            }),
+            st.fixed_dictionaries(
+                {
+                    "qty": st.floats(
+                        min_value=-100.0,
+                        max_value=100.0,
+                        allow_nan=False,
+                        allow_infinity=False,
+                    ),
+                    "price": st.floats(
+                        min_value=0.01,
+                        max_value=10_000.0,
+                        allow_nan=False,
+                        allow_infinity=False,
+                    ),
+                    "risk_weight": st.floats(
+                        min_value=0.1,
+                        max_value=5.0,
+                        allow_nan=False,
+                        allow_infinity=False,
+                    ),
+                    "side": st.sampled_from(["long", "short"]),
+                }
+            ),
             min_size=0,
             max_size=10,
         )
@@ -89,18 +109,20 @@ class TestPortfolioHeatProperties:
         """Doubling position size should double the heat."""
         single = [{"qty": qty, "price": price, "side": "long"}]
         double = [{"qty": 2 * qty, "price": price, "side": "long"}]
-        
+
         heat_single = portfolio_heat(single)
         heat_double = portfolio_heat(double)
-        
+
         assert heat_double == pytest.approx(2 * heat_single, rel=1e-6)
 
     def test_heat_treats_long_and_short_symmetrically(self) -> None:
         """Heat should be the same for long and short positions of equal size."""
         long_pos = [{"qty": 10.0, "price": 100.0, "side": "long"}]
         short_pos = [{"qty": -10.0, "price": 100.0, "side": "short"}]
-        
-        assert portfolio_heat(long_pos) == pytest.approx(portfolio_heat(short_pos), rel=1e-9)
+
+        assert portfolio_heat(long_pos) == pytest.approx(
+            portfolio_heat(short_pos), rel=1e-9
+        )
 
 
 class TestOrderProperties:
@@ -117,7 +139,9 @@ class TestOrderProperties:
         self, side: OrderSide, qty: float, price: float | None, order_type: OrderType
     ) -> None:
         """Order should be created with provided fields."""
-        order = Order(symbol="BTCUSD", side=side, quantity=qty, price=price, order_type=order_type)
+        order = Order(
+            symbol="BTCUSD", side=side, quantity=qty, price=price, order_type=order_type
+        )
         assert order.side == side
         assert order.quantity == qty
         assert order.price == price

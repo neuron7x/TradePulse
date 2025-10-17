@@ -10,7 +10,9 @@ import pytest
 from core.data.adapters import base
 
 
-def test_default_retry_exceptions_include_optional_modules(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_default_retry_exceptions_include_optional_modules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     dummy_httpx = types.ModuleType("httpx")
     dummy_ccxt = types.ModuleType("ccxt")
 
@@ -32,7 +34,9 @@ def test_default_retry_exceptions_include_optional_modules(monkeypatch: pytest.M
     assert asyncio.TimeoutError in exceptions
 
 
-def test_retry_config_compute_backoff_applies_jitter(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retry_config_compute_backoff_applies_jitter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = base.RetryConfig(multiplier=1.0, max_backoff=4.0, jitter=0.5)
 
     calls: list[tuple[float, float]] = []
@@ -48,7 +52,9 @@ def test_retry_config_compute_backoff_applies_jitter(monkeypatch: pytest.MonkeyP
     assert calls == [(0.0, 1.0)]
 
 
-def test_retry_config_compute_backoff_respects_max_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_retry_config_compute_backoff_respects_max_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = base.RetryConfig(multiplier=1.0, max_backoff=5.0, jitter=0.5)
 
     def fake_uniform(low: float, high: float) -> float:
@@ -62,7 +68,9 @@ def test_retry_config_compute_backoff_respects_max_backoff(monkeypatch: pytest.M
 
 
 @pytest.mark.asyncio
-async def test_fault_tolerance_policy_retries_with_rate_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_fault_tolerance_policy_retries_with_rate_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     entries: list[str] = []
 
     class DummyLimiter:
@@ -106,7 +114,9 @@ async def test_fault_tolerance_policy_retries_with_rate_limit(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_sleep_for_attempt_uses_retry_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_sleep_for_attempt_uses_retry_backoff(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     recorded: dict[str, float] = {}
 
     async def fake_sleep(delay: float) -> None:
@@ -119,4 +129,6 @@ async def test_sleep_for_attempt_uses_retry_backoff(monkeypatch: pytest.MonkeyPa
     )
 
     await policy.sleep_for_attempt(4)
-    assert math.isclose(recorded["delay"], policy.retry.compute_backoff(4), rel_tol=1e-9)
+    assert math.isclose(
+        recorded["delay"], policy.retry.compute_backoff(4), rel_tol=1e-9
+    )

@@ -2,9 +2,10 @@
 """Numerical stability tests shared across CPU architectures."""
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
-import warnings
 
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
@@ -70,4 +71,6 @@ def test_kuramoto_order_accepts_complex_inputs_without_warning() -> None:
 
     assert not caught
     real_value = kuramoto_order(phases)
-    assert complex_value == pytest.approx(real_value, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert complex_value == pytest.approx(
+        real_value, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )

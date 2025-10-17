@@ -6,14 +6,14 @@ import pytest
 
 from backtest.engine import PortfolioConstraints, WalkForwardEngine, walk_forward
 from backtest.transaction_costs import (
-    BpsSpread,
     BorrowFinancing,
+    BpsSpread,
     CompositeTransactionCostModel,
     FixedBpsCommission,
     FixedSlippage,
     FixedSpread,
-    PerUnitCommission,
     PercentVolumeCommission,
+    PerUnitCommission,
     SquareRootSlippage,
     TransactionCostModel,
     VolumeProportionalSlippage,
@@ -36,7 +36,9 @@ class DummyModel(TransactionCostModel):
         self.spread_calls.append((price, side))
         return price * 0.01
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:
         self.slippage_calls.append((volume, price, side))
         return volume * 0.1
 
@@ -46,8 +48,12 @@ class DummyModel(TransactionCostModel):
 
 
 def test_component_models_behaviour() -> None:
-    assert FixedBpsCommission(10).get_commission(5, 100) == pytest.approx(5 * 100 * 10 * 1e-4)
-    assert PercentVolumeCommission(0.5).get_commission(2, 50) == pytest.approx(2 * 50 * 0.5 * 0.01)
+    assert FixedBpsCommission(10).get_commission(5, 100) == pytest.approx(
+        5 * 100 * 10 * 1e-4
+    )
+    assert PercentVolumeCommission(0.5).get_commission(2, 50) == pytest.approx(
+        2 * 50 * 0.5 * 0.01
+    )
     assert PerUnitCommission(1.2).get_commission(3, 10) == pytest.approx(3.6)
 
     assert FixedSpread(0.25).get_spread(100, "buy") == pytest.approx(0.25)
@@ -55,15 +61,23 @@ def test_component_models_behaviour() -> None:
 
     assert FixedSlippage(0.05).get_slippage(10, 100) == pytest.approx(0.05)
     assert VolumeProportionalSlippage(0.01).get_slippage(4, 100) == pytest.approx(0.04)
-    assert SquareRootSlippage(a=0.1, b=0.5).get_slippage(9, 100) == pytest.approx(100 * (0.1 + 0.5 * math.sqrt(9)))
+    assert SquareRootSlippage(a=0.1, b=0.5).get_slippage(9, 100) == pytest.approx(
+        100 * (0.1 + 0.5 * math.sqrt(9))
+    )
 
-    linear_financing = BorrowFinancing(long_rate_bps=36500, short_rate_bps=36500, periods_per_year=365)
+    linear_financing = BorrowFinancing(
+        long_rate_bps=36500, short_rate_bps=36500, periods_per_year=365
+    )
     assert linear_financing.get_financing(1.0, 100.0) == pytest.approx(1.0)
     assert linear_financing.get_financing(-2.0, 100.0) == pytest.approx(2.0)
 
     linear_reference = BorrowFinancing(long_rate_bps=10000, short_rate_bps=10000)
-    nonlinear_financing = BorrowFinancing(long_rate_bps=10000, short_rate_bps=10000, exponent=1.5)
-    assert nonlinear_financing.get_financing(4.0, 50.0) > linear_reference.get_financing(4.0, 50.0)
+    nonlinear_financing = BorrowFinancing(
+        long_rate_bps=10000, short_rate_bps=10000, exponent=1.5
+    )
+    assert nonlinear_financing.get_financing(
+        4.0, 50.0
+    ) > linear_reference.get_financing(4.0, 50.0)
 
 
 def test_composite_model_delegates() -> None:
@@ -171,7 +185,9 @@ def test_walk_forward_financing_and_constraints() -> None:
     def signals(_: np.ndarray) -> np.ndarray:
         return np.array([0.0, 1.0, 1.0, 1.0], dtype=float)
 
-    financing_model = BorrowFinancing(long_rate_bps=36500, short_rate_bps=36500, periods_per_year=365)
+    financing_model = BorrowFinancing(
+        long_rate_bps=36500, short_rate_bps=36500, periods_per_year=365
+    )
     composite = CompositeTransactionCostModel(financing_model=financing_model)
     constraints = PortfolioConstraints(max_gross_exposure=0.5)
 

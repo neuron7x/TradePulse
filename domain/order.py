@@ -141,7 +141,11 @@ class Order:
     def is_active(self) -> bool:
         """Return whether the order can still receive fills."""
 
-        return self.status in {OrderStatus.PENDING, OrderStatus.OPEN, OrderStatus.PARTIALLY_FILLED}
+        return self.status in {
+            OrderStatus.PENDING,
+            OrderStatus.OPEN,
+            OrderStatus.PARTIALLY_FILLED,
+        }
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the order into a transport-friendly representation."""

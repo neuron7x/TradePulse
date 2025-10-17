@@ -31,12 +31,15 @@ try:
         generate_latest,
         start_http_server,
     )
+
     PROMETHEUS_AVAILABLE = True
 except ImportError:
     PROMETHEUS_AVAILABLE = False
 
 
-def _fallback_quantiles(values: list[float], quantiles: tuple[float, ...]) -> Dict[float, float]:
+def _fallback_quantiles(
+    values: list[float], quantiles: tuple[float, ...]
+) -> Dict[float, float]:
     """Compute quantiles without numpy."""
 
     if not values:
@@ -83,7 +86,7 @@ class MetricsCollector:
 
         self._enabled = True
         self.registry = registry
-        
+
         # Feature/Indicator metrics
         self.feature_transform_duration = Histogram(
             "tradepulse_feature_transform_duration_seconds",
@@ -91,21 +94,21 @@ class MetricsCollector:
             ["feature_name", "feature_type"],
             registry=registry,
         )
-        
+
         self.feature_transform_total = Counter(
             "tradepulse_feature_transform_total",
             "Total number of feature transformations",
             ["feature_name", "feature_type", "status"],
             registry=registry,
         )
-        
+
         self.feature_value = Gauge(
             "tradepulse_feature_value",
             "Current feature value",
             ["feature_name"],
             registry=registry,
         )
-        
+
         # Backtest metrics
         self.backtest_duration = Histogram(
             "tradepulse_backtest_duration_seconds",
@@ -113,35 +116,35 @@ class MetricsCollector:
             ["strategy"],
             registry=registry,
         )
-        
+
         self.backtest_total = Counter(
             "tradepulse_backtest_total",
             "Total number of backtests run",
             ["strategy", "status"],
             registry=registry,
         )
-        
+
         self.backtest_pnl = Gauge(
             "tradepulse_backtest_pnl",
             "Backtest profit and loss",
             ["strategy"],
             registry=registry,
         )
-        
+
         self.backtest_max_drawdown = Gauge(
             "tradepulse_backtest_max_drawdown",
             "Backtest maximum drawdown",
             ["strategy"],
             registry=registry,
         )
-        
+
         self.backtest_trades = Gauge(
             "tradepulse_backtest_trades",
             "Number of trades in backtest",
             ["strategy"],
             registry=registry,
         )
-        
+
         # Data ingestion metrics
         self.data_ingestion_duration = Histogram(
             "tradepulse_data_ingestion_duration_seconds",
@@ -207,7 +210,7 @@ class MetricsCollector:
             ["exchange", "symbol"],
             registry=registry,
         )
-        
+
         self.orders_placed = Counter(
             "tradepulse_orders_placed_total",
             "Total number of orders placed",
@@ -334,13 +337,25 @@ class MetricsCollector:
             registry=registry,
         )
 
-        self._ingestion_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        self._signal_latency_samples: Dict[str, deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        self._order_submission_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        self._order_ack_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        self._order_fill_latency_samples: Dict[tuple[str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        self._signal_to_fill_latency_samples: Dict[tuple[str, str, str], deque[float]] = defaultdict(lambda: deque(maxlen=256))
-        
+        self._ingestion_latency_samples: Dict[tuple[str, str], deque[float]] = (
+            defaultdict(lambda: deque(maxlen=256))
+        )
+        self._signal_latency_samples: Dict[str, deque[float]] = defaultdict(
+            lambda: deque(maxlen=256)
+        )
+        self._order_submission_latency_samples: Dict[tuple[str, str], deque[float]] = (
+            defaultdict(lambda: deque(maxlen=256))
+        )
+        self._order_ack_latency_samples: Dict[tuple[str, str], deque[float]] = (
+            defaultdict(lambda: deque(maxlen=256))
+        )
+        self._order_fill_latency_samples: Dict[tuple[str, str], deque[float]] = (
+            defaultdict(lambda: deque(maxlen=256))
+        )
+        self._signal_to_fill_latency_samples: Dict[
+            tuple[str, str, str], deque[float]
+        ] = defaultdict(lambda: deque(maxlen=256))
+
         # Agent/optimization metrics
         self.optimization_duration = Histogram(
             "tradepulse_optimization_duration_seconds",
@@ -348,14 +363,14 @@ class MetricsCollector:
             ["optimizer_type"],
             registry=registry,
         )
-        
+
         self.optimization_iterations = Counter(
             "tradepulse_optimization_iterations_total",
             "Total number of optimization iterations",
             ["optimizer_type"],
             registry=registry,
         )
-        
+
     @property
     def enabled(self) -> bool:
         """Check if metrics collection is enabled."""
@@ -380,7 +395,7 @@ class MetricsCollector:
 
         final_status = str(override).strip()
         return final_status or status
-        
+
     @contextmanager
     def measure_feature_transform(
         self,
@@ -388,11 +403,11 @@ class MetricsCollector:
         feature_type: str = "generic",
     ) -> Iterator[None]:
         """Context manager for measuring feature transformation time.
-        
+
         Args:
             feature_name: Name of the feature being transformed
             feature_type: Type/category of the feature
-            
+
         Example:
             >>> collector = MetricsCollector()
             >>> with collector.measure_feature_transform("RSI", "momentum"):
@@ -401,10 +416,10 @@ class MetricsCollector:
         if not self._enabled:
             yield
             return
-            
+
         start_time = time.time()
         status = "success"
-        
+
         try:
             yield
         except Exception:
@@ -413,25 +428,22 @@ class MetricsCollector:
         finally:
             duration = time.time() - start_time
             self.feature_transform_duration.labels(
-                feature_name=feature_name,
-                feature_type=feature_type
+                feature_name=feature_name, feature_type=feature_type
             ).observe(duration)
             self.feature_transform_total.labels(
-                feature_name=feature_name,
-                feature_type=feature_type,
-                status=status
+                feature_name=feature_name, feature_type=feature_type, status=status
             ).inc()
-            
+
     @contextmanager
     def measure_backtest(self, strategy: str) -> Iterator[Dict[str, Any]]:
         """Context manager for measuring backtest execution.
-        
+
         Args:
             strategy: Name of the strategy being backtested
-            
+
         Yields:
             Dictionary to store backtest results
-            
+
         Example:
             >>> collector = MetricsCollector()
             >>> with collector.measure_backtest("momentum_strategy") as ctx:
@@ -443,11 +455,11 @@ class MetricsCollector:
         if not self._enabled:
             yield {}
             return
-            
+
         start_time = time.time()
         status = "success"
         ctx: Dict[str, Any] = {}
-        
+
         try:
             yield ctx
         except Exception:
@@ -457,15 +469,17 @@ class MetricsCollector:
             duration = time.time() - start_time
             self.backtest_duration.labels(strategy=strategy).observe(duration)
             self.backtest_total.labels(strategy=strategy, status=status).inc()
-            
+
             if status == "success" and ctx:
                 if "pnl" in ctx:
                     self.backtest_pnl.labels(strategy=strategy).set(ctx["pnl"])
                 if "max_dd" in ctx:
-                    self.backtest_max_drawdown.labels(strategy=strategy).set(abs(ctx["max_dd"]))
+                    self.backtest_max_drawdown.labels(strategy=strategy).set(
+                        abs(ctx["max_dd"])
+                    )
                 if "trades" in ctx:
                     self.backtest_trades.labels(strategy=strategy).set(ctx["trades"])
-                    
+
     def record_feature_value(self, feature_name: str, value: float) -> None:
         """Record a feature value.
 
@@ -535,7 +549,9 @@ class MetricsCollector:
                 {"strategy": strategy},
                 samples,
             )
-            self.signal_generation_total.labels(strategy=strategy, status=final_status).inc()
+            self.signal_generation_total.labels(
+                strategy=strategy, status=final_status
+            ).inc()
 
     @contextmanager
     def measure_data_ingestion(
@@ -585,13 +601,17 @@ class MetricsCollector:
                 status=final_status,
             ).inc()
 
-    def set_ingestion_throughput(self, source: str, symbol: str, throughput: float) -> None:
+    def set_ingestion_throughput(
+        self, source: str, symbol: str, throughput: float
+    ) -> None:
         """Record instantaneous ingestion throughput."""
 
         if not self._enabled:
             return
 
-        self.data_ingestion_throughput.labels(source=source, symbol=symbol).set(max(0.0, float(throughput)))
+        self.data_ingestion_throughput.labels(source=source, symbol=symbol).set(
+            max(0.0, float(throughput))
+        )
 
     def record_tick_processed(self, source: str, symbol: str, count: int = 1) -> None:
         """Record that ticks were processed.
@@ -681,7 +701,9 @@ class MetricsCollector:
             return
         self.open_positions.labels(exchange=exchange, symbol=symbol).set(positions)
 
-    def record_order_fill_latency(self, exchange: str, symbol: str, duration: float) -> None:
+    def record_order_fill_latency(
+        self, exchange: str, symbol: str, duration: float
+    ) -> None:
         """Observe latency from order submission to fill."""
 
         if not self._enabled:
@@ -694,7 +716,9 @@ class MetricsCollector:
             samples,
         )
 
-    def record_order_ack_latency(self, exchange: str, symbol: str, duration: float) -> None:
+    def record_order_ack_latency(
+        self, exchange: str, symbol: str, duration: float
+    ) -> None:
         """Observe latency between order submission and venue acknowledgement."""
 
         if not self._enabled:
@@ -750,7 +774,9 @@ class MetricsCollector:
         for name, value in metrics.items():
             if value is None:
                 continue
-            self.regression_metrics.labels(model=model, metric=str(name)).set(float(value))
+            self.regression_metrics.labels(model=model, metric=str(name)).set(
+                float(value)
+            )
 
     def record_equity_point(self, strategy: str, step: int, value: float) -> None:
         """Record a sample on the equity curve gauge."""
@@ -814,9 +840,13 @@ class MetricsCollector:
 
         if not self._enabled:
             return
-        self.watchdog_live_probe_status.labels(watchdog=watchdog).set(1.0 if healthy else 0.0)
+        self.watchdog_live_probe_status.labels(watchdog=watchdog).set(
+            1.0 if healthy else 0.0
+        )
 
-    def set_watchdog_heartbeat(self, watchdog: str, timestamp: float | None = None) -> None:
+    def set_watchdog_heartbeat(
+        self, watchdog: str, timestamp: float | None = None
+    ) -> None:
         """Record the timestamp associated with the latest watchdog heartbeat."""
 
         if not self._enabled:
@@ -831,7 +861,9 @@ class MetricsCollector:
         if not self._enabled:
             return
 
-        self.health_check_latency.labels(check_name=check_name).observe(max(0.0, float(duration)))
+        self.health_check_latency.labels(check_name=check_name).observe(
+            max(0.0, float(duration))
+        )
 
     def set_health_check_status(self, check_name: str, healthy: bool) -> None:
         """Update the status gauge tracking the latest health probe outcome."""
@@ -839,7 +871,9 @@ class MetricsCollector:
         if not self._enabled:
             return
 
-        self.health_check_status.labels(check_name=check_name).set(1.0 if healthy else 0.0)
+        self.health_check_status.labels(check_name=check_name).set(
+            1.0 if healthy else 0.0
+        )
 
 
 # Global metrics collector instance
@@ -848,10 +882,10 @@ _collector: Optional[MetricsCollector] = None
 
 def get_metrics_collector(registry: Optional[Any] = None) -> MetricsCollector:
     """Get the global metrics collector instance.
-    
+
     Args:
         registry: Prometheus registry (uses default if None)
-        
+
     Returns:
         MetricsCollector instance
     """
@@ -873,7 +907,9 @@ def start_metrics_server(port: int = 8000, addr: str = "") -> None:
     start_http_server(port, addr)
 
 
-def start_metrics_exporter_process(port: int = 8000, addr: str = "") -> multiprocessing.Process:
+def start_metrics_exporter_process(
+    port: int = 8000, addr: str = ""
+) -> multiprocessing.Process:
     """Spawn a Prometheus exporter in a dedicated process."""
 
     if not PROMETHEUS_AVAILABLE:

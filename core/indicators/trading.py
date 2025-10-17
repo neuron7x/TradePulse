@@ -113,7 +113,9 @@ class HurstIndicator:
     window: int = 100
     min_lag: int = 2
     max_lag: int | None = None
-    _buffers: _HurstBufferPool = field(init=False, repr=False, default_factory=_HurstBufferPool)
+    _buffers: _HurstBufferPool = field(
+        init=False, repr=False, default_factory=_HurstBufferPool
+    )
 
     def __post_init__(self) -> None:
         if self.window <= 0:
@@ -170,10 +172,18 @@ class VPINIndicator:
         if array.size == 0:
             return np.empty(0, dtype=float)
         if array.ndim != 2 or array.shape[1] < 3:
-            raise ValueError("volume_data must have columns [volume, buy_volume, sell_volume]")
-        total = np.clip(np.nan_to_num(array[:, 0], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
-        buy = np.clip(np.nan_to_num(array[:, 1], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
-        sell = np.clip(np.nan_to_num(array[:, 2], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
+            raise ValueError(
+                "volume_data must have columns [volume, buy_volume, sell_volume]"
+            )
+        total = np.clip(
+            np.nan_to_num(array[:, 0], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None
+        )
+        buy = np.clip(
+            np.nan_to_num(array[:, 1], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None
+        )
+        sell = np.clip(
+            np.nan_to_num(array[:, 2], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None
+        )
         imbalance = np.abs(buy - sell)
         total_sums = _rolling_sum(total, self.bucket_size)
         imb_sums = _rolling_sum(imbalance, self.bucket_size)

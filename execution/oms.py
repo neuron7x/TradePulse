@@ -11,12 +11,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Dict, Iterable, MutableMapping
 
+from core.utils.metrics import get_metrics_collector
 from domain import Order, OrderStatus
 from interfaces.execution import RiskController
 
-from core.utils.metrics import get_metrics_collector
-from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
+from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
@@ -114,12 +114,20 @@ class OrderManagementSystem:
                 item["correlation_id"],
                 self._restore_order(item["order"]),
                 int(item.get("attempts", 0)),
-                str(item.get("last_error")) if item.get("last_error") is not None else None,
+                (
+                    str(item.get("last_error"))
+                    if item.get("last_error") is not None
+                    else None
+                ),
             )
             for item in payload.get("queue", [])
         )
-        self._processed = {str(k): str(v) for k, v in payload.get("processed", {}).items()}
-        self._correlations = {str(k): str(v) for k, v in payload.get("correlations", {}).items()}
+        self._processed = {
+            str(k): str(v) for k, v in payload.get("processed", {}).items()
+        }
+        self._correlations = {
+            str(k): str(v) for k, v in payload.get("correlations", {}).items()
+        }
         self._pending = {item.correlation_id: item.order for item in self._queue}
 
     # ------------------------------------------------------------------
@@ -145,16 +153,30 @@ class OrderManagementSystem:
             quantity=float(data["quantity"]),
             price=float(data["price"]) if data.get("price") is not None else None,
             order_type=str(data.get("order_type", "market")),
-            stop_price=float(data["stop_price"]) if data.get("stop_price") is not None else None,
+            stop_price=(
+                float(data["stop_price"])
+                if data.get("stop_price") is not None
+                else None
+            ),
             order_id=str(data.get("order_id")) if data.get("order_id") else None,
             status=str(data.get("status", "pending")),
             filled_quantity=float(data.get("filled_quantity", 0.0)),
-            average_price=float(data["average_price"]) if data.get("average_price") is not None else None,
-            rejection_reason=str(data.get("rejection_reason")) if data.get("rejection_reason") else None,
+            average_price=(
+                float(data["average_price"])
+                if data.get("average_price") is not None
+                else None
+            ),
+            rejection_reason=(
+                str(data.get("rejection_reason"))
+                if data.get("rejection_reason")
+                else None
+            ),
             created_at=created_at,
         )
         if data.get("updated_at"):
-            object.__setattr__(order, "updated_at", datetime.fromisoformat(str(data["updated_at"])) )
+            object.__setattr__(
+                order, "updated_at", datetime.fromisoformat(str(data["updated_at"]))
+            )
         return order
 
     # ------------------------------------------------------------------
@@ -171,7 +193,9 @@ class OrderManagementSystem:
         if self._compliance is not None:
             report = None
             try:
-                report = self._compliance.check(order.symbol, order.quantity, order.price)
+                report = self._compliance.check(
+                    order.symbol, order.quantity, order.price
+                )
             except ComplianceViolation as exc:
                 report = exc.report
                 self._metrics.record_compliance_check(
@@ -190,10 +214,18 @@ class OrderManagementSystem:
                 )
                 self._emit_compliance_audit(order, correlation_id, report, None)
                 if report.blocked:
-                    raise ComplianceViolation("Compliance check blocked order", report=report)
+                    raise ComplianceViolation(
+                        "Compliance check blocked order", report=report
+                    )
 
-        reference_price = order.price if order.price is not None else max(order.average_price or 0.0, 1.0)
-        self.risk.validate_order(order.symbol, order.side.value, order.quantity, reference_price)
+        reference_price = (
+            order.price
+            if order.price is not None
+            else max(order.average_price or 0.0, 1.0)
+        )
+        self.risk.validate_order(
+            order.symbol, order.side.value, order.quantity, reference_price
+        )
 
         queued_order = QueuedOrder(correlation_id, order)
         self._queue.append(queued_order)
@@ -245,7 +277,9 @@ class OrderManagementSystem:
             item.attempts += 1
             try:
                 start = time.perf_counter()
-                submitted = self.connector.place_order(item.order, idempotency_key=item.correlation_id)
+                submitted = self.connector.place_order(
+                    item.order, idempotency_key=item.correlation_id
+                )
                 ack_latency = time.perf_counter() - start
             except retryable as exc:
                 item.last_error = str(exc)
@@ -275,8 +309,12 @@ class OrderManagementSystem:
         self._processed[item.correlation_id] = submitted.order_id
         self._correlations[submitted.order_id] = item.correlation_id
         if self._metrics.enabled:
-            exchange = getattr(self.connector, "name", self.connector.__class__.__name__.lower())
-            self._metrics.record_order_ack_latency(exchange, submitted.symbol, max(0.0, ack_latency))
+            exchange = getattr(
+                self.connector, "name", self.connector.__class__.__name__.lower()
+            )
+            self._metrics.record_order_ack_latency(
+                exchange, submitted.symbol, max(0.0, ack_latency)
+            )
             self._ack_timestamps[submitted.order_id] = datetime.now(timezone.utc)
         self._persist_state()
         return submitted
@@ -302,7 +340,9 @@ class OrderManagementSystem:
         order.record_fill(quantity, price)
         self.risk.register_fill(order.symbol, order.side.value, quantity, price)
         if self._metrics.enabled:
-            exchange = getattr(self.connector, "name", self.connector.__class__.__name__.lower())
+            exchange = getattr(
+                self.connector, "name", self.connector.__class__.__name__.lower()
+            )
             now = datetime.now(timezone.utc)
             ack_ts = self._ack_timestamps.get(order_id)
             if ack_ts is not None:
@@ -344,9 +384,7 @@ class OrderManagementSystem:
         stored.status = OrderStatus(order.status)
         stored.filled_quantity = float(order.filled_quantity)
         stored.average_price = (
-            float(order.average_price)
-            if order.average_price is not None
-            else None
+            float(order.average_price) if order.average_price is not None else None
         )
         stored.rejection_reason = order.rejection_reason
         stored.updated_at = getattr(order, "updated_at", stored.updated_at)
@@ -375,7 +413,9 @@ class OrderManagementSystem:
 
         return self._correlations.get(order_id)
 
-    def adopt_open_order(self, order: Order, *, correlation_id: str | None = None) -> None:
+    def adopt_open_order(
+        self, order: Order, *, correlation_id: str | None = None
+    ) -> None:
         """Adopt an externally recovered order into the OMS state."""
 
         if order.order_id is None:

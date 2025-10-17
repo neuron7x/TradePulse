@@ -25,7 +25,16 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from time import monotonic
-from typing import Any, Callable, Deque, Iterable, Iterator, MutableMapping, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Deque,
+    Iterable,
+    Iterator,
+    MutableMapping,
+    Optional,
+    Sequence,
+)
 
 
 class RateLimitExceededError(RuntimeError):
@@ -186,7 +195,7 @@ class RestIngestionAdapter:
                     self._context_injector(header_carrier)
                     kwargs["headers"] = header_carrier
                 payload = self._request_fn(*args, **kwargs)
-            except self._retriable_exceptions as exc:
+            except self._retriable_exceptions:
                 attempt += 1
                 if attempt > self._max_retries:
                     raise
@@ -278,4 +287,3 @@ __all__ = [
     "RestIngestionAdapter",
     "WebSocketIngestionAdapter",
 ]
-

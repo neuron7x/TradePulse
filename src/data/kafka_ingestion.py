@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Iterable, Mapping, Protocol, Sequence
 
 from core.data.models import InstrumentType, PriceTick
-from core.messaging.idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore
+from core.messaging.idempotency import (
+    EventIdempotencyStore,
+    InMemoryEventIdempotencyStore,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,21 +30,24 @@ class TickDecoder(Protocol):
         key: bytes | None,
         value: bytes,
         headers: Mapping[str, str],
-    ) -> PriceTick:
-        ...
+    ) -> PriceTick: ...
 
 
 class TickBatchHandler(Protocol):
     """Handle decoded ticks in-order."""
 
-    async def __call__(self, ticks: Sequence[PriceTick]) -> None:  # pragma: no cover - protocol
+    async def __call__(
+        self, ticks: Sequence[PriceTick]
+    ) -> None:  # pragma: no cover - protocol
         ...
 
 
 class LagHandler(Protocol):
     """Handle lag reconciliation reports."""
 
-    async def __call__(self, report: "LagReport") -> None:  # pragma: no cover - protocol
+    async def __call__(
+        self, report: "LagReport"
+    ) -> None:  # pragma: no cover - protocol
         ...
 
 
@@ -141,7 +147,9 @@ class HotSymbolCache:
         self._max_ticks = max_ticks
         self._flush_size = flush_size
         self._clock = clock or time.monotonic
-        self._entries: OrderedDict[tuple[str, str, InstrumentType], _HotSymbolEntry] = OrderedDict()
+        self._entries: OrderedDict[tuple[str, str, InstrumentType], _HotSymbolEntry] = (
+            OrderedDict()
+        )
 
     def update(self, tick: PriceTick) -> list[HotSymbolSnapshot]:
         key = (tick.symbol, tick.venue, tick.instrument_type)
@@ -156,7 +164,7 @@ class HotSymbolCache:
         entry.ticks.append(tick)
         entry.last_seen = now
         if len(entry.ticks) > self._max_ticks:
-            overflow = entry.ticks[:-self._max_ticks]
+            overflow = entry.ticks[: -self._max_ticks]
             entry.ticks = entry.ticks[-self._max_ticks :]
             flushed.append(
                 HotSymbolSnapshot(
@@ -204,7 +212,9 @@ class HotSymbolCache:
                         venue=key[1],
                         instrument_type=key[2],
                         ticks=tuple(entry.ticks),
-                        last_seen=datetime.fromtimestamp(entry.last_seen, tz=timezone.utc),
+                        last_seen=datetime.fromtimestamp(
+                            entry.last_seen, tz=timezone.utc
+                        ),
                     )
                 )
                 entry.ticks = []
@@ -232,7 +242,6 @@ class HotSymbolCache:
         )
 
     def drain(self) -> list[HotSymbolSnapshot]:
-        now = self._clock()
         drained: list[HotSymbolSnapshot] = []
         while self._entries:
             key, entry = self._entries.popitem(last=False)
@@ -243,7 +252,9 @@ class HotSymbolCache:
                         venue=key[1],
                         instrument_type=key[2],
                         ticks=tuple(entry.ticks),
-                        last_seen=datetime.fromtimestamp(entry.last_seen, tz=timezone.utc),
+                        last_seen=datetime.fromtimestamp(
+                            entry.last_seen, tz=timezone.utc
+                        ),
                     )
                 )
         return drained
@@ -316,12 +327,18 @@ class KafkaIngestionService:
         await self._producer.start()
         await self._consumer.start()
         self._stop_event.clear()
-        self._consume_task = asyncio.create_task(self._consume_loop(), name="kafka-ingestion-consumer")
-        self._lag_task = asyncio.create_task(self._lag_monitor_loop(), name="kafka-ingestion-lag-monitor")
+        self._consume_task = asyncio.create_task(
+            self._consume_loop(), name="kafka-ingestion-consumer"
+        )
+        self._lag_task = asyncio.create_task(
+            self._lag_monitor_loop(), name="kafka-ingestion-lag-monitor"
+        )
 
     async def stop(self) -> None:
         self._stop_event.set()
-        tasks = [task for task in (self._consume_task, self._lag_task) if task is not None]
+        tasks = [
+            task for task in (self._consume_task, self._lag_task) if task is not None
+        ]
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -342,7 +359,9 @@ class KafkaIngestionService:
                     timeout_ms=self._config.poll_timeout_ms,
                     max_records=self._config.max_batch_size,
                 )
-            except asyncio.CancelledError:  # pragma: no cover - cooperative cancellation
+            except (
+                asyncio.CancelledError
+            ):  # pragma: no cover - cooperative cancellation
                 raise
             except Exception:  # pragma: no cover - defensive logging
                 logger.exception("Kafka ingestion poll failed")
@@ -354,7 +373,9 @@ class KafkaIngestionService:
             try:
                 await producer.begin_transaction()
             except AttributeError as exc:  # pragma: no cover - misconfigured producer
-                raise RuntimeError("Kafka producer does not support transactions") from exc
+                raise RuntimeError(
+                    "Kafka producer does not support transactions"
+                ) from exc
             processed_offsets: Dict[Any, int] = {}
             ticks: list[PriceTick] = []
             committable_event_ids: list[str] = []
@@ -373,8 +394,14 @@ class KafkaIngestionService:
                     state.pending_event_ids = []
                 for message in messages:
                     headers = _coerce_headers(getattr(message, "headers", []))
-                    event_id = headers.get("event_id") or f"{key[0]}:{key[1]}:{message.offset}"
-                    expected = state.expected_offset if state.expected_offset is not None else message.offset
+                    event_id = (
+                        headers.get("event_id") or f"{key[0]}:{key[1]}:{message.offset}"
+                    )
+                    expected = (
+                        state.expected_offset
+                        if state.expected_offset is not None
+                        else message.offset
+                    )
                     if message.offset > expected:
                         logger.warning(
                             "Detected offset gap (topic=%s partition=%s expected=%s observed=%s)",
@@ -404,12 +431,17 @@ class KafkaIngestionService:
                         state.advance(message.offset)
                         processed_offsets[tp] = message.offset + 1
                         continue
-                    if event_id in current_event_ids or self._idempotency.was_processed(event_id):
+                    if (
+                        event_id in current_event_ids
+                        or self._idempotency.was_processed(event_id)
+                    ):
                         state.advance(message.offset)
                         processed_offsets[tp] = message.offset + 1
                         continue
                     try:
-                        tick = self._decoder(key=message.key, value=message.value, headers=headers)
+                        tick = self._decoder(
+                            key=message.key, value=message.value, headers=headers
+                        )
                     except Exception:
                         logger.exception("Failed to decode tick payload")
                         state.advance(message.offset)
@@ -429,8 +461,12 @@ class KafkaIngestionService:
             if ticks:
                 try:
                     await self._tick_handler(ticks)
-                except Exception:  # pragma: no cover - handler errors logged but offsets still committed
-                    logger.exception("Tick handler failed; offsets will not be committed")
+                except (
+                    Exception
+                ):  # pragma: no cover - handler errors logged but offsets still committed
+                    logger.exception(
+                        "Tick handler failed; offsets will not be committed"
+                    )
                     try:
                         await producer.abort_transaction()
                     except Exception:
@@ -438,7 +474,9 @@ class KafkaIngestionService:
                     await asyncio.sleep(0.5)
                     continue
             try:
-                await producer.send_offsets_to_transaction(processed_offsets, self._config.group_id)
+                await producer.send_offsets_to_transaction(
+                    processed_offsets, self._config.group_id
+                )
                 await producer.commit_transaction()
                 for event_id in committable_event_ids:
                     self._idempotency.mark_processed(event_id)
@@ -473,7 +511,11 @@ class KafkaIngestionService:
         for tp in assignment:
             key = (getattr(tp, "topic"), getattr(tp, "partition"))
             state = self._partition_state.get(key)
-            expected = state.expected_offset if state and state.expected_offset is not None else 0
+            expected = (
+                state.expected_offset
+                if state and state.expected_offset is not None
+                else 0
+            )
             end_offset = end_offsets.get(tp, 0)
             lag = max(0, end_offset - expected)
             if lag >= self._config.lag_detection_threshold:
@@ -539,11 +581,15 @@ class KafkaIngestionService:
         if protocol not in {"SSL", "SASL_SSL"}:
             raise ValueError("Kafka security_protocol must be 'SSL' or 'SASL_SSL'")
         if not self._config.ssl_cafile:
-            raise ValueError("ssl_cafile must be configured for secure Kafka connections")
+            raise ValueError(
+                "ssl_cafile must be configured for secure Kafka connections"
+            )
         cafile_path = self._config.ssl_cafile
         context = ssl.create_default_context(cafile=cafile_path)
         if self._config.ssl_certfile and self._config.ssl_keyfile:
-            context.load_cert_chain(certfile=self._config.ssl_certfile, keyfile=self._config.ssl_keyfile)
+            context.load_cert_chain(
+                certfile=self._config.ssl_certfile, keyfile=self._config.ssl_keyfile
+            )
         elif self._config.ssl_certfile or self._config.ssl_keyfile:
             raise ValueError("ssl_certfile and ssl_keyfile must be provided together")
         kwargs: Dict[str, Any] = {
@@ -577,7 +623,9 @@ def _coerce_headers(headers: Iterable[tuple[str, bytes]] | None) -> Dict[str, st
     return result
 
 
-def _default_tick_decoder(*, key: bytes | None, value: bytes, headers: Mapping[str, str]) -> PriceTick:
+def _default_tick_decoder(
+    *, key: bytes | None, value: bytes, headers: Mapping[str, str]
+) -> PriceTick:
     if not value:
         raise ValueError("Kafka message payload is empty")
     payload = json.loads(value.decode("utf-8"))
@@ -588,7 +636,11 @@ def _default_tick_decoder(*, key: bytes | None, value: bytes, headers: Mapping[s
     if not symbol or not venue:
         raise ValueError("Tick payload must contain symbol and venue")
     instrument_value = payload.get("instrument_type") or headers.get("instrument_type")
-    instrument_type = InstrumentType(str(instrument_value)) if instrument_value else InstrumentType.SPOT
+    instrument_type = (
+        InstrumentType(str(instrument_value))
+        if instrument_value
+        else InstrumentType.SPOT
+    )
     timestamp = payload.get("timestamp") or headers.get("occurred_at")
     if timestamp is None:
         raise ValueError("Tick payload missing timestamp")

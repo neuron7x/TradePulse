@@ -15,7 +15,9 @@ from libs.db.postgres import create_postgres_connection
 class _FakePsycopgModule(SimpleNamespace):
     """Collect the arguments used to construct a connection."""
 
-    def __call__(self, **kwargs: Any) -> object:  # pragma: no cover - compatibility shim.
+    def __call__(
+        self, **kwargs: Any
+    ) -> object:  # pragma: no cover - compatibility shim.
         return self.connect(**kwargs)
 
     def connect(self, **kwargs: Any) -> object:
@@ -39,7 +41,9 @@ def _tls(tmp_path: pytest.TempPathFactory) -> PostgresTLSConfig:
     )
 
 
-def test_factory_passes_tls_parameters(fake_psycopg: _FakePsycopgModule, tmp_path_factory: pytest.TempPathFactory) -> None:
+def test_factory_passes_tls_parameters(
+    fake_psycopg: _FakePsycopgModule, tmp_path_factory: pytest.TempPathFactory
+) -> None:
     tls = _tls(tmp_path_factory)
     uri = "postgresql://user:pass@db/prod?sslmode=verify-full"
 
@@ -76,4 +80,3 @@ def test_factory_requires_tls(
 
     with pytest.raises(ValueError):
         create_postgres_connection(uri, None)
-

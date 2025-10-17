@@ -94,7 +94,9 @@ class SlidingWindowRateLimiter:
 
     async def check(self, *, subject: str | None, ip_address: str | None) -> None:
         policy, key = self._resolve_policy(subject, ip_address)
-        count = await self._backend.hit(key, limit=policy.max_requests, window_seconds=policy.window_seconds)
+        count = await self._backend.hit(
+            key, limit=policy.max_requests, window_seconds=policy.window_seconds
+        )
         if count > policy.max_requests:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -181,14 +183,18 @@ class SlidingWindowRateLimiter:
             saturated_keys=saturated,
         )
 
-    def _resolve_policy(self, subject: str | None, ip_address: str | None) -> tuple[RateLimitPolicy, str]:
+    def _resolve_policy(
+        self, subject: str | None, ip_address: str | None
+    ) -> tuple[RateLimitPolicy, str]:
         if subject:
             specific = self._settings.client_policies.get(subject)
             if specific is not None:
                 return specific, f"subject:{subject}"
             return self._settings.default_policy, f"subject:{subject}"
         if ip_address:
-            policy = self._settings.unauthenticated_policy or self._settings.default_policy
+            policy = (
+                self._settings.unauthenticated_policy or self._settings.default_policy
+            )
             return policy, f"ip:{ip_address}"
         return self._settings.default_policy, "anonymous"
 
@@ -243,8 +249,12 @@ def build_rate_limiter(settings: ApiRateLimitSettings) -> SlidingWindowRateLimit
                 "Redis-backed rate limiting requires the 'redis' package to be installed."
             ) from exc
 
-        client = from_url(str(settings.redis_url), encoding="utf-8", decode_responses=False)
-        backend: RateLimiterBackend = RedisSlidingWindowBackend(client, key_prefix=settings.redis_key_prefix)
+        client = from_url(
+            str(settings.redis_url), encoding="utf-8", decode_responses=False
+        )
+        backend: RateLimiterBackend = RedisSlidingWindowBackend(
+            client, key_prefix=settings.redis_key_prefix
+        )
     else:
         backend = InMemorySlidingWindowBackend()
 
