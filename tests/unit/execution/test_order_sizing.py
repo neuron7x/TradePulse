@@ -4,7 +4,14 @@ import math
 
 import pytest
 
-from execution.order import RiskAwarePositionSizer, position_sizing
+from execution.order import (
+    ConstrainedPositionSizer,
+    PortfolioState,
+    PositionSizingConstraints,
+    PositionSizingRequest,
+    RiskAwarePositionSizer,
+    position_sizing,
+)
 
 
 def test_size_rejects_non_positive_price() -> None:
@@ -53,3 +60,102 @@ def test_size_biases_down_when_rounding_overshoots(
     ), "nextafter should be consulted when the initial quantity exceeds the budget"
     assert qty >= 0.0
     assert qty * price <= balance * min(max(risk, 0.0), 1.0) + 1e-12
+
+
+def test_constrained_sizer_zero_when_drawdown_breached() -> None:
+    constraints = PositionSizingConstraints(max_drawdown=0.1, cppi_floor=0.9)
+    sizer = ConstrainedPositionSizer(constraints)
+    state = PortfolioState(
+        balance=100_000.0,
+        equity=85_000.0,
+        peak_equity=100_000.0,
+        volatility=0.18,
+    )
+    request = PositionSizingRequest(
+        symbol="BTC",
+        direction=1,
+        price=25_000.0,
+        risk_fraction=0.2,
+        forecast_edge=0.05,
+        forecast_variance=0.3,
+        instrument_volatility=0.5,
+    )
+
+    result = sizer.size_order(request, state)
+
+    assert result.order_quantity == 0.0
+    assert result.target_position == 0.0
+    assert result.notes.get("drawdown") == pytest.approx(0.15)
+
+
+def test_constrained_sizer_scales_to_volatility_limit() -> None:
+    constraints = PositionSizingConstraints(
+        max_portfolio_volatility=0.3,
+        volatility_buffer=0.0,
+        kelly_fraction_limit=0.6,
+        cppi_floor=0.5,
+        cppi_multiplier=4.0,
+    )
+    sizer = ConstrainedPositionSizer(constraints)
+    state = PortfolioState(
+        balance=100_000.0,
+        equity=100_000.0,
+        peak_equity=100_000.0,
+        volatility=0.25,
+    )
+    request = PositionSizingRequest(
+        symbol="ETH",
+        direction=1,
+        price=100.0,
+        risk_fraction=0.5,
+        instrument_volatility=1.2,
+    )
+
+    result = sizer.size_order(request, state)
+
+    assert result.target_position == pytest.approx(230.769, rel=1e-3)
+    assert result.order_quantity == pytest.approx(result.target_position)
+    assert result.notes.get("volatility_scale") == pytest.approx(0.4615, rel=1e-3)
+
+
+def test_constrained_sizer_respects_risk_budgets_and_positions() -> None:
+    constraints = PositionSizingConstraints(
+        kelly_fraction_limit=0.5,
+        max_drawdown=0.3,
+        cppi_floor=0.6,
+    )
+    sizer = ConstrainedPositionSizer(constraints)
+    state = PortfolioState(
+        balance=200_000.0,
+        equity=200_000.0,
+        peak_equity=220_000.0,
+        volatility=0.12,
+        positions={"BTC": 0.5333333333},
+        risk_budgets={"BTC": 0.1},
+        risk_exposures={"BTC": 0.08, "ETH": 0.2},
+    )
+    request = PositionSizingRequest(
+        symbol="BTC",
+        direction=1,
+        price=30_000.0,
+        risk_fraction=0.3,
+    )
+
+    result = sizer.size_order(request, state)
+
+    expected_fraction = 0.1 * (1 - state.drawdown / constraints.max_drawdown)
+    expected_target = expected_fraction * state.equity / request.price
+
+    assert result.target_position == pytest.approx(expected_target, rel=1e-6)
+    assert result.order_quantity == pytest.approx(
+        expected_target - state.position_for("BTC"), rel=1e-6
+    )
+    assert result.notes.get("risk_budget") == pytest.approx(0.1)
+
+
+def test_constrained_sizer_size_method_matches_risk_aware_for_small_risk() -> None:
+    sizer = ConstrainedPositionSizer()
+
+    qty = sizer.size(balance=10_000.0, risk=0.02, price=25_000.0)
+
+    assert qty == pytest.approx(0.008)
