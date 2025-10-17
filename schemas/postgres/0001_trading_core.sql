@@ -14,7 +14,7 @@ CREATE TYPE IF NOT EXISTS order_status AS ENUM ('new', 'accepted', 'partially_fi
 
 CREATE TABLE IF NOT EXISTS instrument (
     instrument_id      BIGSERIAL PRIMARY KEY,
-    symbol             TEXT NOT NULL UNIQUE,
+    symbol             TEXT NOT NULL,
     exchange_code      TEXT NOT NULL,
     asset_type         TEXT NOT NULL CHECK (asset_type IN ('stock','future','option','fx','crypto')),
     currency           TEXT NOT NULL,
@@ -24,6 +24,9 @@ CREATE TABLE IF NOT EXISTS instrument (
     archived_at        TIMESTAMPTZ,
     CHECK (archived_at IS NULL OR archived_at >= created_at)
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS instrument_symbol_exchange_uidx
+    ON instrument (symbol, exchange_code);
 
 CREATE INDEX IF NOT EXISTS instrument_active_idx ON instrument (exchange_code, archived_at) WHERE archived_at IS NULL;
 
