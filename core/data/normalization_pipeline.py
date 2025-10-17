@@ -162,14 +162,26 @@ def normalize_market_data(
         # calendar alignment until after aggregation.  Reindexing prior to
         # resampling would discard every tick that does not already land on the
         # frequency boundary (e.g. millisecond feeds against a 1s calendar).
-        expected_index = pd.date_range(
-            start=prepared.index[0],
-            end=prepared.index[-1],
-            freq=resolved_freq,
-            tz=prepared.index[0].tz,
-        )
-        missing = int(expected_index.difference(prepared.index).shape[0])
         ohlcv_raw = _from_ticks(prepared, config, resolved_freq)
+        if ohlcv_raw.empty:
+            expected_index = ohlcv_raw.index
+            missing = 0
+        else:
+            start = ohlcv_raw.index[0]
+            end = ohlcv_raw.index[-1]
+            expected_index = pd.date_range(
+                start=start,
+                end=end,
+                freq=resolved_freq,
+                tz=start.tz,
+            )
+            price_columns = [col for col in ("open", "high", "low", "close") if col in ohlcv_raw]
+            if price_columns:
+                present_mask = ~ohlcv_raw[price_columns].isna().all(axis=1)
+                observed = ohlcv_raw.index[present_mask]
+            else:
+                observed = ohlcv_raw.index
+            missing = int(expected_index.difference(observed).shape[0])
         reindexed = ohlcv_raw.reindex(expected_index)
         filled = _fill_gaps(reindexed, config.fill_method)
         ohlcv = _ensure_ohlcv_columns(filled)
