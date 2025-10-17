@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable
 
 import numpy as np
@@ -31,6 +31,48 @@ def _fill_missing(series: np.ndarray) -> np.ndarray:
     return filled
 
 
+def _rolling_sum(values: np.ndarray, window: int) -> np.ndarray:
+    if window <= 0:
+        raise ValueError("window must be positive")
+    if values.size == 0:
+        return np.empty(0, dtype=values.dtype)
+    cumulative = np.cumsum(values)
+    padded = np.empty(values.size + 1, dtype=values.dtype)
+    padded[0] = values.dtype.type(0)
+    padded[1:] = cumulative
+    indices = np.arange(values.size)
+    start = np.maximum(indices - window + 1, 0)
+    return padded[indices + 1] - padded[start]
+
+
+class _HurstBufferPool:
+    """Reuse temporary buffers required by the Hurst exponent kernel."""
+
+    __slots__ = ("_scratch", "_tau")
+
+    def __init__(self) -> None:
+        self._scratch: np.ndarray | None = None
+        self._tau: np.ndarray | None = None
+
+    def scratch(self, size: int) -> np.ndarray:
+        if size <= 0:
+            return np.empty(0, dtype=float)
+        scratch = self._scratch
+        if scratch is None or scratch.size < size:
+            scratch = np.empty(size, dtype=float)
+            self._scratch = scratch
+        return scratch
+
+    def tau(self, size: int) -> np.ndarray:
+        if size <= 0:
+            return np.empty(0, dtype=float)
+        tau = self._tau
+        if tau is None or tau.size != size:
+            tau = np.empty(size, dtype=float)
+            self._tau = tau
+        return tau
+
+
 @dataclass(slots=True)
 class KuramotoIndicator:
     """Compute rolling Kuramoto-style synchronisation scores."""
@@ -53,17 +95,14 @@ class KuramotoIndicator:
         series = _fill_missing(raw)
         phases = compute_phase(series)
         complex_phase = np.exp(1j * phases)
-        cumulative = np.cumsum(complex_phase)
-        result = np.zeros_like(series, dtype=float)
+        totals = _rolling_sum(complex_phase, self.window)
+        counts = np.minimum(np.arange(1, series.size + 1), self.window)
         min_samples = min(self.window, 10)
-        for idx in range(series.size):
-            start = max(0, idx - self.window + 1)
-            count = idx - start + 1
-            if count < min_samples:
-                continue
-            total = cumulative[idx] - (cumulative[start - 1] if start > 0 else 0.0)
-            order = np.abs(total) / float(count)
-            result[idx] = float(np.clip(self.coupling * order, 0.0, 1.0))
+        mask = counts >= min_samples
+        result = np.zeros_like(series, dtype=float)
+        if mask.any():
+            order = np.abs(totals[mask]) / counts[mask]
+            result[mask] = np.clip(self.coupling * order, 0.0, 1.0)
         return result
 
 
@@ -74,6 +113,7 @@ class HurstIndicator:
     window: int = 100
     min_lag: int = 2
     max_lag: int | None = None
+    _buffers: _HurstBufferPool = field(init=False, repr=False, default_factory=_HurstBufferPool)
 
     def __post_init__(self) -> None:
         if self.window <= 0:
@@ -89,6 +129,7 @@ class HurstIndicator:
             return np.empty(0, dtype=float)
         series = _fill_missing(series)
         result = np.full(series.size, 0.5, dtype=float)
+        buffer_pool = self._buffers
         for idx in range(series.size):
             start = max(0, idx - self.window + 1)
             window_slice = series[start : idx + 1]
@@ -98,7 +139,15 @@ class HurstIndicator:
             max_lag = available
             if self.max_lag is not None:
                 max_lag = min(max_lag, self.max_lag)
-            value = hurst_exponent(window_slice, min_lag=self.min_lag, max_lag=max_lag)
+            scratch = buffer_pool.scratch(window_slice.size)
+            tau = buffer_pool.tau(max_lag - self.min_lag + 1)
+            value = hurst_exponent(
+                window_slice,
+                min_lag=self.min_lag,
+                max_lag=max_lag,
+                scratch=scratch,
+                tau_buffer=tau,
+            )
             result[idx] = float(np.clip(value, 0.0, 1.0))
         return result
 
@@ -126,15 +175,11 @@ class VPINIndicator:
         buy = np.clip(np.nan_to_num(array[:, 1], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
         sell = np.clip(np.nan_to_num(array[:, 2], nan=0.0, posinf=0.0, neginf=0.0), 0.0, None)
         imbalance = np.abs(buy - sell)
-        cum_total = np.cumsum(total)
-        cum_imbalance = np.cumsum(imbalance)
+        total_sums = _rolling_sum(total, self.bucket_size)
+        imb_sums = _rolling_sum(imbalance, self.bucket_size)
         result = np.zeros(total.size, dtype=float)
-        for idx in range(total.size):
-            start = max(0, idx - self.bucket_size + 1)
-            total_sum = cum_total[idx] - (cum_total[start - 1] if start > 0 else 0.0)
-            if total_sum <= 0.0:
-                result[idx] = 0.0
-                continue
-            imb_sum = cum_imbalance[idx] - (cum_imbalance[start - 1] if start > 0 else 0.0)
-            result[idx] = float(np.clip(imb_sum / total_sum, 0.0, 1.0))
+        valid = total_sums > 0.0
+        if np.any(valid):
+            ratios = imb_sums[valid] / total_sums[valid]
+            result[valid] = np.clip(ratios, 0.0, 1.0)
         return result
