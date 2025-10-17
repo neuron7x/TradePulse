@@ -21,6 +21,14 @@ from .materialization import (
     InMemoryCheckpointStore,
     StreamMaterializer,
 )
+from .normalization_pipeline import (
+    FillMethod,
+    MarketNormalizationConfig,
+    MarketNormalizationMetadata,
+    MarketNormalizationResult,
+    NormalisationKind,
+    normalize_market_data,
+)
 from .models import (
     AggregateMetric,
     DataKind,
@@ -89,6 +97,12 @@ __all__ = [
     "CheckpointStore",
     "InMemoryCheckpointStore",
     "StreamMaterializer",
+    "FillMethod",
+    "MarketNormalizationConfig",
+    "MarketNormalizationMetadata",
+    "MarketNormalizationResult",
+    "NormalisationKind",
+    "normalize_market_data",
     "DataVersionManager",
     "VersioningError",
     "TimeSeriesValidationConfig",
