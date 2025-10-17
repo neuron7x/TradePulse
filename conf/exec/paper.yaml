@@ -1,0 +1,4 @@
+exec:
+  venue: paper-cex
+  order_type: limit
+  slippage_bps: 2.0

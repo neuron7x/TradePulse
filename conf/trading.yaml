@@ -1,0 +1,8 @@
+defaults:
+  - strategy: trend
+  - risk: vol_target_10
+  - exec: backtest
+  - _self_
+
+data:
+  path: data/reference_bars.csv

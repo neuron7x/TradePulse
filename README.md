@@ -19,6 +19,10 @@ TradePulse is a professional algorithmic trading platform that combines advanced
 
 ---
 
+## 2025 Reference Core
+
+The 2025 refresh introduces a reproducible, Hydra-configured trading core with three reference strategies (trend following, mean-reversion, and AMM liquidity provision), a unified risk manager, MLflow experiment logging, and production-grade TCA reporting. Configuration groups under `conf/` enable Optuna sweeps, volatility targeting, and execution venue selection while walk-forward + purged CV validation ensures robust research workflows.
+
 ## 📚 Table of Contents
 
 - [Overview](#-overview)

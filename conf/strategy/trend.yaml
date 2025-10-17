@@ -1,0 +1,10 @@
+strategy:
+  kind: trend
+  ma_fast: 20
+  ma_slow: 100
+  vol_window: 20
+  atr_window: 20
+  chandelier_multiple: 3.0
+  entry_on_close: true
+  min_atr: 1.0e-06
+  timeout_bars: 250

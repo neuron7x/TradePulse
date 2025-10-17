@@ -1,0 +1,10 @@
+defaults:
+  - override hydra/sweeper: optuna
+
+hydra:
+  sweeper:
+    sampler:
+      name: tpe
+      seed: 2025
+    direction: maximize
+    n_trials: 20

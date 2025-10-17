@@ -1,0 +1,6 @@
+risk:
+  target_vol: 0.08
+  max_leverage: 1.5
+  max_position_notional: 3000000.0
+  max_daily_loss: 50000.0
+  max_drawdown: 0.10

@@ -1,0 +1,9 @@
+strategy:
+  kind: amm
+  dex: uniswap_v3
+  pair: ETH/USDC
+  sigma_window: 24
+  range_width_sigma: 1.5
+  rebalance_threshold: out_of_range
+  fee_tier: auto_dynamic
+  base_liquidity: 1000000.0

@@ -1,0 +1,4 @@
+exec:
+  venue: CE-spot
+  order_type: market
+  slippage_bps: 3.0
