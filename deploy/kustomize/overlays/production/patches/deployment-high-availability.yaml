@@ -45,7 +45,10 @@ spec:
                   name: tradepulse-kafka-client
                   key: bootstrap.servers
             - name: KAFKA_SECURITY_PROTOCOL
-              value: SASL_SSL
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-kafka-client
+                  key: security.protocol
             - name: KAFKA_SSL_CAFILE
               value: /etc/tradepulse/kafka/ca.crt
             - name: KAFKA_SSL_CERTFILE
@@ -53,7 +56,10 @@ spec:
             - name: KAFKA_SSL_KEYFILE
               value: /etc/tradepulse/kafka/client.key
             - name: KAFKA_SASL_MECHANISM
-              value: PLAIN
+              valueFrom:
+                secretKeyRef:
+                  name: tradepulse-kafka-client
+                  key: sasl.mechanism
             - name: KAFKA_SASL_USERNAME
               valueFrom:
                 secretKeyRef:
