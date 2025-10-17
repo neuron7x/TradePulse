@@ -74,7 +74,7 @@ class FeatureParityCoordinator:
 
         offline_frame = self._prepare_frame(frame, spec)
         online_existing = self._prepare_frame(
-            self._store.load(spec.feature_view), spec
+            self._store.load(spec.feature_view), spec, require_columns=False
         )
 
         keys = list(spec.entity_columns) + [spec.timestamp_column]
@@ -159,14 +159,17 @@ class FeatureParityCoordinator:
         )
 
     def _prepare_frame(
-        self, frame: pd.DataFrame, spec: FeatureParitySpec
+        self,
+        frame: pd.DataFrame,
+        spec: FeatureParitySpec,
+        *,
+        require_columns: bool = True,
     ) -> pd.DataFrame:
-        if frame.empty:
-            return frame.copy()
-
         expected_columns = set(spec.entity_columns) | {spec.timestamp_column}
         missing = expected_columns - set(frame.columns)
         if missing:
+            if frame.empty and not require_columns:
+                return frame.copy()
             missing_str = ", ".join(sorted(missing))
             raise KeyError(
                 f"Frame for feature view {spec.feature_view!r} is missing required "

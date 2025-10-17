@@ -28,6 +28,17 @@ def _make_frame(ts_values: list[str], values: list[float]) -> pd.DataFrame:
     return pd.DataFrame({"entity_id": ["A"] * len(values), "ts": timestamps, "value": values})
 
 
+def test_parity_coordinator_validates_empty_frames(tmp_path) -> None:
+    store = OnlineFeatureStore(tmp_path)
+    coordinator = FeatureParityCoordinator(store)
+    spec = FeatureParitySpec(feature_view="prices", allow_schema_evolution=True)
+
+    empty = pd.DataFrame()
+
+    with pytest.raises(KeyError, match="missing required columns"):
+        coordinator.synchronize(spec, empty, mode="overwrite")
+
+
 def test_parity_coordinator_overwrite_success(tmp_path, parity_spec) -> None:
     store = OnlineFeatureStore(tmp_path)
     coordinator = FeatureParityCoordinator(store)
