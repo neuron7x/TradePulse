@@ -126,8 +126,10 @@ The `Deploy TradePulse Environments` GitHub Actions workflow automates validatio
 
 - On every push to `main`, Terraform formatting/validation and Kustomize builds are executed before any cluster writes.
 - Staging deploys automatically after validation. Production deploys once staging succeeds and the protected `production` environment gate is approved inside GitHub.
-- Workflow dispatch supports ad-hoc rollouts; provide base64-encoded kubeconfigs through the `KUBE_CONFIG_STAGING` and `KUBE_CONFIG_PRODUCTION` secrets.
+- Workflow dispatch supports ad-hoc rollouts via GitHub OIDC → AWS IAM federation. Configure short-lived access by supplying the `AWS_REGION`, `AWS_STAGING_ROLE_ARN`, `AWS_STAGING_CLUSTER_NAME`, `AWS_PRODUCTION_ROLE_ARN`, and `AWS_PRODUCTION_CLUSTER_NAME` secrets so the workflow can assume scoped roles and call `aws eks update-kubeconfig` on demand.
 - `kubectl diff` runs before each apply to surface configuration drift without failing the run for expected changes.
+
+Before enabling the workflow, create an IAM OIDC identity provider in your cloud account for `token.actions.githubusercontent.com` (or the equivalent endpoint on your platform). Bind environment-specific roles to that provider with trust policies that limit access to this repository, branch, and workflow so that every job receives ephemeral credentials with least privilege.
 
 Document required environment reviewers inside your repository settings so production deployments remain a two-person control.
 
@@ -142,6 +144,7 @@ Document required environment reviewers inside your repository settings so produ
   ```
   Reference the secret with `envFrom` in your Deployment so that the application receives identical configuration in every environment.
 - Rotate API keys and credentials regularly. Update the Secret object and restart the workloads (`kubectl rollout restart deployment tradepulse`).
+- **CI/CD cluster access** – rely on GitHub's OpenID Connect integration with your cloud provider instead of storing kubeconfigs in secrets. Create dedicated IAM roles with the minimum permissions needed to call `eks:DescribeCluster` (and supporting `sts:AssumeRole`), scope their trust policy to your repository, and allow automatic rotation by issuing fresh tokens per workflow run.
 
 ### Vault/KMS-backed exchange credentials
 
