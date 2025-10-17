@@ -9,7 +9,7 @@ from collections import deque
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Deque, Dict, Iterable, MutableMapping
+from typing import Deque, Dict, Iterable, Mapping, MutableMapping
 
 from core.utils.metrics import get_metrics_collector
 from domain import Order, OrderStatus
@@ -18,6 +18,10 @@ from interfaces.execution import RiskController
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
+from .order_ledger import OrderLedger
+
+
+DEFAULT_LEDGER_PATH = Path("observability/audit/order-ledger.jsonl")
 
 
 @dataclass(slots=True)
@@ -38,6 +42,7 @@ class OMSConfig:
     auto_persist: bool = True
     max_retries: int = 3
     backoff_seconds: float = 0.0
+    ledger_path: Path | None = DEFAULT_LEDGER_PATH
 
     def __post_init__(self) -> None:
         if not isinstance(self.state_path, Path):
@@ -46,6 +51,8 @@ class OMSConfig:
             object.__setattr__(self, "max_retries", 1)
         if self.backoff_seconds < 0.0:
             object.__setattr__(self, "backoff_seconds", 0.0)
+        if self.ledger_path is not None and not isinstance(self.ledger_path, Path):
+            object.__setattr__(self, "ledger_path", Path(self.ledger_path))
 
 
 class OrderManagementSystem:
@@ -72,6 +79,8 @@ class OrderManagementSystem:
         self._ack_timestamps: Dict[str, datetime] = {}
         self._pending: Dict[str, Order] = {}
         self._audit = audit_logger or get_execution_audit_logger()
+        ledger_path = self.config.ledger_path
+        self._ledger = OrderLedger(ledger_path) if ledger_path is not None else None
         self._load_state()
 
     # ------------------------------------------------------------------
@@ -101,9 +110,23 @@ class OrderManagementSystem:
 
     def _load_state(self) -> None:
         path = self.config.state_path
-        if not path.exists():
+        payload: Mapping[str, object] | None = None
+        source = "state_file"
+        if path.exists():
+            try:
+                payload = json.loads(path.read_text())
+            except json.JSONDecodeError:
+                payload = None
+        if payload is None and self._ledger is not None:
+            payload = self._ledger.latest_state()
+            source = "ledger"
+        if payload is None:
             return
-        payload = json.loads(path.read_text())
+        self._apply_state_snapshot(payload, source=source)
+
+    def _apply_state_snapshot(
+        self, payload: Mapping[str, object], *, source: str = "manual"
+    ) -> None:
         self._orders = {
             order.order_id: order
             for order in self._restore_orders(payload.get("orders", []))
@@ -129,6 +152,8 @@ class OrderManagementSystem:
             str(k): str(v) for k, v in payload.get("correlations", {}).items()
         }
         self._pending = {item.correlation_id: item.order for item in self._queue}
+        if self._ledger is not None:
+            self._record_ledger_event("state_restored", metadata={"source": source})
 
     # ------------------------------------------------------------------
     # Serialization helpers
@@ -204,6 +229,17 @@ class OrderManagementSystem:
                     () if report is None else report.violations,
                 )
                 self._emit_compliance_audit(order, correlation_id, report, str(exc))
+                self._record_ledger_event(
+                    "compliance_blocked",
+                    order=order,
+                    correlation_id=correlation_id,
+                    metadata={
+                        "violations": []
+                        if report is None
+                        else report.violations,
+                        "error": str(exc),
+                    },
+                )
                 raise
             status = "passed" if report is None or report.is_clean() else "warning"
             if report is not None:
@@ -214,6 +250,15 @@ class OrderManagementSystem:
                 )
                 self._emit_compliance_audit(order, correlation_id, report, None)
                 if report.blocked:
+                    self._record_ledger_event(
+                        "compliance_blocked",
+                        order=order,
+                        correlation_id=correlation_id,
+                        metadata={
+                            "violations": report.violations,
+                            "blocked": True,
+                        },
+                    )
                     raise ComplianceViolation(
                         "Compliance check blocked order", report=report
                     )
@@ -231,6 +276,11 @@ class OrderManagementSystem:
         self._queue.append(queued_order)
         self._pending[correlation_id] = order
         self._persist_state()
+        self._record_ledger_event(
+            "order_queued",
+            order=order,
+            correlation_id=correlation_id,
+        )
         return order
 
     def _emit_compliance_audit(
@@ -288,9 +338,29 @@ class OrderManagementSystem:
                     self._pending.pop(item.correlation_id, None)
                     item.order.reject(str(exc))
                     self._persist_state()
+                    self._record_ledger_event(
+                        "order_rejected",
+                        order=item.order,
+                        correlation_id=item.correlation_id,
+                        metadata={
+                            "reason": str(exc),
+                            "attempts": item.attempts,
+                            "transient": True,
+                        },
+                    )
                     return item.order
                 backoff = max(0.0, float(self.config.backoff_seconds))
                 self._persist_state()
+                self._record_ledger_event(
+                    "order_retry_scheduled",
+                    order=item.order,
+                    correlation_id=item.correlation_id,
+                    metadata={
+                        "attempts": item.attempts,
+                        "error": str(exc),
+                        "backoff_seconds": backoff * item.attempts,
+                    },
+                )
                 if backoff:
                     time.sleep(backoff * item.attempts)
                 continue
@@ -299,6 +369,12 @@ class OrderManagementSystem:
                 self._pending.pop(item.correlation_id, None)
                 item.order.reject(str(exc))
                 self._persist_state()
+                self._record_ledger_event(
+                    "order_rejected",
+                    order=item.order,
+                    correlation_id=item.correlation_id,
+                    metadata={"reason": str(exc)},
+                )
                 return item.order
             break
         self._queue.popleft()
@@ -317,6 +393,12 @@ class OrderManagementSystem:
             )
             self._ack_timestamps[submitted.order_id] = datetime.now(timezone.utc)
         self._persist_state()
+        self._record_ledger_event(
+            "order_acknowledged",
+            order=submitted,
+            correlation_id=item.correlation_id,
+            metadata={"attempts": item.attempts, "ack_latency": ack_latency},
+        )
         return submitted
 
     def process_all(self) -> None:
@@ -333,6 +415,11 @@ class OrderManagementSystem:
             self._orders[order_id].cancel()
             self._ack_timestamps.pop(order_id, None)
             self._persist_state()
+            self._record_ledger_event(
+                "order_cancelled",
+                order=self._orders[order_id],
+                correlation_id=self._correlations.get(order_id),
+            )
         return cancelled
 
     def register_fill(self, order_id: str, quantity: float, price: float) -> Order:
@@ -369,6 +456,12 @@ class OrderManagementSystem:
                 )
             self._ack_timestamps.pop(order_id, None)
         self._persist_state()
+        self._record_ledger_event(
+            "order_fill_recorded",
+            order=order,
+            correlation_id=self._correlations.get(order_id),
+            metadata={"fill_quantity": quantity, "fill_price": price},
+        )
         return order
 
     def sync_remote_state(self, order: Order) -> Order:
@@ -393,6 +486,11 @@ class OrderManagementSystem:
             self._ack_timestamps.pop(order.order_id, None)
 
         self._persist_state()
+        self._record_ledger_event(
+            "order_state_synced",
+            order=stored,
+            correlation_id=self._correlations.get(order.order_id),
+        )
         return stored
 
     def reload(self) -> None:
@@ -405,6 +503,30 @@ class OrderManagementSystem:
         self._pending.clear()
         self._correlations.clear()
         self._load_state()
+        self._record_ledger_event("state_reloaded", metadata={"source": "reload"})
+
+    def _record_ledger_event(
+        self,
+        event: str,
+        *,
+        order: Order | Mapping[str, object] | None = None,
+        correlation_id: str | None = None,
+        metadata: Mapping[str, object] | None = None,
+    ) -> None:
+        if self._ledger is None:
+            return
+        order_payload: Mapping[str, object] | None
+        if isinstance(order, Order):
+            order_payload = order.to_dict()
+        else:
+            order_payload = order
+        self._ledger.append(
+            event,
+            order=order_payload,
+            correlation_id=correlation_id,
+            metadata=metadata,
+            state_snapshot=self._state_payload(),
+        )
 
     # ------------------------------------------------------------------
     # Recovery helpers
