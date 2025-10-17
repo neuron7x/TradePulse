@@ -1,5 +1,11 @@
 """High-level data ingestion services and helpers."""
 
+from src.data.experiment_registry import (
+    ArtifactRecord,
+    ExperimentRegistry,
+    ExperimentRunRecord,
+    HyperparameterAuditEntry,
+)
 from src.data.ingestion_service import CacheEntrySnapshot, DataIngestionCacheService
 from src.data.kafka_ingestion import (
     HotSymbolCache,
@@ -12,9 +18,13 @@ from src.data.kafka_ingestion import (
 from src.data.streaming_aggregator import AggregationResult, TickStreamAggregator
 
 __all__ = [
+    "ArtifactRecord",
     "AggregationResult",
     "CacheEntrySnapshot",
     "DataIngestionCacheService",
+    "ExperimentRegistry",
+    "ExperimentRunRecord",
+    "HyperparameterAuditEntry",
     "HotSymbolCache",
     "HotSymbolSnapshot",
     "KafkaIngestionConfig",
