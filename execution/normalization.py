@@ -108,9 +108,10 @@ class SymbolNormalizer:
             cls._ABS_ALIGNMENT_TOLERANCE,
             step_abs * cls._REL_ALIGNMENT_TOLERANCE,
         )
-        if remainder_abs <= tolerance:
+        tolerance = min(step_abs * Decimal("0.1"), tolerance)
+        if remainder_abs < tolerance:
             return True
-        if (step_abs - remainder_abs) <= tolerance:
+        if (step_abs - remainder_abs) < tolerance:
             return True
         return False
 
