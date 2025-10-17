@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import os
 import threading
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
+from itertools import count
+from queue import Empty, Full, PriorityQueue
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Protocol, Sequence
 
@@ -32,6 +34,7 @@ class StrategyFlow:
     strategies: Sequence[Strategy]
     dataset: Any
     raise_on_error: bool = False
+    priority: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name.strip():
@@ -48,6 +51,9 @@ class StrategyFlow:
             if not isinstance(strategy, Strategy):
                 raise TypeError("StrategyFlow.strategies must contain Strategy instances")
         object.__setattr__(self, "strategies", strategies)
+
+        if not isinstance(self.priority, int):
+            raise TypeError("StrategyFlow.priority must be an integer")
 
 
 class StrategyOrchestrationError(RuntimeError):
@@ -73,20 +79,27 @@ class StrategyOrchestrator:
         self,
         *,
         max_parallel: int | None = None,
+        max_queue_size: int | None = None,
         evaluator_factory: Callable[[], _Evaluator] | _Evaluator | None = None,
         thread_name_prefix: str = "strategy-orchestrator",
     ) -> None:
         if max_parallel is not None and max_parallel <= 0:
             raise ValueError("max_parallel must be positive when provided")
 
+        if max_queue_size is not None and max_queue_size < 0:
+            raise ValueError("max_queue_size must be non-negative when provided")
+
         workers = max_parallel or min(32, (os.cpu_count() or 1) + 4)
-        self._executor = ThreadPoolExecutor(
-            max_workers=workers,
-            thread_name_prefix=thread_name_prefix,
-        )
         self._lock = threading.Lock()
         self._active: set[str] = set()
+        self._pending: set[str] = set()
         self._shutdown = False
+        self._sentinel = object()
+        self._sequence = count()
+        self._queue: PriorityQueue[tuple[int, int, StrategyFlow | object, Future | None]]
+        queue_size = 0 if max_queue_size in (None, 0) else max_queue_size
+        self._queue = PriorityQueue(maxsize=queue_size)
+        self._threads: list[threading.Thread] = []
 
         if evaluator_factory is None:
             self._factory: Callable[[], _Evaluator] = StrategyBatchEvaluator
@@ -97,16 +110,34 @@ class StrategyOrchestrator:
         else:  # pragma: no cover - defensive branch
             raise TypeError("evaluator_factory must be callable or expose an 'evaluate' method")
 
+        for index in range(workers):
+            thread = threading.Thread(
+                target=self._worker,
+                name=f"{thread_name_prefix}-{index}",
+                daemon=True,
+            )
+            thread.start()
+            self._threads.append(thread)
+
     # ------------------------------------------------------------------
     # Lifecycle helpers
-    def shutdown(self, *, wait: bool = True) -> None:
+    def shutdown(self, *, wait: bool = True, cancel_pending: bool = False) -> None:
         """Terminate worker threads and reject new flows."""
 
         with self._lock:
             if self._shutdown:
                 return
             self._shutdown = True
-        self._executor.shutdown(wait=wait)
+        if cancel_pending:
+            self._drain_pending()
+
+        for _ in self._threads:
+            # ``float('inf')`` ensures sentinels are consumed only after real work.
+            self._queue.put((float("inf"), next(self._sequence), self._sentinel, None))
+
+        if wait:
+            for thread in self._threads:
+                thread.join()
 
     def __enter__(self) -> "StrategyOrchestrator":
         return self
@@ -116,29 +147,32 @@ class StrategyOrchestrator:
 
     # ------------------------------------------------------------------
     # Submission helpers
-    def submit_flow(self, flow: StrategyFlow) -> Future[list[EvaluationResult]]:
+    def submit_flow(
+        self,
+        flow: StrategyFlow,
+        *,
+        timeout: float | None = None,
+    ) -> Future[list[EvaluationResult]]:
         """Submit *flow* for asynchronous execution."""
 
         with self._lock:
             if self._shutdown:
                 raise RuntimeError("StrategyOrchestrator has been shut down")
-            if flow.name in self._active:
+            if flow.name in self._active or flow.name in self._pending:
                 raise RuntimeError(f"Flow '{flow.name}' is already running")
-            self._active.add(flow.name)
+            self._pending.add(flow.name)
 
-        def _run() -> list[EvaluationResult]:
-            try:
-                evaluator = self._factory()
-                return evaluator.evaluate(
-                    flow.strategies,
-                    flow.dataset,
-                    raise_on_error=flow.raise_on_error,
-                )
-            finally:
-                with self._lock:
-                    self._active.discard(flow.name)
+        future: Future[list[EvaluationResult]] = Future()
+        task = (flow.priority, next(self._sequence), flow, future)
 
-        return self._executor.submit(_run)
+        try:
+            self._queue.put(task, timeout=timeout)
+        except Full as exc:  # pragma: no cover - defensive
+            with self._lock:
+                self._pending.discard(flow.name)
+            raise TimeoutError("Timed out while waiting to enqueue strategy flow") from exc
+
+        return future
 
     def run_flows(
         self,
@@ -178,6 +212,66 @@ class StrategyOrchestrator:
 
         with self._lock:
             return frozenset(self._active)
+
+    # ------------------------------------------------------------------
+    # Worker internals
+    def _worker(self) -> None:
+        while True:
+            priority, sequence, flow, future = self._queue.get()
+            try:
+                if flow is self._sentinel:
+                    return
+
+                assert isinstance(flow, StrategyFlow)
+                assert isinstance(future, Future)
+
+                with self._lock:
+                    self._pending.discard(flow.name)
+
+                if not future.set_running_or_notify_cancel():
+                    continue
+
+                with self._lock:
+                    self._active.add(flow.name)
+
+                try:
+                    evaluator = self._factory()
+                    result = evaluator.evaluate(
+                        flow.strategies,
+                        flow.dataset,
+                        raise_on_error=flow.raise_on_error,
+                    )
+                except BaseException as exc:  # pragma: no cover - forward to caller
+                    future.set_exception(exc)
+                else:
+                    future.set_result(result)
+                finally:
+                    with self._lock:
+                        self._active.discard(flow.name)
+            finally:
+                self._queue.task_done()
+
+    def _drain_pending(self) -> None:
+        while True:
+            try:
+                priority, sequence, flow, future = self._queue.get_nowait()
+            except Empty:
+                return
+
+            try:
+                if flow is self._sentinel:
+                    # Re-insert the sentinel for other workers to observe.
+                    self._queue.put((priority, sequence, flow, future))
+                    return
+
+                assert isinstance(flow, StrategyFlow)
+                assert isinstance(future, Future)
+
+                future.cancel()
+                with self._lock:
+                    self._pending.discard(flow.name)
+            finally:
+                self._queue.task_done()
 
 
 __all__ = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from concurrent.futures import CancelledError
 from typing import Any, Sequence
 
 import pytest
@@ -129,3 +130,154 @@ def test_orchestrator_surfaces_flow_errors_with_context() -> None:
     assert "flow bad failed" in str(error)
     assert "good" in error.results
     assert isinstance(error.results["good"][0], EvaluationResult)
+
+
+def test_orchestrator_prioritizes_queues() -> None:
+    calls: list[tuple[tuple[str, ...], Any, bool]] = []
+    orchestrator = StrategyOrchestrator(
+        max_parallel=1,
+        evaluator_factory=lambda: RecordingEvaluator(calls, delay=0.05),
+    )
+
+    blocker = StrategyFlow(
+        name="blocker",
+        strategies=[_make_strategy("blocker")],
+        dataset="blocker",
+        priority=0,
+    )
+    low = StrategyFlow(
+        name="low",
+        strategies=[_make_strategy("low")],
+        dataset="low",
+        priority=5,
+    )
+    high = StrategyFlow(
+        name="high",
+        strategies=[_make_strategy("high")],
+        dataset="high",
+        priority=-5,
+    )
+
+    future_blocker = orchestrator.submit_flow(blocker)
+    future_low = orchestrator.submit_flow(low)
+    future_high = orchestrator.submit_flow(high)
+
+    future_blocker.result()
+    future_high.result()
+    future_low.result()
+    orchestrator.shutdown()
+
+    observed = [data for (_, data, _) in calls if data != "blocker"]
+    assert observed == ["high", "low"]
+
+
+def test_orchestrator_applies_backpressure() -> None:
+    calls: list[tuple[tuple[str, ...], Any, bool]] = []
+    orchestrator = StrategyOrchestrator(
+        max_parallel=1,
+        max_queue_size=1,
+        evaluator_factory=lambda: RecordingEvaluator(calls, delay=0.2),
+    )
+
+    first = StrategyFlow(
+        name="first",
+        strategies=[_make_strategy("first")],
+        dataset="first",
+    )
+    second = StrategyFlow(
+        name="second",
+        strategies=[_make_strategy("second")],
+        dataset="second",
+    )
+    third = StrategyFlow(
+        name="third",
+        strategies=[_make_strategy("third")],
+        dataset="third",
+    )
+
+    orchestrator.submit_flow(first)
+    orchestrator.submit_flow(second)
+    with pytest.raises(TimeoutError):
+        orchestrator.submit_flow(third, timeout=0.05)
+
+    orchestrator.shutdown(cancel_pending=True)
+
+
+def test_orchestrator_isolates_evaluator_state() -> None:
+    created: list[int] = []
+
+    class StatefulEvaluator:
+        def __init__(self) -> None:
+            self.counter = 0
+            created.append(id(self))
+
+        def evaluate(
+            self,
+            strategies: Sequence[Strategy],
+            data: Any,
+            *,
+            raise_on_error: bool = False,
+        ) -> list[EvaluationResult]:
+            self.counter += 1
+            return [
+                EvaluationResult(strategy=strategy, score=1.0, duration=0.0, error=None)
+                for strategy in strategies
+            ]
+
+    orchestrator = StrategyOrchestrator(
+        max_parallel=2,
+        evaluator_factory=StatefulEvaluator,
+    )
+
+    flows = [
+        StrategyFlow(name=f"flow-{idx}", strategies=[_make_strategy(f"s{idx}")], dataset=idx)
+        for idx in range(3)
+    ]
+
+    orchestrator.run_flows(flows)
+    orchestrator.shutdown()
+
+    assert len(created) == len(flows)
+
+
+def test_orchestrator_shutdown_cancels_pending_flows() -> None:
+    calls: list[tuple[tuple[str, ...], Any, bool]] = []
+    orchestrator = StrategyOrchestrator(
+        max_parallel=1,
+        max_queue_size=2,
+        evaluator_factory=lambda: RecordingEvaluator(calls, delay=0.2),
+    )
+
+    active_flow = StrategyFlow(
+        name="active",
+        strategies=[_make_strategy("active")],
+        dataset="active",
+    )
+    pending_flow = StrategyFlow(
+        name="pending",
+        strategies=[_make_strategy("pending")],
+        dataset="pending",
+    )
+
+    running = orchestrator.submit_flow(active_flow)
+    queued = orchestrator.submit_flow(pending_flow)
+
+    for _ in range(50):
+        if "active" in orchestrator.active_flows():
+            break
+        time.sleep(0.01)
+
+    orchestrator.shutdown(cancel_pending=True)
+
+    assert running.result()[0].strategy.name == "active"
+    with pytest.raises(CancelledError):
+        queued.result()
+
+    with pytest.raises(RuntimeError):
+        orchestrator.submit_flow(
+            StrategyFlow(
+                name="after",
+                strategies=[_make_strategy("after")],
+                dataset="after",
+            )
+        )
