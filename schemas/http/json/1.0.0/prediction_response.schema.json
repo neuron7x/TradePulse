@@ -1,6 +1,144 @@
 {
+  "$defs": {
+    "PaginationMeta": {
+      "description": "Pagination envelope used by collection responses.",
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        },
+        "limit": {
+          "default": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "returned": {
+          "default": 0,
+          "title": "Returned",
+          "type": "integer"
+        }
+      },
+      "title": "PaginationMeta",
+      "type": "object"
+    },
+    "PredictionFilters": {
+      "description": "Echoed filter parameters for prediction responses.",
+      "properties": {
+        "start_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start At"
+        },
+        "end_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End At"
+        },
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/SignalAction"
+          },
+          "title": "Actions",
+          "type": "array"
+        },
+        "min_confidence": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Min Confidence"
+        }
+      },
+      "title": "PredictionFilters",
+      "type": "object"
+    },
+    "PredictionSnapshot": {
+      "description": "Snapshot of a derived signal at a point in time.",
+      "properties": {
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        },
+        "signal": {
+          "additionalProperties": true,
+          "title": "Signal",
+          "type": "object"
+        }
+      },
+      "required": [
+        "timestamp",
+        "score",
+        "signal"
+      ],
+      "title": "PredictionSnapshot",
+      "type": "object"
+    },
+    "SignalAction": {
+      "description": "Supported signal directives.",
+      "enum": [
+        "buy",
+        "sell",
+        "hold",
+        "exit"
+      ],
+      "title": "SignalAction",
+      "type": "string"
+    }
+  },
   "description": "Response representing the generated trading signal.",
   "properties": {
+    "symbol": {
+      "title": "Symbol",
+      "type": "string"
+    },
     "generated_at": {
       "format": "date-time",
       "title": "Generated At",
@@ -11,25 +149,49 @@
       "type": "integer"
     },
     "score": {
-      "description": "Composite alpha score driving the action.",
-      "title": "Score",
-      "type": "number"
+      "anyOf": [
+        {
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Composite alpha score driving the primary action.",
+      "title": "Score"
     },
     "signal": {
-      "additionalProperties": true,
-      "title": "Signal",
-      "type": "object"
+      "anyOf": [
+        {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Primary trading signal at the head of the page.",
+      "title": "Signal"
     },
-    "symbol": {
-      "title": "Symbol",
-      "type": "string"
+    "items": {
+      "items": {
+        "$ref": "#/$defs/PredictionSnapshot"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "pagination": {
+      "$ref": "#/$defs/PaginationMeta"
+    },
+    "filters": {
+      "$ref": "#/$defs/PredictionFilters"
     }
   },
   "required": [
     "symbol",
-    "horizon_seconds",
-    "score",
-    "signal"
+    "horizon_seconds"
   ],
   "title": "PredictionResponse",
   "type": "object"

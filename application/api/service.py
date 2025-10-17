@@ -1120,8 +1120,8 @@ def create_app(
                 continue
 
             normalised = _coerce_dependency_result(result)
-            metrics = dict(normalised.data or {})
-            metrics["latency_ms"] = round(elapsed_ms, 2)
+            dependency_metrics = dict(normalised.data or {})
+            dependency_metrics["latency_ms"] = round(elapsed_ms, 2)
             status_value = "operational" if normalised.healthy else "failed"
             if not normalised.healthy:
                 dependency_failures = True
@@ -1129,7 +1129,7 @@ def create_app(
                 healthy=normalised.healthy,
                 status=status_value,
                 detail=normalised.detail,
-                metrics=metrics,
+                metrics=dependency_metrics,
             )
 
         severity = "ready"
