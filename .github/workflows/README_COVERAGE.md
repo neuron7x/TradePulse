@@ -6,6 +6,12 @@ This document explains how to configure and use the test coverage workflow (`.gi
 
 The CI workflow enforces test coverage requirements on all pull requests and pushes to the `main` branch. It runs tests with coverage reporting and fails the build if coverage drops below the configured threshold.
 
+## Quick Reference / Швидкий довідник
+
+| Завдання | Що робить / користь | Приклад реалізації |
+| --- | --- | --- |
+| **Покриття коду / Code Coverage** | Генерує `coverage.xml`, підсвічує просідання покриття безпосередньо у PR та живить дашборди Codecov/Coveralls для довгострокового моніторингу. | `pytest --cov=core --cov=backtest --cov=execution --cov-report=term-missing --cov-report=xml`; завантаження `coverage.xml` у Codecov (`codecov/codecov-action`) або Coveralls (`coverallsapp/github-action`). |
+
 ## Configuration
 
 ### Coverage Threshold
