@@ -66,7 +66,6 @@ To make test coverage a required check before merging pull requests:
 6. In the search box, find and select:
    - `Test Coverage (Python 3.11)`
    - `Test Coverage (Python 3.12)`
-   - `Test Coverage (Python 3.13)`
 7. (Optional but recommended) Check **Require a pull request before merging**
 8. Click **Create** or **Save changes**
 
@@ -116,9 +115,6 @@ If Codecov upload fails:
 
 ### Python Version Compatibility
 
-The workflow tests against Python 3.11, 3.12, and 3.13. If your code requires a different version:
+The workflow tests against Python 3.11 and 3.12. If your code requires a different version:
 1. Edit the `matrix.python-version` in `.github/workflows/ci.yml`
 2. Update the branch protection rules to match the new Python versions
-
-> ℹ️ The workflow enables `allow-prereleases` for Python 3.13 to keep the matrix green until GitHub's runner images ship the
-> stable release. Remove this flag once 3.13 is generally available.

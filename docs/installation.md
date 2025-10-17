@@ -6,7 +6,7 @@ This guide covers environment prerequisites, supported platforms, and the recomm
 
 Before installing TradePulse, make sure you have the following tools available:
 
-- **Python 3.11–3.13** with `pip` and `venv` modules.
+- **Python 3.11 or 3.12** with `pip` and `venv` modules.
 - **Git** for cloning the repository and tracking updates.
 - **Build essentials** for native extensions:
   - Linux: `build-essential`, `python3-dev`, and `libffi-dev`.

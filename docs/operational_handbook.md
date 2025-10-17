@@ -152,7 +152,7 @@ teams can reach production readiness without tribal knowledge.
 
 ## Compatibility Matrix and Fallback Paths
 
-- **Python matrix** – CI exercises Python 3.11, 3.12, and 3.13 via the matrix in
+- **Python matrix** – CI exercises Python 3.11 and 3.12 via the matrix in
   [`.github/workflows/tests.yml`](../.github/workflows/tests.yml) to guarantee
   forward compatibility before releases.
 - **GPU fallbacks** – Indicator kernels automatically downgrade to CPU when CuPy

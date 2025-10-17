@@ -23,7 +23,7 @@ automated coverage that protects them.
 
 ## Continuous Integration Gates
 
-Every pull request fans out across Python 3.11–3.13. Each run provisions a shared
+Every pull request fans out across Python 3.11 and 3.12. Each run provisions a shared
 virtual environment via `uv`, executes the coverage-enforced unit/integration suite,
 and now executes the end-to-end smoke harness (`pytest tests/e2e/ -m "not slow and not flaky"`).
 
