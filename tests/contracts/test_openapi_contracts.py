@@ -15,7 +15,7 @@ from application.api.service import create_app  # noqa: E402  - env vars must be
 from application.settings import AdminApiSettings
 
 
-BASELINE = Path("interfaces/http/openapi/1.0.0.json")
+BASELINE = Path("interfaces/http/openapi/0.2.0.json")
 
 
 @pytest.fixture()
@@ -41,5 +41,17 @@ def test_openapi_defines_expected_routes(fastapi_app) -> None:
     assert "post" in paths["/predictions"]
     feature_response = schema["components"]["schemas"]["FeatureResponse"]
     prediction_response = schema["components"]["schemas"]["PredictionResponse"]
-    assert {"symbol", "features", "generated_at"} <= set(feature_response["properties"].keys())
-    assert {"symbol", "signal", "horizon_seconds"} <= set(prediction_response["properties"].keys())
+    assert {
+        "symbol",
+        "features",
+        "items",
+        "pagination",
+        "filters",
+    } <= set(feature_response["properties"].keys())
+    assert {
+        "symbol",
+        "signal",
+        "items",
+        "pagination",
+        "filters",
+    } <= set(prediction_response["properties"].keys())

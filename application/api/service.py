@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import asyncio
 import hashlib
 import inspect
 import json
 from json import JSONDecodeError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
+from http import HTTPStatus
 from time import perf_counter
 from typing import Any, Awaitable, Callable, Mapping, Literal
 
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
@@ -157,6 +161,175 @@ def _coerce_dependency_result(value: DependencyProbeResult | bool | dict[str, An
     return DependencyProbeResult(healthy=bool(value))
 
 
+class ApiErrorCode(str, Enum):
+    """Stable error codes returned by the public HTTP API."""
+
+    BAD_REQUEST = "ERR_BAD_REQUEST"
+    AUTH_REQUIRED = "ERR_AUTH_REQUIRED"
+    FORBIDDEN = "ERR_FORBIDDEN"
+    NOT_FOUND = "ERR_NOT_FOUND"
+    RATE_LIMIT = "ERR_RATE_LIMIT"
+    VALIDATION_FAILED = "ERR_VALIDATION_FAILED"
+    UNPROCESSABLE = "ERR_UNPROCESSABLE"
+    INTERNAL = "ERR_INTERNAL"
+    FEATURES_EMPTY = "ERR_FEATURES_EMPTY"
+    FEATURES_MISSING = "ERR_FEATURES_MISSING"
+    FEATURES_INVALID = "ERR_FEATURES_INVALID"
+    FEATURES_FILTER_MISMATCH = "ERR_FEATURES_FILTER_MISMATCH"
+    INVALID_CURSOR = "ERR_INVALID_CURSOR"
+    INVALID_CONFIDENCE = "ERR_INVALID_CONFIDENCE"
+    PREDICTIONS_FILTER_MISMATCH = "ERR_PREDICTIONS_FILTER_MISMATCH"
+
+
+DEFAULT_ERROR_CODES: dict[int, ApiErrorCode] = {
+    status.HTTP_400_BAD_REQUEST: ApiErrorCode.BAD_REQUEST,
+    status.HTTP_401_UNAUTHORIZED: ApiErrorCode.AUTH_REQUIRED,
+    status.HTTP_403_FORBIDDEN: ApiErrorCode.FORBIDDEN,
+    status.HTTP_404_NOT_FOUND: ApiErrorCode.NOT_FOUND,
+    status.HTTP_422_UNPROCESSABLE_CONTENT: ApiErrorCode.VALIDATION_FAILED,
+    status.HTTP_429_TOO_MANY_REQUESTS: ApiErrorCode.RATE_LIMIT,
+    status.HTTP_500_INTERNAL_SERVER_ERROR: ApiErrorCode.INTERNAL,
+    status.HTTP_503_SERVICE_UNAVAILABLE: ApiErrorCode.INTERNAL,
+}
+
+
+@dataclass(slots=True, frozen=True)
+class FeatureQueryParams:
+    """Query parameters driving feature pagination and filtering."""
+
+    limit: int
+    cursor: datetime | None
+    start_at: datetime | None
+    end_at: datetime | None
+    feature_prefix: str | None
+    feature_keys: tuple[str, ...]
+
+    def cache_fragment(self) -> dict[str, Any]:
+        return {
+            "limit": self.limit,
+            "cursor": self.cursor.isoformat() if self.cursor else None,
+            "start_at": self.start_at.isoformat() if self.start_at else None,
+            "end_at": self.end_at.isoformat() if self.end_at else None,
+            "feature_prefix": self.feature_prefix,
+            "feature_keys": list(self.feature_keys),
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class PredictionQueryParams:
+    """Query parameters for prediction pagination and filtering."""
+
+    limit: int
+    cursor: datetime | None
+    start_at: datetime | None
+    end_at: datetime | None
+    actions: tuple[SignalAction, ...]
+    min_confidence: float | None
+
+    def cache_fragment(self) -> dict[str, Any]:
+        return {
+            "limit": self.limit,
+            "cursor": self.cursor.isoformat() if self.cursor else None,
+            "start_at": self.start_at.isoformat() if self.start_at else None,
+            "end_at": self.end_at.isoformat() if self.end_at else None,
+            "actions": [action.value for action in self.actions],
+            "min_confidence": self.min_confidence,
+        }
+
+
+def _parse_datetime_param(name: str, raw: str | None) -> datetime | None:
+    if raw is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": ApiErrorCode.INVALID_CURSOR.value,
+                "message": f"Invalid {name} value; expected ISO 8601 format.",
+                "meta": {"parameter": name, "value": raw},
+            },
+        ) from exc
+    return _ensure_timezone(parsed)
+
+
+def _parse_confidence_param(raw: str | None) -> float | None:
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": ApiErrorCode.INVALID_CONFIDENCE.value,
+                "message": "min_confidence must be a floating point number between 0 and 1.",
+                "meta": {"parameter": "min_confidence", "value": raw},
+            },
+        ) from exc
+    if not 0.0 <= value <= 1.0:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={
+                "code": ApiErrorCode.INVALID_CONFIDENCE.value,
+                "message": "min_confidence must be within [0.0, 1.0].",
+                "meta": {"parameter": "min_confidence", "value": raw},
+            },
+        )
+    return value
+
+
+def get_feature_query_params(
+    limit: int = Query(1, ge=1, le=500, description="Number of feature snapshots to return."),
+    cursor: str | None = Query(None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."),
+    start_at: str | None = Query(None, alias="startAt", description="Filter snapshots on or after this timestamp."),
+    end_at: str | None = Query(None, alias="endAt", description="Filter snapshots on or before this timestamp."),
+    feature_prefix: str | None = Query(None, alias="featurePrefix", description="Return only feature keys with the provided prefix."),
+    feature: list[str] | None = Query(None, alias="feature", description="Specific feature keys to include."),
+) -> FeatureQueryParams:
+    feature_keys: tuple[str, ...] = tuple(dict.fromkeys(feature or []))
+    return FeatureQueryParams(
+        limit=limit,
+        cursor=_parse_datetime_param("cursor", cursor),
+        start_at=_parse_datetime_param("start_at", start_at),
+        end_at=_parse_datetime_param("end_at", end_at),
+        feature_prefix=feature_prefix,
+        feature_keys=feature_keys,
+    )
+
+
+def get_prediction_query_params(
+    limit: int = Query(1, ge=1, le=500, description="Number of predictions to return."),
+    cursor: str | None = Query(None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."),
+    start_at: str | None = Query(None, alias="startAt", description="Return predictions generated at or after this time."),
+    end_at: str | None = Query(None, alias="endAt", description="Return predictions generated at or before this time."),
+    action: list[str] | None = Query(None, alias="action", description="Filter predictions by signal action."),
+    min_confidence: str | None = Query(None, alias="minConfidence", description="Minimum signal confidence to include."),
+) -> PredictionQueryParams:
+    actions: list[SignalAction] = []
+    for value in action or []:
+        try:
+            actions.append(SignalAction(value))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": ApiErrorCode.UNPROCESSABLE.value,
+                    "message": f"Unsupported action filter '{value}'.",
+                    "meta": {"parameter": "action", "value": value},
+                },
+            ) from exc
+    return PredictionQueryParams(
+        limit=limit,
+        cursor=_parse_datetime_param("cursor", cursor),
+        start_at=_parse_datetime_param("start_at", start_at),
+        end_at=_parse_datetime_param("end_at", end_at),
+        actions=tuple(actions),
+        min_confidence=_parse_confidence_param(min_confidence),
+    )
+
+
 def _ensure_timezone(ts: datetime) -> datetime:
     if ts.tzinfo is None:
         return ts.replace(tzinfo=timezone.utc)
@@ -218,12 +391,46 @@ class FeatureRequest(BaseModel):
         return frame
 
 
+class PaginationMeta(BaseModel):
+    """Pagination envelope used by collection responses."""
+
+    cursor: datetime | None = None
+    next_cursor: datetime | None = None
+    limit: int = 0
+    returned: int = 0
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FeatureFilters(BaseModel):
+    """Echoed filter parameters for feature responses."""
+
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    feature_prefix: str | None = None
+    feature_keys: tuple[str, ...] = Field(default_factory=tuple)
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FeatureSnapshot(BaseModel):
+    """Single feature vector at a specific timestamp."""
+
+    timestamp: datetime
+    features: dict[str, float]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class FeatureResponse(BaseModel):
     """Response containing the most recent feature snapshot."""
 
     symbol: str
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    features: dict[str, float]
+    features: dict[str, float] = Field(default_factory=dict)
+    items: list[FeatureSnapshot] = Field(default_factory=list)
+    pagination: PaginationMeta = Field(default_factory=PaginationMeta)
+    filters: FeatureFilters = Field(default_factory=FeatureFilters)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -239,14 +446,43 @@ class PredictionRequest(FeatureRequest):
     )
 
 
+class PredictionFilters(BaseModel):
+    """Echoed filter parameters for prediction responses."""
+
+    start_at: datetime | None = None
+    end_at: datetime | None = None
+    actions: tuple[SignalAction, ...] = Field(default_factory=tuple)
+    min_confidence: float | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class PredictionSnapshot(BaseModel):
+    """Snapshot of a derived signal at a point in time."""
+
+    timestamp: datetime
+    score: float
+    signal: dict[str, Any]
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class PredictionResponse(BaseModel):
     """Response representing the generated trading signal."""
 
     symbol: str
     generated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     horizon_seconds: int
-    score: float = Field(..., description="Composite alpha score driving the action.")
-    signal: dict[str, Any]
+    score: float | None = Field(
+        default=None,
+        description="Composite alpha score driving the primary action.",
+    )
+    signal: dict[str, Any] | None = Field(
+        default=None, description="Primary trading signal at the head of the page."
+    )
+    items: list[PredictionSnapshot] = Field(default_factory=list)
+    pagination: PaginationMeta = Field(default_factory=PaginationMeta)
+    filters: PredictionFilters = Field(default_factory=PredictionFilters)
 
     model_config = ConfigDict(populate_by_name=True)
 
@@ -262,40 +498,82 @@ class OnlineSignalForecaster:
         features = self._pipeline.transform(frame)
         return features
 
-    def latest_feature_vector(self, features: pd.DataFrame) -> pd.Series:
-        if features.empty:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="No features computed"
-            )
-
-        latest_row = features.iloc[-1]
-
+    def _normalise_feature_row(self, row: pd.Series, *, strict: bool) -> pd.Series | None:
         required_macd_columns = ("macd", "macd_signal", "macd_histogram")
-        missing_columns = [col for col in required_macd_columns if col not in latest_row.index]
+        missing_columns = [col for col in required_macd_columns if col not in row.index]
         if missing_columns:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Missing MACD features: {', '.join(sorted(missing_columns))}",
-            )
+            if strict:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": ApiErrorCode.FEATURES_MISSING.value,
+                        "message": f"Missing MACD features: {', '.join(sorted(missing_columns))}",
+                    },
+                )
+            return None
 
         invalid_columns = [
             col
             for col in required_macd_columns
-            if pd.isna(latest_row[col]) or not np.isfinite(float(latest_row[col]))
+            if pd.isna(row[col]) or not np.isfinite(float(row[col]))
         ]
         if invalid_columns:
+            if strict:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": ApiErrorCode.FEATURES_INVALID.value,
+                        "message": f"Unavailable MACD features: {', '.join(sorted(invalid_columns))}",
+                    },
+                )
+            return None
+
+        cleaned = row.dropna()
+        if cleaned.empty:
+            if strict:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                    detail={
+                        "code": ApiErrorCode.FEATURES_INVALID.value,
+                        "message": "Insufficient data to derive features",
+                    },
+                )
+            return None
+        return cleaned
+
+    def normalised_feature_rows(
+        self, features: pd.DataFrame, *, strict: bool = False
+    ) -> list[tuple[datetime, pd.Series]]:
+        rows: list[tuple[datetime, pd.Series]] = []
+        for timestamp, raw in features.iterrows():
+            normalised = self._normalise_feature_row(raw, strict=strict)
+            if normalised is None:
+                continue
+            python_ts = timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp
+            rows.append((_ensure_timezone(python_ts), normalised))
+        return rows
+
+    def latest_feature_vector(self, features: pd.DataFrame) -> pd.Series:
+        if features.empty:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Unavailable MACD features: {', '.join(sorted(invalid_columns))}",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "code": ApiErrorCode.FEATURES_EMPTY.value,
+                    "message": "No features computed",
+                },
             )
 
-        latest = latest_row.dropna()
-        if latest.empty:
+        latest_row = features.iloc[-1]
+        normalised = self._normalise_feature_row(latest_row, strict=True)
+        if normalised is None:  # pragma: no cover - strict=True ensures non-None
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="Insufficient data to derive features",
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail={
+                    "code": ApiErrorCode.FEATURES_INVALID.value,
+                    "message": "Insufficient data to derive features",
+                },
             )
-        return latest
+        return normalised
 
     def derive_signal(
         self, symbol: str, latest: pd.Series, horizon_seconds: int
@@ -358,8 +636,58 @@ class OnlineSignalForecaster:
         return signal, score
 
 
-def _hash_payload(prefix: str, payload: BaseModel) -> str:
-    data = json.dumps(payload.model_dump(mode="json"), sort_keys=True, default=str)
+def _filter_feature_frame(
+    features: pd.DataFrame,
+    *,
+    start_at: datetime | None,
+    end_at: datetime | None,
+) -> pd.DataFrame:
+    frame = features
+    if start_at is not None:
+        frame = frame[frame.index >= start_at]
+    if end_at is not None:
+        frame = frame[frame.index <= end_at]
+    return frame
+
+
+def _paginate_frame(
+    frame: pd.DataFrame, *, limit: int, cursor: datetime | None
+) -> tuple[pd.DataFrame, datetime | None]:
+    ordered = frame.sort_index(ascending=False)
+    if cursor is not None:
+        ordered = ordered[ordered.index < cursor]
+    page = ordered.iloc[:limit]
+    if page.empty:
+        return page, None
+    next_cursor_ts = page.index[-1]
+    if hasattr(next_cursor_ts, "to_pydatetime"):
+        next_cursor = _ensure_timezone(next_cursor_ts.to_pydatetime())
+    else:
+        next_cursor = _ensure_timezone(next_cursor_ts)
+    return page, next_cursor
+
+
+def _filter_feature_values(
+    feature_vector: pd.Series,
+    *,
+    feature_prefix: str | None,
+    feature_keys: tuple[str, ...],
+) -> dict[str, float]:
+    values: dict[str, float] = {}
+    for key in sorted(feature_vector.index):
+        if feature_prefix is not None and not key.startswith(feature_prefix):
+            continue
+        if feature_keys and key not in feature_keys:
+            continue
+        values[key] = float(feature_vector[key])
+    return values
+
+
+def _hash_payload(prefix: str, payload: BaseModel, extra: Mapping[str, Any] | None = None) -> str:
+    body = payload.model_dump(mode="json")
+    if extra:
+        body["__query__"] = extra
+    data = json.dumps(body, sort_keys=True, default=str)
     digest = hashlib.sha256(data.encode("utf-8")).hexdigest()
     return f"{prefix}:{digest}"
 
@@ -589,7 +917,7 @@ def create_app(
             "Production-ready endpoints for computing feature vectors and generating "
             "lightweight trading signals from streaming market data."
         ),
-        version="0.1.0",
+        version="0.2.0",
         contact={
             "name": "TradePulse Platform Team",
             "url": "https://github.com/neuron7x/TradePulse",
@@ -815,10 +1143,11 @@ def create_app(
     async def compute_features(
         payload: FeatureRequest,
         response: Response,
+        query: FeatureQueryParams = Depends(get_feature_query_params),
         _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> FeatureResponse:
-        cache_key = _hash_payload("features", payload)
+        cache_key = _hash_payload("features", payload, query.cache_fragment())
         cached = await ttl_cache.get(cache_key)
         if cached is not None:
             response.headers["X-Cache-Status"] = "hit"
@@ -826,10 +1155,57 @@ def create_app(
             return cached.payload  # type: ignore[return-value]
 
         features = predictor.compute_features(payload)
-        latest = predictor.latest_feature_vector(features)
-        feature_dict = {k: float(v) for k, v in latest.items()}
-        body = FeatureResponse(symbol=payload.symbol, features=feature_dict)
-        etag = hashlib.sha256(json.dumps(feature_dict, sort_keys=True).encode("utf-8")).hexdigest()
+        filtered = _filter_feature_frame(
+            features,
+            start_at=query.start_at,
+            end_at=query.end_at,
+        )
+        page, next_cursor = _paginate_frame(filtered, limit=query.limit, cursor=query.cursor)
+
+        snapshots: list[FeatureSnapshot] = []
+        if not page.empty:
+            for timestamp, vector in predictor.normalised_feature_rows(page, strict=False):
+                values = _filter_feature_values(
+                    vector,
+                    feature_prefix=query.feature_prefix,
+                    feature_keys=query.feature_keys,
+                )
+                if not values:
+                    continue
+                snapshots.append(FeatureSnapshot(timestamp=timestamp, features=values))
+
+        if not snapshots:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": ApiErrorCode.FEATURES_FILTER_MISMATCH.value,
+                    "message": "No feature snapshots matched the requested filters.",
+                },
+            )
+
+        pagination = PaginationMeta(
+            cursor=query.cursor,
+            next_cursor=next_cursor,
+            limit=query.limit,
+            returned=len(snapshots),
+        )
+        filters = FeatureFilters(
+            start_at=query.start_at,
+            end_at=query.end_at,
+            feature_prefix=query.feature_prefix,
+            feature_keys=query.feature_keys,
+        )
+        feature_dict = snapshots[0].features
+        body = FeatureResponse(
+            symbol=payload.symbol,
+            features=feature_dict,
+            items=snapshots,
+            pagination=pagination,
+            filters=filters,
+        )
+        etag = hashlib.sha256(
+            json.dumps(body.model_dump(), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
         await ttl_cache.set(cache_key, body, etag)
         response.headers["X-Cache-Status"] = "miss"
         response.headers["ETag"] = etag
@@ -844,10 +1220,11 @@ def create_app(
     async def generate_prediction(
         payload: PredictionRequest,
         response: Response,
+        query: PredictionQueryParams = Depends(get_prediction_query_params),
         _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
     ) -> PredictionResponse:
-        cache_key = _hash_payload("predictions", payload)
+        cache_key = _hash_payload("predictions", payload, query.cache_fragment())
         cached = await ttl_cache.get(cache_key)
         if cached is not None:
             response.headers["X-Cache-Status"] = "hit"
@@ -855,13 +1232,64 @@ def create_app(
             return cached.payload  # type: ignore[return-value]
 
         features = predictor.compute_features(payload)
-        latest = predictor.latest_feature_vector(features)
-        signal, score = predictor.derive_signal(payload.symbol, latest, payload.horizon_seconds)
+        filtered = _filter_feature_frame(
+            features,
+            start_at=query.start_at,
+            end_at=query.end_at,
+        )
+        page, next_cursor = _paginate_frame(filtered, limit=query.limit, cursor=query.cursor)
+
+        predictions: list[PredictionSnapshot] = []
+        if not page.empty:
+            for timestamp, vector in predictor.normalised_feature_rows(page, strict=False):
+                signal, score = predictor.derive_signal(
+                    payload.symbol, vector, payload.horizon_seconds
+                )
+                if query.actions and signal.action not in query.actions:
+                    continue
+                if (
+                    query.min_confidence is not None
+                    and float(signal.confidence) < query.min_confidence
+                ):
+                    continue
+                predictions.append(
+                    PredictionSnapshot(
+                        timestamp=timestamp,
+                        score=score,
+                        signal=signal_to_dto(signal),
+                    )
+                )
+
+        if not predictions:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={
+                    "code": ApiErrorCode.PREDICTIONS_FILTER_MISMATCH.value,
+                    "message": "No predictions matched the requested filters.",
+                },
+            )
+
+        pagination = PaginationMeta(
+            cursor=query.cursor,
+            next_cursor=next_cursor,
+            limit=query.limit,
+            returned=len(predictions),
+        )
+        filters = PredictionFilters(
+            start_at=query.start_at,
+            end_at=query.end_at,
+            actions=query.actions,
+            min_confidence=query.min_confidence,
+        )
+        head = predictions[0]
         body = PredictionResponse(
             symbol=payload.symbol,
             horizon_seconds=payload.horizon_seconds,
-            score=score,
-            signal=signal_to_dto(signal),
+            score=head.score,
+            signal=head.signal,
+            items=predictions,
+            pagination=pagination,
+            filters=filters,
         )
         etag = hashlib.sha256(
             json.dumps(body.model_dump(), sort_keys=True, default=str).encode("utf-8")
@@ -871,18 +1299,49 @@ def create_app(
         response.headers["ETag"] = etag
         return body
 
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
         return JSONResponse(
-            status_code=exc.status_code,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content={
                 "error": {
-                    "code": exc.status_code,
-                    "message": exc.detail,
+                    "code": ApiErrorCode.VALIDATION_FAILED.value,
+                    "message": "Invalid request payload.",
                     "path": request.url.path,
+                    "meta": {"errors": exc.errors()},
                 }
             },
         )
+
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+        default_code = DEFAULT_ERROR_CODES.get(exc.status_code, ApiErrorCode.INTERNAL).value
+        detail = exc.detail
+        message: str | None = None
+        meta: Any | None = None
+        code = default_code
+        if isinstance(detail, dict):
+            code = str(detail.get("code") or default_code)
+            message = detail.get("message") or detail.get("detail")
+            meta = detail.get("meta")
+        elif isinstance(detail, str):
+            message = detail
+        if not message:
+            try:
+                message = HTTPStatus(exc.status_code).phrase
+            except ValueError:  # pragma: no cover - defensive
+                message = "An error occurred"
+
+        error_content: dict[str, Any] = {
+            "code": code,
+            "message": message,
+            "path": request.url.path,
+        }
+        if meta is not None:
+            error_content["meta"] = meta
+        return JSONResponse(status_code=exc.status_code, content={"error": error_content})
 
     return app
 
