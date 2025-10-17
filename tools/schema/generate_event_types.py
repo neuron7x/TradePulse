@@ -63,7 +63,9 @@ class AvroSchemaCollector:
         for field in schema.get("fields", []):
             field_def = self._parse_field(field, namespace)
             fields.append(field_def)
-        record = RecordDefinition(name=name, namespace=namespace, doc=schema.get("doc"), fields=fields)
+        record = RecordDefinition(
+            name=name, namespace=namespace, doc=schema.get("doc"), fields=fields
+        )
         self.records[name] = record
         self._record_keys.add(key)
         return name
@@ -138,13 +140,17 @@ class AvroSchemaCollector:
                 ts_type = nested_name
                 json_schema = {"$ref": f"#/$defs/{nested_name}"}
             elif avro_kind == "array":
-                item_type, item_ts, _, _, _, item_schema = self._parse_type(avro_type["items"], None, namespace)
+                item_type, item_ts, _, _, _, item_schema = self._parse_type(
+                    avro_type["items"], None, namespace
+                )
                 self.python_imports.add("List")
                 type_hint = f"List[{item_type}]"
                 ts_type = f"{item_ts}[]"
                 json_schema = {"type": "array", "items": item_schema}
             elif avro_kind == "map":
-                value_type, value_ts, _, _, _, value_schema = self._parse_type(avro_type["values"], None, namespace)
+                value_type, value_ts, _, _, _, value_schema = self._parse_type(
+                    avro_type["values"], None, namespace
+                )
                 self.python_imports.add("Dict")
                 type_hint = f"Dict[str, {value_type}]"
                 ts_type = f"Record<string, {value_ts}>"
@@ -237,7 +243,11 @@ class AvroSchemaCollector:
             elif field.default_value is not None:
                 fragment.setdefault("default", field.default_value)
             schema["properties"][field.name] = fragment
-            if not field.optional and field.default is None and field.default_factory is None:
+            if (
+                not field.optional
+                and field.default is None
+                and field.default_factory is None
+            ):
                 required.append(field.name)
 
         if required:
@@ -257,7 +267,9 @@ class AvroSchemaCollector:
             elif candidate in self.records:
                 definition = _render_record_definition(self.records[candidate])
                 defs[candidate] = definition
-                nested_refs = _collect_references(definition.get("properties", {}).values())
+                nested_refs = _collect_references(
+                    definition.get("properties", {}).values()
+                )
                 queue.extend(nested_refs)
         if defs:
             schema["$defs"] = defs
@@ -299,9 +311,9 @@ _JSON_PRIMITIVES = {
 def _render_python_enum(enum: EnumDefinition) -> str:
     lines = ["", f"class {enum.name}(Enum):"]
     if enum.doc:
-        lines.append(f"    \"\"\"{enum.doc}\"\"\"")
+        lines.append(f'    """{enum.doc}"""')
     for symbol in enum.symbols:
-        lines.append(f"    {symbol} = \"{symbol}\"")
+        lines.append(f'    {symbol} = "{symbol}"')
     lines.append("")
     return "\n".join(lines)
 
@@ -310,8 +322,8 @@ def _render_python_record(record: RecordDefinition) -> str:
     lines = [""]
     lines.append(f"class {record.name}(BaseModel):")
     if record.doc:
-        lines.append(f"    \"\"\"{record.doc}\"\"\"")
-    lines.append("    model_config = ConfigDict(extra=\"forbid\")")
+        lines.append(f'    """{record.doc}"""')
+    lines.append('    model_config = ConfigDict(extra="forbid")')
     if not record.fields:
         lines.append("    pass")
     for field in record.fields:
@@ -331,7 +343,7 @@ def _render_python_record(record: RecordDefinition) -> str:
 def _render_ts_enum(enum: EnumDefinition) -> str:
     lines = [f"export enum {enum.name} {{"]
     for symbol in enum.symbols:
-        lines.append(f"  {symbol} = \"{symbol}\",")
+        lines.append(f'  {symbol} = "{symbol}",')
     lines.append("}")
     return "\n".join(lines)
 
@@ -369,7 +381,11 @@ def _render_record_definition(record: RecordDefinition) -> Dict[str, Any]:
         elif field.default_value is not None:
             fragment.setdefault("default", field.default_value)
         properties[field.name] = fragment
-        if not field.optional and field.default is None and field.default_factory is None:
+        if (
+            not field.optional
+            and field.default is None
+            and field.default_factory is None
+        ):
             required.append(field.name)
     schema: Dict[str, Any] = {"type": "object", "properties": properties}
     if required:
@@ -416,8 +432,12 @@ def _is_null_type(value) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Generate event types from Avro schemas")
-    parser.add_argument("--registry", default="schemas/events", help="Path to schema registry directory")
+    parser = argparse.ArgumentParser(
+        description="Generate event types from Avro schemas"
+    )
+    parser.add_argument(
+        "--registry", default="schemas/events", help="Path to schema registry directory"
+    )
     parser.add_argument("--python-output", default="core/events/models.py")
     parser.add_argument("--ts-output", default="ui/dashboard/src/types/events.ts")
     args = parser.parse_args()

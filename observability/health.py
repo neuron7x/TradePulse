@@ -1,9 +1,10 @@
 """Lightweight health check HTTP server for TradePulse services."""
+
 from __future__ import annotations
 
 import json
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Dict, Optional
 
 
@@ -22,7 +23,9 @@ class _HealthState:
         with self._lock:
             self.live = live
 
-    def update_component(self, name: str, healthy: bool, message: str | None = None) -> None:
+    def update_component(
+        self, name: str, healthy: bool, message: str | None = None
+    ) -> None:
         payload: Dict[str, object] = {"healthy": bool(healthy)}
         if message:
             payload["message"] = message
@@ -43,8 +46,12 @@ class HealthServer:
 
     def __init__(self, host: str = "0.0.0.0", port: int = 8085) -> None:
         self._state = _HealthState()
-        self._server = ThreadingHTTPServer((host, port), self._handler_factory(self._state))
-        self._thread = threading.Thread(target=self._server.serve_forever, name="health-server", daemon=True)
+        self._server = ThreadingHTTPServer(
+            (host, port), self._handler_factory(self._state)
+        )
+        self._thread = threading.Thread(
+            target=self._server.serve_forever, name="health-server", daemon=True
+        )
         self._started = threading.Event()
 
     @staticmethod
@@ -58,21 +65,32 @@ class HealthServer:
                 self.end_headers()
                 self.wfile.write(body)
 
-            def do_GET(self) -> None:  # noqa: N802 - interface defined by BaseHTTPRequestHandler
+            def do_GET(
+                self,
+            ) -> None:  # noqa: N802 - interface defined by BaseHTTPRequestHandler
                 snapshot = state.snapshot()
                 if self.path == "/healthz":
                     status = 200 if snapshot["live"] else 503
-                    payload = {"status": "ok" if snapshot["live"] else "down", **snapshot}
+                    payload = {
+                        "status": "ok" if snapshot["live"] else "down",
+                        **snapshot,
+                    }
                     self._write(status, payload)
                     return
                 if self.path == "/health/live":
                     status = 200 if snapshot["live"] else 503
-                    payload = {"status": "live" if snapshot["live"] else "down", **snapshot}
+                    payload = {
+                        "status": "live" if snapshot["live"] else "down",
+                        **snapshot,
+                    }
                     self._write(status, payload)
                     return
                 if self.path == "/readyz":
                     status = 200 if snapshot["ready"] else 503
-                    payload = {"status": "ready" if snapshot["ready"] else "not-ready", **snapshot}
+                    payload = {
+                        "status": "ready" if snapshot["ready"] else "not-ready",
+                        **snapshot,
+                    }
                     self._write(status, payload)
                     return
                 self._write(404, {"status": "unknown", **snapshot})
@@ -107,7 +125,9 @@ class HealthServer:
     def set_live(self, live: bool = True) -> None:
         self._state.set_live(live)
 
-    def update_component(self, name: str, healthy: bool, message: str | None = None) -> None:
+    def update_component(
+        self, name: str, healthy: bool, message: str | None = None
+    ) -> None:
         self._state.update_component(name, healthy, message)
 
     def __enter__(self) -> "HealthServer":

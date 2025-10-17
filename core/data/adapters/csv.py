@@ -8,7 +8,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Iterable
 
 from core.data.adapters.base import IngestionAdapter
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from core.utils.logging import get_logger
 
@@ -53,7 +54,9 @@ class CSVIngestionAdapter(IngestionAdapter):
 
         missing = set(required_fields) - set(rows[0].keys())
         if missing:
-            raise ValueError(f"CSV missing required columns: {', '.join(sorted(missing))}")
+            raise ValueError(
+                f"CSV missing required columns: {', '.join(sorted(missing))}"
+            )
 
         ticks: list[Ticker] = []
         for row in rows:

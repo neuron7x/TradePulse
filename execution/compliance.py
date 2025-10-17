@@ -16,7 +16,9 @@ __all__ = [
 class ComplianceViolation(NormalizationError):
     """Raised when an order violates venue-level minimums."""
 
-    def __init__(self, message: str, *, report: "ComplianceReport" | None = None) -> None:
+    def __init__(
+        self, message: str, *, report: "ComplianceReport" | None = None
+    ) -> None:
         super().__init__(message)
         self.report = report
 
@@ -53,16 +55,30 @@ class ComplianceReport:
 class ComplianceMonitor:
     """Validate orders against lot, tick, and notional minimums before routing."""
 
-    def __init__(self, normalizer: SymbolNormalizer, *, strict: bool = True, auto_round: bool = True) -> None:
+    def __init__(
+        self,
+        normalizer: SymbolNormalizer,
+        *,
+        strict: bool = True,
+        auto_round: bool = True,
+    ) -> None:
         self._normalizer = normalizer
         self._strict = strict
         self._auto_round = auto_round
 
-    def check(self, symbol: str, quantity: float, price: float | None = None) -> ComplianceReport:
-        normalized_qty = self._normalizer.round_quantity(symbol, quantity) if self._auto_round else quantity
+    def check(
+        self, symbol: str, quantity: float, price: float | None = None
+    ) -> ComplianceReport:
+        normalized_qty = (
+            self._normalizer.round_quantity(symbol, quantity)
+            if self._auto_round
+            else quantity
+        )
         normalized_price = (
-            None if price is None else self._normalizer.round_price(symbol, price)
-        ) if self._auto_round else price
+            (None if price is None else self._normalizer.round_price(symbol, price))
+            if self._auto_round
+            else price
+        )
 
         violations: list[str] = []
         violation_exc: NormalizationError | None = None
@@ -78,10 +94,14 @@ class ComplianceMonitor:
             requested_quantity=float(quantity),
             requested_price=None if price is None else float(price),
             normalized_quantity=float(normalized_qty),
-            normalized_price=None if normalized_price is None else float(normalized_price),
+            normalized_price=(
+                None if normalized_price is None else float(normalized_price)
+            ),
             violations=tuple(violations),
             blocked=blocked,
         )
         if violation_exc is not None and self._strict:
-            raise ComplianceViolation(str(violation_exc), report=report) from violation_exc
+            raise ComplianceViolation(
+                str(violation_exc), report=report
+            ) from violation_exc
         return report

@@ -9,8 +9,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
-
 from core.indicators.kuramoto import (
     KuramotoOrderFeature,
     MultiAssetKuramotoFeature,
@@ -27,7 +25,7 @@ from core.indicators.multiscale_kuramoto import (
     TimeFrame,
     WaveletWindowSelector,
 )
-
+from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 _SAMPLE_DATA_PATH = Path(__file__).resolve().parents[2] / "sample.csv"
 
@@ -119,7 +117,9 @@ def test_compute_phase_gpu_uses_gpu_backend(monkeypatch: pytest.MonkeyPatch) -> 
     fake_cp = SimpleNamespace(
         asarray=_asarray,
         float32=np.float32,
-        zeros=lambda n, dtype=None: np.zeros(n, dtype=dtype if dtype is not None else np.float32),
+        zeros=lambda n, dtype=None: np.zeros(
+            n, dtype=dtype if dtype is not None else np.float32
+        ),
         fft=SimpleNamespace(
             fft=lambda x: np.fft.fft(_asarray(x)),
             ifft=lambda x: np.fft.ifft(_asarray(x)),
@@ -156,7 +156,9 @@ def test_multi_asset_kuramoto_feature_reports_asset_count(sin_wave: np.ndarray) 
     assert outcome.name == "multi"
     assert outcome.metadata == {"assets": 2}
     expected = multi_asset_kuramoto(data)
-    assert outcome.value == pytest.approx(expected, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert outcome.value == pytest.approx(
+        expected, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
 
 
 def _synth_dataframe(periods: int = 4096) -> pd.DataFrame:
@@ -224,9 +226,16 @@ def test_multiscale_kuramoto_analyzer_reports_consensus_metrics() -> None:
     )
     result = analyzer.analyze(df)
     assert 0.0 <= result.consensus_R <= 1.0
-    assert result.dominant_scale in result.timeframe_results or result.dominant_scale is None
+    assert (
+        result.dominant_scale in result.timeframe_results
+        or result.dominant_scale is None
+    )
     assert result.adaptive_window == 128
-    assert set(result.timeframe_results.keys()) == {TimeFrame.M1, TimeFrame.M5, TimeFrame.M15}
+    assert set(result.timeframe_results.keys()) == {
+        TimeFrame.M1,
+        TimeFrame.M5,
+        TimeFrame.M15,
+    }
     assert 0.0 <= result.cross_scale_coherence <= 1.0
 
 
@@ -248,7 +257,9 @@ def test_multiscale_feature_metadata_contains_timeframe_scores() -> None:
     assert "R_M1" in outcome.metadata and "R_M5" in outcome.metadata
 
 
-def test_wavelet_selector_falls_back_without_scipy(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_wavelet_selector_falls_back_without_scipy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     selector = WaveletWindowSelector(min_window=32, max_window=256)
     prices = np.sin(np.linspace(0, 6 * np.pi, 300))
 
@@ -286,7 +297,9 @@ def test_multiscale_analyzer_requires_datetime_index() -> None:
         analyzer.analyze(df)
 
 
-def test_multiscale_analyzer_marks_skipped_timeframes_when_insufficient_samples() -> None:
+def test_multiscale_analyzer_marks_skipped_timeframes_when_insufficient_samples() -> (
+    None
+):
     df = _synth_dataframe(periods=90)
     analyzer = MultiScaleKuramoto(
         timeframes=(TimeFrame.M1, TimeFrame.M15),
@@ -328,7 +341,9 @@ def test_multiscale_feature_respects_custom_price_column_and_metadata() -> None:
         def __init__(self) -> None:
             self.price_cols: list[str] = []
 
-        def analyze(self, _: pd.DataFrame, *, price_col: str = "close") -> MultiScaleResult:
+        def analyze(
+            self, _: pd.DataFrame, *, price_col: str = "close"
+        ) -> MultiScaleResult:
             self.price_cols.append(price_col)
             return MultiScaleResult(
                 consensus_R=0.55,
@@ -336,8 +351,12 @@ def test_multiscale_feature_respects_custom_price_column_and_metadata() -> None:
                 dominant_scale=TimeFrame.M5,
                 adaptive_window=144,
                 timeframe_results={
-                    TimeFrame.M1: KuramotoResult(order_parameter=0.42, mean_phase=0.1, window=128),
-                    TimeFrame.M5: KuramotoResult(order_parameter=0.68, mean_phase=0.3, window=144),
+                    TimeFrame.M1: KuramotoResult(
+                        order_parameter=0.42, mean_phase=0.1, window=128
+                    ),
+                    TimeFrame.M5: KuramotoResult(
+                        order_parameter=0.68, mean_phase=0.3, window=144
+                    ),
                 },
                 skipped_timeframes=(TimeFrame.M15,),
             )
@@ -355,5 +374,7 @@ def test_multiscale_feature_respects_custom_price_column_and_metadata() -> None:
     assert outcome.metadata["cross_scale_coherence"] == pytest.approx(
         0.82, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
     )
-    assert outcome.metadata["R_M1"] == pytest.approx(0.42, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert outcome.metadata["R_M1"] == pytest.approx(
+        0.42, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
     assert outcome.metadata["window_M5"] == 144

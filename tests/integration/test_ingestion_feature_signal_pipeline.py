@@ -29,11 +29,13 @@ def _write_synthetic_csv(path: Path, *, periods: int = 80) -> None:
     volumes = rng.integers(1, 5, size=periods)
     for ts, dz, vol in zip(index, noise, volumes, strict=True):
         price = base_price + drift[len(rows)] + dz
-        rows.append({
-            "ts": ts.timestamp(),
-            "price": round(price, 6),
-            "volume": int(vol),
-        })
+        rows.append(
+            {
+                "ts": ts.timestamp(),
+                "price": round(price, 6),
+                "volume": int(vol),
+            }
+        )
     with path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=["ts", "price", "volume"])
         writer.writeheader()

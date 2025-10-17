@@ -14,7 +14,10 @@ from analytics.execution_quality import (
 
 
 def test_vwap_and_slippage_buy():
-    fills = [FillSample(quantity=1.0, price=101.0), FillSample(quantity=2.0, price=99.5)]
+    fills = [
+        FillSample(quantity=1.0, price=101.0),
+        FillSample(quantity=2.0, price=99.5),
+    ]
     assert math.isclose(vwap(fills), (1.0 * 101.0 + 2.0 * 99.5) / 3.0)
     slippage = vwap_slippage("buy", benchmark_price=100.0, fills=fills)
     assert slippage == pytest.approx(vwap(fills) - 100.0)
@@ -41,7 +44,10 @@ def test_implementation_shortfall_sell():
 
 
 def test_fill_rate_bounds():
-    fills = [FillSample(quantity=0.6, price=100.0), FillSample(quantity=0.4, price=100.0)]
+    fills = [
+        FillSample(quantity=0.6, price=100.0),
+        FillSample(quantity=0.4, price=100.0),
+    ]
     assert fill_rate(1.0, fills) == pytest.approx(1.0)
     assert fill_rate(2.0, fills) == pytest.approx(0.5)
     assert fill_rate(0.0, fills) == 0.0

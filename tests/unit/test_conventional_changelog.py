@@ -1,17 +1,43 @@
 """Unit tests for the conventional changelog generator."""
+
 from __future__ import annotations
 
 import datetime as dt
 from pathlib import Path
 
-from tools.release.conventional_changelog import CommitInfo, render_changelog, update_changelog
+from tools.release.conventional_changelog import (
+    CommitInfo,
+    render_changelog,
+    update_changelog,
+)
 
 
 def test_render_changelog_groups_by_category() -> None:
     commits = [
-        CommitInfo(sha="a" * 40, type="feat", scope="ingest", subject="Add kafka source", breaking=False, notes=[]),
-        CommitInfo(sha="b" * 40, type="fix", scope=None, subject="Handle reconnects", breaking=False, notes=[]),
-        CommitInfo(sha="c" * 40, type="docs", scope=None, subject="Document release process", breaking=False, notes=[]),
+        CommitInfo(
+            sha="a" * 40,
+            type="feat",
+            scope="ingest",
+            subject="Add kafka source",
+            breaking=False,
+            notes=[],
+        ),
+        CommitInfo(
+            sha="b" * 40,
+            type="fix",
+            scope=None,
+            subject="Handle reconnects",
+            breaking=False,
+            notes=[],
+        ),
+        CommitInfo(
+            sha="c" * 40,
+            type="docs",
+            scope=None,
+            subject="Document release process",
+            breaking=False,
+            notes=[],
+        ),
     ]
     notes = render_changelog("v1.2.3", commits, date=dt.date(2024, 1, 2))
     assert "## v1.2.3 - 2024-01-02" in notes

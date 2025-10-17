@@ -1,4 +1,5 @@
 """Execution-layer audit logging utilities."""
+
 from __future__ import annotations
 
 import json

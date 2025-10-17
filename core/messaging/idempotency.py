@@ -52,7 +52,9 @@ class InMemoryEventIdempotencyStore(EventIdempotencyStore):
     def mark_processed(self, event_id: str) -> None:
         now = time.time()
         with self._lock:
-            self._records[event_id] = IdempotencyRecord(event_id=event_id, timestamp=now)
+            self._records[event_id] = IdempotencyRecord(
+                event_id=event_id, timestamp=now
+            )
             self._order.append(IdempotencyRecord(event_id=event_id, timestamp=now))
             self._evict_locked(now)
 
@@ -61,7 +63,9 @@ class InMemoryEventIdempotencyStore(EventIdempotencyStore):
             expiry = time.time() - (ttl_seconds or self._ttl_seconds)
             self._evict_locked(expiry_reference=expiry)
 
-    def _evict_locked(self, reference_time: float | None = None, expiry_reference: float | None = None) -> None:
+    def _evict_locked(
+        self, reference_time: float | None = None, expiry_reference: float | None = None
+    ) -> None:
         """Evict stale entries while holding the lock."""
 
         if reference_time is None:

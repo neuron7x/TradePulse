@@ -7,10 +7,10 @@ import logging
 import os
 import platform
 import random
+import re
 import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-import re
 from pathlib import Path
 from typing import Any
 
@@ -23,7 +23,6 @@ from omegaconf import DictConfig, OmegaConf
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
-
 
 REDACTED_PLACEHOLDER = "***REDACTED***"
 SENSITIVE_TOKENS = (
@@ -148,7 +147,9 @@ def _current_git_sha(cwd: Path) -> str | None:
     return result.stdout.strip() or None
 
 
-def collect_run_metadata(run_dir: Path, original_cwd: Path, cfg: DictConfig) -> RunMetadata:
+def collect_run_metadata(
+    run_dir: Path, original_cwd: Path, cfg: DictConfig
+) -> RunMetadata:
     """Collect metadata that allows reproducing the current experiment run."""
 
     timestamp = datetime.now(timezone.utc).isoformat()
@@ -185,7 +186,9 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
 
     data_path = Path(to_absolute_path(str(data_cfg.price_csv)))
     if not data_path.exists():
-        logger.warning("Data file %s does not exist; analytics step skipped.", data_path)
+        logger.warning(
+            "Data file %s does not exist; analytics step skipped.", data_path
+        )
         return {"status": "missing-data", "path": str(data_path)}
 
     df = pd.read_csv(data_path)
@@ -260,4 +263,3 @@ def main(cfg: DictConfig) -> None:
 
 if __name__ == "__main__":
     main()
-

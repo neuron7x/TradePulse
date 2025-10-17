@@ -32,7 +32,11 @@ def phase_flags(
     low, high = cfg.neutral_band
     if low <= R <= high and dH <= 0:
         return "precognitive"
-    if R >= cfg.emergent_R_min and dH <= cfg.emergent_entropy_slope_max and kappa_mean <= cfg.emergent_kappa_max:
+    if (
+        R >= cfg.emergent_R_min
+        and dH <= cfg.emergent_entropy_slope_max
+        and kappa_mean <= cfg.emergent_kappa_max
+    ):
         return "emergent"
     if R <= high and dH > cfg.proto_entropy_slope_min:
         return "post-emergent"

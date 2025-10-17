@@ -10,7 +10,6 @@ from core.accelerators.numeric import (
     numpy_available,
     quantiles_numpy_backend,
     quantiles_python_backend,
-    rust_available,
     sliding_windows_numpy_backend,
     sliding_windows_python_backend,
 )
@@ -66,7 +65,9 @@ def test_python_backends_match_public_api() -> None:
     expected_convolve = convolve(data, [1.0, -1.0], mode="full", use_rust=False)
 
     np.testing.assert_allclose(np.asarray(windows_py, dtype=float), expected_windows)
-    np.testing.assert_allclose(np.asarray(quantiles_py, dtype=float), expected_quantiles)
+    np.testing.assert_allclose(
+        np.asarray(quantiles_py, dtype=float), expected_quantiles
+    )
     np.testing.assert_allclose(np.asarray(conv_py, dtype=float), expected_convolve)
 
 

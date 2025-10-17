@@ -9,7 +9,12 @@ from scripts import cli
 
 @pytest.mark.parametrize(
     "flags,expected",
-    [([], 20), (["--verbose"], 10), (["--verbose", "--verbose"], 10), (["--quiet"], 30)],
+    [
+        ([], 20),
+        (["--verbose"], 10),
+        (["--verbose", "--verbose"], 10),
+        (["--quiet"], 30),
+    ],
 )
 def test_determine_log_level(flags: list[str], expected: int) -> None:
     parser = cli.build_parser()

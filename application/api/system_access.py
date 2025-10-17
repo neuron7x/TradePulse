@@ -3,26 +3,28 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Sequence
 
-import logging
-
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from application.system import TradePulseSystem
-from application.trading import order_to_dto
-from domain import Order, OrderSide, OrderType, Position
-from src.admin.remote_control import AdminIdentity
 
 from application.api.authorization import require_roles
 from application.api.security import verify_request_identity
 from application.settings import NotificationSettings
+from application.system import TradePulseSystem
+from application.trading import order_to_dto
+from domain import Order, OrderSide, OrderType, Position
 from observability.logging import configure_logging
-from observability.notifications import NotificationDispatcher, EmailSender, SlackNotifier
+from observability.notifications import (
+    EmailSender,
+    NotificationDispatcher,
+    SlackNotifier,
+)
+from src.admin.remote_control import AdminIdentity
 
 
 def _read_version() -> str:
@@ -91,7 +93,9 @@ class StatusResponse(BaseModel):
 
     status: str = Field(..., description="Operational state of the system.")
     uptime_seconds: float = Field(..., ge=0.0, description="Service uptime in seconds.")
-    version: str = Field(..., min_length=1, description="Semantic version of the deployment.")
+    version: str = Field(
+        ..., min_length=1, description="Semantic version of the deployment."
+    )
 
 
 class PositionSnapshot(BaseModel):
@@ -158,14 +162,18 @@ class OrderRequest(BaseModel):
     @model_validator(mode="after")
     def _validate_reference_price(self) -> "OrderRequest":
         if self.price is None and self.reference_price is None:
-            raise ValueError("reference_price must be supplied when no price is provided")
+            raise ValueError(
+                "reference_price must be supplied when no price is provided"
+            )
         return self
 
 
 class OrderResponse(BaseModel):
     """Subset of order lifecycle data returned to REST clients."""
 
-    order_id: str | None = Field(default=None, description="Venue supplied order identifier.")
+    order_id: str | None = Field(
+        default=None, description="Venue supplied order identifier."
+    )
     status: str = Field(..., description="Latest known status of the order.")
     filled_quantity: float = Field(..., ge=0.0)
     average_price: float | None = Field(default=None, ge=0.0)
@@ -184,13 +192,16 @@ class _PositionNormaliser:
             or "unknown"
         )
 
-        quantity = _coerce_float(
-            payload.get("quantity")
-            or payload.get("qty")
-            or payload.get("size")
-            or payload.get("positionAmt")
-            or payload.get("position")
-        ) or 0.0
+        quantity = (
+            _coerce_float(
+                payload.get("quantity")
+                or payload.get("qty")
+                or payload.get("size")
+                or payload.get("positionAmt")
+                or payload.get("position")
+            )
+            or 0.0
+        )
 
         entry_price = _coerce_float(
             payload.get("entry_price")
@@ -272,7 +283,9 @@ class SystemAccess:
         **fields: Any,
     ) -> None:
         logger_method = getattr(self._logger, level, None)
-        if logger_method is None:  # pragma: no cover - defensive guard for invalid level
+        if (
+            logger_method is None
+        ):  # pragma: no cover - defensive guard for invalid level
             raise AttributeError(f"Unsupported log level requested: {level}")
         payload = {"event": message, **fields}
         if identity is not None:
@@ -289,7 +302,9 @@ class SystemAccess:
     ) -> None:
         if self._notifier is None:
             return
-        await self._notifier.dispatch(event, subject=subject, message=message, metadata=metadata)
+        await self._notifier.dispatch(
+            event, subject=subject, message=message, metadata=metadata
+        )
 
     @staticmethod
     def _actor(identity: AdminIdentity | None) -> str:
@@ -309,7 +324,9 @@ class SystemAccess:
             uptime_seconds=uptime,
             kill_switch_engaged=kill_switch,
         )
-        return StatusResponse(status=status_value, uptime_seconds=uptime, version=self._version)
+        return StatusResponse(
+            status=status_value, uptime_seconds=uptime, version=self._version
+        )
 
     def _default_venue(self) -> str:
         names = self._system.connector_names
@@ -317,10 +334,14 @@ class SystemAccess:
             raise RuntimeError("TradePulseSystem has no configured execution venues")
         return names[0]
 
-    def _ensure_connected(self, venue: str, *, identity: AdminIdentity | None = None) -> None:
+    def _ensure_connected(
+        self, venue: str, *, identity: AdminIdentity | None = None
+    ) -> None:
         key = venue.lower()
         if key in self._connected:
-            self._log("debug", "system.connector.cached", identity=identity, venue=venue)
+            self._log(
+                "debug", "system.connector.cached", identity=identity, venue=venue
+            )
             return
         connector = self._system.get_connector(venue)
         credentials = self._system.connector_credentials(venue)
@@ -339,7 +360,9 @@ class SystemAccess:
         self._connected.add(key)
         self._log("info", "system.connector.connected", identity=identity, venue=venue)
 
-    async def list_positions(self, *, identity: AdminIdentity | None = None) -> PositionsResponse:
+    async def list_positions(
+        self, *, identity: AdminIdentity | None = None
+    ) -> PositionsResponse:
         self._log("info", "system.positions.fetch", identity=identity)
         snapshots: list[PositionSnapshot] = []
         for venue in self._system.connector_names:
@@ -448,7 +471,9 @@ class SystemAccess:
 
             placed: Order
             try:
-                placed = connector.place_order(order, idempotency_key=request.client_order_id)
+                placed = connector.place_order(
+                    order, idempotency_key=request.client_order_id
+                )
             except Exception as exc:
                 self._log(
                     "error",
@@ -481,7 +506,9 @@ class SystemAccess:
             response = OrderResponse(
                 order_id=dto.get("order_id"),
                 status=str(dto.get("status", placed.status.value)),
-                filled_quantity=float(dto.get("filled_quantity", placed.filled_quantity)),
+                filled_quantity=float(
+                    dto.get("filled_quantity", placed.filled_quantity)
+                ),
                 average_price=_coerce_float(dto.get("average_price")),
             )
 
@@ -529,7 +556,9 @@ def _get_access(request: Request) -> SystemAccess:
 def create_system_app(
     system: TradePulseSystem,
     *,
-    identity_dependency: Callable[..., Awaitable[AdminIdentity] | AdminIdentity] | None = None,
+    identity_dependency: (
+        Callable[..., Awaitable[AdminIdentity] | AdminIdentity] | None
+    ) = None,
     reader_roles: Sequence[str] = ("system:read",),
     trader_roles: Sequence[str] = ("system:trade",),
     notification_dispatcher: NotificationDispatcher | None = None,
@@ -546,7 +575,9 @@ def create_system_app(
     reader_dependency = require_roles(reader_roles, identity_dependency=base_dependency)
     trader_dependency = require_roles(trader_roles, identity_dependency=base_dependency)
 
-    notifier = notification_dispatcher or _build_notification_dispatcher(notification_settings)
+    notifier = notification_dispatcher or _build_notification_dispatcher(
+        notification_settings
+    )
     logger = logging.getLogger("tradepulse.system_access")
     access = SystemAccess(system, logger=logger, notifier=notifier)
 
@@ -593,4 +624,3 @@ __all__ = [
     "PositionSnapshot",
     "StatusResponse",
 ]
-

@@ -16,7 +16,9 @@ import numpy as np
 import pandas as pd
 
 
-def _to_timedelta(value: Optional[pd.Timedelta | str | int | float], *, freq: Optional[str] = None) -> Optional[pd.Timedelta]:
+def _to_timedelta(
+    value: Optional[pd.Timedelta | str | int | float], *, freq: Optional[str] = None
+) -> Optional[pd.Timedelta]:
     """Convert ``value`` to :class:`pandas.Timedelta` when possible.
 
     Parameters
@@ -38,7 +40,9 @@ def _to_timedelta(value: Optional[pd.Timedelta | str | int | float], *, freq: Op
         return pd.to_timedelta(value)
     if isinstance(value, (int, float)):
         if freq is None:
-            raise ValueError("A frequency must be provided when using a numeric window size.")
+            raise ValueError(
+                "A frequency must be provided when using a numeric window size."
+            )
         return pd.to_timedelta(value, unit=freq)
     raise TypeError(f"Unsupported timedelta specification: {value!r}")
 
@@ -73,15 +77,21 @@ class _BaseTimeSplit:
         self._resolved_time_col = time_col  # type: ignore[attr-defined]
         if self.label_end_col:
             if self.label_end_col not in frame.columns:
-                raise KeyError(f"Column `{self.label_end_col}` not found in data frame.")
+                raise KeyError(
+                    f"Column `{self.label_end_col}` not found in data frame."
+                )
             frame[self.label_end_col] = pd.to_datetime(
                 frame[self.label_end_col], utc=True, errors="coerce"
             )
             if frame[self.label_end_col].isna().any():
-                raise ValueError("All label end values must be convertible to datetime.")
+                raise ValueError(
+                    "All label end values must be convertible to datetime."
+                )
         return frame
 
-    def _purge_overlaps(self, frame: pd.DataFrame, train_mask: np.ndarray, test_mask: np.ndarray) -> np.ndarray:
+    def _purge_overlaps(
+        self, frame: pd.DataFrame, train_mask: np.ndarray, test_mask: np.ndarray
+    ) -> np.ndarray:
         if not self.label_end_col:
             return train_mask
         time_col = self._resolved_time_col  # type: ignore[attr-defined]
@@ -89,13 +99,14 @@ class _BaseTimeSplit:
         test_end = frame.loc[test_mask, self.label_end_col].max()
         if pd.isna(test_end):
             test_end = frame.loc[test_mask, time_col].max()
-        overlap_mask = (
-            (frame[self.label_end_col] >= test_start)
-            & (frame[time_col] <= test_end)
+        overlap_mask = (frame[self.label_end_col] >= test_start) & (
+            frame[time_col] <= test_end
         )
         return train_mask & ~overlap_mask.to_numpy()
 
-    def _apply_embargo(self, frame: pd.DataFrame, train_mask: np.ndarray, test_mask: np.ndarray) -> np.ndarray:
+    def _apply_embargo(
+        self, frame: pd.DataFrame, train_mask: np.ndarray, test_mask: np.ndarray
+    ) -> np.ndarray:
         if self.embargo_pct <= 0:
             return train_mask
         embargo_count = int(np.ceil(len(frame) * self.embargo_pct))
@@ -146,22 +157,34 @@ class WalkForwardSplitter(_BaseTimeSplit):
         label_end_col: Optional[str] = None,
         embargo_pct: float = 0.0,
     ) -> None:
-        super().__init__(time_col=time_col, label_end_col=label_end_col, embargo_pct=embargo_pct)
+        super().__init__(
+            time_col=time_col, label_end_col=label_end_col, embargo_pct=embargo_pct
+        )
         self.train_window = _to_timedelta(train_window, freq=freq)
         self.test_window = _to_timedelta(test_window, freq=freq)
         if self.test_window is None:
             raise ValueError("`test_window` must be provided.")
-        self.step = _to_timedelta(step, freq=freq) if step is not None else self.test_window
+        self.step = (
+            _to_timedelta(step, freq=freq) if step is not None else self.test_window
+        )
 
     def split(self, data: pd.DataFrame) -> Iterator[Tuple[np.ndarray, np.ndarray]]:
         frame = self._prepare_frame(data)
         time_col = self._resolved_time_col  # type: ignore[attr-defined]
         min_time = frame[time_col].min()
         max_time = frame[time_col].max()
-        test_start = min_time if self.train_window is None else min_time + self.train_window
+        test_start = (
+            min_time if self.train_window is None else min_time + self.train_window
+        )
         while test_start + self.test_window <= max_time:
-            train_start = min_time if self.train_window is None else test_start - self.train_window
-            train_mask = (frame[time_col] >= train_start) & (frame[time_col] < test_start)
+            train_start = (
+                min_time
+                if self.train_window is None
+                else test_start - self.train_window
+            )
+            train_mask = (frame[time_col] >= train_start) & (
+                frame[time_col] < test_start
+            )
             test_end = test_start + self.test_window
             test_mask = (frame[time_col] >= test_start) & (frame[time_col] < test_end)
             if not test_mask.any():
@@ -193,7 +216,9 @@ class PurgedKFoldTimeSeriesSplit(_BaseTimeSplit):
     ) -> None:
         if n_splits < 2:
             raise ValueError("`n_splits` must be at least 2.")
-        super().__init__(time_col=time_col, label_end_col=label_end_col, embargo_pct=embargo_pct)
+        super().__init__(
+            time_col=time_col, label_end_col=label_end_col, embargo_pct=embargo_pct
+        )
         self.n_splits = n_splits
 
     def split(self, data: pd.DataFrame) -> Iterator[Tuple[np.ndarray, np.ndarray]]:

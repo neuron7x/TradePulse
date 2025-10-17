@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 import httpx
+
 from src.audit import AuditLogger, AuditRecord, JsonLinesAuditStore, SiemAuditSink
 
 
@@ -61,7 +62,9 @@ def test_siem_sink_retries_until_success(tmp_path: Path) -> None:
         completed.set()
         return httpx.Response(202)
 
-    client = httpx.Client(base_url="https://siem.example.com", transport=httpx.MockTransport(handler))
+    client = httpx.Client(
+        base_url="https://siem.example.com", transport=httpx.MockTransport(handler)
+    )
     sink = SiemAuditSink(
         "/ingest",
         tmp_path / "spool",
@@ -84,7 +87,9 @@ def test_siem_sink_moves_to_dead_letter_after_retries(tmp_path: Path) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("downstream unavailable", request=request)
 
-    client = httpx.Client(base_url="https://siem.example.com", transport=httpx.MockTransport(handler))
+    client = httpx.Client(
+        base_url="https://siem.example.com", transport=httpx.MockTransport(handler)
+    )
     sink = SiemAuditSink(
         "/ingest",
         tmp_path / "spool",

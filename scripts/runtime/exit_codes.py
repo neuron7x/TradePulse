@@ -1,4 +1,5 @@
 """Shared exit codes for script automation."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT

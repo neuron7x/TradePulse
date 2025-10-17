@@ -17,19 +17,17 @@ References:
 """
 from __future__ import annotations
 
-from __future__ import annotations
-
 import asyncio
+import logging
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from contextlib import nullcontext
 from typing import Any, Literal, Sequence
-import logging
 
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.logging import get_logger
 from ..utils.metrics import get_metrics_collector
+from .base import BaseFeature, FeatureResult
 
 _logger = get_logger(__name__)
 _metrics = get_metrics_collector()
@@ -39,6 +37,7 @@ def _log_debug_enabled() -> bool:
     base_logger = getattr(_logger, "logger", None)
     check = getattr(base_logger, "isEnabledFor", None)
     return bool(check and check(logging.DEBUG))
+
 
 _GPU_MIN_SIZE_BYTES = 512 * 1024
 _GPU_MEMORY_MARGIN = 1.4
@@ -78,6 +77,7 @@ if cuda is not None:  # pragma: no cover - compiled at import time
             if bin_id >= hist.size:
                 bin_id = hist.size - 1
         cuda.atomic.add(hist, bin_id, 1)
+
 else:  # pragma: no cover
     _entropy_histogram_kernel = None
 
@@ -93,14 +93,14 @@ def entropy(
     backend: Literal["cpu", "gpu", "auto", "cupy", "numba"] = "cpu",
 ) -> float:
     """Calculate Shannon entropy of a data series.
-    
+
     Entropy quantifies the uncertainty or randomness in the data distribution.
     The series is normalized and binned, then Shannon entropy is computed as:
-    
+
         H = -Σ p(i) * log(p(i))
-    
+
     where p(i) is the probability of bin i.
-    
+
     Args:
         series: 1D array of numeric data (typically prices or returns)
         bins: Number of bins for histogram discretization (default: 30)
@@ -115,21 +115,21 @@ def entropy(
         backend: Computation backend. ``"cpu"`` runs on NumPy, ``"gpu"``/``"auto"``
                  pick the best available accelerator (CuPy first, then
                  :mod:`numba.cuda`).
-        
+
     Returns:
         Shannon entropy value. Higher values indicate more randomness/chaos.
         Returns 0.0 for empty or invalid input.
-        
+
     Example:
         >>> prices = np.array([100, 101, 102, 101, 100, 99, 100, 101])
         >>> H = entropy(prices, bins=10)
         >>> print(f"Entropy: {H:.3f}")
         Entropy: 1.234
-        
+
         >>> # Memory-efficient processing for large arrays
         >>> large_data = np.random.randn(1_000_000)
         >>> H = entropy(large_data, bins=50, use_float32=True, chunk_size=10000)
-        
+
     Note:
         - Data is automatically scaled to [-1, 1] range for numerical stability
         - Invalid values (NaN, inf) are filtered out
@@ -200,8 +200,7 @@ def entropy(
         # Chunked processing for large arrays
         if chunk_size is not None and x.size > chunk_size:
             chunks = [
-                x[i : min(i + chunk_size, x.size)]
-                for i in range(0, x.size, chunk_size)
+                x[i : min(i + chunk_size, x.size)] for i in range(0, x.size, chunk_size)
             ]
             tasks = [
                 (chunk, bins, dtype, global_scale, hist_range)
@@ -303,7 +302,9 @@ def _resolve_backend(requested: str, data_bytes: int | None = None) -> str:
     return "cpu"
 
 
-def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no cover - requires GPU backends
+def _entropy_gpu(
+    x: np.ndarray, bins: int, backend: str
+) -> float:  # pragma: no cover - requires GPU backends
     if backend == "cupy":
         if cp is None:
             raise RuntimeError("CuPy not available")
@@ -344,7 +345,9 @@ def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no
         device_hist = cuda.to_device(np.zeros(bins, dtype=np.int32))
         threads = 256
         blocks = (int(data.size) + threads - 1) // threads
-        _entropy_histogram_kernel[blocks, threads](device_data, device_hist, min_v, max_v)
+        _entropy_histogram_kernel[blocks, threads](
+            device_data, device_hist, min_v, max_v
+        )
         cuda.synchronize()
         counts = device_hist.copy_to_host().astype(np.float32)
         total = counts.sum(dtype=np.float32)
@@ -357,7 +360,7 @@ def _entropy_gpu(x: np.ndarray, bins: int, backend: str) -> float:  # pragma: no
 
 
 def _entropy_chunk_worker(
-    task: tuple[np.ndarray, int, np.dtype, float | None, tuple[float, float] | None]
+    task: tuple[np.ndarray, int, np.dtype, float | None, tuple[float, float] | None],
 ) -> tuple[np.ndarray, int]:
     chunk, bins, dtype, scale, hist_range = task
     chunk = np.asarray(chunk, dtype=dtype)
@@ -418,27 +421,27 @@ def _run_entropy_async(
 
 def delta_entropy(series: np.ndarray, window: int = 100, bins_range=(10, 50)) -> float:
     """Calculate delta entropy (change in entropy over time).
-    
+
     Delta entropy (ΔH) measures the rate of change in market uncertainty by
     comparing entropy between two consecutive time windows:
-    
+
         ΔH = H(t) - H(t-τ)
-    
+
     where τ is the window size. Positive ΔH indicates increasing chaos,
     negative ΔH suggests decreasing uncertainty.
-    
+
     Args:
         series: 1D array of numeric data (typically prices)
         window: Size of each time window for entropy calculation (default: 100)
         bins_range: (min_bins, max_bins) for adaptive histogram binning.
                    Actual bins = clip(window // 3, min_bins, max_bins)
                    Default: (10, 50)
-        
+
     Returns:
         Delta entropy value. Positive values indicate increasing uncertainty,
         negative values indicate decreasing uncertainty. Returns 0.0 if
         insufficient data (need at least 2 * window points).
-        
+
     Example:
         >>> prices = np.linspace(100, 110, 300)  # Trending market
         >>> dH = delta_entropy(prices, window=100)
@@ -446,7 +449,7 @@ def delta_entropy(series: np.ndarray, window: int = 100, bins_range=(10, 50)) ->
         ...     print("Market becoming more chaotic")
         ... elif dH < -0.5:
         ...     print("Market becoming more structured")
-        
+
     Note:
         - Requires at least 2 * window data points
         - Bins are adaptively chosen based on window size
@@ -455,23 +458,23 @@ def delta_entropy(series: np.ndarray, window: int = 100, bins_range=(10, 50)) ->
     x = np.asarray(series, dtype=float)
     if x.size < 2 * window:
         return 0.0
-    
+
     # Split into two consecutive windows
     a, b = x[-window * 2 : -window], x[-window:]
-    
+
     # Adaptive bin selection
     bins = int(np.clip(window // 3, bins_range[0], bins_range[1]))
-    
+
     # Compute entropy difference
     return float(entropy(b, bins) - entropy(a, bins))
 
 
 class EntropyFeature(BaseFeature):
     """Feature wrapper for Shannon entropy indicator.
-    
+
     This class wraps the entropy() function as a BaseFeature, making it
     compatible with the TradePulse feature pipeline and composition system.
-    
+
     Attributes:
         bins: Number of histogram bins for entropy calculation
         use_float32: Use float32 precision to reduce memory usage
@@ -480,15 +483,15 @@ class EntropyFeature(BaseFeature):
         backend: Computation backend
         max_workers: Optional worker cap
         name: Feature identifier
-        
+
     Example:
         >>> from core.indicators.entropy import EntropyFeature
         >>> import numpy as np
-        >>> 
+        >>>
         >>> feature = EntropyFeature(bins=50, name="market_entropy")
         >>> prices = np.random.randn(200) * 10 + 100
         >>> result = feature.transform(prices)
-        >>> 
+        >>>
         >>> print(f"{result.name}: {result.value:.3f}")
         >>> print(f"Metadata: {result.metadata}")
         market_entropy: 2.345
@@ -496,7 +499,7 @@ class EntropyFeature(BaseFeature):
     """
 
     def __init__(
-        self, 
+        self,
         bins: int = 30,
         *,
         use_float32: bool = False,
@@ -507,7 +510,7 @@ class EntropyFeature(BaseFeature):
         name: str | None = None,
     ) -> None:
         """Initialize entropy feature.
-        
+
         Args:
             bins: Number of bins for histogram discretization (default: 30)
             use_float32: Use float32 precision for memory efficiency (default: False)
@@ -527,11 +530,11 @@ class EntropyFeature(BaseFeature):
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute Shannon entropy of input data.
-        
+
         Args:
             data: 1D array of numeric values (typically prices)
             **_: Additional keyword arguments (ignored)
-            
+
         Returns:
             FeatureResult containing entropy value and metadata
         """
@@ -574,24 +577,24 @@ class EntropyFeature(BaseFeature):
 
 class DeltaEntropyFeature(BaseFeature):
     """Feature wrapper for delta entropy (rate of entropy change).
-    
+
     This feature computes the change in Shannon entropy over time by comparing
     entropy between consecutive time windows. Useful for detecting regime
     transitions and changes in market dynamics.
-    
+
     Attributes:
         window: Size of each time window
         bins_range: (min, max) range for adaptive bin selection
         name: Feature identifier
-        
+
     Example:
         >>> from core.indicators.entropy import DeltaEntropyFeature
         >>> import numpy as np
-        >>> 
+        >>>
         >>> feature = DeltaEntropyFeature(window=100, bins_range=(10, 50))
         >>> prices = np.linspace(100, 110, 300)  # Trending market
         >>> result = feature.transform(prices)
-        >>> 
+        >>>
         >>> if result.value > 0.5:
         ...     print("Market becoming more chaotic")
         ... elif result.value < -0.5:
@@ -606,7 +609,7 @@ class DeltaEntropyFeature(BaseFeature):
         name: str | None = None,
     ) -> None:
         """Initialize delta entropy feature.
-        
+
         Args:
             window: Size of each time window (default: 100)
             bins_range: (min_bins, max_bins) for histogram (default: (10, 50))
@@ -618,14 +621,14 @@ class DeltaEntropyFeature(BaseFeature):
 
     def transform(self, data: np.ndarray, **_: Any) -> FeatureResult:
         """Compute delta entropy (ΔH) of input data.
-        
+
         Args:
             data: 1D array of numeric values (typically prices)
             **_: Additional keyword arguments (ignored)
-            
+
         Returns:
             FeatureResult containing ΔH value and metadata
-            
+
         Raises:
             ValueError: If data has fewer than 2 * window points
         """

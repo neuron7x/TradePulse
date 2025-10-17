@@ -21,7 +21,9 @@ _DEFAULT_PRIOR_BETA = 1.0
 _METRIC_NAMES = tuple(field.name for field in fields(PerformanceReport))
 
 
-def _as_array(values: Iterable[float] | NDArray[np.float64] | None) -> NDArray[np.float64]:
+def _as_array(
+    values: Iterable[float] | NDArray[np.float64] | None,
+) -> NDArray[np.float64]:
     if values is None:
         return np.array([], dtype=float)
     if isinstance(values, np.ndarray):
@@ -49,7 +51,9 @@ def _validate_metric_names(metrics: Sequence[str] | None) -> tuple[str, ...]:
     return tuple(dict.fromkeys(metrics))
 
 
-def _compute_returns(equity_curve: NDArray[np.float64], initial_capital: float) -> NDArray[np.float64]:
+def _compute_returns(
+    equity_curve: NDArray[np.float64], initial_capital: float
+) -> NDArray[np.float64]:
     if equity_curve.size == 0:
         return np.array([], dtype=float)
 
@@ -60,7 +64,9 @@ def _compute_returns(equity_curve: NDArray[np.float64], initial_capital: float) 
     return returns.astype(float, copy=False)
 
 
-def _equity_from_returns(returns: NDArray[np.float64], initial_capital: float) -> NDArray[np.float64]:
+def _equity_from_returns(
+    returns: NDArray[np.float64], initial_capital: float
+) -> NDArray[np.float64]:
     cumulative = np.cumprod(1.0 + returns, axis=-1)
     return float(initial_capital) * cumulative
 
@@ -186,7 +192,9 @@ def bootstrap_performance_metrics(
 
         for name in selected_metrics:
             value = values[name]
-            samples_by_metric[name][index] = float(value) if value is not None else np.nan
+            samples_by_metric[name][index] = (
+                float(value) if value is not None else np.nan
+            )
 
     metrics_result: dict[str, ResampledMetric] = {}
     for name in selected_metrics:
@@ -280,7 +288,9 @@ def bayesian_mcmc_performance_metrics(
         + (kappa_prior * n_obs * (sample_mean - mu_prior) ** 2) / (2.0 * kappa_post)
     )
 
-    sigma_squared = 1.0 / rng.gamma(shape=alpha_post, scale=1.0 / beta_post, size=num_samples)
+    sigma_squared = 1.0 / rng.gamma(
+        shape=alpha_post, scale=1.0 / beta_post, size=num_samples
+    )
     sigma = np.sqrt(sigma_squared)
     mu_samples = rng.normal(loc=mu_post, scale=np.sqrt(sigma_squared / kappa_post))
 
@@ -302,7 +312,9 @@ def bayesian_mcmc_performance_metrics(
 
         for name in selected_metrics:
             value = values[name]
-            samples_by_metric[name][index] = float(value) if value is not None else np.nan
+            samples_by_metric[name][index] = (
+                float(value) if value is not None else np.nan
+            )
 
     metrics_result: dict[str, ResampledMetric] = {}
     for name in selected_metrics:

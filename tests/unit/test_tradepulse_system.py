@@ -96,8 +96,13 @@ def test_generate_signals_filters_invalid_scores(tmp_path: Path) -> None:
     def strategy(_prices: np.ndarray) -> np.ndarray:
         return np.array([0.5, np.nan, np.inf, -0.75])
 
-    signals = system.generate_signals(feature_frame, strategy=strategy, symbol="BTCUSDT")
+    signals = system.generate_signals(
+        feature_frame, strategy=strategy, symbol="BTCUSDT"
+    )
 
     assert len(signals) == 2
-    assert {signal.action for signal in signals} == {SignalAction.BUY, SignalAction.SELL}
+    assert {signal.action for signal in signals} == {
+        SignalAction.BUY,
+        SignalAction.SELL,
+    }
     assert all(np.isfinite(signal.metadata["score"]) for signal in signals)

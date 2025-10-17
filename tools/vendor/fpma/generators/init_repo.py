@@ -2,7 +2,7 @@
 from pathlib import Path
 
 LICENSES = {
-"MIT": """MIT License
+    "MIT": """MIT License
 
 Copyright (c) 2025
 
@@ -236,7 +236,8 @@ dot -Tpng tools/dep_graph.dot -o tools/dep_graph.png
 echo "Wrote tools/dep_graph.png"
 """
 
-def init_repo(name:str, license_id="MIT", include_ci=True, include_bazel=True):
+
+def init_repo(name: str, license_id="MIT", include_ci=True, include_bazel=True):
     root = Path(name)
     root.mkdir(parents=True, exist_ok=True)
 
@@ -250,7 +251,9 @@ def init_repo(name:str, license_id="MIT", include_ci=True, include_bazel=True):
 
     (root / ".gitignore").write_text(GITIGNORE, encoding="utf-8")
     (root / "README.md").write_text(ROOT_README.format(name=name), encoding="utf-8")
-    (root / "LICENSE").write_text(LICENSES.get(license_id, LICENSES["MIT"]), encoding="utf-8")
+    (root / "LICENSE").write_text(
+        LICENSES.get(license_id, LICENSES["MIT"]), encoding="utf-8"
+    )
     (root / "docs" / "spec.md").write_text(SPEC_TEXT, encoding="utf-8")
 
     if include_ci:

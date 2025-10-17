@@ -32,16 +32,15 @@ deployment runbooks:
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
-import json
-import re
 from threading import RLock
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 from domain import OrderStatus
-
 from libs.db import DataAccessLayer
 
 __all__ = [
@@ -142,7 +141,9 @@ class OrderLifecycleStore:
         """Create the journal table if it does not exist."""
 
         if self._dialect == "postgres" and self._schema is not None:
-            schema_sql = f"CREATE SCHEMA IF NOT EXISTS {_quote_identifier(self._schema)}"
+            schema_sql = (
+                f"CREATE SCHEMA IF NOT EXISTS {_quote_identifier(self._schema)}"
+            )
             self._dal.execute(schema_sql, ())
 
         create_sql = self._build_create_table_sql()
@@ -348,9 +349,7 @@ class OrderLifecycleStore:
         return stored
 
     def get(self, order_id: str, correlation_id: str) -> OrderTransition | None:
-        row = self._dal.fetch_one(
-            self._select_one_sql, (order_id, correlation_id)
-        )
+        row = self._dal.fetch_one(self._select_one_sql, (order_id, correlation_id))
         if row is None:
             return None
         return self._row_to_transition(self._coerce_row(row))
@@ -545,4 +544,3 @@ class OrderLifecycle:
             raise ValueError(
                 f"Transition {from_status.value!r} -> {event.value!r} is not permitted"
             ) from exc
-

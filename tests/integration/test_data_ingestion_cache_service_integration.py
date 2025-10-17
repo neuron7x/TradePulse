@@ -7,7 +7,8 @@ import pandas as pd
 
 from core.data.backfill import CacheRegistry, GapFillPlanner
 from core.data.ingestion import DataIngestor
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from src.data.ingestion_service import DataIngestionCacheService
 
 
@@ -156,7 +157,9 @@ def test_ingest_csv_caches_frame_and_supports_range_queries() -> None:
         end=end,
     )
 
-    expected_slice = frame.loc[frame.index[(frame.index >= start) & (frame.index <= end)]]
+    expected_slice = frame.loc[
+        frame.index[(frame.index >= start) & (frame.index <= end)]
+    ]
     pd.testing.assert_frame_equal(sliced, expected_slice)
 
     snapshot = service.cache_snapshot()

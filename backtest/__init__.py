@@ -1,7 +1,11 @@
 """Backtesting utilities, strategies, and performance analytics."""
 
 from .engine import LatencyConfig, OrderBookConfig
-from .performance import compute_performance_metrics, export_performance_report, PerformanceReport
+from .performance import (
+    PerformanceReport,
+    compute_performance_metrics,
+    export_performance_report,
+)
 
 __all__ = [
     "LatencyConfig",

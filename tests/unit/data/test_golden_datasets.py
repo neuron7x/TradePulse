@@ -6,7 +6,6 @@ import pandas as pd
 
 from scripts import data_sanity
 
-
 DATA_DIR = Path("data/golden")
 BASELINE_FILE = DATA_DIR / "indicator_macd_baseline.csv"
 

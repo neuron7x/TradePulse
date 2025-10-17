@@ -1,26 +1,31 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Callable
 
 import jwt
-from jwt.algorithms import RSAAlgorithm
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from jwt.algorithms import RSAAlgorithm
 
 os.environ.setdefault("TRADEPULSE_AUDIT_SECRET", "test-audit-secret")
 os.environ.setdefault("TRADEPULSE_OAUTH2_ISSUER", "https://issuer.tradepulse.test")
 os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
-os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
+os.environ.setdefault(
+    "TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks"
+)
 
 from application.api import security as security_module
 from application.api import service as service_module
-from application.api.rate_limit import InMemorySlidingWindowBackend, SlidingWindowRateLimiter
+from application.api.rate_limit import (
+    InMemorySlidingWindowBackend,
+    SlidingWindowRateLimiter,
+)
 from application.api.service import DependencyProbeResult, create_app
 from application.settings import (
     AdminApiSettings,
@@ -100,7 +105,9 @@ def configured_app(
     return create_app(settings=settings)
 
 
-def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]) -> None:
+def test_create_app_requires_secrets(
+    monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]
+) -> None:
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="TRADEPULSE_AUDIT_SECRET"):
         create_app()
@@ -114,7 +121,9 @@ def test_create_app_uses_postgres_store(
     invoked: dict[str, object] = {}
 
     class DummyStore:
-        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - simple stub
+        def __init__(
+            self, *args: object, **kwargs: object
+        ) -> None:  # pragma: no cover - simple stub
             invoked["kwargs"] = kwargs
 
         def load(self) -> None:
@@ -360,9 +369,7 @@ def test_prediction_endpoint_returns_404_when_no_predictions_match(
     token = security_context(subject="prediction-user")
     headers = _auth_headers(token)
 
-    response = client.post(
-        "/predictions?action=exit", json=payload, headers=headers
-    )
+    response = client.post("/predictions?action=exit", json=payload, headers=headers)
     assert response.status_code == 404
     error = response.json()["error"]
     assert error["code"] == "ERR_PREDICTIONS_FILTER_MISMATCH"
@@ -441,7 +448,9 @@ def test_admin_endpoint_rejects_wrong_audience(
 def test_client_rate_limit_is_enforced(security_context: Callable[..., str]) -> None:
     rate_settings = ApiRateLimitSettings(
         default_policy=RateLimitPolicy(max_requests=5, window_seconds=60),
-        client_policies={"feature-user": RateLimitPolicy(max_requests=1, window_seconds=60)},
+        client_policies={
+            "feature-user": RateLimitPolicy(max_requests=1, window_seconds=60)
+        },
     )
     limiter = SlidingWindowRateLimiter(InMemorySlidingWindowBackend(), rate_settings)
     app = create_app(
@@ -456,11 +465,15 @@ def test_client_rate_limit_is_enforced(security_context: Callable[..., str]) -> 
     response_ok = client.post("/features", json=payload, headers=_auth_headers(token))
     assert response_ok.status_code == 200
 
-    response_limited = client.post("/features", json=payload, headers=_auth_headers(token))
+    response_limited = client.post(
+        "/features", json=payload, headers=_auth_headers(token)
+    )
     assert response_limited.status_code == 429
 
     other_token = security_context(subject="different-user")
-    recovery = client.post("/features", json=payload, headers=_auth_headers(other_token))
+    recovery = client.post(
+        "/features", json=payload, headers=_auth_headers(other_token)
+    )
     assert recovery.status_code == 200
 
 
@@ -494,9 +507,14 @@ def test_health_probe_reflects_kill_switch(configured_app: FastAPI) -> None:
 
 def test_health_probe_flags_dependency_failure() -> None:
     probes = {
-        "postgres": lambda: DependencyProbeResult(healthy=False, detail="connection refused"),
+        "postgres": lambda: DependencyProbeResult(
+            healthy=False, detail="connection refused"
+        ),
     }
-    app = create_app(settings=AdminApiSettings(audit_secret="unit-audit-secret"), dependency_probes=probes)
+    app = create_app(
+        settings=AdminApiSettings(audit_secret="unit-audit-secret"),
+        dependency_probes=probes,
+    )
     client = TestClient(app)
 
     response = client.get("/health")
@@ -518,7 +536,9 @@ def test_trusted_host_middleware_blocks_unlisted_hosts(
         oauth2_jwks_uri="https://issuer.tradepulse.test/jwks",
         trusted_hosts=["api.tradepulse.test"],
     )
-    monkeypatch.setattr(security_module, "_default_settings_loader", lambda: restricted_settings)
+    monkeypatch.setattr(
+        security_module, "_default_settings_loader", lambda: restricted_settings
+    )
     if hasattr(security_module.get_api_security_settings, "_instance"):
         delattr(security_module.get_api_security_settings, "_instance")
 
@@ -546,7 +566,9 @@ def test_payload_guard_rejects_large_and_suspicious_bodies(
         trusted_hosts=["testserver"],
         max_request_bytes=512,
     )
-    monkeypatch.setattr(security_module, "_default_settings_loader", lambda: tuned_settings)
+    monkeypatch.setattr(
+        security_module, "_default_settings_loader", lambda: tuned_settings
+    )
     if hasattr(security_module.get_api_security_settings, "_instance"):
         delattr(security_module.get_api_security_settings, "_instance")
 

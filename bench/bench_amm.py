@@ -1,6 +1,10 @@
 from __future__ import annotations
-import time, numpy as np
-from core.neuro.amm import AMMConfig, AdaptiveMarketMind
+
+import time
+
+import numpy as np
+
+from core.neuro.amm import AdaptiveMarketMind, AMMConfig
 
 n = 100000
 rng = np.random.default_rng(0)
@@ -12,5 +16,5 @@ amm = AdaptiveMarketMind(AMMConfig())
 t0 = time.perf_counter()
 for i in range(n):
     amm.update(float(xs[i]), float(R[i]), float(kappa[i]), None)
-dt = time.perf_counter()-t0
+dt = time.perf_counter() - t0
 print(f"{n} steps in {dt:.4f}s, {n/dt:.0f} steps/s")

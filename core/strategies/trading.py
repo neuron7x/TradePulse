@@ -68,9 +68,15 @@ class KuramotoStrategy(TradingStrategy):
         confidence = np.zeros_like(sync_values)
         if sync_values.size:
             buy_range = max(1e-12, 1.0 - threshold)
-            confidence[buy_mask] = np.clip((sync_values[buy_mask] - threshold) / buy_range, 0.0, 1.0)
+            confidence[buy_mask] = np.clip(
+                (sync_values[buy_mask] - threshold) / buy_range, 0.0, 1.0
+            )
             if lower_threshold > 0.0:
-                confidence[sell_mask] = np.clip((lower_threshold - sync_values[sell_mask]) / lower_threshold, 0.0, 1.0)
+                confidence[sell_mask] = np.clip(
+                    (lower_threshold - sync_values[sell_mask]) / lower_threshold,
+                    0.0,
+                    1.0,
+                )
             else:
                 confidence[sell_mask] = 1.0
         warmup = max(0, min(getattr(self._indicator, "window", 0), 10) - 1)
@@ -97,7 +103,9 @@ class HurstVPINStrategy(TradingStrategy):
             bucket_size=int(self.params.get("vpin_bucket_size", 50)),
             threshold=float(self.params.get("vpin_threshold", 0.8)),
         )
-        self._hurst_trend_threshold = float(self.params.get("hurst_trend_threshold", 0.6))
+        self._hurst_trend_threshold = float(
+            self.params.get("hurst_trend_threshold", 0.6)
+        )
         self._vpin_safe_threshold = float(self.params.get("vpin_safe_threshold", 0.5))
 
     def generate_signals(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -106,7 +114,9 @@ class HurstVPINStrategy(TradingStrategy):
         if missing:
             raise ValueError(f"DataFrame missing required columns: {sorted(missing)}")
         closes = data["close"].to_numpy(dtype=float, copy=False)
-        volume_fields = data[["volume", "buy_volume", "sell_volume"]].to_numpy(dtype=float, copy=False)
+        volume_fields = data[["volume", "buy_volume", "sell_volume"]].to_numpy(
+            dtype=float, copy=False
+        )
         hurst_values = self._hurst.compute(closes)
         vpin_values = self._vpin.compute(volume_fields)
         size = len(data)
@@ -117,7 +127,10 @@ class HurstVPINStrategy(TradingStrategy):
         for idx in range(size):
             hurst_value = float(np.clip(hurst_values[idx], 0.0, 1.0))
             vpin_value = float(np.clip(vpin_values[idx], 0.0, 1.0))
-            if hurst_value > self._hurst_trend_threshold and vpin_value < self._vpin_safe_threshold:
+            if (
+                hurst_value > self._hurst_trend_threshold
+                and vpin_value < self._vpin_safe_threshold
+            ):
                 signals[idx] = "Buy"
                 confidence[idx] = max(min(hurst_value, 1.0 - vpin_value), 0.0)
             elif vpin_value > self._vpin_safe_threshold:

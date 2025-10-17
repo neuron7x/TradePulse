@@ -18,10 +18,14 @@ class DummyRESTConnector(RESTWebSocketConnector):
             name="dummy",
             base_url="https://example.com",
             sandbox=True,
-            http_client=httpx.Client(base_url="https://example.com", transport=transport),
+            http_client=httpx.Client(
+                base_url="https://example.com", transport=transport
+            ),
         )
 
-    def _resolve_credentials(self, credentials: Mapping[str, str] | None) -> Mapping[str, str]:
+    def _resolve_credentials(
+        self, credentials: Mapping[str, str] | None
+    ) -> Mapping[str, str]:
         return dict(credentials or {})
 
     def _sign_request(self, method: str, path: str, *, params, json_payload, headers):  # type: ignore[override]
@@ -30,7 +34,9 @@ class DummyRESTConnector(RESTWebSocketConnector):
     def _order_endpoint(self) -> str:
         return "/order"
 
-    def _build_place_payload(self, order: Order, idempotency_key: str | None) -> dict[str, Any]:
+    def _build_place_payload(
+        self, order: Order, idempotency_key: str | None
+    ) -> dict[str, Any]:
         payload = {
             "symbol": order.symbol,
             "side": order.side.value,
@@ -43,18 +49,30 @@ class DummyRESTConnector(RESTWebSocketConnector):
             payload["price"] = f"{order.price:.2f}"
         return payload
 
-    def _parse_order(self, payload: Mapping[str, Any], *, original: Order | None = None) -> Order:
+    def _parse_order(
+        self, payload: Mapping[str, Any], *, original: Order | None = None
+    ) -> Order:
         symbol = str(payload.get("symbol") or (original.symbol if original else ""))
         if not symbol:
             raise ValueError("order payload missing symbol")
-        side_value = str(payload.get("side") or (original.side.value if original else "buy"))
-        order_type_value = str(payload.get("type") or (original.order_type.value if original else "market"))
-        order_id = str(payload.get("id") or payload.get("orderId") or payload.get("order_id") or "")
+        side_value = str(
+            payload.get("side") or (original.side.value if original else "buy")
+        )
+        order_type_value = str(
+            payload.get("type") or (original.order_type.value if original else "market")
+        )
+        order_id = str(
+            payload.get("id") or payload.get("orderId") or payload.get("order_id") or ""
+        )
         if not order_id:
             raise ValueError("order payload missing id")
         price = payload.get("price")
         price = float(price) if price not in (None, "") else None
-        quantity = float(payload.get("quantity") or payload.get("qty") or (original.quantity if original else 0.0))
+        quantity = float(
+            payload.get("quantity")
+            or payload.get("qty")
+            or (original.quantity if original else 0.0)
+        )
         filled = float(payload.get("filled") or payload.get("filled_quantity") or 0.0)
         status_value = str(payload.get("status") or "OPEN").upper()
         try:
@@ -66,7 +84,9 @@ class DummyRESTConnector(RESTWebSocketConnector):
         return Order(
             symbol=symbol,
             side=OrderSide(side_value),
-            quantity=quantity if quantity > 0 else (original.quantity if original else 0.0),
+            quantity=(
+                quantity if quantity > 0 else (original.quantity if original else 0.0)
+            ),
             price=price,
             order_type=OrderType(order_type_value),
             order_id=order_id,
@@ -87,12 +107,16 @@ class DummyRESTConnector(RESTWebSocketConnector):
     def _positions_endpoint(self) -> tuple[str, dict[str, Any]]:
         return "/positions", {}
 
-    def _parse_positions(self, payload: Mapping[str, Any] | list) -> list[dict[str, Any]]:
+    def _parse_positions(
+        self, payload: Mapping[str, Any] | list
+    ) -> list[dict[str, Any]]:
         if isinstance(payload, list):
             return [dict(position) for position in payload]
         return [dict(position) for position in payload.get("positions", [])]
 
-    def _handle_stream_message(self, payload: Mapping[str, Any]) -> None:  # pragma: no cover - not exercised
+    def _handle_stream_message(
+        self, payload: Mapping[str, Any]
+    ) -> None:  # pragma: no cover - not exercised
         return None
 
 
@@ -107,7 +131,9 @@ def test_sliding_window_rate_limiter_blocks(monkeypatch: pytest.MonkeyPatch) -> 
         sleep_calls.append(duration)
         current["value"] += duration
 
-    limiter = SlidingWindowRateLimiter(max_requests=2, interval_seconds=1.0, clock=clock)
+    limiter = SlidingWindowRateLimiter(
+        max_requests=2, interval_seconds=1.0, clock=clock
+    )
     monkeypatch.setattr("execution.adapters.base.time.sleep", fake_sleep)
 
     limiter.acquire()
@@ -178,7 +204,9 @@ def test_rest_connector_idempotency_and_caches() -> None:
                 ],
             )
         if request.method == "GET" and request.url.path == "/positions":
-            return httpx.Response(200, json=[{"symbol": "BTC", "qty": 1.0, "side": "long", "price": 0.0}])
+            return httpx.Response(
+                200, json=[{"symbol": "BTC", "qty": 1.0, "side": "long", "price": 0.0}]
+            )
         if request.method == "DELETE" and request.url.path == "/order":
             delete_calls += 1
             return httpx.Response(200, json={"status": "CANCELED"})
@@ -187,7 +215,13 @@ def test_rest_connector_idempotency_and_caches() -> None:
     connector = DummyRESTConnector(httpx.MockTransport(handler))
     connector.connect({})
 
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, price=100.0, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=1.0,
+        price=100.0,
+        order_type=OrderType.LIMIT,
+    )
     first = connector.place_order(order, idempotency_key="idem-1")
     second = connector.place_order(order, idempotency_key="idem-1")
     assert first.order_id == "order-1"
@@ -217,7 +251,9 @@ def test_rest_connector_error_handling() -> None:
 
     connector = DummyRESTConnector(httpx.MockTransport(rate_limited))
     connector.connect({})
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, order_type=OrderType.MARKET)
+    order = Order(
+        symbol="BTCUSDT", side=OrderSide.BUY, quantity=1.0, order_type=OrderType.MARKET
+    )
     with pytest.raises(TransientOrderError):
         connector.place_order(order)
     connector.disconnect()
@@ -225,7 +261,16 @@ def test_rest_connector_error_handling() -> None:
     def invalid_json(request: httpx.Request) -> httpx.Response:
         if request.method == "GET":
             return httpx.Response(200, text="not json")
-        return httpx.Response(200, json={"symbol": "BTCUSDT", "id": "order-1", "side": "buy", "type": "limit", "quantity": "1"})
+        return httpx.Response(
+            200,
+            json={
+                "symbol": "BTCUSDT",
+                "id": "order-1",
+                "side": "buy",
+                "type": "limit",
+                "quantity": "1",
+            },
+        )
 
     connector = DummyRESTConnector(httpx.MockTransport(invalid_json))
     connector.connect({})

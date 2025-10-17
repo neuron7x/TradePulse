@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, MutableMapping, Protocol, Sequence
 
 import pandas as pd
@@ -30,11 +30,9 @@ class Checkpoint:
 class CheckpointStore(Protocol):
     """Minimal persistence abstraction for checkpoint metadata."""
 
-    def load(self, feature_view: str) -> Checkpoint | None:
-        ...
+    def load(self, feature_view: str) -> Checkpoint | None: ...
 
-    def save(self, checkpoint: Checkpoint) -> None:
-        ...
+    def save(self, checkpoint: Checkpoint) -> None: ...
 
 
 class InMemoryCheckpointStore:
@@ -43,7 +41,9 @@ class InMemoryCheckpointStore:
     def __init__(self) -> None:
         self._state: MutableMapping[str, Checkpoint] = {}
 
-    def load(self, feature_view: str) -> Checkpoint | None:  # pragma: no cover - trivial
+    def load(
+        self, feature_view: str
+    ) -> Checkpoint | None:  # pragma: no cover - trivial
         return self._state.get(feature_view)
 
     def save(self, checkpoint: Checkpoint) -> None:
@@ -53,7 +53,9 @@ class InMemoryCheckpointStore:
             return
         ids = set(current.checkpoint_ids)
         ids.update(checkpoint.checkpoint_ids)
-        self._state[checkpoint.feature_view] = Checkpoint(checkpoint.feature_view, frozenset(ids))
+        self._state[checkpoint.feature_view] = Checkpoint(
+            checkpoint.feature_view, frozenset(ids)
+        )
 
 
 class StreamMaterializer:
@@ -108,12 +110,16 @@ class StreamMaterializer:
 
         new_rows = self._filter_new_rows(deduped, history_keys)
         if new_rows.empty:
-            self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
+            self._checkpoint_store.save(
+                Checkpoint(feature_view, frozenset({checkpoint_id}))
+            )
             return
 
         self._writer(feature_view, new_rows.reset_index(drop=True))
         history_keys.update(self._iter_key_tuples(new_rows))
-        self._checkpoint_store.save(Checkpoint(feature_view, frozenset({checkpoint_id})))
+        self._checkpoint_store.save(
+            Checkpoint(feature_view, frozenset({checkpoint_id}))
+        )
 
     def _filter_new_rows(
         self,
@@ -159,9 +165,7 @@ class StreamMaterializer:
         deduped_history = self._deduplicate(history)
         return set(self._iter_key_tuples(deduped_history))
 
-    def _iter_key_tuples(
-        self, frame: pd.DataFrame
-    ) -> Iterable[tuple[Any, ...]]:
+    def _iter_key_tuples(self, frame: pd.DataFrame) -> Iterable[tuple[Any, ...]]:
         key_columns = list(self._dedup_keys)
         yield from frame[key_columns].itertuples(index=False, name=None)
 

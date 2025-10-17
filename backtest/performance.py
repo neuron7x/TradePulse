@@ -17,7 +17,9 @@ _PERIODS_PER_YEAR = 252
 _DEFAULT_ALPHA = 0.05
 
 
-def _to_numpy(array: Iterable[float] | NDArray[np.float64] | None) -> NDArray[np.float64]:
+def _to_numpy(
+    array: Iterable[float] | NDArray[np.float64] | None,
+) -> NDArray[np.float64]:
     if array is None:
         return np.array([], dtype=float)
     if isinstance(array, np.ndarray):
@@ -114,7 +116,9 @@ def compute_performance_metrics(
         excess_returns = returns - excess_rate
         mean_excess = float(np.mean(excess_returns)) if excess_returns.size else 0.0
         volatility = (
-            float(np.std(excess_returns, ddof=1)) if excess_returns.size > 1 else float(np.std(excess_returns))
+            float(np.std(excess_returns, ddof=1))
+            if excess_returns.size > 1
+            else float(np.std(excess_returns))
         )
         if volatility > 0:
             sr_periodic = mean_excess / volatility
@@ -129,11 +133,19 @@ def compute_performance_metrics(
                 if m2 > 1e-12:
                     m3 = float(np.mean(centered**3))
                     m4 = float(np.mean(centered**4))
-                    skewness = m3 / (m2 ** 1.5) if m2 > 0 else 0.0
+                    skewness = m3 / (m2**1.5) if m2 > 0 else 0.0
                     kurtosis = m4 / (m2**2) if m2 > 0 else 3.0
-                    denom_term = 1.0 - skewness * sr_periodic + ((kurtosis - 1.0) / 4.0) * sr_periodic**2
+                    denom_term = (
+                        1.0
+                        - skewness * sr_periodic
+                        + ((kurtosis - 1.0) / 4.0) * sr_periodic**2
+                    )
                     if denom_term > 1e-12:
-                        z_score = (sr_periodic - psr_target) * math.sqrt(n_obs - 1) / math.sqrt(denom_term)
+                        z_score = (
+                            (sr_periodic - psr_target)
+                            * math.sqrt(n_obs - 1)
+                            / math.sqrt(denom_term)
+                        )
                         probabilistic_sharpe_ratio = float(stats.norm.cdf(z_score))
 
     sortino_ratio: float | None = None
@@ -142,16 +154,24 @@ def compute_performance_metrics(
         downside = excess_returns[excess_returns < 0.0]
         if downside.size:
             downside_vol = (
-                float(np.std(downside, ddof=1)) if downside.size > 1 else float(np.std(downside))
+                float(np.std(downside, ddof=1))
+                if downside.size > 1
+                else float(np.std(downside))
             )
             if downside_vol > 0:
-                sortino_ratio = float(np.mean(excess_returns)) / downside_vol * annualisation
+                sortino_ratio = (
+                    float(np.mean(excess_returns)) / downside_vol * annualisation
+                )
         elif excess_returns.size:
             sortino_ratio = math.inf
 
     certainty_equivalent: float | None = None
     if returns.size:
-        variance = float(np.var(returns, ddof=1)) if returns.size > 1 else float(np.var(returns))
+        variance = (
+            float(np.var(returns, ddof=1))
+            if returns.size > 1
+            else float(np.var(returns))
+        )
         mean_return = float(np.mean(returns))
         ce_periodic = mean_return - 0.5 * float(max(risk_aversion, 0.0)) * variance
         if periods_per_year > 0:
@@ -171,7 +191,12 @@ def compute_performance_metrics(
             certainty_equivalent = ce_periodic
 
     cagr: float | None = None
-    if equity.size and initial_capital > 0.0 and equity[-1] > 0.0 and periods_per_year > 0:
+    if (
+        equity.size
+        and initial_capital > 0.0
+        and equity[-1] > 0.0
+        and periods_per_year > 0
+    ):
         years = equity.size / periods_per_year
         if years > 0:
             cagr = float((equity[-1] / float(initial_capital)) ** (1.0 / years) - 1.0)
@@ -215,12 +240,22 @@ def compute_performance_metrics(
         if port_ret.size and bench_ret.size:
             bench_excess = bench_ret - excess_rate
             port_excess = port_ret - excess_rate
-            bench_var = float(np.var(bench_excess, ddof=1)) if bench_excess.size > 1 else float(np.var(bench_excess))
+            bench_var = (
+                float(np.var(bench_excess, ddof=1))
+                if bench_excess.size > 1
+                else float(np.var(bench_excess))
+            )
             if bench_var > 1e-12:
-                cov = float(np.cov(port_excess, bench_excess, ddof=1)[0, 1]) if port_excess.size > 1 else 0.0
+                cov = (
+                    float(np.cov(port_excess, bench_excess, ddof=1)[0, 1])
+                    if port_excess.size > 1
+                    else 0.0
+                )
                 beta_value = cov / bench_var if bench_excess.size > 1 else 0.0
             if beta_value is not None:
-                alpha_periodic = float(np.mean(port_excess) - (beta_value or 0.0) * np.mean(bench_excess))
+                alpha_periodic = float(
+                    np.mean(port_excess) - (beta_value or 0.0) * np.mean(bench_excess)
+                )
                 alpha_value = alpha_periodic * periods_per_year
             active_returns = port_excess - bench_excess
             if active_returns.size:
@@ -230,7 +265,9 @@ def compute_performance_metrics(
                     else float(np.std(active_returns))
                 )
                 if tracking_error > 1e-12:
-                    information_ratio = float(np.mean(active_returns)) / tracking_error * annualisation
+                    information_ratio = (
+                        float(np.mean(active_returns)) / tracking_error * annualisation
+                    )
 
     return PerformanceReport(
         sharpe_ratio=sharpe_ratio,
@@ -261,7 +298,9 @@ def export_performance_report(
     target_dir = Path(directory)
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    safe_name = "".join(c if c.isalnum() or c in {"-", "_"} else "_" for c in strategy_name).strip("_")
+    safe_name = "".join(
+        c if c.isalnum() or c in {"-", "_"} else "_" for c in strategy_name
+    ).strip("_")
     if not safe_name:
         safe_name = "strategy"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")

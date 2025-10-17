@@ -65,7 +65,9 @@ class EventSchemaRegistry:
         root = Path(base_path)
         registry_path = root / "registry.json"
         if not registry_path.exists():
-            raise FileNotFoundError(f"Schema registry descriptor not found: {registry_path}")
+            raise FileNotFoundError(
+                f"Schema registry descriptor not found: {registry_path}"
+            )
         with registry_path.open("r", encoding="utf-8") as handle:
             payload = json.load(handle)
         events: Dict[str, List[SchemaVersionInfo]] = {}
@@ -112,7 +114,9 @@ class EventSchemaRegistry:
                         SchemaVersionInfo(
                             version=parsed_version,
                             version_str=raw_version,
-                            path=(root / version_info[SchemaFormat.PROTOBUF.value]).resolve(),
+                            path=(
+                                root / version_info[SchemaFormat.PROTOBUF.value]
+                            ).resolve(),
                             format=SchemaFormat.PROTOBUF,
                             subject=subject,
                             namespace=namespace,
@@ -132,7 +136,9 @@ class EventSchemaRegistry:
 
         return self._base_path
 
-    def get_versions(self, event_type: str, fmt: SchemaFormat) -> List[SchemaVersionInfo]:
+    def get_versions(
+        self, event_type: str, fmt: SchemaFormat
+    ) -> List[SchemaVersionInfo]:
         if event_type not in self._registry:
             raise KeyError(f"Unknown event type '{event_type}'")
         return [info for info in self._registry[event_type] if info.format is fmt]
@@ -154,7 +160,9 @@ class EventSchemaRegistry:
             version = Version(version)
         subject_map = self._subjects[event_type]
         if version not in subject_map:
-            raise KeyError(f"No subject registered for version '{version}' of '{event_type}'")
+            raise KeyError(
+                f"No subject registered for version '{version}' of '{event_type}'"
+            )
         return subject_map[version]
 
     def namespace(self, event_type: str, version: str | Version | None = None) -> str:
@@ -168,13 +176,18 @@ class EventSchemaRegistry:
             version = Version(version)
         namespace_map = self._namespaces[event_type]
         if version not in namespace_map:
-            raise KeyError(f"No namespace registered for version '{version}' of '{event_type}'")
+            raise KeyError(
+                f"No namespace registered for version '{version}' of '{event_type}'"
+            )
         return namespace_map[version]
 
     def validate_backward_and_forward(self, event_type: str) -> None:
         """Ensure all registered versions are backward and forward compatible."""
 
-        avro_versions = sorted(self.get_versions(event_type, SchemaFormat.AVRO), key=lambda info: info.version)
+        avro_versions = sorted(
+            self.get_versions(event_type, SchemaFormat.AVRO),
+            key=lambda info: info.version,
+        )
         if not avro_versions:
             return
         schemas = [version.load() for version in avro_versions]
@@ -187,7 +200,11 @@ class EventSchemaRegistry:
 
     def _validate_sequential_backward(self, schemas: List[Mapping[str, Any]]) -> None:
         for previous, current in zip(schemas, schemas[1:]):
-            missing = [field["name"] for field in previous.get("fields", []) if field["name"] not in _field_name_index(current)]
+            missing = [
+                field["name"]
+                for field in previous.get("fields", [])
+                if field["name"] not in _field_name_index(current)
+            ]
             if missing:
                 raise SchemaCompatibilityError(
                     f"Backward compatibility broken: fields {missing} removed or renamed"
@@ -230,7 +247,10 @@ def _normalise_avro_type(avro_type: Any) -> Tuple:
             return (
                 "record",
                 avro_type.get("name"),
-                tuple((field["name"], _normalise_avro_type(field["type"])) for field in avro_type.get("fields", [])),
+                tuple(
+                    (field["name"], _normalise_avro_type(field["type"]))
+                    for field in avro_type.get("fields", [])
+                ),
             )
         if type_name == "enum":
             return ("enum", avro_type.get("name"), tuple(avro_type.get("symbols", [])))
@@ -253,5 +273,9 @@ def _normalise_union_member(member: Any) -> Tuple:
 def _is_nullable(field: Mapping[str, Any]) -> bool:
     avro_type = field["type"]
     if isinstance(avro_type, list):
-        return any(member == "null" or (isinstance(member, Mapping) and member.get("type") == "null") for member in avro_type)
+        return any(
+            member == "null"
+            or (isinstance(member, Mapping) and member.get("type") == "null")
+            for member in avro_type
+        )
     return False

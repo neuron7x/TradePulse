@@ -1,5 +1,4 @@
 """Tests for async data ingestion."""
-"""Tests for async data ingestion."""
 
 import asyncio
 import csv
@@ -94,10 +93,7 @@ class TestAsyncDataIngestor:
         ticks = []
 
         async for tick in ingestor.stream_ticks(
-            "test_source",
-            "BTC",
-            interval_ms=10,
-            max_ticks=5
+            "test_source", "BTC", interval_ms=10, max_ticks=5
         ):
             ticks.append(tick)
 
@@ -217,7 +213,9 @@ class TestAsyncDataIngestor:
         """The async ingestor should enforce configured file size limits."""
 
         csv_file = tmp_path / "big.csv"
-        csv_file.write_text("ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8")
+        csv_file.write_text(
+            "ts,price\n" + "\n".join("1,1" for _ in range(40)), encoding="utf-8"
+        )
 
         ingestor = AsyncDataIngestor(allowed_roots=[tmp_path], max_csv_bytes=32)
 
@@ -266,7 +264,9 @@ class TestAsyncDataIngestor:
 class TestMergeStreams:
     """Test stream merging functionality."""
 
-    async def generate_ticks(self, symbol: str, count: int, delay_ms: int = 5) -> AsyncIterator[Ticker]:
+    async def generate_ticks(
+        self, symbol: str, count: int, delay_ms: int = 5
+    ) -> AsyncIterator[Ticker]:
         """Helper to generate ticks."""
         for i in range(count):
             await asyncio.sleep(delay_ms / 1000.0)
@@ -296,6 +296,7 @@ class TestMergeStreams:
     @pytest.mark.asyncio
     async def test_merge_empty_stream(self) -> None:
         """Test merging with empty stream."""
+
         async def empty_stream():
             return
             yield  # Make it a generator
@@ -311,7 +312,9 @@ class TestMergeStreams:
         assert all(tick.symbol == "BTC" for tick in ticks)
 
     @pytest.mark.asyncio
-    async def test_merge_streams_handles_failures(self, caplog: pytest.LogCaptureFixture) -> None:
+    async def test_merge_streams_handles_failures(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Failed streams should be logged and skipped while others continue."""
 
         async def flaky_stream():
@@ -337,7 +340,10 @@ class TestMergeStreams:
 
         prices = [str(tick.price) for tick in received]
         assert "101.0" in prices
-        assert any("Async stream terminated with error" in record.message for record in caplog.records)
+        assert any(
+            "Async stream terminated with error" in record.message
+            for record in caplog.records
+        )
 
 
 class TestAsyncWebSocketStream:

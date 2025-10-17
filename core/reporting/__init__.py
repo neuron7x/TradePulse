@@ -1,4 +1,5 @@
 """Helpers for building and rendering TradePulse reports."""
+
 from __future__ import annotations
 
 from .generator import generate_markdown_report

@@ -19,10 +19,14 @@ def _freeze_time(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("interfaces.execution.coinbase.time.time", lambda: fixed)
 
 
-def _signature_for(payload: dict[str, Any], timestamp: int, method: str, path: str) -> str:
+def _signature_for(
+    payload: dict[str, Any], timestamp: int, method: str, path: str
+) -> str:
     body = json.dumps(payload, separators=(",", ":"))
     message = f"{timestamp}{method}{path}{body}".encode()
-    return base64.b64encode(hmac.new(b"coinbase-secret", message, hashlib.sha256).digest()).decode()
+    return base64.b64encode(
+        hmac.new(b"coinbase-secret", message, hashlib.sha256).digest()
+    ).decode()
 
 
 def test_coinbase_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -30,9 +34,7 @@ def test_coinbase_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> 
         "client_order_id": "idem-coin",
         "product_id": "BTC-USD",
         "side": "buy",
-        "order_configuration": {
-            "market_market_ioc": {"base_size": "1"}
-        },
+        "order_configuration": {"market_market_ioc": {"base_size": "1"}},
     }
 
     call_counts: dict[str, int] = {"post": 0, "get": 0}
@@ -42,11 +44,15 @@ def test_coinbase_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> 
             call_counts["post"] += 1
             timestamp = request.headers["CB-ACCESS-TIMESTAMP"]
             assert request.headers["CB-ACCESS-KEY"] == "coinbase-key"
-            expected = _signature_for(order_body, int(timestamp), request.method, request.url.path)
+            expected = _signature_for(
+                order_body, int(timestamp), request.method, request.url.path
+            )
             assert request.headers["CB-ACCESS-SIGN"] == expected
             assert request.headers["CB-ACCESS-PASSPHRASE"] == "coinbase-pass"
             return httpx.Response(200, json={"order_id": "order-1", "status": "OPEN"})
-        if request.method == "GET" and request.url.path.startswith("/api/v3/brokerage/orders/historical/"):
+        if request.method == "GET" and request.url.path.startswith(
+            "/api/v3/brokerage/orders/historical/"
+        ):
             call_counts["get"] += 1
             return httpx.Response(
                 200,
@@ -74,7 +80,9 @@ def test_coinbase_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> 
         }
     )
 
-    order = Order(symbol="BTC-USD", side="buy", quantity=1.0, order_type=OrderType.MARKET)
+    order = Order(
+        symbol="BTC-USD", side="buy", quantity=1.0, order_type=OrderType.MARKET
+    )
     first = connector.place_order(order, idempotency_key="idem-coin")
     second = connector.place_order(order, idempotency_key="idem-coin")
 
@@ -85,7 +93,10 @@ def test_coinbase_signature_and_idempotency(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_coinbase_rate_limit_retries(monkeypatch: pytest.MonkeyPatch) -> None:
     sleep_calls: list[float] = []
-    monkeypatch.setattr("interfaces.execution.common.time.sleep", lambda value: sleep_calls.append(value))
+    monkeypatch.setattr(
+        "interfaces.execution.common.time.sleep",
+        lambda value: sleep_calls.append(value),
+    )
 
     call_sequence: list[str] = []
 
@@ -110,7 +121,9 @@ def test_coinbase_rate_limit_retries(monkeypatch: pytest.MonkeyPatch) -> None:
         }
     )
 
-    order = Order(symbol="BTC-USD", side="buy", quantity=1.0, order_type=OrderType.MARKET)
+    order = Order(
+        symbol="BTC-USD", side="buy", quantity=1.0, order_type=OrderType.MARKET
+    )
     response = connector.place_order(order)
 
     assert response.order_id == "order-2"

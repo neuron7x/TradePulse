@@ -40,8 +40,10 @@ def _log_debug_enabled() -> bool:
     checker = getattr(base_logger, "isEnabledFor", None)
     return bool(checker and checker(logging.DEBUG))
 
+
 try:
     from scipy import fft as _scipy_fft  # type: ignore
+
     _scipy_fft.set_workers(1)  # pragma: no cover - optional tuning
 except Exception:  # fallback if SciPy not installed
     _scipy_fft = None  # type: ignore[assignment]
@@ -50,6 +52,7 @@ try:
     from scipy.signal import hilbert
 except Exception:  # fallback if SciPy not installed
     hilbert = None
+
 
 def compute_phase(
     x: np.ndarray,
@@ -115,7 +118,9 @@ def compute_phase(
             raise ValueError("compute_phase expects 1D array")
         if not np.all(np.isfinite(x)):
             x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-        hilbert_module = getattr(hilbert, "__module__", "") if hilbert is not None else ""
+        hilbert_module = (
+            getattr(hilbert, "__module__", "") if hilbert is not None else ""
+        )
         use_scipy_fastpath = (
             _scipy_fft is not None
             and hilbert is not None
@@ -164,6 +169,7 @@ def compute_phase(
             return target
         phases = np.arctan2(imag, real)
         return phases.astype(dtype, copy=False)
+
 
 def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     """Evaluate the Kuramoto order parameter.
@@ -262,6 +268,7 @@ def kuramoto_order(phases: np.ndarray) -> float | np.ndarray:
     clipped[clipped < 1e-8] = 0.0
     return clipped
 
+
 def multi_asset_kuramoto(series_list: Sequence[np.ndarray]) -> float:
     """Aggregate cross-asset synchrony at the most recent timestamp.
 
@@ -310,6 +317,7 @@ try:
 except Exception:
     cp = None
 
+
 def compute_phase_gpu(x):
     """Compute phase on the GPU via CuPy with CPU fallback.
 
@@ -328,7 +336,9 @@ def compute_phase_gpu(x):
         computation defaults to ``float32`` to minimise device-host transfer
         overhead.
     """
-    with _logger.operation("compute_phase_gpu", data_size=len(x), has_cupy=cp is not None):
+    with _logger.operation(
+        "compute_phase_gpu", data_size=len(x), has_cupy=cp is not None
+    ):
         if cp is None:
             _logger.info("CuPy not available, falling back to CPU compute_phase")
             return compute_phase(np.asarray(x))

@@ -6,13 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from application.api.system_access import create_system_app
-from typing import Any
-
-import pytest
-from fastapi.testclient import TestClient
-
-from application.api.system_access import create_system_app
-from application.system import ExchangeAdapterConfig, TradePulseSystem, TradePulseSystemConfig
+from application.system import (
+    ExchangeAdapterConfig,
+    TradePulseSystem,
+    TradePulseSystemConfig,
+)
 from domain import Order
 from execution.connectors import SimulatedExchangeConnector
 from src.admin.remote_control import AdminIdentity
@@ -54,7 +52,9 @@ def system() -> TradePulseSystem:
 
 @pytest.fixture()
 def authorized_identity() -> AdminIdentity:
-    return AdminIdentity(subject="integration-test", roles=("system:read", "system:trade"))
+    return AdminIdentity(
+        subject="integration-test", roles=("system:read", "system:trade")
+    )
 
 
 @pytest.fixture()
@@ -67,7 +67,8 @@ def identity_dependency(authorized_identity: AdminIdentity):
 
 @pytest.fixture()
 def client(
-    system: TradePulseSystem, identity_dependency: Callable[[], Awaitable[AdminIdentity]]
+    system: TradePulseSystem,
+    identity_dependency: Callable[[], Awaitable[AdminIdentity]],
 ) -> TestClient:
     app = create_system_app(
         system,
@@ -256,4 +257,3 @@ def test_order_submission_emits_notification(
     assert events, "expected notification to be dispatched"
     assert events[0]["event"] == "order.submitted"
     assert events[0]["metadata"]["symbol"] == "ETHUSD"
-

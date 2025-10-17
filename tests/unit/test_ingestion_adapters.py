@@ -26,10 +26,47 @@ from core.utils.dataframe_io import MissingParquetDependencyError, write_datafra
 from tests.tolerances import FLOAT_ABS_TOL, FLOAT_REL_TOL
 
 POLYGON_TEST_KEY = "".join(
-    ("p", "o", "l", "y", "g", "o", "n", "-", "d", "e", "m", "o", "-", "t", "o", "k", "e", "n")
+    (
+        "p",
+        "o",
+        "l",
+        "y",
+        "g",
+        "o",
+        "n",
+        "-",
+        "d",
+        "e",
+        "m",
+        "o",
+        "-",
+        "t",
+        "o",
+        "k",
+        "e",
+        "n",
+    )
 )
 ALPACA_TEST_KEY = "".join(
-    ("a", "l", "p", "a", "c", "a", "-", "d", "e", "m", "o", "-", "t", "o", "k", "e", "n")
+    (
+        "a",
+        "l",
+        "p",
+        "a",
+        "c",
+        "a",
+        "-",
+        "d",
+        "e",
+        "m",
+        "o",
+        "-",
+        "t",
+        "o",
+        "k",
+        "e",
+        "n",
+    )
 )
 ALPACA_TEST_SECRET = "".join(
     (
@@ -121,9 +158,7 @@ async def test_parquet_adapter_fetch(tmp_path: Path) -> None:
 async def test_csv_adapter_stream(tmp_path: Path) -> None:
     csv_path = tmp_path / "ticks.csv"
     csv_path.write_text(
-        "ts,price,volume\n"
-        "1719878400,100.5,10\n"
-        "1719878460,101.0,5\n",
+        "ts,price,volume\n" "1719878400,100.5,10\n" "1719878460,101.0,5\n",
         encoding="utf-8",
     )
 
@@ -131,7 +166,9 @@ async def test_csv_adapter_stream(tmp_path: Path) -> None:
     stream = adapter.stream(path=csv_path, symbol="ETHUSD", venue="CSV")
     ticks = [tick async for tick in stream]
     assert len(ticks) == 2
-    assert float(ticks[1].price) == pytest.approx(101.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL)
+    assert float(ticks[1].price) == pytest.approx(
+        101.0, rel=FLOAT_REL_TOL, abs=FLOAT_ABS_TOL
+    )
 
 
 class _StubExchange:

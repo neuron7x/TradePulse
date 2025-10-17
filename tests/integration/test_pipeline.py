@@ -6,12 +6,12 @@ import pandas as pd
 import pytest
 
 from backtest.engine import walk_forward
+from core.agent.strategy import PiAgent, Strategy
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.hurst import hurst_exponent
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
 from core.phase.detector import composite_transition, phase_flags
-from core.agent.strategy import PiAgent, Strategy
 
 
 def test_csv_to_backtest_pipeline(price_dataframe: pd.DataFrame) -> None:

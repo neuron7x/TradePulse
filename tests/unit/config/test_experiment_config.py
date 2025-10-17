@@ -68,4 +68,3 @@ def test_non_postgres_does_not_require_tls(tmp_path: Path) -> None:
 
     assert config.db_uri == "sqlite:///local.db"
     assert config.db_tls is None
-

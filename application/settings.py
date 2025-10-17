@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
+    from application.secrets.manager import SecretManager
     from src.audit.audit_logger import AuditLogger
 
 from pydantic import (
@@ -31,8 +32,12 @@ class KillSwitchPostgresSettings(BaseModel):
 
     dsn: PostgresDsn
     tls: PostgresTLSConfig
-    min_pool_size: int = Field(1, ge=0, description="Minimum number of pooled connections to pre-create.")
-    max_pool_size: PositiveInt = Field(4, description="Maximum number of pooled connections available concurrently.")
+    min_pool_size: int = Field(
+        1, ge=0, description="Minimum number of pooled connections to pre-create."
+    )
+    max_pool_size: PositiveInt = Field(
+        4, description="Maximum number of pooled connections available concurrently."
+    )
     acquire_timeout_seconds: float | None = Field(
         2.0,
         ge=0.0,
@@ -46,7 +51,11 @@ class KillSwitchPostgresSettings(BaseModel):
         5000,
         description="PostgreSQL statement timeout applied to store operations, in milliseconds.",
     )
-    max_retries: int = Field(3, ge=0, description="Maximum number of retries for transient PostgreSQL errors.")
+    max_retries: int = Field(
+        3,
+        ge=0,
+        description="Maximum number of retries for transient PostgreSQL errors.",
+    )
     retry_interval_seconds: float = Field(
         0.1,
         ge=0.0,
@@ -62,7 +71,9 @@ class KillSwitchPostgresSettings(BaseModel):
     def _validate_pool(self) -> "KillSwitchPostgresSettings":
         ensure_secure_postgres_uri(str(self.dsn))
         if self.max_pool_size < self.min_pool_size:
-            raise ValueError("max_pool_size must be greater than or equal to min_pool_size")
+            raise ValueError(
+                "max_pool_size must be greater than or equal to min_pool_size"
+            )
         return self
 
     model_config = ConfigDict(extra="forbid")
@@ -146,10 +157,14 @@ class AdminApiSettings(BaseSettings):
     @model_validator(mode="after")
     def _validate_siem_configuration(self) -> "AdminApiSettings":
         if self.siem_endpoint is not None:
-            has_secret = self.siem_client_secret is not None or self.siem_client_secret_path is not None
+            has_secret = (
+                self.siem_client_secret is not None
+                or self.siem_client_secret_path is not None
+            )
             if not self.siem_client_id or not has_secret:
                 raise ValueError(
-                    "siem_client_id and siem_client_secret must be configured when siem_endpoint is set"
+                    "siem_client_id and siem_client_secret must be configured when "
+                    "siem_endpoint is set"
                 )
         return self
 
@@ -160,7 +175,11 @@ class AdminApiSettings(BaseSettings):
     ) -> "SecretManager":
         """Return a configured secret manager for administrative components."""
 
-        from application.secrets.manager import ManagedSecret, ManagedSecretConfig, SecretManager
+        from application.secrets.manager import (
+            ManagedSecret,
+            ManagedSecretConfig,
+            SecretManager,
+        )
 
         refresh_interval = float(self.secret_refresh_interval_seconds)
         secrets: dict[str, ManagedSecret] = {
@@ -175,7 +194,10 @@ class AdminApiSettings(BaseSettings):
             )
         }
 
-        if self.siem_client_secret is not None or self.siem_client_secret_path is not None:
+        if (
+            self.siem_client_secret is not None
+            or self.siem_client_secret_path is not None
+        ):
             fallback: str | None = None
             if self.siem_client_secret is not None:
                 fallback = self.siem_client_secret.get_secret_value()
@@ -343,7 +365,9 @@ class EmailNotificationSettings(BaseModel):
 
     host: str = Field(..., min_length=1, description="SMTP server hostname.")
     port: PositiveInt = Field(587, description="SMTP server port.")
-    sender: str = Field(..., min_length=3, description="Email address used as the sender.")
+    sender: str = Field(
+        ..., min_length=3, description="Email address used as the sender."
+    )
     recipients: list[str] = Field(
         default_factory=list,
         description="Email recipients that receive TradePulse notifications.",
@@ -355,7 +379,9 @@ class EmailNotificationSettings(BaseModel):
         default=None, description="Optional password used for SMTP authentication."
     )
     use_tls: bool = Field(True, description="Enable STARTTLS for SMTP connections.")
-    use_ssl: bool = Field(False, description="Use implicit TLS when connecting to SMTP.")
+    use_ssl: bool = Field(
+        False, description="Use implicit TLS when connecting to SMTP."
+    )
     timeout_seconds: PositiveFloat = Field(10.0, description="SMTP connection timeout.")
 
     @model_validator(mode="after")

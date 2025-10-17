@@ -6,9 +6,9 @@ from __future__ import annotations
 import os
 import threading
 from concurrent.futures import Future
+from dataclasses import dataclass
 from itertools import count
 from queue import Empty, Full, PriorityQueue
-from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping, Protocol, Sequence
 
 from .evaluator import EvaluationResult, StrategyBatchEvaluator
@@ -42,14 +42,18 @@ class StrategyFlow:
         if isinstance(self.strategies, (str, bytes)):
             raise TypeError("StrategyFlow.strategies must not be a string")
         if not isinstance(self.strategies, Sequence):
-            raise TypeError("StrategyFlow.strategies must be a sequence of Strategy instances")
+            raise TypeError(
+                "StrategyFlow.strategies must be a sequence of Strategy instances"
+            )
 
         strategies = tuple(self.strategies)
         if not strategies:
             raise ValueError("StrategyFlow must include at least one strategy")
         for strategy in strategies:
             if not isinstance(strategy, Strategy):
-                raise TypeError("StrategyFlow.strategies must contain Strategy instances")
+                raise TypeError(
+                    "StrategyFlow.strategies must contain Strategy instances"
+                )
         object.__setattr__(self, "strategies", strategies)
 
         if not isinstance(self.priority, int):
@@ -96,7 +100,9 @@ class StrategyOrchestrator:
         self._shutdown = False
         self._sentinel = object()
         self._sequence = count()
-        self._queue: PriorityQueue[tuple[int, int, StrategyFlow | object, Future | None]]
+        self._queue: PriorityQueue[
+            tuple[int, int, StrategyFlow | object, Future | None]
+        ]
         queue_size = 0 if max_queue_size in (None, 0) else max_queue_size
         self._queue = PriorityQueue(maxsize=queue_size)
         self._threads: list[threading.Thread] = []
@@ -108,7 +114,9 @@ class StrategyOrchestrator:
         elif hasattr(evaluator_factory, "evaluate"):
             self._factory = lambda: evaluator_factory  # type: ignore[assignment]
         else:  # pragma: no cover - defensive branch
-            raise TypeError("evaluator_factory must be callable or expose an 'evaluate' method")
+            raise TypeError(
+                "evaluator_factory must be callable or expose an 'evaluate' method"
+            )
 
         for index in range(workers):
             thread = threading.Thread(
@@ -170,7 +178,9 @@ class StrategyOrchestrator:
         except Full as exc:  # pragma: no cover - defensive
             with self._lock:
                 self._pending.discard(flow.name)
-            raise TimeoutError("Timed out while waiting to enqueue strategy flow") from exc
+            raise TimeoutError(
+                "Timed out while waiting to enqueue strategy flow"
+            ) from exc
 
         if self._is_shutdown():
             self._reject_submitted_flow(flow.name, future, task)

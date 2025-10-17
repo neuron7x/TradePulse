@@ -10,7 +10,12 @@ from libs.db.access import DataAccessLayer
 class FakeCursor:
     """Collect executed queries and expose canned fetch results."""
 
-    def __init__(self, *, fetchone_result: object | None = None, fetchall_result: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        fetchone_result: object | None = None,
+        fetchall_result: list[object] | None = None,
+    ) -> None:
         self.fetchone_result = fetchone_result
         self.fetchall_result = fetchall_result or []
         self.closed = False
@@ -38,7 +43,9 @@ class FakeCursor:
 class ErrorCursor(FakeCursor):
     """Cursor that fails when executing a statement."""
 
-    def execute(self, query: str, params: object = None) -> None:  # pragma: no cover - simple delegation
+    def execute(
+        self, query: str, params: object = None
+    ) -> None:  # pragma: no cover - simple delegation
         super().execute(query, params)
         raise RuntimeError("boom")
 
@@ -68,14 +75,22 @@ class FakeConnection:
 class RecordingFactory:
     """Connection factory storing produced connections for inspection."""
 
-    def __init__(self, cursor_factory: type[FakeCursor] | None = None, *, fetchone: object | None = None, fetchall: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        cursor_factory: type[FakeCursor] | None = None,
+        *,
+        fetchone: object | None = None,
+        fetchall: list[object] | None = None,
+    ) -> None:
         self.cursor_factory = cursor_factory or FakeCursor
         self.fetchone = fetchone
         self.fetchall = fetchall
         self.connections: list[FakeConnection] = []
 
     def __call__(self) -> FakeConnection:
-        cursor = self.cursor_factory(fetchone_result=self.fetchone, fetchall_result=self.fetchall)
+        cursor = self.cursor_factory(
+            fetchone_result=self.fetchone, fetchall_result=self.fetchall
+        )
         connection = FakeConnection(cursor)
         self.connections.append(connection)
         return connection

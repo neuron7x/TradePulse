@@ -68,7 +68,9 @@ def signal_from_indicators(
     worker_count = max_workers if max_workers is not None else 3
     executor: ThreadPoolExecutor | None = None
     if worker_count is not None and worker_count > 1:
-        executor = ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="signal-indicators")
+        executor = ThreadPoolExecutor(
+            max_workers=worker_count, thread_name_prefix="signal-indicators"
+        )
 
     def _compute_ricci(window_prices: np.ndarray) -> float:
         graph = build_price_graph(window_prices, delta=ricci_delta)
@@ -89,7 +91,9 @@ def signal_from_indicators(
             else:
                 futures = {
                     "entropy": executor.submit(entropy, window_prices),
-                    "delta_entropy": executor.submit(delta_entropy, prefix, window=window),
+                    "delta_entropy": executor.submit(
+                        delta_entropy, prefix, window=window
+                    ),
                     "ricci": executor.submit(_compute_ricci, window_prices),
                 }
                 H = futures["entropy"].result()
@@ -217,12 +221,17 @@ def cmd_analyze(args):
     df = pd.read_csv(args.csv)
     prices = df[args.price_col].to_numpy()
     from core.indicators.kuramoto import compute_phase_gpu
-    phases = compute_phase_gpu(prices) if getattr(args,'gpu',False) else compute_phase(prices)
-    R = kuramoto_order(phases[-args.window:])
-    H = entropy(prices[-args.window:], bins=args.bins)
-    dH = delta_entropy(prices, window=args.window, bins_range=(10,50))
-    kappa = mean_ricci(build_price_graph(prices[-args.window:], delta=args.delta))
-    Hs = hurst_exponent(prices[-args.window:])
+
+    phases = (
+        compute_phase_gpu(prices)
+        if getattr(args, "gpu", False)
+        else compute_phase(prices)
+    )
+    R = kuramoto_order(phases[-args.window :])
+    H = entropy(prices[-args.window :], bins=args.bins)
+    dH = delta_entropy(prices, window=args.window, bins_range=(10, 50))
+    kappa = mean_ricci(build_price_graph(prices[-args.window :], delta=args.delta))
+    Hs = hurst_exponent(prices[-args.window :])
     phase = phase_flags(R, dH, kappa, H)
     print(
         json.dumps(
@@ -239,6 +248,7 @@ def cmd_analyze(args):
             indent=2,
         )
     )
+
 
 def cmd_backtest(args):
     """Run a walk-forward backtest using the indicator composite signal.
@@ -263,6 +273,7 @@ def cmd_backtest(args):
     res = walk_forward(prices, lambda _: sig, fee=args.fee)
     out = {"pnl": res.pnl, "max_dd": res.max_dd, "trades": res.trades}
     print(json.dumps(_enrich_with_trace(out), indent=2))
+
 
 def cmd_live(args):
     """Bootstrap the live trading runner with risk and tracing configuration.
@@ -313,7 +324,9 @@ def _run_with_trace_context(cmd_name: str, args: argparse.Namespace) -> None:
         tracing as outlined in ``docs/monitoring.md``.
     """
     tracer = get_tracer("tradepulse.cli")
-    inbound = getattr(args, "traceparent", None) or os.environ.get("TRADEPULSE_TRACEPARENT")
+    inbound = getattr(args, "traceparent", None) or os.environ.get(
+        "TRADEPULSE_TRACEPARENT"
+    )
     with activate_traceparent(inbound):
         with tracer.start_as_current_span(
             f"cli.{cmd_name}",
@@ -331,6 +344,7 @@ def _run_with_trace_context(cmd_name: str, args: argparse.Namespace) -> None:
                         os.environ.pop("TRADEPULSE_TRACEPARENT", None)
                     else:
                         os.environ["TRADEPULSE_TRACEPARENT"] = previous
+
 
 def main():
     p = argparse.ArgumentParser(prog="tradepulse")
@@ -392,6 +406,7 @@ def main():
 
     args = p.parse_args()
     _run_with_trace_context(args.cmd, args)
+
 
 if __name__ == "__main__":
     main()

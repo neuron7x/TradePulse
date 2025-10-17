@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from analytics import runner
 from omegaconf import OmegaConf
+
+from analytics import runner
 
 
 def test_redact_sensitive_data_masks_known_keys() -> None:

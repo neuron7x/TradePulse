@@ -2,8 +2,6 @@ import io
 import json
 from urllib.error import URLError
 
-import pytest
-
 from tools.compliance import generate_license_report as report
 
 
@@ -71,7 +69,9 @@ def test_extract_license_names_falls_back_to_pypi(monkeypatch):
     unknown = report._extract_license_names(fallback_entry)
     assert unknown == ["UNKNOWN"]
 
-    monkeypatch.setattr(report, "_fetch_license_from_pypi", lambda name, version: ["Apache-2.0"])
+    monkeypatch.setattr(
+        report, "_fetch_license_from_pypi", lambda name, version: ["Apache-2.0"]
+    )
     resolved = report._extract_license_names({"name": "pkg", "version": "1.1"})
     assert resolved == ["Apache-2.0"]
 
@@ -116,7 +116,8 @@ def test_main_writes_report(monkeypatch, tmp_path):
 
     report.main()
 
-    output = (tmp_path / "docs" / "legal" / "THIRD_PARTY_NOTICES.md").read_text(encoding="utf-8")
+    output = (tmp_path / "docs" / "legal" / "THIRD_PARTY_NOTICES.md").read_text(
+        encoding="utf-8"
+    )
     assert report.HEADER.strip() in output
     assert "| demo | 1.0 | MIT | pkg:pypi/demo@1.0 |" in output
-

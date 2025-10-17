@@ -48,6 +48,8 @@ def test_size_biases_down_when_rounding_overshoots(
 
     qty = sizer.size(balance=balance, risk=risk, price=price)
 
-    assert calls, "nextafter should be consulted when the initial quantity exceeds the budget"
+    assert (
+        calls
+    ), "nextafter should be consulted when the initial quantity exceeds the budget"
     assert qty >= 0.0
     assert qty * price <= balance * min(max(risk, 0.0), 1.0) + 1e-12

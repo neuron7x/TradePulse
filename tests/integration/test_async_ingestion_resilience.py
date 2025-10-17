@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import csv
 from collections import deque
 from pathlib import Path
@@ -13,7 +12,9 @@ from core.data.models import InstrumentType
 
 
 @pytest.mark.asyncio
-async def test_async_csv_ingestion_handles_malformed_rows(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_async_csv_ingestion_handles_malformed_rows(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     csv_path = tmp_path / "ticks.csv"
     rows: Iterable[list[str]] = [
         ["ts", "price", "volume"],
@@ -44,7 +45,9 @@ async def test_async_csv_ingestion_handles_malformed_rows(tmp_path: Path, caplog
 
 
 @pytest.mark.asyncio
-async def test_async_csv_ingestion_logs_failure(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+async def test_async_csv_ingestion_logs_failure(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     bad_csv = tmp_path / "bad.csv"
     bad_csv.write_text("", encoding="utf-8")
 
@@ -84,7 +87,9 @@ async def _error_stream(symbol: str, values: Deque[float]) -> AsyncIterator[Tick
 
 
 @pytest.mark.asyncio
-async def test_merge_streams_continues_after_stream_failure(caplog: pytest.LogCaptureFixture) -> None:
+async def test_merge_streams_continues_after_stream_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level("WARNING")
 
     primary = _finite_stream("BTCUSD", [100.0, 101.0, 102.0])
@@ -100,4 +105,7 @@ async def test_merge_streams_continues_after_stream_failure(caplog: pytest.LogCa
 
     prices = [str(tick.price) for tick in received]
     assert prices.count("1500.0") == 1
-    assert any("Async stream terminated with error" in record.message for record in caplog.records)
+    assert any(
+        "Async stream terminated with error" in record.message
+        for record in caplog.records
+    )

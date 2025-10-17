@@ -84,7 +84,9 @@ def test_dead_letter_queue_appends_to_persistent_path(tmp_path: Path) -> None:
     queue.push({"id": 1}, "boom", context="fetch")
     queue.push({"id": 2}, "boom", context="stream")
 
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    lines = [
+        line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()
+    ]
     assert len(lines) == 2
     records = [json.loads(line) for line in lines]
     assert records[0]["context"] == "fetch"

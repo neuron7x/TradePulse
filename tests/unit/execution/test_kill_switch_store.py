@@ -5,6 +5,7 @@ import sqlite3
 import threading
 from collections import deque
 from datetime import datetime, timedelta, timezone
+
 import pytest
 
 from execution.risk import (
@@ -158,7 +159,9 @@ def test_kill_switch_refreshes_from_store_between_instances(tmp_path) -> None:
     assert primary.reason == ""
 
 
-def test_sqlite_store_retries_when_locked(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlite_store_retries_when_locked(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = SQLiteKillSwitchStateStore(
         tmp_path / "retryable.sqlite",
         max_retries=3,
@@ -182,7 +185,9 @@ def test_sqlite_store_retries_when_locked(tmp_path, monkeypatch: pytest.MonkeyPa
     assert store.load() == (True, "lock-step")
 
 
-def test_sqlite_store_raises_when_lock_persists(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sqlite_store_raises_when_lock_persists(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = SQLiteKillSwitchStateStore(
         tmp_path / "permanent_lock.sqlite",
         max_retries=1,
@@ -214,7 +219,9 @@ def test_sqlite_store_enforces_staleness_contract(tmp_path) -> None:
 
     store.save(True, "initial trip")
 
-    stale_timestamp = (current_time - timedelta(seconds=5)).strftime("%Y-%m-%d %H:%M:%S")
+    stale_timestamp = (current_time - timedelta(seconds=5)).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
     with sqlite3.connect(store_path) as connection:
         connection.execute(
             "UPDATE kill_switch_state SET updated_at = ? WHERE id = 1",
@@ -328,5 +335,7 @@ async def test_postgres_store_handles_concurrent_clients(postgres_store) -> None
 
     results = await asyncio.gather(*(engage(i) for i in range(3)))
 
-    assert any(result == (True, f"maintenance-{idx}") for idx, result in enumerate(results))
+    assert any(
+        result == (True, f"maintenance-{idx}") for idx, result in enumerate(results)
+    )
     assert store.load()[0] is True

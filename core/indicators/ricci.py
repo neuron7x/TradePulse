@@ -42,9 +42,11 @@ def _log_debug_enabled() -> bool:
     check = getattr(base_logger, "isEnabledFor", None)
     return bool(check and check(logging.DEBUG))
 
+
 try:
     import networkx as nx
 except Exception:  # pragma: no cover - fallback for lightweight environments
+
     class _SimpleGraph:
         def __init__(self) -> None:
             self._adj: dict[int, dict[int, float]] = {}
@@ -73,7 +75,9 @@ except Exception:  # pragma: no cover - fallback for lightweight environments
         ) -> Iterable[tuple[int, float]] | float:
             if node is None:
                 if weight:
-                    return tuple((n, sum(neigh.values())) for n, neigh in self._adj.items())
+                    return tuple(
+                        (n, sum(neigh.values())) for n, neigh in self._adj.items()
+                    )
                 return tuple((n, len(neigh)) for n, neigh in self._adj.items())
             neigh = self._adj.get(int(node), {})
             return sum(neigh.values()) if weight else len(neigh)
@@ -197,6 +201,7 @@ def build_price_graph(prices: np.ndarray, delta: float = 0.005) -> nx.Graph:
             G.add_edge(int(levels[i - 1]), int(lv), weight=weight)
     return G
 
+
 def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
     """Return the degree-weighted probability mass over a node's neighbourhood.
 
@@ -231,6 +236,7 @@ def local_distribution(G: nx.Graph, node: int, radius: int = 1) -> np.ndarray:
         return np.full(len(neigh), 1.0 / len(neigh))
     return w_arr / total
 
+
 def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     """Evaluate the Ollivier–Ricci curvature for a specific edge.
 
@@ -256,8 +262,8 @@ def ricci_curvature_edge(G: nx.Graph, x: int, y: int) -> float:
     mu_y = local_distribution(G, y)
     # for simple comparison, map distributions to common support by padding
     m = max(len(mu_x), len(mu_y))
-    a = np.pad(mu_x, (0, m-len(mu_x)))
-    b = np.pad(mu_y, (0, m-len(mu_y)))
+    a = np.pad(mu_x, (0, m - len(mu_x)))
+    b = np.pad(mu_y, (0, m - len(mu_y)))
     d_xy = _shortest_path_length_safe(G, x, y)
     if not np.isfinite(d_xy) or d_xy <= 0:
         return 0.0
@@ -307,6 +313,7 @@ def _shortest_path_length_safe(G: nx.Graph, x: int, y: int) -> float:
             return float(_call_shortest_path(G, None))
         except Exception:
             return float("inf")
+
 
 def mean_ricci(
     G: nx.Graph,
@@ -362,7 +369,7 @@ def mean_ricci(
             curvatures = []
 
             for i in range(0, len(edges), chunk_size):
-                chunk_edges = edges[i:i + chunk_size]
+                chunk_edges = edges[i : i + chunk_size]
                 chunk_curv = [ricci_curvature_edge(G, u, v) for u, v in chunk_edges]
                 curvatures.extend(chunk_curv)
 
@@ -382,12 +389,14 @@ def mean_ricci(
             return 0.0
         return float(np.mean(arr))
 
+
 def _run_ricci_async(
     G: nx.Graph,
     edges: list[tuple[int, int]],
     max_workers: int | None,
 ) -> list[float]:
     """Evaluate curvature across edges concurrently using asyncio threads."""
+
     async def _runner() -> list[float]:
         loop = asyncio.get_running_loop()
         executor: ThreadPoolExecutor | None = None
@@ -521,7 +530,6 @@ class MeanRicciFeature(BaseFeature):
             return FeatureResult(name=self.name, value=value, metadata=metadata)
 
 
-
 __all__ = [
     "build_price_graph",
     "local_distribution",
@@ -529,4 +537,3 @@ __all__ = [
     "mean_ricci",
     "MeanRicciFeature",
 ]
-

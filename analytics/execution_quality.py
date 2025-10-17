@@ -38,7 +38,9 @@ class CancelReplaceSample:
         return max(0.0, float(self.replace_ts) - float(self.cancel_ts))
 
 
-def _coerce_fill(fill: Mapping[str, float] | FillSample | Mapping[str, object]) -> FillSample:
+def _coerce_fill(
+    fill: Mapping[str, float] | FillSample | Mapping[str, object],
+) -> FillSample:
     """Coerce a mapping or FillSample into a FillSample instance."""
 
     if isinstance(fill, FillSample):
@@ -124,7 +126,10 @@ def vwap_slippage(
     return side_factor * (trade_vwap - benchmark_price)
 
 
-def fill_rate(target_quantity: float, fills: Sequence[Mapping[str, float] | FillSample] | Sequence[object]) -> float:
+def fill_rate(
+    target_quantity: float,
+    fills: Sequence[Mapping[str, float] | FillSample] | Sequence[object],
+) -> float:
     """Compute the executed quantity as a fraction of the target quantity."""
 
     if target_quantity <= 0:
@@ -138,7 +143,9 @@ def fill_rate(target_quantity: float, fills: Sequence[Mapping[str, float] | Fill
     return max(0.0, min(1.0, executed_qty / float(target_quantity)))
 
 
-def cancel_replace_latency(samples: Iterable[CancelReplaceSample | Mapping[str, float]]) -> dict[str, float]:
+def cancel_replace_latency(
+    samples: Iterable[CancelReplaceSample | Mapping[str, float]],
+) -> dict[str, float]:
     """Aggregate latency statistics from cancel/replace samples."""
 
     latencies: list[float] = []

@@ -1,4 +1,5 @@
 """Feature fusion utilities combining market and alternative data."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -49,10 +50,16 @@ class AltDataFusionEngine:
         prefixes = dict(self._config.prefixes or {})
         market = self._prepare(market_features, prefix=prefixes.get("market", ""))
         news = self._prepare(news_features, prefix=prefixes.get("news", "news_"))
-        sentiment = self._prepare(sentiment_features, prefix=prefixes.get("sentiment", "sentiment_"))
-        onchain = self._prepare(onchain_features, prefix=prefixes.get("onchain", "onchain_"))
+        sentiment = self._prepare(
+            sentiment_features, prefix=prefixes.get("sentiment", "sentiment_")
+        )
+        onchain = self._prepare(
+            onchain_features, prefix=prefixes.get("onchain", "onchain_")
+        )
 
-        frames = [frame for frame in (market, news, sentiment, onchain) if not frame.empty]
+        frames = [
+            frame for frame in (market, news, sentiment, onchain) if not frame.empty
+        ]
         if not frames:
             return pd.DataFrame()
 

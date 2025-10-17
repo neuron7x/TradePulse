@@ -9,19 +9,14 @@ import sys
 from pathlib import Path
 from typing import Iterable, Sequence
 
+import pandas as pd
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG_ENV = "KURAMOTO_RICCI_CONFIG"
 DEFAULT_OUTPUT_ENV = "KURAMOTO_RICCI_OUTPUT_DIR"
 
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
-
-
-import pandas as pd
-
-from core.config import load_kuramoto_ricci_config, parse_cli_overrides
-from core.indicators.kuramoto_ricci_composite import TradePulseCompositeEngine
-
 
 
 def _resolve_path(candidate: Path, *, allow_missing: bool = False) -> Path:
@@ -56,7 +51,9 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--config",
         type=Path,
-        default=_path_default(DEFAULT_CONFIG_ENV, Path("configs/kuramoto_ricci_composite.yaml")),
+        default=_path_default(
+            DEFAULT_CONFIG_ENV, Path("configs/kuramoto_ricci_composite.yaml")
+        ),
         help=(
             "Configuration file for the composite engine. "
             f"Defaults to ${{{DEFAULT_CONFIG_ENV}}} or 'configs/kuramoto_ricci_composite.yaml'."
@@ -112,7 +109,9 @@ def _ensure_output_dir(path: Path, *, confirm: bool) -> None:
         path.mkdir(parents=True, exist_ok=True)
 
 
-def _print_plan(data_path: Path, config_path: Path, output_dir: Path, overrides: Iterable[str]) -> None:
+def _print_plan(
+    data_path: Path, config_path: Path, output_dir: Path, overrides: Iterable[str]
+) -> None:
     print("[dry-run] Kuramoto–Ricci composite integration plan")
     print(f"[dry-run] Data source: {data_path}")
     print(f"[dry-run] Configuration: {config_path}")
@@ -130,6 +129,9 @@ def run_integration(
     output_dir: Path,
     config_overrides: Sequence[str],
 ) -> None:
+    from core.config import load_kuramoto_ricci_config, parse_cli_overrides
+    from core.indicators.kuramoto_ricci_composite import TradePulseCompositeEngine
+
     df = pd.read_csv(data_path, index_col=0, parse_dates=True)
     if "volume" not in df.columns:
         df["volume"] = 1.0
@@ -153,7 +155,9 @@ def run_integration(
         "Entry: "
         f"{sig.entry_signal:.3f} | Exit: {sig.exit_signal:.3f} | Risk: {sig.risk_multiplier:.3f}"
     )
-    print(f"Kuramoto R: {sig.kuramoto_R:.3f}, Coherence: {sig.cross_scale_coherence:.3f}")
+    print(
+        f"Kuramoto R: {sig.kuramoto_R:.3f}, Coherence: {sig.cross_scale_coherence:.3f}"
+    )
     print(
         "Static κ: "
         f"{sig.static_ricci:.4f}, Temporal κ_t: {sig.temporal_ricci:.4f}, "

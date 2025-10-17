@@ -111,4 +111,3 @@ def test_state_survives_restart(tmp_path) -> None:
     assert restored.get_state("order-x") == OrderStatus.PARTIALLY_FILLED
     restored.apply("order-x", OrderEvent.FILL_FINAL, correlation_id="x-final")
     assert restored.get_state("order-x") == OrderStatus.FILLED
-

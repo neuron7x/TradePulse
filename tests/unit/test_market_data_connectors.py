@@ -35,10 +35,14 @@ class DummyAdapter(IngestionAdapter):
         self.stream_error = stream_error
         self.stream_calls = 0
 
-    async def fetch(self, **kwargs: Any) -> List[Any]:  # pragma: no cover - exercised via connector
+    async def fetch(
+        self, **kwargs: Any
+    ) -> List[Any]:  # pragma: no cover - exercised via connector
         return list(self.fetch_result)
 
-    async def stream(self, **kwargs: Any) -> AsyncIterator[Any]:  # pragma: no cover - exercised via connector
+    async def stream(
+        self, **kwargs: Any
+    ) -> AsyncIterator[Any]:  # pragma: no cover - exercised via connector
         self.stream_calls += 1
         for item in self.stream_items:
             yield item
@@ -54,7 +58,9 @@ class FlakyAdapter(DummyAdapter):
         super().__init__(stream_items=stream_items, stream_error=RuntimeError("boom"))
         self._failures = 0
 
-    async def stream(self, **kwargs: Any) -> AsyncIterator[Any]:  # pragma: no cover - exercised in tests
+    async def stream(
+        self, **kwargs: Any
+    ) -> AsyncIterator[Any]:  # pragma: no cover - exercised in tests
         self.stream_calls += 1
         if self._failures < 1:
             self._failures += 1
@@ -65,7 +71,9 @@ class FlakyAdapter(DummyAdapter):
 
 def _make_tick(symbol: str = "BTCUSDT", venue: str = "BINANCE") -> PriceTick:
     return PriceTick(
-        metadata=MarketMetadata(symbol=symbol, venue=venue, instrument_type=InstrumentType.SPOT),
+        metadata=MarketMetadata(
+            symbol=symbol, venue=venue, instrument_type=InstrumentType.SPOT
+        ),
         timestamp=datetime.now(timezone.utc),
         price=Decimal("30123.45"),
         volume=Decimal("12.5"),
@@ -147,11 +155,12 @@ async def test_polygon_connector_fetch_aggregates_uses_adapter() -> None:
     adapter = DummyAdapter(fetch_result=[tick])
     connector = PolygonMarketDataConnector(api_key="dummy", adapter=adapter)
 
-    events = await connector.fetch_aggregates(symbol="AAPL", start="2024-01-01", end="2024-01-02")
+    events = await connector.fetch_aggregates(
+        symbol="AAPL", start="2024-01-01", end="2024-01-02"
+    )
 
     assert len(events) == 1
     event = events[0]
     assert event.symbol == tick.symbol
     assert event.bid_price == pytest.approx(float(tick.price))
     assert connector.dead_letter_queue.peek() == []
-

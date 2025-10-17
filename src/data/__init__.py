@@ -6,8 +6,8 @@ from src.data.kafka_ingestion import (
     HotSymbolSnapshot,
     KafkaIngestionConfig,
     KafkaIngestionService,
-    LagReport,
     LagRecord,
+    LagReport,
 )
 from src.data.streaming_aggregator import AggregationResult, TickStreamAggregator
 

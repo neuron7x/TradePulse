@@ -6,19 +6,21 @@ pipeline.  All helpers gracefully degrade to no-ops when the optional
 ``opentelemetry`` dependencies are not installed so that the rest of the code
 base keeps functioning in lightweight environments.
 """
+
 from __future__ import annotations
 
-from contextlib import contextmanager
-from dataclasses import dataclass, field
 import fnmatch
 import logging
 import os
 import re
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - optional dependency import guarded at runtime
     from opentelemetry import context as otel_context
     from opentelemetry import trace
+    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.propagate import get_global_textmap, set_global_textmap
     from opentelemetry.sdk.resources import Resource
     from opentelemetry.sdk.trace import TracerProvider
@@ -28,9 +30,10 @@ try:  # pragma: no cover - optional dependency import guarded at runtime
         SamplingResult,
         TraceIdRatioBased,
     )
-    from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
     from opentelemetry.trace import Status, StatusCode
-    from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+    from opentelemetry.trace.propagation.tracecontext import (
+        TraceContextTextMapPropagator,
+    )
 
     _TRACE_AVAILABLE = True
 except Exception:  # pragma: no cover - the dependencies are optional
@@ -51,12 +54,12 @@ _TRACEPARENT_HEADER = "traceparent"
 
 
 if _TRACE_AVAILABLE:
+
     class _DictSetter:
         """Setter helper compatible with OpenTelemetry propagators."""
 
         def set(self, carrier: MutableMapping[str, str], key: str, value: str) -> None:
             carrier[key] = value
-
 
     class _DictGetter:
         """Getter helper compatible with OpenTelemetry propagators."""
@@ -68,7 +71,6 @@ if _TRACE_AVAILABLE:
             if isinstance(value, (list, tuple)):
                 return list(value)
             return [value]
-
 
     _DICT_SETTER = _DictSetter()
     _DICT_GETTER = _DictGetter()
@@ -118,7 +120,11 @@ def configure_tracing(config: TracingConfig | None = None) -> bool:
 
     endpoint = cfg.exporter_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     insecure_env = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE")
-    insecure = cfg.exporter_insecure if insecure_env is None else insecure_env.lower() == "true"
+    insecure = (
+        cfg.exporter_insecure
+        if insecure_env is None
+        else insecure_env.lower() == "true"
+    )
 
     sampler = _build_sampler(cfg)
     provider = TracerProvider(resource=Resource.create(resource_attrs), sampler=sampler)
@@ -161,7 +167,11 @@ def _build_sampler(config: TracingConfig):
     hot_ratio = max(0.0, min(1.0, float(config.hot_path_sample_ratio)))
     default_ratio = max(0.0, min(1.0, float(config.default_sample_ratio)))
 
-    if config.hot_path_globs or hot_ratio not in (0.0, 1.0) or default_ratio not in (0.0, 1.0):
+    if (
+        config.hot_path_globs
+        or hot_ratio not in (0.0, 1.0)
+        or default_ratio not in (0.0, 1.0)
+    ):
         return SelectiveSampler(
             hot_path_globs=config.hot_path_globs,
             attribute_flag=config.hot_path_attribute,
@@ -237,11 +247,19 @@ def current_traceparent() -> str | None:
 def activate_traceparent(traceparent: str | None) -> Iterator[bool]:
     """Temporarily activate the provided ``traceparent`` header."""
 
-    if not (_TRACE_AVAILABLE and traceparent and otel_context and _W3C_PROPAGATOR and _DICT_GETTER):
+    if not (
+        _TRACE_AVAILABLE
+        and traceparent
+        and otel_context
+        and _W3C_PROPAGATOR
+        and _DICT_GETTER
+    ):
         yield False
         return
 
-    context = _W3C_PROPAGATOR.extract({_TRACEPARENT_HEADER: traceparent}, getter=_DICT_GETTER)
+    context = _W3C_PROPAGATOR.extract(
+        {_TRACEPARENT_HEADER: traceparent}, getter=_DICT_GETTER
+    )
     token = otel_context.attach(context)
     try:
         yield True
@@ -272,10 +290,14 @@ def pipeline_span(stage: str, **attributes: Any) -> Iterator[Any]:
 class _NoOpSpan:
     """Minimal span used when OpenTelemetry is not installed."""
 
-    def set_attributes(self, _attrs: Mapping[str, Any]) -> None:  # pragma: no cover - trivial
+    def set_attributes(
+        self, _attrs: Mapping[str, Any]
+    ) -> None:  # pragma: no cover - trivial
         return
 
-    def record_exception(self, _exc: BaseException) -> None:  # pragma: no cover - trivial
+    def record_exception(
+        self, _exc: BaseException
+    ) -> None:  # pragma: no cover - trivial
         return
 
     def set_status(self, _status: Any) -> None:  # pragma: no cover - trivial
@@ -293,7 +315,9 @@ class _NoOpSpanContext:
 class _NoOpTracer:
     """Tracer compatible stub used when tracing is disabled."""
 
-    def start_as_current_span(self, _name: str, **_kwargs: Any) -> _NoOpSpanContext:  # pragma: no cover - trivial
+    def start_as_current_span(
+        self, _name: str, **_kwargs: Any
+    ) -> _NoOpSpanContext:  # pragma: no cover - trivial
         return _NoOpSpanContext()
 
 
@@ -337,12 +361,15 @@ if _TRACE_AVAILABLE:
             links: Iterable[Any] | None,
         ) -> SamplingResult:
             if self._is_hot(name, attributes):
-                return self._hot_sampler.should_sample(parent_context, trace_id, name, kind, attributes, links)
-            return self._default_sampler.should_sample(parent_context, trace_id, name, kind, attributes, links)
+                return self._hot_sampler.should_sample(
+                    parent_context, trace_id, name, kind, attributes, links
+                )
+            return self._default_sampler.should_sample(
+                parent_context, trace_id, name, kind, attributes, links
+            )
 
         def get_description(self) -> str:
             return "SelectiveSampler"
-
 
     class PIIFilterSpanProcessor(SpanProcessor):
         """Scrub attributes/events that may contain PII before export."""
@@ -356,7 +383,10 @@ if _TRACE_AVAILABLE:
         ) -> None:
             super().__init__()
             self._denylist = {key.lower() for key in (denylist or ())}
-            self._patterns = [re.compile(fnmatch.translate(pattern), re.IGNORECASE) for pattern in (pattern_denylist or [])]
+            self._patterns = [
+                re.compile(fnmatch.translate(pattern), re.IGNORECASE)
+                for pattern in (pattern_denylist or [])
+            ]
             self._redaction = redaction
 
         def _matches(self, key: str) -> bool:
@@ -365,7 +395,9 @@ if _TRACE_AVAILABLE:
                 return True
             return any(pattern.match(key) for pattern in self._patterns)
 
-        def on_start(self, span: Any, parent_context: Any) -> None:  # pragma: no cover - no-op
+        def on_start(
+            self, span: Any, parent_context: Any
+        ) -> None:  # pragma: no cover - no-op
             return None
 
         def on_end(self, span: Any) -> None:
@@ -386,7 +418,9 @@ if _TRACE_AVAILABLE:
         def shutdown(self) -> None:  # pragma: no cover - interface requirement
             return None
 
-        def force_flush(self, timeout_millis: int = 30000) -> bool:  # pragma: no cover - interface requirement
+        def force_flush(
+            self, timeout_millis: int = 30000
+        ) -> bool:  # pragma: no cover - interface requirement
             return True
 
 else:  # pragma: no cover - optional dependency missing

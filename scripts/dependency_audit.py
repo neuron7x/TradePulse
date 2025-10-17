@@ -1,4 +1,5 @@
 """Utility to run pip-audit with consistent settings and provide actionable summaries."""
+
 from __future__ import annotations
 
 import argparse
@@ -128,12 +129,16 @@ def _print_summary(findings: Sequence[dict[str, object]]) -> None:
     for finding in findings:
         grouped[(finding["name"], finding["version"])] += [finding]
 
-    for (name, version) in sorted(grouped):
+    for name, version in sorted(grouped):
         print(f"\n{name}=={version}")
         for vuln in grouped[(name, version)]:
             fix = ", ".join(vuln["fix_versions"]) or "no patched release available"
             aliases = ", ".join(vuln["aliases"]) or "no aliases"
-            description = vuln["description"].strip().splitlines()[0] if vuln["description"] else ""
+            description = (
+                vuln["description"].strip().splitlines()[0]
+                if vuln["description"]
+                else ""
+            )
             print(f"  - {vuln['id']} (aliases: {aliases})")
             print(f"    ↳ upgrade to: {fix}")
             if description:

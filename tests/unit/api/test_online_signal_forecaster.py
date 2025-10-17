@@ -18,7 +18,6 @@ from application.api.service import OnlineSignalForecaster, PredictionResponse
 from application.trading import signal_to_dto
 from domain.signal import SignalAction
 
-
 pytestmark = pytest.mark.filterwarnings(
     "ignore:'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated.:DeprecationWarning"
 )
@@ -27,10 +26,14 @@ pytestmark = pytest.mark.filterwarnings(
 class _StubPipeline:
     """Lightweight pipeline stub used to bypass the heavy feature pipeline."""
 
-    def __init__(self, transform_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None) -> None:
+    def __init__(
+        self, transform_fn: Callable[[pd.DataFrame], pd.DataFrame] | None = None
+    ) -> None:
         self._transform_fn = transform_fn or (lambda frame: frame)
 
-    def transform(self, frame: pd.DataFrame) -> pd.DataFrame:  # pragma: no cover - trivial
+    def transform(
+        self, frame: pd.DataFrame
+    ) -> pd.DataFrame:  # pragma: no cover - trivial
         return self._transform_fn(frame)
 
 
@@ -44,7 +47,9 @@ def make_forecaster() -> Callable[[pd.DataFrame], OnlineSignalForecaster]:
 
 
 class TestLatestFeatureVector:
-    def test_empty_frame_raises_bad_request(self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]) -> None:
+    def test_empty_frame_raises_bad_request(
+        self, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+    ) -> None:
         forecaster = make_forecaster(pd.DataFrame())
 
         with pytest.raises(HTTPException) as excinfo:
@@ -166,7 +171,10 @@ class TestDeriveSignal:
         ],
     )
     def test_action_and_confidence_bounds(
-        self, series: pd.Series, expected_action: SignalAction, make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster]
+        self,
+        series: pd.Series,
+        expected_action: SignalAction,
+        make_forecaster: Callable[[pd.DataFrame], OnlineSignalForecaster],
     ) -> None:
         forecaster = make_forecaster(pd.DataFrame([series]))
         horizon = 900
@@ -261,4 +269,3 @@ class TestDeriveSignal:
         assert response.horizon_seconds == horizon
         assert response.signal["metadata"]["horizon_seconds"] == horizon
         assert response.signal["metadata"]["score"] == pytest.approx(score, rel=1e-6)
-

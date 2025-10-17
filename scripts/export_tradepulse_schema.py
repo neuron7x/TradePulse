@@ -1,4 +1,5 @@
 """Utility for exporting the TradePulse configuration JSON schema."""
+
 from __future__ import annotations
 
 import argparse

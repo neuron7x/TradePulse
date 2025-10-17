@@ -19,6 +19,7 @@ from observability.health_checks import (
     evaluate_signal_pipeline_health,
 )
 
+
 def _build_system(tmp_path: Path) -> TradePulseSystem:
     venue = ExchangeAdapterConfig(name="binance", connector=BinanceConnector())
     settings = LiveLoopSettings(state_dir=tmp_path / "state")
@@ -96,4 +97,8 @@ def test_execution_health_validates_loop_state(tmp_path: Path) -> None:
     assert not result.healthy
 
     checks = build_default_health_checks(system)
-    assert {check.name for check in checks} == {"data_pipeline", "signal_pipeline", "execution"}
+    assert {check.name for check in checks} == {
+        "data_pipeline",
+        "signal_pipeline",
+        "execution",
+    }

@@ -9,10 +9,10 @@ matching logic.
 """
 from __future__ import annotations
 
+import heapq
 from collections import deque
 from dataclasses import dataclass, field
 from enum import Enum
-import heapq
 from typing import Deque, Dict, Iterable, List, Optional, Protocol, Tuple
 
 
@@ -58,14 +58,18 @@ class Execution:
 class ImpactModel(Protocol):
     """Protocol for price impact models."""
 
-    def adjusted_price(self, price: float, side: Side, executed_qty: float, level_index: int) -> float:
+    def adjusted_price(
+        self, price: float, side: Side, executed_qty: float, level_index: int
+    ) -> float:
         """Return the impacted price for the executed trade."""
 
 
 class NullImpactModel:
     """No-op impact model used as default."""
 
-    def adjusted_price(self, price: float, side: Side, executed_qty: float, level_index: int) -> float:  # noqa: D401
+    def adjusted_price(
+        self, price: float, side: Side, executed_qty: float, level_index: int
+    ) -> float:  # noqa: D401
         return price
 
 
@@ -77,7 +81,9 @@ class LinearImpactModel:
     def __init__(self, coefficient: float) -> None:
         self.coefficient = float(max(coefficient, 0.0))
 
-    def adjusted_price(self, price: float, side: Side, executed_qty: float, level_index: int) -> float:  # noqa: D401
+    def adjusted_price(
+        self, price: float, side: Side, executed_qty: float, level_index: int
+    ) -> float:  # noqa: D401
         if executed_qty <= 0:
             return price
         multiplier = self.coefficient * executed_qty
@@ -262,7 +268,9 @@ class PriceTimeOrderBook:
             while remaining > 0 and level.orders:
                 resting_order = level.orders[0]
                 take = min(remaining, resting_order.quantity)
-                impacted = self._impact_model.adjusted_price(level.price, side, take, level_index)
+                impacted = self._impact_model.adjusted_price(
+                    level.price, side, take, level_index
+                )
                 slippage = self._compute_slippage(
                     side=side,
                     base_price=level.price,
@@ -349,4 +357,3 @@ __all__ = [
     "QueueAwareSlippage",
     "Side",
 ]
-

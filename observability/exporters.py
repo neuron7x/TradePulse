@@ -1,4 +1,5 @@
 """Helpers to run observability exporters in isolated processes."""
+
 from __future__ import annotations
 
 import multiprocessing
@@ -14,7 +15,9 @@ except Exception:  # pragma: no cover - prometheus_client is optional
     _PROM_AVAILABLE = False
 
 
-def _run_prometheus_exporter(port: int, addr: str, ready: multiprocessing.Event) -> None:
+def _run_prometheus_exporter(
+    port: int, addr: str, ready: multiprocessing.Event
+) -> None:
     if not _PROM_AVAILABLE or start_http_server is None:  # pragma: no cover - defensive
         return
     start_http_server(port, addr)
@@ -26,7 +29,9 @@ def _run_prometheus_exporter(port: int, addr: str, ready: multiprocessing.Event)
         return
 
 
-def start_prometheus_exporter_process(port: int = 8000, addr: str = "") -> multiprocessing.Process:
+def start_prometheus_exporter_process(
+    port: int = 8000, addr: str = ""
+) -> multiprocessing.Process:
     """Spawn a dedicated process that serves Prometheus metrics."""
 
     if not _PROM_AVAILABLE:
@@ -44,7 +49,9 @@ def start_prometheus_exporter_process(port: int = 8000, addr: str = "") -> multi
     return process
 
 
-def stop_exporter_process(process: Optional[multiprocessing.Process], *, timeout: float = 5.0) -> None:
+def stop_exporter_process(
+    process: Optional[multiprocessing.Process], *, timeout: float = 5.0
+) -> None:
     """Terminate an exporter process if it is still alive."""
 
     if process is None:

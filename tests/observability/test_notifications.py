@@ -5,7 +5,11 @@ from typing import Any, Mapping
 
 import pytest
 
-from observability.notifications import EmailSender, NotificationDispatcher, SlackNotifier
+from observability.notifications import (
+    EmailSender,
+    NotificationDispatcher,
+    SlackNotifier,
+)
 
 
 @pytest.mark.asyncio()
@@ -41,8 +45,9 @@ async def test_email_sender_constructs_message(monkeypatch: pytest.MonkeyPatch) 
         captured["instance"] = instance
         return instance
 
-    from observability import notifications as notifications_module
     from email.message import EmailMessage
+
+    from observability import notifications as notifications_module
 
     monkeypatch.setattr(notifications_module.smtplib, "SMTP", _smtp_factory)
 
@@ -57,7 +62,9 @@ async def test_email_sender_constructs_message(monkeypatch: pytest.MonkeyPatch) 
         use_ssl=False,
     )
 
-    await sender.send("TradePulse Alert", "Order executed", metadata={"order_id": "abc"})
+    await sender.send(
+        "TradePulse Alert", "Order executed", metadata={"order_id": "abc"}
+    )
 
     instance: _DummySMTP = captured["instance"]
     assert instance.started_tls is True
@@ -80,7 +87,9 @@ async def test_slack_notifier_posts_payload() -> None:
         def __init__(self) -> None:
             self.closed = False
 
-        async def post(self, url: str, *, json: dict[str, Any], timeout: float) -> _DummyResponse:
+        async def post(
+            self, url: str, *, json: dict[str, Any], timeout: float
+        ) -> _DummyResponse:
             events.append({"url": url, "payload": json, "timeout": timeout})
             return _DummyResponse()
 
@@ -113,11 +122,23 @@ async def test_dispatcher_routes_to_all_channels() -> None:
     slack_calls: list[str] = []
 
     class _EmailStub:
-        async def send(self, subject: str, message: str, *, metadata: Mapping[str, Any] | None = None) -> None:
+        async def send(
+            self,
+            subject: str,
+            message: str,
+            *,
+            metadata: Mapping[str, Any] | None = None,
+        ) -> None:
             email_calls.append((subject, message))
 
     class _SlackStub:
-        async def send(self, subject: str, message: str, *, metadata: Mapping[str, Any] | None = None) -> None:
+        async def send(
+            self,
+            subject: str,
+            message: str,
+            *,
+            metadata: Mapping[str, Any] | None = None,
+        ) -> None:
             slack_calls.append(subject)
 
         async def aclose(self) -> None:
@@ -138,4 +159,3 @@ async def test_dispatcher_routes_to_all_channels() -> None:
 
     assert email_calls == [("Order Created", "New order submitted")]
     assert slack_calls == ["Order Created"]
-

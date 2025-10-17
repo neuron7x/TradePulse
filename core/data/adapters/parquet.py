@@ -9,10 +9,11 @@ from typing import Any, AsyncIterator, Iterable, Optional
 import pandas as pd
 
 from core.data.adapters.base import IngestionAdapter
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
-from core.utils.logging import get_logger
 from core.utils.dataframe_io import MissingParquetDependencyError, read_dataframe
+from core.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -25,7 +26,9 @@ class ParquetIngestionAdapter(IngestionAdapter):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
 
-    async def _read_parquet(self, path: str | Path, columns: Optional[Iterable[str]] = None) -> pd.DataFrame:
+    async def _read_parquet(
+        self, path: str | Path, columns: Optional[Iterable[str]] = None
+    ) -> pd.DataFrame:
         def _load() -> pd.DataFrame:
             frame = read_dataframe(Path(path), allow_json_fallback=False)
             if columns is not None:

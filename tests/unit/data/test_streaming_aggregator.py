@@ -8,7 +8,6 @@ import pytest
 from core.data.models import InstrumentType, PriceTick
 from src.data import DataIngestionCacheService, TickStreamAggregator
 
-
 BASE_TS = datetime(2024, 1, 1, tzinfo=UTC)
 
 
@@ -56,8 +55,12 @@ def test_tick_stream_aggregator_merges_sources_and_detects_gaps() -> None:
         pd.Timestamp(BASE_TS + timedelta(minutes=1)),
         pd.Timestamp(BASE_TS + timedelta(minutes=2)),
     ]
-    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=1))]["price"] == pytest.approx(30020.0)
-    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=2))]["price"] == pytest.approx(30030.0)
+    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=1))][
+        "price"
+    ] == pytest.approx(30020.0)
+    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=2))][
+        "price"
+    ] == pytest.approx(30030.0)
 
     assert len(result.backfill_plan.gaps) == 1
     gap = result.backfill_plan.gaps[0]
@@ -98,7 +101,9 @@ def test_tick_stream_aggregator_backfills_gaps_via_callback() -> None:
     frame = result.frame
     assert frame.index.tz == UTC
     assert len(frame) == 3
-    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=1))]["price"] == pytest.approx(30020.0)
+    assert frame.loc[pd.Timestamp(BASE_TS + timedelta(minutes=1))][
+        "price"
+    ] == pytest.approx(30020.0)
 
 
 def test_tick_stream_aggregator_rejects_mismatched_metadata() -> None:
@@ -136,7 +141,9 @@ def test_tick_stream_aggregator_validates_venue_and_instrument_metadata() -> Non
     instrument_mismatch = [
         _make_tick(0, "30000", symbol="AAPL", instrument_type=InstrumentType.FUTURES)
     ]
-    with pytest.raises(ValueError, match="Tick instrument type does not match aggregation key"):
+    with pytest.raises(
+        ValueError, match="Tick instrument type does not match aggregation key"
+    ):
         aggregator.synchronise(
             symbol="AAPL",
             venue="BINANCE",
@@ -170,7 +177,9 @@ def test_tick_stream_aggregator_detects_inverted_time_window() -> None:
 
     historical = [_make_tick(0, "30000"), _make_tick(1, "30010")]
 
-    with pytest.raises(ValueError, match="end timestamp must be greater than or equal to start"):
+    with pytest.raises(
+        ValueError, match="end timestamp must be greater than or equal to start"
+    ):
         aggregator.synchronise(
             symbol="BTC/USDT",
             venue="BINANCE",
@@ -185,7 +194,9 @@ def test_tick_stream_aggregator_requires_positive_frequency() -> None:
     cache_service = DataIngestionCacheService()
 
     with pytest.raises(ValueError, match="frequency must be strictly positive"):
-        TickStreamAggregator(cache_service=cache_service, timeframe="1min", frequency="0min")
+        TickStreamAggregator(
+            cache_service=cache_service, timeframe="1min", frequency="0min"
+        )
 
 
 def test_tick_stream_aggregator_requires_non_empty_timeframe() -> None:

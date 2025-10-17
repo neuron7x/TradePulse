@@ -27,7 +27,9 @@ def restore_logging() -> Callable[[], None]:
         _restore()
 
 
-def test_configure_logging_emits_structured_payload(restore_logging: Callable[[], None]) -> None:
+def test_configure_logging_emits_structured_payload(
+    restore_logging: Callable[[], None],
+) -> None:
     records: list[dict[str, object]] = []
     configure_logging(level="DEBUG", sink=records.append)
 
@@ -42,4 +44,3 @@ def test_configure_logging_emits_structured_payload(restore_logging: Callable[[]
     assert records[0]["component"] == "test"
     assert records[1]["level"] == "error"
     assert records[1]["error_code"] == 500
-

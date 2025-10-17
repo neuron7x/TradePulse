@@ -115,7 +115,14 @@ def _kuramoto(phases: np.ndarray) -> tuple[float, float]:
 class WaveletWindowSelector:
     """Selects an analysis window via wavelet energy concentration."""
 
-    def __init__(self, min_window: int = 64, max_window: int = 512, *, wavelet: str = "ricker", levels: int = 16) -> None:
+    def __init__(
+        self,
+        min_window: int = 64,
+        max_window: int = 512,
+        *,
+        wavelet: str = "ricker",
+        levels: int = 16,
+    ) -> None:
         if min_window <= 0 or max_window <= 0:
             raise ValueError("window bounds must be positive")
         if min_window > max_window:
@@ -135,9 +142,13 @@ class WaveletWindowSelector:
 
     def select_window(self, prices: Sequence[float]) -> int:
         if self.max_window > 1_048_576:
-            raise ValueError("max_window is excessively large for efficient wavelet analysis")
+            raise ValueError(
+                "max_window is excessively large for efficient wavelet analysis"
+            )
         if self.levels > 8192:
-            raise ValueError("levels is excessively large and could exhaust memory during wavelet selection")
+            raise ValueError(
+                "levels is excessively large and could exhaust memory during wavelet selection"
+            )
         values = np.asarray(prices, dtype=float)
         if values.size == 0:
             raise ValueError("cannot select window from empty price series")
@@ -180,12 +191,15 @@ class MultiScaleKuramoto:
         if min_samples_per_scale <= 0:
             raise ValueError("min_samples_per_scale must be positive")
 
-        self.timeframes: tuple[TimeFrame, ...] = tuple(timeframes or (
-            TimeFrame.M1,
-            TimeFrame.M5,
-            TimeFrame.M15,
-            TimeFrame.H1,
-        ))
+        self.timeframes: tuple[TimeFrame, ...] = tuple(
+            timeframes
+            or (
+                TimeFrame.M1,
+                TimeFrame.M5,
+                TimeFrame.M15,
+                TimeFrame.H1,
+            )
+        )
         self.base_window = int(base_window)
         self.use_adaptive_window = use_adaptive_window
         self.min_samples_per_scale = int(min_samples_per_scale)
@@ -209,7 +223,9 @@ class MultiScaleKuramoto:
             return int(self.selector.select_window(values_list))
         return self.base_window
 
-    def analyze(self, df: pd.DataFrame, *, price_col: str = "close") -> MultiScaleResult:
+    def analyze(
+        self, df: pd.DataFrame, *, price_col: str = "close"
+    ) -> MultiScaleResult:
         if price_col not in df.columns:
             raise KeyError(f"column '{price_col}' not found in dataframe")
         series = df[price_col]
@@ -239,12 +255,16 @@ class MultiScaleKuramoto:
                 continue
 
             R, psi = self._kuramoto_order_parameter(phases[-window:])
-            timeframe_results[timeframe] = KuramotoResult(order_parameter=R, mean_phase=psi, window=window)
+            timeframe_results[timeframe] = KuramotoResult(
+                order_parameter=R, mean_phase=psi, window=window
+            )
             windows.append(window)
             endpoints[timeframe] = sampled.index[-1]
 
         if timeframe_results:
-            R_values = np.array([res.order_parameter for res in timeframe_results.values()], dtype=float)
+            R_values = np.array(
+                [res.order_parameter for res in timeframe_results.values()], dtype=float
+            )
             consensus_R = float(np.mean(R_values))
             if R_values.size > 1:
                 dispersion = float(np.std(R_values))
@@ -260,7 +280,11 @@ class MultiScaleKuramoto:
             cross_scale_coherence = 0.0
             dominant_scale = None
 
-        adaptive_window = int(np.median(windows)) if windows and self.use_adaptive_window else self.base_window
+        adaptive_window = (
+            int(np.median(windows))
+            if windows and self.use_adaptive_window
+            else self.base_window
+        )
 
         return MultiScaleResult(
             consensus_R=consensus_R,
@@ -351,7 +375,11 @@ class MultiScaleKuramotoFeature(BaseFeature):
             coverage_end = sampled.index[-1].to_pydatetime()
             fingerprint = self.cache.store(
                 indicator_name=f"{self.name}:{timeframe.name}",
-                params={**params, "timeframe": timeframe.name, "window": tf_result.window},
+                params={
+                    **params,
+                    "timeframe": timeframe.name,
+                    "window": tf_result.window,
+                },
                 data_hash=timeframe_hash,
                 value=tf_result,
                 timeframe=timeframe,
@@ -408,7 +436,9 @@ class MultiScaleKuramotoFeature(BaseFeature):
             result = cached_result
 
         metadata = self._metadata_from_result(result)
-        feature = FeatureResult(name=self.name, value=result.consensus_R, metadata=metadata)
+        feature = FeatureResult(
+            name=self.name, value=result.consensus_R, metadata=metadata
+        )
 
         if self.cache is not None and cached_result is None and not df.empty:
             target = df[[price_col]] if price_col in df.columns else df
@@ -448,6 +478,9 @@ def analyze_simple(
 ) -> MultiScaleResult:
     """Legacy helper retained for backwards compatibility in smoke tests."""
 
-    analyzer = MultiScaleKuramoto(use_adaptive_window=False, base_window=window, min_samples_per_scale=min(window, 64))
+    analyzer = MultiScaleKuramoto(
+        use_adaptive_window=False,
+        base_window=window,
+        min_samples_per_scale=min(window, 64),
+    )
     return analyzer.analyze(df, price_col=price_col)
-

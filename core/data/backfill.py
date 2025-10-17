@@ -45,7 +45,9 @@ class CacheEntry:
     start: pd.Timestamp
     end: pd.Timestamp
 
-    def slice(self, start: Optional[pd.Timestamp], end: Optional[pd.Timestamp]) -> pd.DataFrame:
+    def slice(
+        self, start: Optional[pd.Timestamp], end: Optional[pd.Timestamp]
+    ) -> pd.DataFrame:
         view = self.frame
         if start is not None:
             view = view[view.index >= start]
@@ -168,7 +170,9 @@ class GapFillPlanner:
         coverage = self._cache.coverage(key)
         existing = self._cache.get(key)
         if existing.empty:
-            return BackfillPlan(gaps=[Gap(start=expected_index[0], end=expected_index[-1] + cadence)])
+            return BackfillPlan(
+                gaps=[Gap(start=expected_index[0], end=expected_index[-1] + cadence)]
+            )
         gaps = detect_gaps(expected_index, existing.index)
         return BackfillPlan(gaps=gaps, covered=coverage)
 
@@ -203,14 +207,18 @@ class CacheRegistry:
         return getattr(self, layer)
 
 
-def normalise_index(frame: pd.DataFrame, *, market: Optional[str] = None) -> pd.DataFrame:
+def normalise_index(
+    frame: pd.DataFrame, *, market: Optional[str] = None
+) -> pd.DataFrame:
     """Ensure the index is tz-aware and normalised through ``normalize_timestamp``."""
 
     if frame.empty:
         return frame
     if not isinstance(frame.index, pd.DatetimeIndex):
         raise TypeError("frame must use a DatetimeIndex")
-    normalized = [normalize_timestamp(ts.to_pydatetime(), market=market) for ts in frame.index]
+    normalized = [
+        normalize_timestamp(ts.to_pydatetime(), market=market) for ts in frame.index
+    ]
     result = frame.copy()
     result.index = pd.DatetimeIndex(normalized, tz=UTC)
     return result
@@ -227,4 +235,3 @@ __all__ = [
     "detect_gaps",
     "normalise_index",
 ]
-

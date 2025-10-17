@@ -14,7 +14,9 @@ def test_admin_settings_reads_environment(monkeypatch):
     monkeypatch.setenv("TRADEPULSE_ADMIN_SUBJECT", "env-operator")
     monkeypatch.setenv("TRADEPULSE_ADMIN_RATE_LIMIT_MAX_ATTEMPTS", "7")
     monkeypatch.setenv("TRADEPULSE_ADMIN_RATE_LIMIT_INTERVAL_SECONDS", "15")
-    monkeypatch.setenv("TRADEPULSE_AUDIT_WEBHOOK_URL", "https://audit.example.com/ingest")
+    monkeypatch.setenv(
+        "TRADEPULSE_AUDIT_WEBHOOK_URL", "https://audit.example.com/ingest"
+    )
 
     settings = AdminApiSettings()
 

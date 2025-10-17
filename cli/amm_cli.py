@@ -10,7 +10,7 @@ from typing import AsyncIterator, Tuple
 from prometheus_client import start_http_server
 
 from analytics.amm_metrics import publish_metrics, timed_update
-from core.neuro.amm import AMMConfig, AdaptiveMarketMind
+from core.neuro.amm import AdaptiveMarketMind, AMMConfig
 
 REQUIRED_COLUMNS: Tuple[str, ...] = ("x", "R", "kappa")
 _SYMBOL_RE = re.compile(r"^[A-Z0-9]{3,15}$")
@@ -86,7 +86,9 @@ def _parse_optional(row: dict[str, str | None], column: str) -> float | None:
     return float(raw)
 
 
-async def stream_csv(path: Path) -> AsyncIterator[Tuple[float, float, float, float | None]]:
+async def stream_csv(
+    path: Path,
+) -> AsyncIterator[Tuple[float, float, float, float | None]]:
     """Yield validated indicator tuples from a CSV file."""
 
     with path.open("r", newline="", encoding="utf-8") as handle:
@@ -95,11 +97,14 @@ async def stream_csv(path: Path) -> AsyncIterator[Tuple[float, float, float, flo
         missing = [col for col in REQUIRED_COLUMNS if col not in columns]
         if missing:
             raise CSVValidationError(
-                "Missing required columns: " + ", ".join(missing) +
-                ". Expected headers: x, R, kappa and optional H."
+                "Missing required columns: "
+                + ", ".join(missing)
+                + ". Expected headers: x, R, kappa and optional H."
             )
 
-        for line_no, row in enumerate(reader, start=2):  # start=2 accounts for header line
+        for line_no, row in enumerate(
+            reader, start=2
+        ):  # start=2 accounts for header line
             x = _parse_required(row, "x", line_no)
             R = _parse_required(row, "R", line_no)
             kappa = _parse_required(row, "kappa", line_no)
@@ -139,9 +144,24 @@ def main() -> None:
             "and keep risk metrics bounded before enabling live publishing."
         ),
     )
-    ap.add_argument("--csv", type=_existing_csv, required=True, help="CSV with columns: x,R,kappa[,H]")
-    ap.add_argument("--symbol", type=_valid_symbol, default="BTCUSDT", help="Trading symbol (uppercase alphanumeric)")
-    ap.add_argument("--tf", type=_valid_timeframe, default="1m", help="Timeframe notation <number><unit>, e.g. 1m")
+    ap.add_argument(
+        "--csv",
+        type=_existing_csv,
+        required=True,
+        help="CSV with columns: x,R,kappa[,H]",
+    )
+    ap.add_argument(
+        "--symbol",
+        type=_valid_symbol,
+        default="BTCUSDT",
+        help="Trading symbol (uppercase alphanumeric)",
+    )
+    ap.add_argument(
+        "--tf",
+        type=_valid_timeframe,
+        default="1m",
+        help="Timeframe notation <number><unit>, e.g. 1m",
+    )
     ap.add_argument(
         "--metrics-port",
         type=_valid_port,

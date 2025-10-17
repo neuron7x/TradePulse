@@ -1,4 +1,5 @@
 """Shared numeric tolerances to keep tests stable across platforms."""
+
 from __future__ import annotations
 
 from decimal import Decimal

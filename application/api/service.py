@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import asyncio
 import hashlib
 import inspect
 import json
-from json import JSONDecodeError
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from http import HTTPStatus
+from json import JSONDecodeError
 from time import perf_counter
-from typing import Any, Awaitable, Callable, Mapping, Literal
+from typing import Any, Awaitable, Callable, Literal, Mapping
 
 import numpy as np
 import pandas as pd
@@ -27,9 +26,17 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
+from application.api.rate_limit import (
+    RateLimiterSnapshot,
+    SlidingWindowRateLimiter,
+    build_rate_limiter,
+)
 from application.api.security import get_api_security_settings, verify_request_identity
-from application.api.rate_limit import RateLimiterSnapshot, SlidingWindowRateLimiter, build_rate_limiter
-from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
+from application.settings import (
+    AdminApiSettings,
+    ApiRateLimitSettings,
+    ApiSecuritySettings,
+)
 from application.trading import signal_to_dto
 from core.utils.metrics import MetricsCollector, get_metrics_collector
 from domain import Signal, SignalAction
@@ -96,17 +103,23 @@ class TTLCache:
         async with self._lock:
             if len(self._entries) >= self._max_entries:
                 # Drop the stalest entry deterministically (smallest expiry).
-                oldest_key = min(self._entries, key=lambda item: self._entries[item].expires_at)
+                oldest_key = min(
+                    self._entries, key=lambda item: self._entries[item].expires_at
+                )
                 self._entries.pop(oldest_key, None)
             expires = datetime.now(timezone.utc) + timedelta(seconds=self._ttl)
-            self._entries[key] = _CacheEntry(payload=payload, expires_at=expires, etag=etag)
+            self._entries[key] = _CacheEntry(
+                payload=payload, expires_at=expires, etag=etag
+            )
 
     async def snapshot(self) -> CacheSnapshot:
         """Return cache occupancy metrics for readiness probes."""
 
         async with self._lock:
             now = datetime.now(timezone.utc)
-            expired = [key for key, entry in self._entries.items() if entry.expires_at <= now]
+            expired = [
+                key for key, entry in self._entries.items() if entry.expires_at <= now
+            ]
             for key in expired:
                 self._entries.pop(key, None)
             return CacheSnapshot(
@@ -142,10 +155,18 @@ class HealthResponse(BaseModel):
     components: dict[str, ComponentHealth]
 
 
-DependencyProbe = Callable[[], Awaitable[DependencyProbeResult | bool | dict[str, Any]] | DependencyProbeResult | bool | dict[str, Any]]
+DependencyProbe = Callable[
+    [],
+    Awaitable[DependencyProbeResult | bool | dict[str, Any]]
+    | DependencyProbeResult
+    | bool
+    | dict[str, Any],
+]
 
 
-def _coerce_dependency_result(value: DependencyProbeResult | bool | dict[str, Any]) -> DependencyProbeResult:
+def _coerce_dependency_result(
+    value: DependencyProbeResult | bool | dict[str, Any],
+) -> DependencyProbeResult:
     """Normalise supported dependency probe return values."""
 
     if isinstance(value, DependencyProbeResult):
@@ -282,12 +303,28 @@ def _parse_confidence_param(raw: str | None) -> float | None:
 
 
 def get_feature_query_params(
-    limit: int = Query(1, ge=1, le=500, description="Number of feature snapshots to return."),
-    cursor: str | None = Query(None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."),
-    start_at: str | None = Query(None, alias="startAt", description="Filter snapshots on or after this timestamp."),
-    end_at: str | None = Query(None, alias="endAt", description="Filter snapshots on or before this timestamp."),
-    feature_prefix: str | None = Query(None, alias="featurePrefix", description="Return only feature keys with the provided prefix."),
-    feature: list[str] | None = Query(None, alias="feature", description="Specific feature keys to include."),
+    limit: int = Query(
+        1, ge=1, le=500, description="Number of feature snapshots to return."
+    ),
+    cursor: str | None = Query(
+        None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."
+    ),
+    start_at: str | None = Query(
+        None,
+        alias="startAt",
+        description="Filter snapshots on or after this timestamp.",
+    ),
+    end_at: str | None = Query(
+        None, alias="endAt", description="Filter snapshots on or before this timestamp."
+    ),
+    feature_prefix: str | None = Query(
+        None,
+        alias="featurePrefix",
+        description="Return only feature keys with the provided prefix.",
+    ),
+    feature: list[str] | None = Query(
+        None, alias="feature", description="Specific feature keys to include."
+    ),
 ) -> FeatureQueryParams:
     feature_keys: tuple[str, ...] = tuple(dict.fromkeys(feature or []))
     return FeatureQueryParams(
@@ -302,11 +339,25 @@ def get_feature_query_params(
 
 def get_prediction_query_params(
     limit: int = Query(1, ge=1, le=500, description="Number of predictions to return."),
-    cursor: str | None = Query(None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."),
-    start_at: str | None = Query(None, alias="startAt", description="Return predictions generated at or after this time."),
-    end_at: str | None = Query(None, alias="endAt", description="Return predictions generated at or before this time."),
-    action: list[str] | None = Query(None, alias="action", description="Filter predictions by signal action."),
-    min_confidence: str | None = Query(None, alias="minConfidence", description="Minimum signal confidence to include."),
+    cursor: str | None = Query(
+        None, description="Pagination cursor (exclusive) encoded as ISO 8601 timestamp."
+    ),
+    start_at: str | None = Query(
+        None,
+        alias="startAt",
+        description="Return predictions generated at or after this time.",
+    ),
+    end_at: str | None = Query(
+        None,
+        alias="endAt",
+        description="Return predictions generated at or before this time.",
+    ),
+    action: list[str] | None = Query(
+        None, alias="action", description="Filter predictions by signal action."
+    ),
+    min_confidence: str | None = Query(
+        None, alias="minConfidence", description="Minimum signal confidence to include."
+    ),
 ) -> PredictionQueryParams:
     actions: list[SignalAction] = []
     for value in action or []:
@@ -340,7 +391,9 @@ def _ensure_timezone(ts: datetime) -> datetime:
 class MarketBar(BaseModel):
     """Representation of a single OHLCV bar for online inference."""
 
-    timestamp: datetime = Field(..., description="Timestamp of the bar in ISO 8601 format.")
+    timestamp: datetime = Field(
+        ..., description="Timestamp of the bar in ISO 8601 format."
+    )
     open: float | None = Field(None, description="Opening price for the interval.")
     high: float = Field(..., description="High price for the interval.")
     low: float = Field(..., description="Low price for the interval.")
@@ -499,7 +552,9 @@ class OnlineSignalForecaster:
         features = self._pipeline.transform(frame)
         return features
 
-    def _normalise_feature_row(self, row: pd.Series, *, strict: bool) -> pd.Series | None:
+    def _normalise_feature_row(
+        self, row: pd.Series, *, strict: bool
+    ) -> pd.Series | None:
         required_macd_columns = ("macd", "macd_signal", "macd_histogram")
         missing_columns = [col for col in required_macd_columns if col not in row.index]
         if missing_columns:
@@ -550,7 +605,11 @@ class OnlineSignalForecaster:
             normalised = self._normalise_feature_row(raw, strict=strict)
             if normalised is None:
                 continue
-            python_ts = timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp
+            python_ts = (
+                timestamp.to_pydatetime()
+                if hasattr(timestamp, "to_pydatetime")
+                else timestamp
+            )
             rows.append((_ensure_timezone(python_ts), normalised))
         return rows
 
@@ -684,7 +743,9 @@ def _filter_feature_values(
     return values
 
 
-def _hash_payload(prefix: str, payload: BaseModel, extra: Mapping[str, Any] | None = None) -> str:
+def _hash_payload(
+    prefix: str, payload: BaseModel, extra: Mapping[str, Any] | None = None
+) -> str:
     body = payload.model_dump(mode="json")
     if extra:
         body["__query__"] = extra
@@ -707,9 +768,13 @@ class PayloadGuardMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self._max_body_bytes = max_body_bytes
         self._suspicious_keys = {key.lower() for key in suspicious_keys}
-        self._suspicious_substrings = tuple(sub.lower() for sub in suspicious_substrings)
+        self._suspicious_substrings = tuple(
+            sub.lower() for sub in suspicious_substrings
+        )
 
-    async def dispatch(self, request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
         if request.method in {"POST", "PUT", "PATCH"}:
             content_length = request.headers.get("content-length")
             if content_length is not None:
@@ -733,7 +798,9 @@ class PayloadGuardMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Request body exceeds configured limit."},
                 )
 
-            content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+            content_type = (
+                request.headers.get("content-type", "").split(";")[0].strip().lower()
+            )
             if content_type in {"application/json", "application/problem+json", ""}:
                 if body:
                     try:
@@ -861,7 +928,9 @@ def create_app(
             if error.get("type") == "missing"
         ]
         joined = ", ".join(sorted(set(missing))) or "OAuth configuration values"
-        raise RuntimeError(("Missing required OAuth configuration: {}.").format(joined)) from exc
+        raise RuntimeError(
+            ("Missing required OAuth configuration: {}.").format(joined)
+        ) from exc
     if security_settings is not None:
         setattr(get_api_security_settings, "_instance", resolved_security_settings)
     audit_sink = None
@@ -882,7 +951,9 @@ def create_app(
 
     audit_logger = secret_manager.audit_logger
     if audit_logger is None:
-        audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
+        audit_logger = AuditLogger(
+            secret_resolver=audit_secret_provider, sink=audit_sink
+        )
 
     kill_switch_store_settings = resolved_settings.kill_switch_postgres
     if kill_switch_store_settings is not None:
@@ -903,7 +974,9 @@ def create_app(
             backoff_multiplier=float(kill_switch_store_settings.backoff_multiplier),
         )
     else:
-        kill_switch_store = SQLiteKillSwitchStateStore(resolved_settings.kill_switch_store_path)
+        kill_switch_store = SQLiteKillSwitchStateStore(
+            resolved_settings.kill_switch_store_path
+        )
     risk_manager_facade = RiskManagerFacade(
         RiskManager(RiskLimits(), kill_switch_store=kill_switch_store)
     )
@@ -950,7 +1023,9 @@ def create_app(
         PayloadGuardMiddleware,
         max_body_bytes=int(resolved_security_settings.max_request_bytes),
         suspicious_keys=set(resolved_security_settings.suspicious_json_keys),
-        suspicious_substrings=tuple(resolved_security_settings.suspicious_json_substrings),
+        suspicious_substrings=tuple(
+            resolved_security_settings.suspicious_json_substrings
+        ),
     )
 
     app.include_router(
@@ -1017,11 +1092,18 @@ def create_app(
             response.headers.setdefault("Pragma", "no-cache")
             _append_vary_header(response, "Authorization")
         else:
-            response.headers["Cache-Control"] = f"private, max-age={ttl_cache.ttl_seconds}"
+            response.headers["Cache-Control"] = (
+                f"private, max-age={ttl_cache.ttl_seconds}"
+            )
         _append_vary_header(response, "Accept")
         return response
 
-    @app.get("/health", tags=["health"], summary="Health probe", response_model=HealthResponse)
+    @app.get(
+        "/health",
+        tags=["health"],
+        summary="Health probe",
+        response_model=HealthResponse,
+    )
     async def health_check(response: Response) -> HealthResponse:
         overall_start = perf_counter()
         metrics: MetricsCollector | None = getattr(app.state, "metrics", None)
@@ -1033,7 +1115,9 @@ def create_app(
         kill_metrics = {"kill_switch_engaged": kill_engaged}
         if kill_switch.reason:
             kill_metrics["reason"] = kill_switch.reason
-        kill_detail = kill_switch.reason if kill_engaged and kill_switch.reason else None
+        kill_detail = (
+            kill_switch.reason if kill_engaged and kill_switch.reason else None
+        )
         components["risk_manager"] = ComponentHealth(
             healthy=not kill_engaged,
             status="operational" if not kill_engaged else "failed",
@@ -1043,7 +1127,9 @@ def create_app(
 
         cache_snapshot = await ttl_cache.snapshot()
         cache_utilisation = (
-            cache_snapshot.entries / cache_snapshot.max_entries if cache_snapshot.max_entries else 0.0
+            cache_snapshot.entries / cache_snapshot.max_entries
+            if cache_snapshot.max_entries
+            else 0.0
         )
         cache_metrics = {
             "entries": cache_snapshot.entries,
@@ -1063,7 +1149,9 @@ def create_app(
             "backend": client_snapshot.backend,
             "tracked_keys": client_snapshot.tracked_keys,
             "max_utilization": (
-                round(client_snapshot.max_utilization, 4) if client_snapshot.max_utilization is not None else None
+                round(client_snapshot.max_utilization, 4)
+                if client_snapshot.max_utilization is not None
+                else None
             ),
             "saturated_keys": list(client_snapshot.saturated_keys),
             "default_policy": {
@@ -1073,7 +1161,10 @@ def create_app(
         }
         client_healthy = True
         client_status = "operational"
-        if client_snapshot.max_utilization is not None and client_snapshot.max_utilization >= 0.9:
+        if (
+            client_snapshot.max_utilization is not None
+            and client_snapshot.max_utilization >= 0.9
+        ):
             client_healthy = False
             client_status = "degraded"
         if client_snapshot.saturated_keys:
@@ -1093,7 +1184,10 @@ def create_app(
             "max_utilization": round(admin_snapshot.max_utilization, 4),
             "saturated_identifiers": list(admin_snapshot.saturated_identifiers),
         }
-        admin_healthy = admin_snapshot.max_utilization < 1.0 and not admin_snapshot.saturated_identifiers
+        admin_healthy = (
+            admin_snapshot.max_utilization < 1.0
+            and not admin_snapshot.saturated_identifiers
+        )
         components["admin_rate_limiter"] = ComponentHealth(
             healthy=admin_healthy,
             status="operational" if admin_healthy else "degraded",
@@ -1133,14 +1227,22 @@ def create_app(
             )
 
         severity = "ready"
-        if any(component.status == "failed" for component in components.values()) or dependency_failures or kill_engaged:
+        if (
+            any(component.status == "failed" for component in components.values())
+            or dependency_failures
+            or kill_engaged
+        ):
             severity = "failed"
         elif any(component.status == "degraded" for component in components.values()):
             severity = "degraded"
 
         health_payload = HealthResponse(status=severity, components=components)
 
-        probe_status = status.HTTP_200_OK if severity == "ready" else status.HTTP_503_SERVICE_UNAVAILABLE
+        probe_status = (
+            status.HTTP_200_OK
+            if severity == "ready"
+            else status.HTTP_503_SERVICE_UNAVAILABLE
+        )
         response.status_code = probe_status
 
         health_state: HealthServer | None = app.state.health_server
@@ -1171,7 +1273,9 @@ def create_app(
             metrics = get_metrics_collector()
 
         if not metrics.enabled:
-            raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, "Prometheus metrics are disabled")
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE, "Prometheus metrics are disabled"
+            )
 
         payload = metrics.render_prometheus()
         return PlainTextResponse(
@@ -1418,8 +1522,12 @@ def create_app(
         )
 
     @app.exception_handler(HTTPException)
-    async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
-        default_code = DEFAULT_ERROR_CODES.get(exc.status_code, ApiErrorCode.INTERNAL).value
+    async def http_exception_handler(
+        request: Request, exc: HTTPException
+    ) -> JSONResponse:
+        default_code = DEFAULT_ERROR_CODES.get(
+            exc.status_code, ApiErrorCode.INTERNAL
+        ).value
         detail = exc.detail
         message: str | None = None
         meta: Any | None = None
@@ -1443,7 +1551,9 @@ def create_app(
         }
         if meta is not None:
             error_content["meta"] = meta
-        return JSONResponse(status_code=exc.status_code, content={"error": error_content})
+        return JSONResponse(
+            status_code=exc.status_code, content={"error": error_content}
+        )
 
     return app
 

@@ -6,6 +6,7 @@ standard error metrics using only NumPy.  Each function validates inputs,
 handles edge-cases such as empty arrays and division-by-zero, and returns a
 plain ``float`` suitable for logging or Prometheus gauges.
 """
+
 from __future__ import annotations
 
 from typing import Iterable

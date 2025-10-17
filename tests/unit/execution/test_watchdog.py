@@ -46,6 +46,7 @@ def test_watchdog_updates_live_probe_status() -> None:
             health_probe_interval=0.1,
         )
         try:
+
             def worker(stop_event: threading.Event) -> None:
                 while not stop_event.wait(0.05):
                     pass

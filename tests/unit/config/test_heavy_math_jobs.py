@@ -15,15 +15,25 @@ def heavy_job_config() -> dict[str, object]:
         return yaml.safe_load(handle)
 
 
-def test_heavy_jobs_defined_for_all_indicators(heavy_job_config: dict[str, object]) -> None:
+def test_heavy_jobs_defined_for_all_indicators(
+    heavy_job_config: dict[str, object],
+) -> None:
     jobs = heavy_job_config.get("jobs", {})
-    expected = {"kuramoto_validation", "ricci_curvature_validation", "hurst_long_memory_validation"}
+    expected = {
+        "kuramoto_validation",
+        "ricci_curvature_validation",
+        "hurst_long_memory_validation",
+    }
     assert expected.issubset(jobs.keys()), "Missing heavy-math job definitions"
 
 
 @pytest.mark.parametrize(
     "job_name",
-    ["kuramoto_validation", "ricci_curvature_validation", "hurst_long_memory_validation"],
+    [
+        "kuramoto_validation",
+        "ricci_curvature_validation",
+        "hurst_long_memory_validation",
+    ],
 )
 def test_heavy_jobs_include_resource_quotas(
     job_name: str, heavy_job_config: dict[str, object]

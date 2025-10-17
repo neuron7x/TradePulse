@@ -21,7 +21,11 @@ from pydantic import (
     model_validator,
 )
 
-from core.data.validation import TimeSeriesValidationConfig, TimeSeriesValidationError, validate_timeseries_frame
+from core.data.validation import (
+    TimeSeriesValidationConfig,
+    TimeSeriesValidationError,
+    validate_timeseries_frame,
+)
 
 
 class QualityGateError(TimeSeriesValidationError):
@@ -33,7 +37,9 @@ class RangeCheck(BaseModel):
 
     model_config = ConfigDict(frozen=True, strict=True)
 
-    column: StrictStr = Field(..., min_length=1, description="Column subject to the range guard")
+    column: StrictStr = Field(
+        ..., min_length=1, description="Column subject to the range guard"
+    )
     min_value: StrictFloat | StrictInt | None = Field(
         default=None,
         description="Lower bound allowed for the column. ``None`` disables the guard.",
@@ -42,13 +48,19 @@ class RangeCheck(BaseModel):
         default=None,
         description="Upper bound allowed for the column. ``None`` disables the guard.",
     )
-    inclusive_min: StrictBool = Field(default=True, description="Treat the lower bound as inclusive")
-    inclusive_max: StrictBool = Field(default=True, description="Treat the upper bound as inclusive")
+    inclusive_min: StrictBool = Field(
+        default=True, description="Treat the lower bound as inclusive"
+    )
+    inclusive_max: StrictBool = Field(
+        default=True, description="Treat the upper bound as inclusive"
+    )
 
     @model_validator(mode="after")
     def _ensure_bounds(self) -> "RangeCheck":
         if self.min_value is None and self.max_value is None:
-            raise QualityGateError("RangeCheck must define at least a minimum or maximum bound")
+            raise QualityGateError(
+                "RangeCheck must define at least a minimum or maximum bound"
+            )
         if (
             self.min_value is not None
             and self.max_value is not None
@@ -88,7 +100,9 @@ class TemporalContract(BaseModel):
         description="Maximum allowed delay between now and the last timestamp",
     )
 
-    @field_validator("earliest", "latest", "expected_start", "expected_end", mode="before")
+    @field_validator(
+        "earliest", "latest", "expected_start", "expected_end", mode="before"
+    )
     @classmethod
     def _coerce_timestamp(cls, value: object) -> pd.Timestamp | None:
         if value is None:
@@ -98,7 +112,9 @@ class TemporalContract(BaseModel):
         try:
             return pd.Timestamp(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive path
-            raise QualityGateError(f"Unable to parse timestamp value: {value!r}") from exc
+            raise QualityGateError(
+                f"Unable to parse timestamp value: {value!r}"
+            ) from exc
 
     @field_validator("tolerance", mode="before")
     @classmethod
@@ -112,7 +128,9 @@ class TemporalContract(BaseModel):
         try:
             return pd.Timedelta(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive path
-            raise QualityGateError(f"Unable to parse timedelta value: {value!r}") from exc
+            raise QualityGateError(
+                f"Unable to parse timedelta value: {value!r}"
+            ) from exc
 
     @field_validator("max_lag", mode="before")
     @classmethod
@@ -126,12 +144,20 @@ class TemporalContract(BaseModel):
         try:
             return pd.Timedelta(value)
         except (TypeError, ValueError) as exc:  # pragma: no cover - defensive path
-            raise QualityGateError(f"Unable to parse timedelta value: {value!r}") from exc
+            raise QualityGateError(
+                f"Unable to parse timedelta value: {value!r}"
+            ) from exc
 
     @model_validator(mode="after")
     def _validate_expectations(self) -> "TemporalContract":
-        if self.expected_start and self.earliest and self.expected_start < self.earliest:
-            raise QualityGateError("expected_start must not be before the earliest bound")
+        if (
+            self.expected_start
+            and self.earliest
+            and self.expected_start < self.earliest
+        ):
+            raise QualityGateError(
+                "expected_start must not be before the earliest bound"
+            )
         if self.expected_end and self.latest and self.expected_end > self.latest:
             raise QualityGateError("expected_end must not exceed the latest bound")
         return self
@@ -142,7 +168,9 @@ class QualityGateConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True, strict=True)
 
-    schema: TimeSeriesValidationConfig = Field(..., description="Underlying schema contract")
+    schema: TimeSeriesValidationConfig = Field(
+        ..., description="Underlying schema contract"
+    )
     price_column: StrictStr = Field(
         default="close",
         min_length=1,
@@ -175,7 +203,10 @@ class QualityGateConfig(BaseModel):
 
     @model_validator(mode="after")
     def _validate_price_column(self) -> "QualityGateConfig":
-        available = {self.schema.timestamp_column, *(col.name for col in self.schema.value_columns)}
+        available = {
+            self.schema.timestamp_column,
+            *(col.name for col in self.schema.value_columns),
+        }
         if self.price_column not in available:
             raise QualityGateError(
                 f"price_column '{self.price_column}' is not declared in the validation schema"
@@ -262,10 +293,14 @@ def _apply_range_checks(
         mask = pd.Series(False, index=frame.index)
         if check.min_value is not None:
             min_value = float(check.min_value)
-            mask |= series <= min_value if not check.inclusive_min else series < min_value
+            mask |= (
+                series <= min_value if not check.inclusive_min else series < min_value
+            )
         if check.max_value is not None:
             max_value = float(check.max_value)
-            mask |= series >= max_value if not check.inclusive_max else series > max_value
+            mask |= (
+                series >= max_value if not check.inclusive_max else series > max_value
+            )
         mask &= series.notna()
         if mask.any():
             payload = frame.loc[mask].copy()
@@ -305,17 +340,19 @@ def _enforce_temporal_contract(
 
     earliest = _align_contract_timestamp(contract.earliest, field="earliest")
     latest = _align_contract_timestamp(contract.latest, field="latest")
-    expected_start = _align_contract_timestamp(contract.expected_start, field="expected_start")
-    expected_end = _align_contract_timestamp(contract.expected_end, field="expected_end")
+    expected_start = _align_contract_timestamp(
+        contract.expected_start, field="expected_start"
+    )
+    expected_end = _align_contract_timestamp(
+        contract.expected_end, field="expected_end"
+    )
     if earliest is not None and first < earliest:
         breaches.append(
             f"First timestamp {first} is earlier than allowed earliest {earliest}"
         )
         blocked = True
     if latest is not None and last > latest:
-        breaches.append(
-            f"Last timestamp {last} exceeds allowed latest {latest}"
-        )
+        breaches.append(f"Last timestamp {last} exceeds allowed latest {latest}")
         blocked = True
     if expected_start is not None:
         delta = abs(first - expected_start)
@@ -342,7 +379,9 @@ def _enforce_temporal_contract(
     return tuple(breaches), blocked
 
 
-def validate_and_quarantine(frame: pd.DataFrame, gate: QualityGateConfig) -> QualityReport:
+def validate_and_quarantine(
+    frame: pd.DataFrame, gate: QualityGateConfig
+) -> QualityReport:
     """Validate a DataFrame and quarantine anomalies according to the configured gates."""
 
     config = gate.schema
@@ -362,7 +401,9 @@ def validate_and_quarantine(frame: pd.DataFrame, gate: QualityGateConfig) -> Qua
     )
 
     clean = buckets["clean"].reset_index()
-    quarantined = pd.concat([buckets["spikes"], buckets["duplicates"]]).drop_duplicates()
+    quarantined = pd.concat(
+        [buckets["spikes"], buckets["duplicates"]]
+    ).drop_duplicates()
     quarantined = pd.concat(
         [quarantined, duplicates.set_index(timestamp_col)], axis=0
     ).drop_duplicates()
@@ -388,7 +429,10 @@ def validate_and_quarantine(frame: pd.DataFrame, gate: QualityGateConfig) -> Qua
         combined_range_indexed = combined_range.set_index(timestamp_col)
         if not quarantined.empty:
             quarantined = (
-                pd.concat([quarantined.set_index(timestamp_col), combined_range_indexed], axis=0)
+                pd.concat(
+                    [quarantined.set_index(timestamp_col), combined_range_indexed],
+                    axis=0,
+                )
                 .drop_duplicates()
                 .reset_index()
             )
@@ -429,4 +473,3 @@ __all__ = [
     "quarantine_anomalies",
     "validate_and_quarantine",
 ]
-

@@ -2,18 +2,27 @@ from __future__ import annotations
 
 from collections import deque
 from typing import Callable
+
 import pytest
 
 from backtest.strategies.amm_combo import AMMComboStrategy, AMMStrategyConfig
 
 
 class DummyAMM:
-    def __init__(self, _cfg: AMMStrategyConfig, *, outputs: deque[dict], use_internal_entropy: bool) -> None:
+    def __init__(
+        self,
+        _cfg: AMMStrategyConfig,
+        *,
+        outputs: deque[dict],
+        use_internal_entropy: bool,
+    ) -> None:
         self.outputs = outputs
         self.use_internal_entropy = use_internal_entropy
         self.calls: list[tuple[float, float, float, float | None]] = []
 
-    def update(self, x_t: float, R_t: float, kappa_t: float, H_t: float | None = None) -> dict:
+    def update(
+        self, x_t: float, R_t: float, kappa_t: float, H_t: float | None = None
+    ) -> dict:
         self.calls.append((x_t, R_t, kappa_t, H_t))
         if self.outputs:
             return self.outputs.popleft()
@@ -47,7 +56,9 @@ def dummy_strategy(
 
     monkeypatch.setattr(
         "backtest.strategies.amm_combo.AdaptiveMarketMind",
-        lambda cfg, use_internal_entropy=True: factory(cfg, use_internal_entropy=use_internal_entropy),
+        lambda cfg, use_internal_entropy=True: factory(
+            cfg, use_internal_entropy=use_internal_entropy
+        ),
     )
 
     return creator

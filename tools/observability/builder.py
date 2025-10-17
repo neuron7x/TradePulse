@@ -45,8 +45,12 @@ def _load_json(path: Path) -> Dict[str, Any]:
 def _validate_labels(labels: Any, *, path: Path) -> List[str]:
     if labels is None:
         return []
-    if not isinstance(labels, list) or not all(isinstance(label, str) for label in labels):
-        raise ObservabilityConfigError(f"Metric labels must be a list of strings in {path}")
+    if not isinstance(labels, list) or not all(
+        isinstance(label, str) for label in labels
+    ):
+        raise ObservabilityConfigError(
+            f"Metric labels must be a list of strings in {path}"
+        )
     if len({label for label in labels}) != len(labels):
         raise ObservabilityConfigError(f"Duplicate label names found in {path}")
     return labels
@@ -58,7 +62,9 @@ def validate_metrics(path: Path) -> List[MetricDefinition]:
     payload = _load_json(path)
     metrics = payload.get("metrics")
     if not isinstance(metrics, list) or not metrics:
-        raise ObservabilityConfigError("metrics.json must define a non-empty `metrics` array")
+        raise ObservabilityConfigError(
+            "metrics.json must define a non-empty `metrics` array"
+        )
 
     seen: set[str] = set()
     validated: List[MetricDefinition] = []
@@ -70,7 +76,9 @@ def validate_metrics(path: Path) -> List[MetricDefinition]:
         if not isinstance(name, str) or not METRIC_NAME_RE.match(name):
             raise ObservabilityConfigError(f"Invalid metric name: {name!r}")
         if name in seen:
-            raise ObservabilityConfigError(f"Duplicate metric definition detected: {name}")
+            raise ObservabilityConfigError(
+                f"Duplicate metric definition detected: {name}"
+            )
         seen.add(name)
 
         metric_type = entry.get("type")
@@ -121,7 +129,9 @@ def validate_alerts(path: Path, metric_names: Iterable[str]) -> Dict[str, Any]:
     payload = _load_json(path)
     groups = payload.get("groups")
     if not isinstance(groups, list) or not groups:
-        raise ObservabilityConfigError("alerts.json must define a non-empty `groups` array")
+        raise ObservabilityConfigError(
+            "alerts.json must define a non-empty `groups` array"
+        )
 
     metric_name_set = set(metric_names)
     for group in groups:
@@ -141,10 +151,14 @@ def validate_alerts(path: Path, metric_names: Iterable[str]) -> Dict[str, Any]:
                 raise ObservabilityConfigError("Each alert rule must be an object")
             alert_name = rule.get("alert")
             if not isinstance(alert_name, str) or not alert_name.strip():
-                raise ObservabilityConfigError("Alert rules must define an `alert` name")
+                raise ObservabilityConfigError(
+                    "Alert rules must define an `alert` name"
+                )
             expr = rule.get("expr")
             if not isinstance(expr, str) or not expr.strip():
-                raise ObservabilityConfigError(f"Alert {alert_name} must define an expression")
+                raise ObservabilityConfigError(
+                    f"Alert {alert_name} must define an expression"
+                )
 
             tokens = set(_extract_metric_tokens(expr))
             unknown = tokens - metric_name_set
@@ -155,26 +169,40 @@ def validate_alerts(path: Path, metric_names: Iterable[str]) -> Dict[str, Any]:
 
             labels = rule.get("labels", {})
             if labels is not None and not isinstance(labels, dict):
-                raise ObservabilityConfigError(f"Alert {alert_name} labels must be an object")
+                raise ObservabilityConfigError(
+                    f"Alert {alert_name} labels must be an object"
+                )
             annotations = rule.get("annotations", {})
             if annotations is not None and not isinstance(annotations, dict):
-                raise ObservabilityConfigError(f"Alert {alert_name} annotations must be an object")
+                raise ObservabilityConfigError(
+                    f"Alert {alert_name} annotations must be an object"
+                )
 
     return payload
 
 
-def _validate_dashboard_payload(payload: Dict[str, Any], source: Path) -> Dict[str, Any]:
+def _validate_dashboard_payload(
+    payload: Dict[str, Any], source: Path
+) -> Dict[str, Any]:
     required_fields = ["uid", "title", "panels"]
     for field in required_fields:
         if field not in payload:
-            raise ObservabilityConfigError(f"Dashboard {source.name} missing required field {field!r}")
+            raise ObservabilityConfigError(
+                f"Dashboard {source.name} missing required field {field!r}"
+            )
 
     if not isinstance(payload["uid"], str) or not payload["uid"].strip():
-        raise ObservabilityConfigError(f"Dashboard {source.name} must define a non-empty uid")
+        raise ObservabilityConfigError(
+            f"Dashboard {source.name} must define a non-empty uid"
+        )
     if not isinstance(payload["title"], str) or not payload["title"].strip():
-        raise ObservabilityConfigError(f"Dashboard {source.name} must define a non-empty title")
+        raise ObservabilityConfigError(
+            f"Dashboard {source.name} must define a non-empty title"
+        )
     if not isinstance(payload["panels"], list) or not payload["panels"]:
-        raise ObservabilityConfigError(f"Dashboard {source.name} requires at least one panel")
+        raise ObservabilityConfigError(
+            f"Dashboard {source.name} requires at least one panel"
+        )
 
     return payload
 
@@ -186,7 +214,9 @@ def load_dashboards(root: Path) -> List[Dict[str, Any]]:
         dashboards.append(_validate_dashboard_payload(payload, path))
 
     if not dashboards:
-        raise ObservabilityConfigError("No dashboards found. Provide at least one JSON dashboard definition.")
+        raise ObservabilityConfigError(
+            "No dashboards found. Provide at least one JSON dashboard definition."
+        )
 
     uids = [dashboard["uid"] for dashboard in dashboards]
     if len(set(uids)) != len(uids):
@@ -282,14 +312,18 @@ def build_bundle(root: Path, output_dir: Path) -> Dict[str, Any]:
     for dashboard in dashboards:
         uid = dashboard["uid"]
         path = grafana_dir / f"{uid}.json"
-        path.write_text(json.dumps(dashboard, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        path.write_text(
+            json.dumps(dashboard, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
 
     manifest = {
         "metrics": [metric.__dict__ for metric in metrics],
         "alerts": alerts["groups"],
         "dashboards": [dashboard["uid"] for dashboard in dashboards],
     }
-    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    (output_dir / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
     return manifest
 
@@ -299,8 +333,15 @@ def _default_root() -> Path:
 
 
 def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Compile observability definitions into artifacts")
-    parser.add_argument("--root", type=Path, default=_default_root(), help="Root folder containing observability definitions")
+    parser = argparse.ArgumentParser(
+        description="Compile observability definitions into artifacts"
+    )
+    parser.add_argument(
+        "--root",
+        type=Path,
+        default=_default_root(),
+        help="Root folder containing observability definitions",
+    )
     parser.add_argument(
         "--output-dir",
         type=Path,

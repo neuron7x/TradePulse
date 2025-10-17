@@ -49,4 +49,3 @@ def ensure_secure_postgres_uri(uri: str) -> str:
         raise ValueError(msg)
 
     return uri
-

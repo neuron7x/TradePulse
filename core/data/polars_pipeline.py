@@ -1,4 +1,5 @@
 """Utilities for constructing zero-copy Polars pipelines."""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -48,7 +49,10 @@ def scan_lazy(
     """Create a lazy Polars scan with streaming-friendly defaults."""
     module = _require_polars()
     _logger.debug(
-        "Creating Polars lazy scan", path=str(path), columns=columns, memory_map=memory_map
+        "Creating Polars lazy scan",
+        path=str(path),
+        columns=columns,
+        memory_map=memory_map,
     )
     lazy_frame = module.scan_csv(
         path,
@@ -117,4 +121,3 @@ def enable_global_string_cache(enable: bool = True) -> None:
     """Enable or disable the Polars global string cache."""
     module = _require_polars()
     module.Config.set_global_string_cache(enable)
-

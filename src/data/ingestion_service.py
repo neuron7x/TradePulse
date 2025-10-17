@@ -1,4 +1,5 @@
 """Data ingestion orchestration with caching helpers."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,8 @@ import pandas as pd
 from core.data.backfill import CacheKey, CacheRegistry, normalise_index
 from core.data.catalog import normalize_symbol, normalize_venue
 from core.data.ingestion import DataIngestor
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.validation import (
     TimeSeriesValidationConfig,
     TimeSeriesValidationError,
@@ -214,7 +216,12 @@ class DataIngestionCacheService:
 
         return sorted(
             self._metadata.values(),
-            key=lambda entry: (entry.key.layer, entry.key.symbol, entry.key.venue, entry.key.timeframe),
+            key=lambda entry: (
+                entry.key.layer,
+                entry.key.symbol,
+                entry.key.venue,
+                entry.key.timeframe,
+            ),
         )
 
     def clear(self) -> None:
@@ -253,7 +260,9 @@ class DataIngestionCacheService:
             end = frame.index.max().to_pydatetime()
             rows = int(frame.shape[0])
         timestamp = self._clock()
-        return CacheEntrySnapshot(key=key, rows=rows, start=start, end=end, last_updated=timestamp)
+        return CacheEntrySnapshot(
+            key=key, rows=rows, start=start, end=end, last_updated=timestamp
+        )
 
     def _build_key(
         self,
@@ -263,9 +272,16 @@ class DataIngestionCacheService:
         timeframe: str,
         instrument_type: InstrumentType,
     ) -> CacheKey:
-        canonical_symbol = normalize_symbol(symbol, instrument_type_hint=instrument_type)
+        canonical_symbol = normalize_symbol(
+            symbol, instrument_type_hint=instrument_type
+        )
         canonical_venue = normalize_venue(venue)
-        return CacheKey(layer=layer, symbol=canonical_symbol, venue=canonical_venue, timeframe=timeframe)
+        return CacheKey(
+            layer=layer,
+            symbol=canonical_symbol,
+            venue=canonical_venue,
+            timeframe=timeframe,
+        )
 
 
 class DataIntegrityError(ValueError):

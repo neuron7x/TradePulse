@@ -4,17 +4,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, Callable, Literal
 from weakref import finalize as _finalize
 
-from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
-
 import numpy as np
 
-from .base import BaseFeature, FeatureResult
 from ..utils.memory import ArrayPool
+from .base import BaseFeature, FeatureResult
 
 
 @dataclass(slots=True)
@@ -79,7 +78,9 @@ class IndicatorPipeline:
     def features(self) -> tuple[BaseFeature, ...]:
         return self._features
 
-    def _prepare_buffer(self, data: np.ndarray | Sequence[float]) -> tuple[np.ndarray, bool]:
+    def _prepare_buffer(
+        self, data: np.ndarray | Sequence[float]
+    ) -> tuple[np.ndarray, bool]:
         array = np.asarray(data)
         borrowed = False
         if array.dtype != self._dtype or not array.flags.c_contiguous:
@@ -91,7 +92,9 @@ class IndicatorPipeline:
 
     def _create_executor(self) -> Executor:
         if self._execution == "thread":
-            return ThreadPoolExecutor(max_workers=self._max_workers, thread_name_prefix="indicator-pipeline")
+            return ThreadPoolExecutor(
+                max_workers=self._max_workers, thread_name_prefix="indicator-pipeline"
+            )
         if self._execution == "process":
             return ProcessPoolExecutor(max_workers=self._max_workers)
         raise RuntimeError("Executor requested for sequential pipeline")
@@ -123,7 +126,9 @@ class IndicatorPipeline:
                     raise RuntimeError("Parallel execution requires an executor")
                 tasks: list[Future[FeatureResult]] = []
                 for feature in self._features:
-                    tasks.append(self._executor.submit(_run_feature, feature, buffer, kwargs))
+                    tasks.append(
+                        self._executor.submit(_run_feature, feature, buffer, kwargs)
+                    )
                 for future in tasks:
                     result = future.result()
                     values[result.name] = result.value
@@ -140,7 +145,9 @@ class IndicatorPipeline:
         if cleanup is not None:
             finalizer = _finalize(buffer, cleanup)
 
-        result = PipelineResult(values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer)
+        result = PipelineResult(
+            values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer
+        )
         return result
 
     def close(self, *, wait: bool = False) -> None:
@@ -154,14 +161,18 @@ class IndicatorPipeline:
     def __enter__(self) -> IndicatorPipeline:
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001 - context manager contract
+    def __exit__(
+        self, exc_type, exc, tb
+    ) -> None:  # noqa: ANN001 - context manager contract
         self.close(wait=exc_type is None)
 
     def __del__(self) -> None:  # pragma: no cover - best effort cleanup
         self.close(wait=False)
 
 
-def _run_feature(feature: BaseFeature, data: np.ndarray, kwargs: Mapping[str, Any]) -> FeatureResult:
+def _run_feature(
+    feature: BaseFeature, data: np.ndarray, kwargs: Mapping[str, Any]
+) -> FeatureResult:
     if kwargs:
         return feature.transform(data, **dict(kwargs))
     return feature.transform(data)

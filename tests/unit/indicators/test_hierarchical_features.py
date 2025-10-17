@@ -37,7 +37,9 @@ def _order_book(freq: str) -> pd.DataFrame:
         },
         index=index,
     )
-    return resample_order_book(levels, freq=freq, bid_cols=["bid_1", "bid_2"], ask_cols=["ask_1", "ask_2"])
+    return resample_order_book(
+        levels, freq=freq, bid_cols=["bid_1", "bid_2"], ask_cols=["ask_1", "ask_2"]
+    )
 
 
 def test_hierarchical_features_with_benchmarks():
@@ -58,4 +60,3 @@ def test_shannon_entropy_float32_precision():
     entropy = _shannon_entropy(samples)
     assert isinstance(entropy, float)
     assert entropy >= 0.0
-

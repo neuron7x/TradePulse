@@ -1,8 +1,8 @@
 """Core runtime helpers shared across the ``scripts`` package."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import locale
 import logging
 import os
@@ -22,7 +22,9 @@ _LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 class UTCFormatter(logging.Formatter):
     """Format timestamps using ISO-8601 in UTC regardless of host settings."""
 
-    def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:  # noqa: N802
+    def formatTime(
+        self, record: logging.LogRecord, datefmt: str | None = None
+    ) -> str:  # noqa: N802
         dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
         if datefmt:
             return dt.strftime(datefmt)
@@ -42,7 +44,11 @@ def configure_deterministic_runtime(
 ) -> None:
     """Apply deterministic defaults for random seed and locale."""
 
-    resolved_seed = seed if seed is not None else int(os.getenv("SCRIPTS_RANDOM_SEED", DEFAULT_SEED))
+    resolved_seed = (
+        seed
+        if seed is not None
+        else int(os.getenv("SCRIPTS_RANDOM_SEED", DEFAULT_SEED))
+    )
     resolved_locale = locale_name or os.getenv("SCRIPTS_LOCALE", DEFAULT_LOCALE)
 
     apply_thread_determinism()

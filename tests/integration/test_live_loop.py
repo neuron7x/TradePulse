@@ -61,13 +61,23 @@ def live_loop_config(tmp_path: Path) -> LiveLoopConfig:
     )
 
 
-def test_live_loop_recovers_and_requeues_orders(live_loop_config: LiveLoopConfig) -> None:
+def test_live_loop_recovers_and_requeues_orders(
+    live_loop_config: LiveLoopConfig,
+) -> None:
     connector = RecoveryConnector()
     risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
-    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+    loop = LiveExecutionLoop(
+        {"binance": connector}, risk_manager, config=live_loop_config
+    )
 
     loop.start(cold_start=True)
-    order = Order(symbol="BTCUSDT", side=OrderSide.BUY, quantity=0.2, price=20_000, order_type=OrderType.LIMIT)
+    order = Order(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=0.2,
+        price=20_000,
+        order_type=OrderType.LIMIT,
+    )
     loop.submit_order("binance", order, correlation_id="ord-1")
 
     order_id: str | None = None
@@ -84,11 +94,19 @@ def test_live_loop_recovers_and_requeues_orders(live_loop_config: LiveLoopConfig
     assert connector.placements == 1
     connector.drop_order(order_id)
     stray = connector.place_order(
-        Order(symbol="BTCUSDT", side=OrderSide.SELL, quantity=0.1, price=20_100, order_type=OrderType.LIMIT)
+        Order(
+            symbol="BTCUSDT",
+            side=OrderSide.SELL,
+            quantity=0.1,
+            price=20_100,
+            order_type=OrderType.LIMIT,
+        )
     )
 
     restart_risk = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
-    loop_restart = LiveExecutionLoop({"binance": connector}, restart_risk, config=live_loop_config)
+    loop_restart = LiveExecutionLoop(
+        {"binance": connector}, restart_risk, config=live_loop_config
+    )
     loop_restart.start(cold_start=False)
 
     for _ in range(50):
@@ -97,20 +115,30 @@ def test_live_loop_recovers_and_requeues_orders(live_loop_config: LiveLoopConfig
         time.sleep(0.05)
     assert connector.placements >= 2
 
-    adopted_ids = [o.order_id for o in loop_restart._contexts["binance"].oms.outstanding() if o.order_id]
+    adopted_ids = [
+        o.order_id
+        for o in loop_restart._contexts["binance"].oms.outstanding()
+        if o.order_id
+    ]
     assert stray.order_id in adopted_ids
 
     loop_restart.shutdown()
 
 
-def test_live_loop_emits_reconnect_on_heartbeat_failure(live_loop_config: LiveLoopConfig) -> None:
+def test_live_loop_emits_reconnect_on_heartbeat_failure(
+    live_loop_config: LiveLoopConfig,
+) -> None:
     connector = FlakyConnector()
     risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
-    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+    loop = LiveExecutionLoop(
+        {"binance": connector}, risk_manager, config=live_loop_config
+    )
 
     reconnect_events: list[tuple[str, int]] = []
 
-    def on_reconnect(venue: str, attempt: int, delay: float, exc: Exception | None) -> None:
+    def on_reconnect(
+        venue: str, attempt: int, delay: float, exc: Exception | None
+    ) -> None:
         reconnect_events.append((venue, attempt))
 
     loop.on_reconnect.connect(on_reconnect)
@@ -130,10 +158,14 @@ def test_live_loop_emits_reconnect_on_heartbeat_failure(live_loop_config: LiveLo
     assert connector.reconnects >= 1
 
 
-def test_live_loop_cancel_and_kill_switch_flushes_orders(live_loop_config: LiveLoopConfig) -> None:
+def test_live_loop_cancel_and_kill_switch_flushes_orders(
+    live_loop_config: LiveLoopConfig,
+) -> None:
     connector = RecoveryConnector()
     risk_manager = RiskManager(RiskLimits(max_notional=1_000_000, max_position=100))
-    loop = LiveExecutionLoop({"binance": connector}, risk_manager, config=live_loop_config)
+    loop = LiveExecutionLoop(
+        {"binance": connector}, risk_manager, config=live_loop_config
+    )
 
     loop.start(cold_start=True)
 
@@ -150,7 +182,9 @@ def test_live_loop_cancel_and_kill_switch_flushes_orders(live_loop_config: LiveL
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             outstanding = [
-                o for o in loop._contexts["binance"].oms.outstanding() if o.order_id is not None
+                o
+                for o in loop._contexts["binance"].oms.outstanding()
+                if o.order_id is not None
             ]
             if outstanding:
                 order_id = outstanding[0].order_id
@@ -161,7 +195,10 @@ def test_live_loop_cancel_and_kill_switch_flushes_orders(live_loop_config: LiveL
 
     first_order_id = _wait_for_order_id()
     assert loop.cancel_order(first_order_id)
-    assert all(o.order_id != first_order_id for o in loop._contexts["binance"].oms.outstanding())
+    assert all(
+        o.order_id != first_order_id
+        for o in loop._contexts["binance"].oms.outstanding()
+    )
     assert not connector.fetch_order(first_order_id).is_active
     assert loop.cancel_order("missing", venue="binance") is False
 

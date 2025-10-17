@@ -15,7 +15,9 @@ _logger = get_logger(__name__)
 ArrayLike = Union[np.ndarray, pd.Series, Sequence[float], Iterable[float]]
 
 
-def normalize_df(df: pd.DataFrame, timestamp_col: str = "ts", *, use_float32: bool = False) -> pd.DataFrame:
+def normalize_df(
+    df: pd.DataFrame, timestamp_col: str = "ts", *, use_float32: bool = False
+) -> pd.DataFrame:
     """Return a cleaned and chronologically ordered copy of ``df``.
 
     The helper performs a defensive copy, standardises the timestamp column
@@ -38,8 +40,9 @@ def normalize_df(df: pd.DataFrame, timestamp_col: str = "ts", *, use_float32: bo
         A normalised dataframe with a reset index for predictable downstream
         usage.
     """
-    with _logger.operation("normalize_df", rows=len(df), columns=len(df.columns), 
-                          use_float32=use_float32):
+    with _logger.operation(
+        "normalize_df", rows=len(df), columns=len(df.columns), use_float32=use_float32
+    ):
         normalized = df.copy()
 
         if timestamp_col in normalized.columns:
@@ -61,7 +64,7 @@ def normalize_df(df: pd.DataFrame, timestamp_col: str = "ts", *, use_float32: bo
             normalized[numeric_cols] = normalized[numeric_cols].interpolate(
                 method="linear", limit_direction="both"
             )
-            
+
             # Convert to float32 if requested
             if use_float32:
                 for col in numeric_cols:
@@ -71,13 +74,15 @@ def normalize_df(df: pd.DataFrame, timestamp_col: str = "ts", *, use_float32: bo
         return normalized.reset_index(drop=True)
 
 
-def scale_series(x: ArrayLike, method: str = "zscore", *, use_float32: bool = False) -> np.ndarray:
+def scale_series(
+    x: ArrayLike, method: str = "zscore", *, use_float32: bool = False
+) -> np.ndarray:
     """Scale a 1-D array according to the requested ``method``.
 
     Currently supported scaling methods are ``"zscore"`` (default) and
     ``"minmax"``. The function always returns a NumPy ``ndarray`` and leaves
     constant or empty inputs untouched.
-    
+
     Parameters
     ----------
     x:
@@ -86,7 +91,7 @@ def scale_series(x: ArrayLike, method: str = "zscore", *, use_float32: bool = Fa
         Scaling method: "zscore" (standardization) or "minmax" (normalization).
     use_float32:
         Use float32 precision to reduce memory usage (default: False).
-        
+
     Returns
     -------
     np.ndarray

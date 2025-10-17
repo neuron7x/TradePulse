@@ -8,7 +8,6 @@ from typing import Callable, Generic, TypeVar
 import numpy as np
 from numpy.typing import NDArray
 
-
 ResultT = TypeVar("ResultT")
 
 

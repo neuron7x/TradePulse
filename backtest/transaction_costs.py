@@ -1,10 +1,11 @@
 """Transaction cost modelling primitives used by the backtest engine."""
+
 from __future__ import annotations
 
-from dataclasses import dataclass
 import importlib
 import inspect
 import math
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping
 
@@ -36,7 +37,9 @@ class TransactionCostModel:
         del price, side
         return 0.0
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:
         """Return the slippage adjustment in price terms for the given trade."""
 
         del volume, price, side
@@ -63,7 +66,9 @@ class PerUnitCommission(TransactionCostModel):
     def __init__(self, fee_per_unit: float) -> None:
         self.fee_per_unit = float(max(fee_per_unit, 0.0))
 
-    def get_commission(self, volume: float, price: float) -> float:  # noqa: D401 - see base docstring
+    def get_commission(
+        self, volume: float, price: float
+    ) -> float:  # noqa: D401 - see base docstring
         del price
         volume = float(abs(volume))
         if not math.isfinite(volume) or volume <= 0.0:
@@ -139,7 +144,9 @@ class FixedSlippage(TransactionCostModel):
     def __init__(self, slippage: float) -> None:
         self.slippage = float(max(slippage, 0.0))
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:  # noqa: D401
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:  # noqa: D401
         del volume, price, side
         return self.slippage
 
@@ -152,7 +159,9 @@ class VolumeProportionalSlippage(TransactionCostModel):
     def __init__(self, coefficient: float) -> None:
         self.coefficient = float(max(coefficient, 0.0))
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:  # noqa: D401
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:  # noqa: D401
         del price, side
         volume = float(abs(volume))
         if not math.isfinite(volume) or volume <= 0.0:
@@ -169,7 +178,9 @@ class SquareRootSlippage(TransactionCostModel):
         self.a = float(max(a, 0.0))
         self.b = float(max(b, 0.0))
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:  # noqa: D401
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:  # noqa: D401
         volume = float(abs(volume))
         price = float(max(price, 0.0))
         if not math.isfinite(volume) or volume <= 0.0 or not math.isfinite(price):
@@ -225,7 +236,9 @@ class CompositeTransactionCostModel(TransactionCostModel):
         model = self.spread_model
         return model.get_spread(price, side) if model else 0.0
 
-    def get_slippage(self, volume: float, price: float, side: str | None = None) -> float:  # noqa: D401
+    def get_slippage(
+        self, volume: float, price: float, side: str | None = None
+    ) -> float:  # noqa: D401
         model = self.slippage_model
         return model.get_slippage(volume, price, side) if model else 0.0
 
@@ -245,7 +258,9 @@ def _import_from_string(path: str) -> Callable[..., Any]:
         raise ValueError(f"'{attr}' is not defined in module '{module_name}'") from exc
 
 
-def _instantiate(spec: Any, params: Mapping[str, Any] | None = None) -> TransactionCostModel:
+def _instantiate(
+    spec: Any, params: Mapping[str, Any] | None = None
+) -> TransactionCostModel:
     if isinstance(spec, TransactionCostModel):
         return spec
 
@@ -275,17 +290,23 @@ def _build_commission(entry: Mapping[str, Any]) -> TransactionCostModel | None:
             if alias in {"fixed_bps", "bps"}:
                 value = params.get("bps", params.get("value"))
                 if value is None:
-                    raise ValueError("'commission_params.bps' is required for fixed_bps model")
+                    raise ValueError(
+                        "'commission_params.bps' is required for fixed_bps model"
+                    )
                 return FixedBpsCommission(value)
             if alias in {"percent", "percentage", "percent_volume"}:
                 value = params.get("percent", params.get("value"))
                 if value is None:
-                    raise ValueError("'commission_params.percent' is required for percent model")
+                    raise ValueError(
+                        "'commission_params.percent' is required for percent model"
+                    )
                 return PercentVolumeCommission(value)
             if alias in {"per_unit", "fixed", "per_contract"}:
                 value = params.get("per_unit", params.get("value"))
                 if value is None:
-                    raise ValueError("'commission_params.per_unit' is required for per_unit model")
+                    raise ValueError(
+                        "'commission_params.per_unit' is required for per_unit model"
+                    )
                 return PerUnitCommission(value)
         return _instantiate(model_spec, params)
 
@@ -313,12 +334,16 @@ def _build_spread(entry: Mapping[str, Any]) -> TransactionCostModel | None:
             if alias in {"fixed", "absolute"}:
                 value = params.get("value")
                 if value is None:
-                    raise ValueError("'spread_params.value' is required for fixed spread model")
+                    raise ValueError(
+                        "'spread_params.value' is required for fixed spread model"
+                    )
                 return FixedSpread(value)
             if alias in {"bps", "percent"}:
                 value = params.get("bps", params.get("value"))
                 if value is None:
-                    raise ValueError("'spread_params.bps' is required for bps spread model")
+                    raise ValueError(
+                        "'spread_params.bps' is required for bps spread model"
+                    )
                 return BpsSpread(value)
         return _instantiate(model_spec, params)
 
@@ -340,7 +365,9 @@ def _build_slippage(entry: Mapping[str, Any]) -> TransactionCostModel | None:
             if alias == "fixed":
                 value = params.get("value")
                 if value is None:
-                    raise ValueError("'slippage_params.value' is required for fixed model")
+                    raise ValueError(
+                        "'slippage_params.value' is required for fixed model"
+                    )
                 return FixedSlippage(value)
             if alias in {"square_root", "sqrt"}:
                 return SquareRootSlippage(**params)
@@ -373,7 +400,9 @@ def _build_financing(entry: Mapping[str, Any]) -> TransactionCostModel | None:
         if isinstance(model_spec, str):
             alias = model_spec.lower()
             if alias in {"borrow", "borrowing", "funding"}:
-                long_rate = params.get("long_rate_bps", params.get("long_bps", params.get("bps", 0.0)))
+                long_rate = params.get(
+                    "long_rate_bps", params.get("long_bps", params.get("bps", 0.0))
+                )
                 short_rate = params.get(
                     "short_rate_bps",
                     params.get("short_bps", params.get("borrow_bps", long_rate)),
@@ -382,7 +411,9 @@ def _build_financing(entry: Mapping[str, Any]) -> TransactionCostModel | None:
                 periods = params.get("periods_per_year")
                 kwargs: dict[str, Any] = {
                     "long_rate_bps": long_rate or 0.0,
-                    "short_rate_bps": short_rate if short_rate is not None else long_rate or 0.0,
+                    "short_rate_bps": (
+                        short_rate if short_rate is not None else long_rate or 0.0
+                    ),
                 }
                 if exponent is not None:
                     kwargs["exponent"] = exponent

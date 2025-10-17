@@ -38,7 +38,9 @@ class AdminRateLimiterSnapshot:
 class AdminIdentity(BaseModel):
     """Authenticated administrator identity extracted from the request."""
 
-    subject: str = Field(..., description="Unique subject identifier for the administrator.")
+    subject: str = Field(
+        ..., description="Unique subject identifier for the administrator."
+    )
     roles: tuple[str, ...] = Field(
         default_factory=tuple,
         description=(
@@ -67,7 +69,9 @@ class AdminIdentity(BaseModel):
 class KillSwitchRequest(BaseModel):
     """Request payload for activating the kill-switch."""
 
-    reason: str = Field(..., min_length=3, max_length=256, description="Human readable reason.")
+    reason: str = Field(
+        ..., min_length=3, max_length=256, description="Human readable reason."
+    )
 
     @field_validator("reason")
     @classmethod
@@ -82,12 +86,20 @@ class KillSwitchResponse(BaseModel):
     """Response payload describing the kill-switch state."""
 
     status: str = Field(..., description="Status message of the kill-switch operation.")
-    kill_switch_engaged: bool = Field(..., description="Whether the kill-switch is active.")
-    reason: str = Field(..., description="Reason supplied when the kill-switch was engaged.")
-    already_engaged: bool = Field(..., description="True if the kill-switch was already active.")
+    kill_switch_engaged: bool = Field(
+        ..., description="Whether the kill-switch is active."
+    )
+    reason: str = Field(
+        ..., description="Reason supplied when the kill-switch was engaged."
+    )
+    already_engaged: bool = Field(
+        ..., description="True if the kill-switch was already active."
+    )
 
 
-def _build_kill_switch_response(status: str, state: KillSwitchState) -> KillSwitchResponse:
+def _build_kill_switch_response(
+    status: str, state: KillSwitchState
+) -> KillSwitchResponse:
     """Serialise a kill-switch state into the public response model."""
 
     return KillSwitchResponse(
@@ -101,7 +113,9 @@ def _build_kill_switch_response(status: str, state: KillSwitchState) -> KillSwit
 class AdminRateLimiter:
     """Track administrative attempts and raise when limits are exceeded."""
 
-    def __init__(self, *, max_attempts: int = 5, interval_seconds: float = 60.0) -> None:
+    def __init__(
+        self, *, max_attempts: int = 5, interval_seconds: float = 60.0
+    ) -> None:
         if max_attempts <= 0:
             raise ValueError("max_attempts must be positive")
         if interval_seconds <= 0:
@@ -257,7 +271,9 @@ def create_remote_control_router(
         """Engage the risk manager kill-switch and log the operation."""
 
         state: KillSwitchState = manager.engage_kill_switch(payload.reason)
-        event_type = "kill_switch_reaffirmed" if state.already_engaged else "kill_switch_engaged"
+        event_type = (
+            "kill_switch_reaffirmed" if state.already_engaged else "kill_switch_engaged"
+        )
         logger.log_event(
             event_type=event_type,
             actor=identity.subject,
@@ -318,7 +334,9 @@ def create_remote_control_router(
         """Reset the kill-switch in an idempotent manner and audit the action."""
 
         state = manager.reset_kill_switch()
-        event_type = "kill_switch_reset" if state.already_engaged else "kill_switch_reset_noop"
+        event_type = (
+            "kill_switch_reset" if state.already_engaged else "kill_switch_reset_noop"
+        )
         logger.log_event(
             event_type=event_type,
             actor=identity.subject,

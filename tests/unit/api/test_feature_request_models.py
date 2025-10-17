@@ -100,7 +100,10 @@ def test_feature_request_to_frame_sorts_and_sets_utc_index() -> None:
 
     frame = request.to_frame()
 
-    expected_order = [pd.Timestamp(bar.timestamp) for bar in sorted(bars, key=lambda bar: bar.timestamp)]
+    expected_order = [
+        pd.Timestamp(bar.timestamp)
+        for bar in sorted(bars, key=lambda bar: bar.timestamp)
+    ]
 
     assert list(frame.index) == expected_order
     assert frame.index.tz is not None

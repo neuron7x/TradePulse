@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from typing import Any, AsyncIterator, Callable, Optional
 
 from core.data.adapters.base import IngestionAdapter, RateLimitConfig, RetryConfig
-from core.data.models import InstrumentType, PriceTick as Ticker
+from core.data.models import InstrumentType
+from core.data.models import PriceTick as Ticker
 from core.data.timeutils import normalize_timestamp
 from core.utils.logging import get_logger
 
@@ -21,7 +21,9 @@ def _load_exchange_factory(exchange_id: str) -> Callable[[dict[str, Any]], Any]:
     try:
         import ccxt.async_support as ccxt_async  # type: ignore
     except ImportError as exc:  # pragma: no cover - defensive guard
-        raise RuntimeError("ccxt must be installed to use the CCXTIngestionAdapter") from exc
+        raise RuntimeError(
+            "ccxt must be installed to use the CCXTIngestionAdapter"
+        ) from exc
 
     exchange_id = exchange_id.lower()
     if not hasattr(ccxt_async, exchange_id):
@@ -58,7 +60,9 @@ class CCXTIngestionAdapter(IngestionAdapter):
         """Fetch OHLCV candles and convert them to tick-level close prices."""
 
         async def _call() -> list[list[float]]:
-            return await self._exchange.fetch_ohlcv(symbol, timeframe=timeframe, since=since, limit=limit)
+            return await self._exchange.fetch_ohlcv(
+                symbol, timeframe=timeframe, since=since, limit=limit
+            )
 
         candles = await self._run_with_policy(_call)
         ticks: list[Ticker] = []
@@ -72,7 +76,9 @@ class CCXTIngestionAdapter(IngestionAdapter):
                 timestamp=normalize_timestamp(ts / 1000 if ts > 1e12 else ts),
             )
             ticks.append(tick)
-        logger.debug("ccxt_fetch", exchange=self._exchange_id, symbol=symbol, count=len(ticks))
+        logger.debug(
+            "ccxt_fetch", exchange=self._exchange_id, symbol=symbol, count=len(ticks)
+        )
         return ticks
 
     async def stream(
@@ -96,7 +102,9 @@ class CCXTIngestionAdapter(IngestionAdapter):
 
         while True:
             try:
-                async with websockets.connect(url, ping_interval=20, ping_timeout=20) as ws:
+                async with websockets.connect(
+                    url, ping_interval=20, ping_timeout=20
+                ) as ws:
                     attempt = 0
                     logger.info("ccxt_ws_connected", url=url, symbol=symbol)
                     while True:
@@ -122,7 +130,9 @@ class CCXTIngestionAdapter(IngestionAdapter):
                         yield tick
             except Exception as exc:
                 attempt += 1
-                logger.warning("ccxt_ws_reconnect", url=url, attempt=attempt, error=str(exc))
+                logger.warning(
+                    "ccxt_ws_reconnect", url=url, attempt=attempt, error=str(exc)
+                )
                 await self._sleep_backoff(attempt)
 
     async def aclose(self) -> None:

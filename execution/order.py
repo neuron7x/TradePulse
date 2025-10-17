@@ -19,6 +19,7 @@ from domain import Order
 try:  # pragma: no cover - optional dependency boundary
     from interfaces.execution import PositionSizer
 except ModuleNotFoundError:  # pragma: no cover
+
     class PositionSizer(Protocol):
         def size(
             self,
@@ -27,8 +28,7 @@ except ModuleNotFoundError:  # pragma: no cover
             price: float,
             *,
             max_leverage: float = 5.0,
-        ) -> float:
-            ...
+        ) -> float: ...
 
 
 class RiskAwarePositionSizer(PositionSizer):

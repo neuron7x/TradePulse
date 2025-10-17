@@ -6,7 +6,6 @@ import pytest
 
 from scripts import data_sanity
 
-
 REFERENCE_DATASETS = [
     Path("data/sample.csv"),
     Path("data/sample_ohlc.csv"),

@@ -59,12 +59,16 @@ sandbox = true
         encoding="utf-8",
     )
 
-    store = {"secret/data/dummy": {"api_key": "vault-key", "api_secret": "vault-secret"}}
+    store = {
+        "secret/data/dummy": {"api_key": "vault-key", "api_secret": "vault-secret"}
+    }
 
     def resolver(path: str) -> Mapping[str, str]:
         return dict(store[path])
 
-    runner = LiveTradingRunner(config_path=config_path, secret_backends={"vault": resolver})
+    runner = LiveTradingRunner(
+        config_path=config_path, secret_backends={"vault": resolver}
+    )
 
     credentials = runner._credentials["dummy"]  # noqa: SLF001 - inspection helper
     assert credentials["API_KEY"] == "vault-key"

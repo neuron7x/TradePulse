@@ -1,8 +1,8 @@
 """Thin wrappers around the existing FPM-A integration tooling."""
+
 from __future__ import annotations
 
 # SPDX-License-Identifier: MIT
-
 import logging
 import sys
 from argparse import _SubParsersAction
@@ -45,4 +45,3 @@ def _invoke_runner(mode: str) -> int:
     run_subprocess([sys.executable, str(TOOL_PATH), mode])
     LOGGER.info("FPM-A command '%s' completed successfully.", mode)
     return 0
-

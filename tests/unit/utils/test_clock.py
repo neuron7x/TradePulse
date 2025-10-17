@@ -29,6 +29,6 @@ def test_freeze_time_accepts_epoch_seconds() -> None:
 
     with freeze_time(target_epoch) as frozen:
         assert frozen == dt.datetime.fromtimestamp(target_epoch, tz=dt.timezone.utc)
-        assert dt.datetime.utcnow() == dt.datetime.fromtimestamp(target_epoch, tz=dt.timezone.utc).replace(
-            tzinfo=None
-        )
+        assert dt.datetime.utcnow() == dt.datetime.fromtimestamp(
+            target_epoch, tz=dt.timezone.utc
+        ).replace(tzinfo=None)

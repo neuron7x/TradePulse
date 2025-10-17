@@ -17,7 +17,9 @@ class ConfigTemplateManager:
 
     def __init__(self, template_dir: Path) -> None:
         if not template_dir.exists():
-            raise FileNotFoundError(f"Template directory '{template_dir}' does not exist")
+            raise FileNotFoundError(
+                f"Template directory '{template_dir}' does not exist"
+            )
         self.template_dir = template_dir
         self._env = Environment(
             loader=FileSystemLoader(str(template_dir)),
@@ -26,7 +28,12 @@ class ConfigTemplateManager:
             lstrip_blocks=True,
         )
 
-    def render(self, template_name: str, destination: Path, context: Mapping[str, Any] | None = None) -> Path:
+    def render(
+        self,
+        template_name: str,
+        destination: Path,
+        context: Mapping[str, Any] | None = None,
+    ) -> Path:
         template = self._env.get_template(f"{template_name}.yaml.j2")
         rendered = template.render(context or {})
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -36,7 +43,9 @@ class ConfigTemplateManager:
     def load_raw(self, path: Path) -> Dict[str, Any]:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
-            raise ValueError("Configuration files must define a mapping at the top level")
+            raise ValueError(
+                "Configuration files must define a mapping at the top level"
+            )
         return data
 
     def load_config(self, path: Path, model: Type[T]) -> T:

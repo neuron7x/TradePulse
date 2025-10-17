@@ -19,7 +19,11 @@ from core.data.materialization import (
     StreamMaterializer,
 )
 from core.data.path_guard import DataPathGuard
-from core.data.resampling import align_timeframes, _ensure_datetime_index, resample_order_book
+from core.data.resampling import (
+    _ensure_datetime_index,
+    align_timeframes,
+    resample_order_book,
+)
 
 
 def test_data_path_guard_enforces_limits(tmp_path: Path) -> None:
@@ -46,7 +50,9 @@ def test_cache_entry_slice_honours_start_and_end() -> None:
 
 def test_resolve_cadence_rejects_ambiguous_index() -> None:
     index = pd.DatetimeIndex([pd.Timestamp("2024-01-01"), pd.Timestamp("2024-01-03")])
-    with pytest.raises(ValueError, match="Unable to determine expected_index frequency"):
+    with pytest.raises(
+        ValueError, match="Unable to determine expected_index frequency"
+    ):
         _resolve_cadence(index)
 
 
@@ -135,7 +141,9 @@ def test_resample_order_book_handles_zero_totals() -> None:
         },
         index=index,
     )
-    result = resample_order_book(levels, freq="1min", bid_cols=["bid0"], ask_cols=["ask0"])
+    result = resample_order_book(
+        levels, freq="1min", bid_cols=["bid0"], ask_cols=["ask0"]
+    )
     assert not result["imbalance"].isna().any()
     assert not result["microprice"].isna().any()
 
