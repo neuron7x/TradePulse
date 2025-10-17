@@ -22,19 +22,30 @@ The default coverage threshold is **80%**. To change this threshold:
 2. Locate the `pytest` command in the "Run tests with coverage" step
 3. Modify the `--cov-fail-under` parameter:
    ```yaml
-   pytest --cov=./ --cov-report=xml --cov-report=term-missing --cov-fail-under=85
+   pytest \
+     --cov=src \
+     --cov=core \
+     --cov=backtest \
+     --cov=execution \
+     --cov-report=xml \
+     --cov-report=term-missing \
+     --cov-fail-under=85
    ```
    Replace `80` with your desired threshold (e.g., `85` for 85% coverage)
 
 ### Coverage Scope
 
-By default, the workflow measures coverage for the entire repository (`--cov=./`). To measure coverage for specific directories only:
+By default, the workflow measures coverage for the primary application packages (`src`, `core`, `backtest`, and `execution`). To measure coverage for different targets:
 
 1. Open `.github/workflows/ci.yml`
 2. Modify the `--cov` parameter to target specific packages:
    ```yaml
-   pytest --cov=core --cov=backtest --cov=execution --cov-report=xml --cov-report=term-missing --cov-fail-under=80
+   pytest --cov=src --cov=core --cov-report=xml --cov-report=term-missing --cov-fail-under=80
    ```
+
+### Publishing Coverage Artifacts
+
+The workflow uploads `coverage.xml` using `actions/upload-artifact@v4`. You can download the artifact from the workflow run summary in GitHub Actions. If you need additional formats (for example, HTML), extend the step to include the generated paths.
 
 You can also configure coverage settings in `.coveragerc` file in the repository root.
 
