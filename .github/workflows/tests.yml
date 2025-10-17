@@ -188,13 +188,24 @@ jobs:
             coverage.xml
             coverage_html
           if-no-files-found: error
-      - name: Upload coverage to Codecov
+      - name: Upload coverage to Codecov (with token)
+        if: ${{ secrets.CODECOV_TOKEN != '' }}
         uses: codecov/codecov-action@v5
         with:
           files: ./coverage.xml
           flags: py${{ matrix.python-version }}
           name: py${{ matrix.python-version }}-coverage
           fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+      - name: Upload coverage to Codecov (OIDC)
+        if: ${{ secrets.CODECOV_TOKEN == '' }}
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.xml
+          flags: py${{ matrix.python-version }}
+          name: py${{ matrix.python-version }}-coverage
+          fail_ci_if_error: false
+          use_oidc: true
 
   pytest-xdist:
     name: Pytest (xdist profiling)
