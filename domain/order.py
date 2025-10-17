@@ -131,6 +131,49 @@ class Order:
             self.rejection_reason = reason
         self.updated_at = datetime.now(timezone.utc)
 
+    def synchronize_execution(
+        self,
+        *,
+        filled_quantity: float,
+        average_price: float | None,
+        status: OrderStatus | str | None = None,
+    ) -> None:
+        """Synchronize execution state with an external source.
+
+        Args:
+            filled_quantity: Quantity acknowledged by the venue.
+            average_price: Average execution price, if available.
+            status: Optional explicit status override.
+
+        Raises:
+            ValueError: If inputs violate order invariants.
+        """
+
+        if filled_quantity < 0:
+            raise ValueError("filled_quantity cannot be negative")
+        if filled_quantity > self.quantity + 1e-9:
+            raise ValueError("filled_quantity cannot exceed order quantity")
+        if average_price is not None and average_price <= 0:
+            raise ValueError("average_price must be positive when provided")
+
+        if status is not None:
+            resolved_status = OrderStatus(status)
+        else:
+            if filled_quantity >= self.quantity - 1e-9:
+                resolved_status = OrderStatus.FILLED
+                filled_quantity = self.quantity
+            elif filled_quantity > 0:
+                resolved_status = OrderStatus.PARTIALLY_FILLED
+            elif self.status in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}:
+                resolved_status = OrderStatus.OPEN
+            else:
+                resolved_status = self.status
+
+        self.filled_quantity = filled_quantity
+        self.average_price = average_price
+        self.status = resolved_status
+        self.updated_at = datetime.now(timezone.utc)
+
     @property
     def remaining_quantity(self) -> float:
         """Quantity still outstanding."""

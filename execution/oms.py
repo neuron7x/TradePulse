@@ -18,6 +18,11 @@ from interfaces.execution import RiskController
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
+from .reconciliation import (
+    FillRecord,
+    ReconciliationDiscrepancy,
+    ReconciliationReport,
+)
 
 
 @dataclass(slots=True)
@@ -367,9 +372,234 @@ class OrderManagementSystem:
                     order.symbol,
                     signal_latency,
                 )
-            self._ack_timestamps.pop(order_id, None)
+        self._ack_timestamps.pop(order_id, None)
         self._persist_state()
         return order
+
+    def reconcile_with_exchange_fills(
+        self,
+        fills: Iterable[FillRecord],
+        *,
+        apply_corrections: bool = True,
+        quantity_tolerance: float = 1e-6,
+        price_tolerance: float = 1e-6,
+    ) -> ReconciliationReport:
+        """Reconcile OMS orders against venue execution reports."""
+
+        records = [fill for fill in fills]
+        aggregated: Dict[str, FillRecord] = {}
+        for record in records:
+            existing = aggregated.get(record.order_id)
+            if existing is None:
+                aggregated[record.order_id] = record
+            else:
+                aggregated[record.order_id] = existing.merge(record)
+
+        report = ReconciliationReport(
+            generated_at=datetime.now(timezone.utc),
+            total_orders=len(self._orders),
+            total_fills=len(records),
+        )
+        persist_needed = False
+
+        for order_id, order in self._orders.items():
+            fill = aggregated.pop(order_id, None)
+            has_recorded_fill = (
+                order.filled_quantity > quantity_tolerance
+                or order.status in {OrderStatus.FILLED, OrderStatus.PARTIALLY_FILLED}
+            )
+
+            if fill is None:
+                if has_recorded_fill:
+                    report.missing_in_exchange.append(order_id)
+                    self._audit.emit(
+                        {
+                            "event": "oms.reconciliation.missing_exchange",
+                            "order_id": order_id,
+                            "symbol": order.symbol,
+                            "side": order.side.value,
+                            "filled_quantity": float(order.filled_quantity),
+                            "status": order.status.value,
+                        }
+                    )
+                continue
+
+            original_quantity = float(order.filled_quantity)
+            original_average = (
+                float(order.average_price) if order.average_price is not None else None
+            )
+
+            had_discrepancy = False
+            order_corrected = False
+            target_quantity = original_quantity
+            target_average = original_average
+            risk_delta = 0.0
+
+            if fill.symbol != order.symbol:
+                had_discrepancy = True
+                discrepancy = ReconciliationDiscrepancy(
+                    order_id=order_id,
+                    field="symbol",
+                    expected=fill.symbol,
+                    actual=order.symbol,
+                    corrected=False,
+                    message="Symbol mismatch between OMS and venue records.",
+                )
+                report.discrepancies.append(discrepancy)
+                self._audit.emit(
+                    {
+                        "event": "oms.reconciliation.discrepancy",
+                        "order_id": order_id,
+                        "symbol": order.symbol,
+                        "side": order.side.value,
+                        "field": "symbol",
+                        "expected": fill.symbol,
+                        "actual": order.symbol,
+                    }
+                )
+            else:
+                quantity_diff = fill.quantity - original_quantity
+                if abs(quantity_diff) > quantity_tolerance:
+                    had_discrepancy = True
+                    corrected = False
+                    message = (
+                        "Venue reports additional executed quantity."
+                        if quantity_diff > 0
+                        else "OMS quantity exceeds venue execution report."
+                    )
+                    if apply_corrections and quantity_diff > 0:
+                        target_quantity = fill.quantity
+                        if fill.average_price is not None:
+                            target_average = fill.average_price
+                        risk_delta = quantity_diff
+                        corrected = True
+                        order_corrected = True
+                    discrepancy = ReconciliationDiscrepancy(
+                        order_id=order_id,
+                        field="filled_quantity",
+                        expected=fill.quantity,
+                        actual=original_quantity,
+                        delta=quantity_diff,
+                        corrected=corrected,
+                        message=message,
+                    )
+                    report.discrepancies.append(discrepancy)
+                    reference_price = fill.average_price or original_average or order.price
+                    if reference_price is not None:
+                        report.total_notional_delta += quantity_diff * float(reference_price)
+                    self._audit.emit(
+                        {
+                            "event": "oms.reconciliation.discrepancy",
+                            "order_id": order_id,
+                            "symbol": order.symbol,
+                            "side": order.side.value,
+                            "field": "filled_quantity",
+                            "expected": fill.quantity,
+                            "actual": original_quantity,
+                            "delta": quantity_diff,
+                            "corrected": corrected,
+                        }
+                    )
+
+                if fill.average_price is not None:
+                    current_average = original_average
+                    if current_average is None or abs(current_average - fill.average_price) > price_tolerance:
+                        had_discrepancy = True
+                        corrected = False
+                        if apply_corrections:
+                            target_average = fill.average_price
+                            corrected = True
+                            order_corrected = True
+                        delta_price = None
+                        if current_average is not None:
+                            delta_price = fill.average_price - current_average
+                            report.total_notional_delta += delta_price * target_quantity
+                        discrepancy = ReconciliationDiscrepancy(
+                            order_id=order_id,
+                            field="average_price",
+                            expected=fill.average_price,
+                            actual=current_average,
+                            delta=delta_price,
+                            corrected=corrected,
+                            message="Average execution price mismatch.",
+                        )
+                        report.discrepancies.append(discrepancy)
+                        self._audit.emit(
+                            {
+                                "event": "oms.reconciliation.discrepancy",
+                                "order_id": order_id,
+                                "symbol": order.symbol,
+                                "side": order.side.value,
+                                "field": "average_price",
+                                "expected": fill.average_price,
+                                "actual": current_average,
+                                "delta": delta_price,
+                                "corrected": corrected,
+                            }
+                        )
+
+            if not had_discrepancy:
+                report.matched += 1
+
+            if order_corrected:
+                before_state = {
+                    "filled_quantity": original_quantity,
+                    "average_price": original_average,
+                    "status": order.status.value,
+                }
+                order.synchronize_execution(
+                    filled_quantity=target_quantity,
+                    average_price=target_average,
+                )
+                persist_needed = True
+                report.corrected += 1
+                if risk_delta > 0:
+                    risk_price = fill.average_price or order.average_price or order.price
+                    if risk_price is None or risk_price <= 0:
+                        risk_price = 1.0
+                    self.risk.register_fill(
+                        order.symbol,
+                        order.side.value,
+                        risk_delta,
+                        float(risk_price),
+                    )
+                self._audit.emit(
+                    {
+                        "event": "oms.reconciliation.corrected",
+                        "order_id": order_id,
+                        "symbol": order.symbol,
+                        "side": order.side.value,
+                        "before": before_state,
+                        "after": {
+                            "filled_quantity": float(order.filled_quantity),
+                            "average_price": (
+                                float(order.average_price)
+                                if order.average_price is not None
+                                else None
+                            ),
+                            "status": order.status.value,
+                        },
+                        "venue": fill.venue,
+                    }
+                )
+
+        for fill in aggregated.values():
+            report.missing_in_oms.append(fill)
+            self._audit.emit(
+                {
+                    "event": "oms.reconciliation.missing_oms",
+                    "order_id": fill.order_id,
+                    "symbol": fill.symbol,
+                    "quantity": fill.quantity,
+                    "average_price": fill.average_price,
+                    "venue": fill.venue,
+                }
+            )
+
+        if persist_needed:
+            self._persist_state()
+
+        return report
 
     def sync_remote_state(self, order: Order) -> Order:
         """Synchronize terminal state reported by the venue without reissuing API calls."""

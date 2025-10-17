@@ -7,6 +7,11 @@ from .live_loop import LiveExecutionLoop, LiveLoopConfig
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
 from .oms import OMSConfig, OrderManagementSystem
 from .order_lifecycle import OrderEvent, OrderLifecycle, OrderLifecycleStore
+from .reconciliation import (
+    FillRecord,
+    ReconciliationDiscrepancy,
+    ReconciliationReport,
+)
 from .risk import (
     IdempotentRetryExecutor,
     KillSwitch,
@@ -29,6 +34,9 @@ __all__ = [
     "NormalizationError",
     "SymbolNormalizer",
     "SymbolSpecification",
+    "FillRecord",
+    "ReconciliationDiscrepancy",
+    "ReconciliationReport",
     "ComplianceMonitor",
     "ComplianceReport",
     "ComplianceViolation",
