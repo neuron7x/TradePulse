@@ -73,6 +73,10 @@ jobs:
       name: staging
     outputs:
       deploy_enabled: ${{ steps.configure_kube.outputs.deploy_enabled }}
+    env:
+      STAGING_HEALTH_LOG: ${{ runner.temp }}/staging-healthcheck.log
+      STAGING_HEALTH_JSON: ${{ runner.temp }}/staging-health.json
+      STAGING_METRICS_LOG: ${{ runner.temp }}/staging-metrics.txt
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -125,6 +129,137 @@ jobs:
         if: steps.configure_kube.outputs.deploy_enabled == 'true'
         run: kubectl rollout status deployment/tradepulse-api -n tradepulse-staging --timeout=5m
 
+      - name: Verify staging service health
+        id: staging_health_check
+        if: steps.configure_kube.outputs.deploy_enabled == 'true'
+        env:
+          PF_LOG: ${{ runner.temp }}/staging-port-forward.log
+        run: |
+          set -euo pipefail
+
+          LOG_PATH="$STAGING_HEALTH_LOG"
+          mkdir -p "$(dirname "$LOG_PATH")"
+          : >"$LOG_PATH"
+          exec > >(tee -a "$LOG_PATH") 2>&1
+
+          HEALTH_URL_PORT=18080
+          METRICS_URL_PORT=18081
+          NAMESPACE="tradepulse-staging"
+          : >"$PF_LOG"
+
+          cleanup() {
+            status=${1:-0}
+            set +e
+            if [ -n "${PF_PID:-}" ] && kill -0 "$PF_PID" 2>/dev/null; then
+              kill "$PF_PID" 2>/dev/null || true
+              wait "$PF_PID" 2>/dev/null || true
+            fi
+            if [ "$status" -ne 0 ] && [ -s "$PF_LOG" ]; then
+              echo "::group::kubectl port-forward logs (${NAMESPACE})"
+              cat "$PF_LOG" || true
+              echo "::endgroup::"
+            fi
+            set -e
+          }
+
+          kubectl port-forward --namespace "$NAMESPACE" service/tradepulse-api \
+            "${HEALTH_URL_PORT}:80" "${METRICS_URL_PORT}:8001" >"$PF_LOG" 2>&1 &
+          PF_PID=$!
+          trap 'cleanup $?' EXIT
+
+          HEALTH_URL="http://127.0.0.1:${HEALTH_URL_PORT}/health"
+          METRICS_URL="http://127.0.0.1:${METRICS_URL_PORT}/metrics"
+
+          echo "Waiting for ${HEALTH_URL} to respond..."
+          for attempt in $(seq 1 10); do
+            if curl --silent --fail --show-error --max-time 2 "$HEALTH_URL" -o "${STAGING_HEALTH_JSON}.tmp"; then
+              mv "${STAGING_HEALTH_JSON}.tmp" "$STAGING_HEALTH_JSON"
+              break
+            fi
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+              echo "Port-forward process exited unexpectedly" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          if [ ! -s "$STAGING_HEALTH_JSON" ]; then
+            echo "Health endpoint did not respond successfully within timeout" >&2
+            exit 1
+          fi
+          rm -f "${STAGING_HEALTH_JSON}.tmp"
+
+          echo "Health endpoint response:"
+          cat "$STAGING_HEALTH_JSON"
+
+          python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+health_path = Path(os.environ["STAGING_HEALTH_JSON"])
+payload = json.loads(health_path.read_text())
+status = payload.get("status")
+if status != "ready":
+    raise SystemExit(
+        f"Expected health status 'ready', got {status!r}. Payload: {json.dumps(payload, indent=2)}"
+    )
+
+required_components = {"risk_manager", "inference_cache", "client_rate_limiter"}
+missing = sorted(required_components.difference(payload.get("components", {}).keys()))
+if missing:
+    raise SystemExit(f"Health payload missing expected components: {missing}")
+
+print("Health response validated successfully.")
+PY
+
+          echo "Fetching Prometheus metrics from ${METRICS_URL}..."
+          curl --silent --fail --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$METRICS_URL" -o "$STAGING_METRICS_LOG"
+
+          echo "Metrics sample (first 40 lines):"
+          head -n 40 "$STAGING_METRICS_LOG" || true
+
+          python - <<'PY'
+import os
+from pathlib import Path
+
+metrics_text = Path(os.environ["STAGING_METRICS_LOG"]).read_text()
+expected_snippets = ["tradepulse_health_check_status", "process_cpu_seconds_total"]
+missing = [snippet for snippet in expected_snippets if snippet not in metrics_text]
+if missing:
+    raise SystemExit(f"Metrics payload missing expected snippets: {missing}")
+
+print("Metrics payload contains expected series.")
+PY
+
+          cleanup 0
+          trap - EXIT
+          echo "Staging health checks passed."
+
+      - name: Upload staging health check logs
+        if: always() && steps.configure_kube.outputs.deploy_enabled == 'true' && steps.staging_health_check.outcome != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-healthcheck-${{ github.run_id }}
+          path: |
+            ${{ env.STAGING_HEALTH_LOG }}
+            ${{ env.STAGING_HEALTH_JSON }}
+            ${{ env.STAGING_METRICS_LOG }}
+          if-no-files-found: warn
+
+      - name: Notify Slack about staging health check failure
+        if: failure() && steps.staging_health_check.outcome == 'failure' && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {
+              "text": ":rotating_light: TradePulse staging health check failed for run ${{ github.run_id }} on ref ${{ github.ref }}. <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View deployment logs>."
+            }
+
   deploy-production:
     if: github.repository == 'neuron7x/TradePulse' && needs.deploy-staging.outputs.deploy_enabled == 'true' && github.ref == 'refs/heads/main' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production'))
     name: Deploy production
@@ -133,6 +268,10 @@ jobs:
       - deploy-staging
     environment:
       name: production
+    env:
+      PRODUCTION_HEALTH_LOG: ${{ runner.temp }}/production-healthcheck.log
+      PRODUCTION_HEALTH_JSON: ${{ runner.temp }}/production-health.json
+      PRODUCTION_METRICS_LOG: ${{ runner.temp }}/production-metrics.txt
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -177,3 +316,133 @@ jobs:
 
       - name: Wait for rollout
         run: kubectl rollout status deployment/tradepulse-api -n tradepulse-production --timeout=10m
+
+      - name: Verify production service health
+        id: production_health_check
+        env:
+          PF_LOG: ${{ runner.temp }}/production-port-forward.log
+        run: |
+          set -euo pipefail
+
+          LOG_PATH="$PRODUCTION_HEALTH_LOG"
+          mkdir -p "$(dirname "$LOG_PATH")"
+          : >"$LOG_PATH"
+          exec > >(tee -a "$LOG_PATH") 2>&1
+
+          HEALTH_URL_PORT=18080
+          METRICS_URL_PORT=18081
+          NAMESPACE="tradepulse-production"
+          : >"$PF_LOG"
+
+          cleanup() {
+            status=${1:-0}
+            set +e
+            if [ -n "${PF_PID:-}" ] && kill -0 "$PF_PID" 2>/dev/null; then
+              kill "$PF_PID" 2>/dev/null || true
+              wait "$PF_PID" 2>/dev/null || true
+            fi
+            if [ "$status" -ne 0 ] && [ -s "$PF_LOG" ]; then
+              echo "::group::kubectl port-forward logs (${NAMESPACE})"
+              cat "$PF_LOG" || true
+              echo "::endgroup::"
+            fi
+            set -e
+          }
+
+          kubectl port-forward --namespace "$NAMESPACE" service/tradepulse-api \
+            "${HEALTH_URL_PORT}:80" "${METRICS_URL_PORT}:8001" >"$PF_LOG" 2>&1 &
+          PF_PID=$!
+          trap 'cleanup $?' EXIT
+
+          HEALTH_URL="http://127.0.0.1:${HEALTH_URL_PORT}/health"
+          METRICS_URL="http://127.0.0.1:${METRICS_URL_PORT}/metrics"
+
+          echo "Waiting for ${HEALTH_URL} to respond..."
+          for attempt in $(seq 1 10); do
+            if curl --silent --fail --show-error --max-time 2 "$HEALTH_URL" -o "${PRODUCTION_HEALTH_JSON}.tmp"; then
+              mv "${PRODUCTION_HEALTH_JSON}.tmp" "$PRODUCTION_HEALTH_JSON"
+              break
+            fi
+            if ! kill -0 "$PF_PID" 2>/dev/null; then
+              echo "Port-forward process exited unexpectedly" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          if [ ! -s "$PRODUCTION_HEALTH_JSON" ]; then
+            echo "Health endpoint did not respond successfully within timeout" >&2
+            exit 1
+          fi
+          rm -f "${PRODUCTION_HEALTH_JSON}.tmp"
+
+          echo "Health endpoint response:"
+          cat "$PRODUCTION_HEALTH_JSON"
+
+          python - <<'PY'
+import json
+import os
+from pathlib import Path
+
+health_path = Path(os.environ["PRODUCTION_HEALTH_JSON"])
+payload = json.loads(health_path.read_text())
+status = payload.get("status")
+if status != "ready":
+    raise SystemExit(
+        f"Expected health status 'ready', got {status!r}. Payload: {json.dumps(payload, indent=2)}"
+    )
+
+required_components = {"risk_manager", "inference_cache", "client_rate_limiter"}
+missing = sorted(required_components.difference(payload.get("components", {}).keys()))
+if missing:
+    raise SystemExit(f"Health payload missing expected components: {missing}")
+
+print("Health response validated successfully.")
+PY
+
+          echo "Fetching Prometheus metrics from ${METRICS_URL}..."
+          curl --silent --fail --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "$METRICS_URL" -o "$PRODUCTION_METRICS_LOG"
+
+          echo "Metrics sample (first 40 lines):"
+          head -n 40 "$PRODUCTION_METRICS_LOG" || true
+
+          python - <<'PY'
+import os
+from pathlib import Path
+
+metrics_text = Path(os.environ["PRODUCTION_METRICS_LOG"]).read_text()
+expected_snippets = ["tradepulse_health_check_status", "process_cpu_seconds_total"]
+missing = [snippet for snippet in expected_snippets if snippet not in metrics_text]
+if missing:
+    raise SystemExit(f"Metrics payload missing expected snippets: {missing}")
+
+print("Metrics payload contains expected series.")
+PY
+
+          cleanup 0
+          trap - EXIT
+          echo "Production health checks passed."
+
+      - name: Upload production health check logs
+        if: always() && steps.production_health_check.outcome != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: production-healthcheck-${{ github.run_id }}
+          path: |
+            ${{ env.PRODUCTION_HEALTH_LOG }}
+            ${{ env.PRODUCTION_HEALTH_JSON }}
+            ${{ env.PRODUCTION_METRICS_LOG }}
+          if-no-files-found: warn
+
+      - name: Notify Slack about production health check failure
+        if: failure() && steps.production_health_check.outcome == 'failure' && secrets.SLACK_WEBHOOK_URL != ''
+        uses: slackapi/slack-github-action@v1.27.0
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        with:
+          payload: |
+            {
+              "text": ":rotating_light: TradePulse production health check failed for run ${{ github.run_id }} on ref ${{ github.ref }}. <${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View deployment logs>."
+            }
