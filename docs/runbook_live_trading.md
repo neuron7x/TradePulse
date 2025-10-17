@@ -106,9 +106,11 @@ Warm starts resume trading after a controlled shutdown or short outage.
   systems (P&L, hedging) reflect the corrected state.
 - **Kill-switch activation** – when the risk kill-switch triggers, the live loop
   stops all background tasks, emits `on_kill_switch`, and requires manual
-  intervention before restarting. Investigate the root cause, confirm the
-  current status with `GET /admin/kill-switch`, and only resume once
-  `DELETE /admin/kill-switch` records a successful reset event.
+  intervention before restarting. Investigate the root cause, consult the
+  [kill-switch failover runbook](runbook_kill_switch_failover.md) if the
+  PostgreSQL state store is impaired, confirm the current status with
+  `GET /admin/kill-switch`, and only resume once `DELETE /admin/kill-switch`
+  records a successful reset event.
 
 ## Shutdown Procedure
 

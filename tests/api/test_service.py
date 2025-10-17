@@ -19,14 +19,17 @@ os.environ.setdefault("TRADEPULSE_OAUTH2_AUDIENCE", "tradepulse-api")
 os.environ.setdefault("TRADEPULSE_OAUTH2_JWKS_URI", "https://issuer.tradepulse.test/jwks")
 
 from application.api import security as security_module
+from application.api import service as service_module
 from application.api.rate_limit import InMemorySlidingWindowBackend, SlidingWindowRateLimiter
 from application.api.service import DependencyProbeResult, create_app
 from application.settings import (
     AdminApiSettings,
     ApiRateLimitSettings,
     ApiSecuritySettings,
+    KillSwitchPostgresSettings,
     RateLimitPolicy,
 )
+from core.config.cli_models import PostgresTLSConfig
 
 
 @pytest.fixture()
@@ -101,6 +104,46 @@ def test_create_app_requires_secrets(monkeypatch: pytest.MonkeyPatch, security_c
     monkeypatch.delenv("TRADEPULSE_AUDIT_SECRET", raising=False)
     with pytest.raises(RuntimeError, match="TRADEPULSE_AUDIT_SECRET"):
         create_app()
+
+
+def test_create_app_uses_postgres_store(
+    monkeypatch: pytest.MonkeyPatch,
+    security_context: Callable[..., str],
+    tmp_path: Path,
+) -> None:
+    invoked: dict[str, object] = {}
+
+    class DummyStore:
+        def __init__(self, *args: object, **kwargs: object) -> None:  # pragma: no cover - simple stub
+            invoked["kwargs"] = kwargs
+
+        def load(self) -> None:
+            return None
+
+    monkeypatch.setattr(service_module, "PostgresKillSwitchStateStore", DummyStore)
+
+    tls_dir = tmp_path / "tls"
+    tls_dir.mkdir()
+    ca = tls_dir / "ca.pem"
+    cert = tls_dir / "client.pem"
+    key = tls_dir / "client.key"
+    for material in (ca, cert, key):
+        material.write_text("dummy", encoding="utf-8")
+
+    settings = AdminApiSettings(
+        audit_secret="unit-audit-secret",
+        kill_switch_postgres=KillSwitchPostgresSettings(
+            dsn="postgresql://user:pass@db/prod?sslmode=verify-full",
+            tls=PostgresTLSConfig(ca_file=ca, cert_file=cert, key_file=key),
+            min_pool_size=0,
+        ),
+    )
+
+    app = create_app(settings=settings)
+
+    kill_switch = app.state.risk_manager.kill_switch
+    assert isinstance(kill_switch._store, DummyStore)  # type: ignore[attr-defined]
+    assert invoked["kwargs"]["pool_min_size"] == 0
 
 
 def _build_payload() -> dict[str, object]:

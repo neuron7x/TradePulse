@@ -15,9 +15,11 @@ attributable—an explicit requirement in ``docs/quality_gates.md``.
 
 from __future__ import annotations
 
+import queue
 import sqlite3
 import threading
 import time
+from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -26,10 +28,13 @@ from typing import Callable, Dict, Iterable, Mapping, MutableMapping, Protocol, 
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from core.config.cli_models import PostgresTLSConfig
 from core.data.catalog import normalize_symbol
 from core.utils.logging import get_logger
 from core.utils.metrics import get_metrics_collector
 from interfaces.execution import PortfolioRiskAnalyzer, RiskController
+from libs.db.access import DataAccessLayer
+from libs.db.postgres import create_postgres_connection
 
 from .audit import ExecutionAuditLogger, get_execution_audit_logger
 
@@ -155,40 +160,17 @@ class KillSwitchStateRecord(BaseModel):
         return self
 
 
-class SQLiteKillSwitchStateStore(KillSwitchStateStore):
-    """SQLite-backed store used to persist kill-switch state across restarts."""
-
-    _UPSERT_STATEMENT = """
-        INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(id) DO UPDATE SET
-            engaged = excluded.engaged,
-            reason = excluded.reason,
-            updated_at = CURRENT_TIMESTAMP
-    """
+class BaseKillSwitchStateStore(KillSwitchStateStore, ABC):
+    """Shared validation and quarantine controls for kill-switch persistence."""
 
     def __init__(
         self,
-        path: str | Path,
         *,
-        timeout: float = 10.0,
-        max_retries: int = 5,
-        retry_interval: float = 0.05,
-        backoff_multiplier: float = 2.0,
         max_staleness: float = 300.0,
         max_future_drift: float = 5.0,
         max_reason_length: int = 512,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._path = Path(path)
-        if timeout <= 0:
-            raise ValueError("timeout must be positive")
-        if max_retries < 0:
-            raise ValueError("max_retries must be non-negative")
-        if retry_interval <= 0:
-            raise ValueError("retry_interval must be positive")
-        if backoff_multiplier < 1.0:
-            raise ValueError("backoff_multiplier must be >= 1.0")
         if max_staleness <= 0:
             raise ValueError("max_staleness must be positive")
         if max_future_drift < 0:
@@ -196,10 +178,6 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
         if max_reason_length <= 0:
             raise ValueError("max_reason_length must be positive")
 
-        self._timeout = float(timeout)
-        self._max_retries = int(max_retries)
-        self._retry_interval = float(retry_interval)
-        self._backoff_multiplier = float(backoff_multiplier)
         self._max_staleness = timedelta(seconds=float(max_staleness))
         self._max_future_drift = timedelta(seconds=float(max_future_drift))
         self._max_reason_length = int(max_reason_length)
@@ -208,74 +186,23 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
         self._quarantined = False
         self._quarantine_reason: str | None = None
         self._logger = get_logger(__name__)
-        self._initialise()
-
-    def _initialise(self) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._path, timeout=self._timeout) as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute(
-                """
-                CREATE TABLE IF NOT EXISTS kill_switch_state (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    engaged INTEGER NOT NULL CHECK (engaged IN (0, 1)),
-                    reason TEXT NOT NULL DEFAULT '',
-                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-                )
-                """
-            )
-
-    def _with_retry(self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False) -> T:
-        delay = self._retry_interval
-        attempts_remaining = self._max_retries
-        while True:
-            try:
-                with sqlite3.connect(self._path, timeout=self._timeout) as connection:
-                    if write:
-                        connection.execute("PRAGMA journal_mode=WAL")
-                    return operation(connection)
-            except sqlite3.OperationalError as exc:
-                if not self._should_retry(exc) or attempts_remaining <= 0:
-                    raise
-                time.sleep(delay)
-                attempts_remaining -= 1
-                delay = min(delay * self._backoff_multiplier, self._timeout)
-
-    @staticmethod
-    def _should_retry(error: sqlite3.OperationalError) -> bool:
-        message = str(error).lower()
-        return "locked" in message or "busy" in message
 
     def load(self) -> tuple[bool, str] | None:
         self._check_not_quarantined()
-
-        def _load(connection: sqlite3.Connection) -> tuple[bool, str] | None:
-            cursor = connection.execute(
-                "SELECT engaged, reason, updated_at FROM kill_switch_state WHERE id = 1"
-            )
-            row = cursor.fetchone()
-            if row is None:
-                return None
-            record = self._validate_record(row)
-            self._enforce_range_checks(record)
-            self._enforce_temporal_contract(record)
-            return record.engaged, record.reason
-
-        return self._with_retry(_load)
+        row = self._load_row()
+        if row is None:
+            return None
+        record = self._validate_record(row)
+        self._enforce_range_checks(record)
+        self._enforce_temporal_contract(record)
+        return record.engaged, record.reason
 
     def save(self, engaged: bool, reason: str) -> None:
         payload_reason = reason or ""
         with self._lock:
             self._check_not_quarantined()
-            self._enforce_outgoing_contracts(engaged, payload_reason)
-
-            def _save(connection: sqlite3.Connection) -> None:
-                connection.execute(
-                    self._UPSERT_STATEMENT,
-                    (1, int(bool(engaged)), payload_reason),
-                )
-
-            self._with_retry(_save, write=True)
+            self._enforce_outgoing_contracts(bool(engaged), payload_reason)
+            self._save_payload(bool(engaged), payload_reason)
 
     def is_quarantined(self) -> bool:
         return self._quarantined
@@ -287,6 +214,14 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
         with self._lock:
             self._quarantined = False
             self._quarantine_reason = None
+
+    @abstractmethod
+    def _load_row(self) -> tuple[object, ...] | None:
+        """Return the raw persistence payload or ``None`` when empty."""
+
+    @abstractmethod
+    def _save_payload(self, engaged: bool, reason: str) -> None:
+        """Persist the provided payload atomically."""
 
     def _check_not_quarantined(self) -> None:
         if self._quarantined:
@@ -354,6 +289,451 @@ class SQLiteKillSwitchStateStore(KillSwitchStateStore):
             )
         if any(ord(ch) < 32 and ch not in {"\t", "\n"} for ch in reason):
             raise DataQualityError("reason contains control characters")
+
+
+class SQLiteKillSwitchStateStore(BaseKillSwitchStateStore):
+    """SQLite-backed store used to persist kill-switch state across restarts."""
+
+    _UPSERT_STATEMENT = """
+        INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(id) DO UPDATE SET
+            engaged = excluded.engaged,
+            reason = excluded.reason,
+            updated_at = CURRENT_TIMESTAMP
+    """
+
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        timeout: float = 10.0,
+        max_retries: int = 5,
+        retry_interval: float = 0.05,
+        backoff_multiplier: float = 2.0,
+        max_staleness: float = 300.0,
+        max_future_drift: float = 5.0,
+        max_reason_length: int = 512,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._path = Path(path)
+        if timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if retry_interval <= 0:
+            raise ValueError("retry_interval must be positive")
+        if backoff_multiplier < 1.0:
+            raise ValueError("backoff_multiplier must be >= 1.0")
+
+        self._timeout = float(timeout)
+        self._max_retries = int(max_retries)
+        self._retry_interval = float(retry_interval)
+        self._backoff_multiplier = float(backoff_multiplier)
+
+        super().__init__(
+            max_staleness=max_staleness,
+            max_future_drift=max_future_drift,
+            max_reason_length=max_reason_length,
+            clock=clock,
+        )
+        self._initialise()
+
+    def _initialise(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self._path, timeout=self._timeout) as connection:
+            connection.execute("PRAGMA journal_mode=WAL")
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS kill_switch_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    engaged INTEGER NOT NULL CHECK (engaged IN (0, 1)),
+                    reason TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+
+    def _with_retry(self, operation: Callable[[sqlite3.Connection], T], *, write: bool = False) -> T:
+        delay = self._retry_interval
+        attempts_remaining = self._max_retries
+        while True:
+            try:
+                with sqlite3.connect(self._path, timeout=self._timeout) as connection:
+                    if write:
+                        connection.execute("PRAGMA journal_mode=WAL")
+                    return operation(connection)
+            except sqlite3.OperationalError as exc:
+                if not self._should_retry(exc) or attempts_remaining <= 0:
+                    raise
+                time.sleep(delay)
+                attempts_remaining -= 1
+                delay = min(delay * self._backoff_multiplier, self._timeout)
+
+    @staticmethod
+    def _should_retry(error: sqlite3.OperationalError) -> bool:
+        message = str(error).lower()
+        return "locked" in message or "busy" in message
+
+    def _load_row(self) -> tuple[object, ...] | None:
+
+        def _load(connection: sqlite3.Connection) -> tuple[object, ...] | None:
+            cursor = connection.execute(
+                "SELECT engaged, reason, updated_at FROM kill_switch_state WHERE id = 1"
+            )
+            return cursor.fetchone()
+
+        return self._with_retry(_load)
+
+    def _save_payload(self, engaged: bool, reason: str) -> None:
+
+        def _save(connection: sqlite3.Connection) -> None:
+            connection.execute(
+                self._UPSERT_STATEMENT,
+                (1, int(bool(engaged)), reason),
+            )
+
+        self._with_retry(_save, write=True)
+
+
+class _PooledCursor:
+    """Wrap a DB-API cursor and mark the owning connection as compromised on errors."""
+
+    def __init__(self, cursor: object, owner: "_PooledConnection") -> None:
+        self._cursor = cursor
+        self._owner = owner
+
+    def execute(self, query: str, params: object | None = None) -> object:
+        try:
+            return self._cursor.execute(query, params)
+        except Exception:
+            self._owner.mark_discard()
+            raise
+
+    def fetchone(self) -> object | None:
+        return self._cursor.fetchone()
+
+    def fetchall(self) -> list[object]:
+        return self._cursor.fetchall()
+
+    @property
+    def rowcount(self) -> int:
+        return int(getattr(self._cursor, "rowcount", -1))
+
+    def close(self) -> None:
+        close = getattr(self._cursor, "close", None)
+        if callable(close):
+            close()
+
+
+class _PooledConnection:
+    """Thin wrapper returning connections to the pool once closed."""
+
+    def __init__(self, raw_connection: object, pool: "_ConnectionPool") -> None:
+        self._conn = raw_connection
+        self._pool = pool
+        self._discard = False
+        self._committed = False
+
+    def cursor(self) -> _PooledCursor:
+        cursor = self._conn.cursor()
+        return _PooledCursor(cursor, self)
+
+    def commit(self) -> None:
+        try:
+            self._conn.commit()
+            self._committed = True
+        except Exception:
+            self._discard = True
+            raise
+
+    def rollback(self) -> None:
+        try:
+            self._conn.rollback()
+        except Exception:
+            self._discard = True
+            raise
+        finally:
+            self._committed = False
+
+    def close(self) -> None:
+        if self._conn is None:
+            return
+        if not self._committed and not self._discard:
+            try:
+                self._conn.rollback()
+            except Exception:
+                self._discard = True
+        if self._discard:
+            self._pool.discard(self._conn)
+        else:
+            self._pool.release(self._conn)
+        self._conn = None
+
+    def mark_discard(self) -> None:
+        self._discard = True
+
+
+class _ConnectionPool:
+    """Simple thread-safe connection pool used by the PostgreSQL store."""
+
+    def __init__(
+        self,
+        connection_factory: Callable[[], object],
+        *,
+        max_size: int,
+        acquire_timeout: float | None = None,
+    ) -> None:
+        if max_size <= 0:
+            raise ValueError("max_size must be positive")
+
+        self._factory = connection_factory
+        self._max_size = int(max_size)
+        self._queue: queue.Queue[object] = queue.Queue(maxsize=self._max_size)
+        self._created = 0
+        self._lock = threading.Lock()
+        self._closed = False
+        self._default_timeout = acquire_timeout
+
+    def acquire(self, timeout: float | None = None) -> object:
+        effective_timeout = self._default_timeout if timeout is None else timeout
+        if self._closed:
+            raise RuntimeError("connection pool is closed")
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            pass
+
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("connection pool is closed")
+            if self._created < self._max_size:
+                connection = self._factory()
+                self._created += 1
+                return connection
+
+        try:
+            if effective_timeout is None:
+                connection = self._queue.get()
+            else:
+                connection = self._queue.get(timeout=max(0.0, effective_timeout))
+        except queue.Empty as exc:  # pragma: no cover - defensive guard
+            raise TimeoutError("timed out waiting for a database connection") from exc
+        return connection
+
+    def release(self, connection: object) -> None:
+        if self._closed:
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+            with self._lock:
+                self._created = max(0, self._created - 1)
+            return
+        try:
+            self._queue.put_nowait(connection)
+        except queue.Full:
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+            with self._lock:
+                self._created = max(0, self._created - 1)
+
+    def discard(self, connection: object) -> None:
+        try:
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+        finally:
+            with self._lock:
+                self._created = max(0, self._created - 1)
+
+    def warmup(self, initial_size: int) -> None:
+        target = min(max(0, int(initial_size)), self._max_size)
+        preallocated: list[object] = []
+        for _ in range(target):
+            preallocated.append(self.acquire())
+        for connection in preallocated:
+            self.release(connection)
+
+    def close(self) -> None:
+        self._closed = True
+        while True:
+            try:
+                connection = self._queue.get_nowait()
+            except queue.Empty:
+                break
+            close = getattr(connection, "close", None)
+            if callable(close):
+                close()
+        with self._lock:
+            self._created = 0
+
+
+class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
+    """PostgreSQL-backed kill-switch store with connection pooling."""
+
+    _UPSERT_STATEMENT = """
+        INSERT INTO kill_switch_state (id, engaged, reason, updated_at)
+        VALUES (1, %(engaged)s, %(reason)s, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+            engaged = EXCLUDED.engaged,
+            reason = EXCLUDED.reason,
+            updated_at = NOW()
+    """
+
+    def __init__(
+        self,
+        dsn: str,
+        *,
+        tls: PostgresTLSConfig | None = None,
+        pool_min_size: int = 1,
+        pool_max_size: int = 4,
+        acquire_timeout: float | None = 2.0,
+        connect_timeout: float = 5.0,
+        statement_timeout_ms: int = 5000,
+        max_retries: int = 3,
+        retry_interval: float = 0.1,
+        backoff_multiplier: float = 2.0,
+        max_staleness: float = 300.0,
+        max_future_drift: float = 5.0,
+        max_reason_length: int = 512,
+        clock: Callable[[], datetime] | None = None,
+        connection_factory: Callable[[], object] | None = None,
+        pool_factory: Callable[[Callable[[], object], int, float | None], _ConnectionPool]
+        | None = None,
+        ensure_schema: bool = True,
+    ) -> None:
+        if pool_min_size < 0:
+            raise ValueError("pool_min_size must be non-negative")
+        if pool_max_size <= 0:
+            raise ValueError("pool_max_size must be positive")
+        if pool_min_size > pool_max_size:
+            raise ValueError("pool_min_size cannot exceed pool_max_size")
+        if connect_timeout <= 0:
+            raise ValueError("connect_timeout must be positive")
+        if statement_timeout_ms <= 0:
+            raise ValueError("statement_timeout_ms must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries must be non-negative")
+        if retry_interval < 0:
+            raise ValueError("retry_interval must be non-negative")
+        if backoff_multiplier < 1.0:
+            raise ValueError("backoff_multiplier must be >= 1.0")
+
+        super().__init__(
+            max_staleness=max_staleness,
+            max_future_drift=max_future_drift,
+            max_reason_length=max_reason_length,
+            clock=clock,
+        )
+
+        self._dsn = dsn
+        self._tls = tls
+        self._max_retries = int(max_retries)
+        self._retry_interval = float(retry_interval)
+        self._backoff_multiplier = float(backoff_multiplier)
+        self._acquire_timeout = acquire_timeout
+
+        if connection_factory is None:
+            if tls is None:
+                raise ValueError(
+                    "tls must be provided when using the default PostgreSQL connection factory"
+                )
+            connection_factory = lambda: self._create_connection(
+                connect_timeout=connect_timeout,
+                statement_timeout_ms=statement_timeout_ms,
+            )
+
+        if pool_factory is None:
+            self._pool = _ConnectionPool(
+                connection_factory,
+                max_size=pool_max_size,
+                acquire_timeout=acquire_timeout,
+            )
+        else:
+            self._pool = pool_factory(connection_factory, pool_max_size, acquire_timeout)
+
+        if pool_min_size:
+            self._pool.warmup(pool_min_size)
+
+        self._dal = DataAccessLayer(self._connection_from_pool)
+        if ensure_schema:
+            self._ensure_schema()
+
+    def _connection_from_pool(self) -> _PooledConnection:
+        connection = self._pool.acquire()
+        return _PooledConnection(connection, self._pool)
+
+    def close(self) -> None:
+        self._pool.close()
+
+    def _create_connection(self, *, connect_timeout: float, statement_timeout_ms: int) -> object:
+        options = f"-c statement_timeout={int(statement_timeout_ms)} -c timezone=UTC"
+        return create_postgres_connection(
+            self._dsn,
+            self._tls,
+            connect_timeout=float(connect_timeout),
+            options=options,
+        )
+
+    def _ensure_schema(self) -> None:
+        self._execute_with_retry(
+            lambda: self._dal.execute(
+                """
+                CREATE TABLE IF NOT EXISTS kill_switch_state (
+                    id SMALLINT PRIMARY KEY CHECK (id = 1),
+                    engaged BOOLEAN NOT NULL,
+                    reason TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            ),
+            write=True,
+        )
+
+    def _load_row(self) -> tuple[object, ...] | None:
+        return self._execute_with_retry(
+            lambda: self._dal.fetch_one(
+                "SELECT engaged, reason, updated_at FROM kill_switch_state WHERE id = 1"
+            )
+        )
+
+    def _save_payload(self, engaged: bool, reason: str) -> None:
+        self._execute_with_retry(
+            lambda: self._dal.execute(
+                self._UPSERT_STATEMENT,
+                {"engaged": bool(engaged), "reason": reason},
+            ),
+            write=True,
+        )
+
+    def _execute_with_retry(self, operation: Callable[[], T], *, write: bool = False) -> T:
+        delay = self._retry_interval
+        attempts_remaining = self._max_retries
+        while True:
+            try:
+                return operation()
+            except Exception as exc:  # pragma: no cover - fallback when psycopg is absent
+                if not self._should_retry(exc) or attempts_remaining <= 0:
+                    raise
+                if delay > 0:
+                    time.sleep(delay)
+                attempts_remaining -= 1
+                delay *= self._backoff_multiplier
+
+    @staticmethod
+    def _should_retry(error: Exception) -> bool:
+        transient_indicators = {
+            "timeout",
+            "temporarily unavailable",
+            "connection reset",
+            "connection refused",
+            "closed",
+        }
+        if isinstance(error, (TimeoutError, ConnectionError, OSError)):
+            return True
+        message = str(error).lower()
+        return any(indicator in message for indicator in transient_indicators)
 
 
 class KillSwitch:

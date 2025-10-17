@@ -28,7 +28,12 @@ from application.api.rate_limit import RateLimiterSnapshot, SlidingWindowRateLim
 from application.settings import AdminApiSettings, ApiRateLimitSettings, ApiSecuritySettings
 from application.trading import signal_to_dto
 from domain import Signal, SignalAction
-from execution.risk import RiskLimits, RiskManager, SQLiteKillSwitchStateStore
+from execution.risk import (
+    PostgresKillSwitchStateStore,
+    RiskLimits,
+    RiskManager,
+    SQLiteKillSwitchStateStore,
+)
 from observability.health import HealthServer
 from src.admin.remote_control import (
     AdminIdentity,
@@ -550,7 +555,26 @@ def create_app(
     if audit_logger is None:
         audit_logger = AuditLogger(secret_resolver=audit_secret_provider, sink=audit_sink)
 
-    kill_switch_store = SQLiteKillSwitchStateStore(resolved_settings.kill_switch_store_path)
+    kill_switch_store_settings = resolved_settings.kill_switch_postgres
+    if kill_switch_store_settings is not None:
+        kill_switch_store = PostgresKillSwitchStateStore(
+            str(kill_switch_store_settings.dsn),
+            tls=kill_switch_store_settings.tls,
+            pool_min_size=int(kill_switch_store_settings.min_pool_size),
+            pool_max_size=int(kill_switch_store_settings.max_pool_size),
+            acquire_timeout=(
+                float(kill_switch_store_settings.acquire_timeout_seconds)
+                if kill_switch_store_settings.acquire_timeout_seconds is not None
+                else None
+            ),
+            connect_timeout=float(kill_switch_store_settings.connect_timeout_seconds),
+            statement_timeout_ms=int(kill_switch_store_settings.statement_timeout_ms),
+            max_retries=int(kill_switch_store_settings.max_retries),
+            retry_interval=float(kill_switch_store_settings.retry_interval_seconds),
+            backoff_multiplier=float(kill_switch_store_settings.backoff_multiplier),
+        )
+    else:
+        kill_switch_store = SQLiteKillSwitchStateStore(resolved_settings.kill_switch_store_path)
     risk_manager_facade = RiskManagerFacade(
         RiskManager(RiskLimits(), kill_switch_store=kill_switch_store)
     )

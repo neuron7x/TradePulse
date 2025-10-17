@@ -11,14 +11,61 @@ if TYPE_CHECKING:
 from pydantic import (
     AnyUrl,
     BaseModel,
+    ConfigDict,
     Field,
     HttpUrl,
     PositiveFloat,
     PositiveInt,
+    PostgresDsn,
     SecretStr,
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from core.config.cli_models import PostgresTLSConfig
+from core.config.postgres import ensure_secure_postgres_uri
+
+
+class KillSwitchPostgresSettings(BaseModel):
+    """Configuration for the PostgreSQL-backed kill-switch store."""
+
+    dsn: PostgresDsn
+    tls: PostgresTLSConfig
+    min_pool_size: int = Field(1, ge=0, description="Minimum number of pooled connections to pre-create.")
+    max_pool_size: PositiveInt = Field(4, description="Maximum number of pooled connections available concurrently.")
+    acquire_timeout_seconds: float | None = Field(
+        2.0,
+        ge=0.0,
+        description="Seconds to wait for a pooled connection before timing out. Use null for infinite wait.",
+    )
+    connect_timeout_seconds: PositiveFloat = Field(
+        5.0,
+        description="Timeout, in seconds, applied to the initial TCP and TLS handshake when establishing new connections.",
+    )
+    statement_timeout_ms: PositiveInt = Field(
+        5000,
+        description="PostgreSQL statement timeout applied to store operations, in milliseconds.",
+    )
+    max_retries: int = Field(3, ge=0, description="Maximum number of retries for transient PostgreSQL errors.")
+    retry_interval_seconds: float = Field(
+        0.1,
+        ge=0.0,
+        description="Initial delay, in seconds, between retries for transient errors.",
+    )
+    backoff_multiplier: float = Field(
+        2.0,
+        ge=1.0,
+        description="Multiplier applied to the retry delay after each failed attempt.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_pool(self) -> "KillSwitchPostgresSettings":
+        ensure_secure_postgres_uri(str(self.dsn))
+        if self.max_pool_size < self.min_pool_size:
+            raise ValueError("max_pool_size must be greater than or equal to min_pool_size")
+        return self
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class AdminApiSettings(BaseSettings):
@@ -61,6 +108,13 @@ class AdminApiSettings(BaseSettings):
     kill_switch_store_path: Path = Field(
         Path("state/kill_switch_state.sqlite"),
         description="Filesystem path used to persist the risk kill-switch state.",
+    )
+    kill_switch_postgres: KillSwitchPostgresSettings | None = Field(
+        default=None,
+        description=(
+            "Optional PostgreSQL configuration for kill-switch persistence. When provided the service uses a pooled "
+            "PostgreSQL backend; otherwise it falls back to the local SQLite store."
+        ),
     )
     siem_endpoint: HttpUrl | None = Field(
         default=None,
