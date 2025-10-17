@@ -156,12 +156,26 @@ def normalize_market_data(
         duplicates_dropped = 0
 
     resolved_freq, inferred = _resolve_frequency(prepared.index, config.frequency)
-    reindexed, missing = _reindex(prepared, resolved_freq)
-    filled = _fill_gaps(reindexed, config.fill_method)
 
     if config.kind == "tick":
-        ohlcv = _from_ticks(filled, config, resolved_freq)
+        # ``resample_ticks_to_l1`` expects the raw tick stream so we postpone
+        # calendar alignment until after aggregation.  Reindexing prior to
+        # resampling would discard every tick that does not already land on the
+        # frequency boundary (e.g. millisecond feeds against a 1s calendar).
+        expected_index = pd.date_range(
+            start=prepared.index[0],
+            end=prepared.index[-1],
+            freq=resolved_freq,
+            tz=prepared.index[0].tz,
+        )
+        missing = int(expected_index.difference(prepared.index).shape[0])
+        ohlcv_raw = _from_ticks(prepared, config, resolved_freq)
+        reindexed = ohlcv_raw.reindex(expected_index)
+        filled = _fill_gaps(reindexed, config.fill_method)
+        ohlcv = _ensure_ohlcv_columns(filled)
     else:
+        reindexed, missing = _reindex(prepared, resolved_freq)
+        filled = _fill_gaps(reindexed, config.fill_method)
         ohlcv = _ensure_ohlcv_columns(filled)
 
     metadata = MarketNormalizationMetadata(
@@ -264,9 +278,29 @@ def _from_ticks(
     l1 = resample_ticks_to_l1(
         working[["price", "size"]], freq=freq, price_col="price", size_col="size"
     )
+
+    counts = frame.resample(freq).size()
+    empty_bins = counts[counts == 0].index
+    if not empty_bins.empty:
+        l1.loc[empty_bins, "mid_price"] = np.nan
+        l1.loc[empty_bins, "last_size"] = 0.0
+
     ohlcv = resample_l1_to_ohlcv(
         l1, freq=freq, price_col="mid_price", size_col="last_size"
     )
+
+    if config.volume_col in frame.columns:
+        volume = (
+            frame[config.volume_col]
+            .resample(freq)
+            .sum(min_count=1)
+            .reindex(ohlcv.index)
+            .fillna(0.0)
+        )
+        ohlcv["volume"] = volume
+    else:
+        ohlcv["volume"] = 0.0
+
     return _ensure_ohlcv_columns(ohlcv)
 
 
