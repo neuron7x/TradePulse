@@ -120,7 +120,8 @@ function normaliseEnvelope(message) {
     return normaliseEnvelope(text);
   }
   if (ArrayBuffer.isView(message)) {
-    const text = new TextDecoder('utf-8').decode(message.buffer);
+    const view = new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+    const text = new TextDecoder('utf-8').decode(view);
     return normaliseEnvelope(text);
   }
   if (message && typeof message === 'object') {
