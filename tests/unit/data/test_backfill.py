@@ -69,6 +69,27 @@ def test_gap_validation_and_detection() -> None:
     assert gaps[0].end == expected[2] + pd.Timedelta(minutes=1)
 
 
+def test_detect_gaps_requires_frequency_override_for_irregular_index() -> None:
+    """Irregular indices must supply an explicit cadence for gap detection."""
+
+    expected = pd.DatetimeIndex(
+        [
+            pd.Timestamp("2024-01-01 00:00:00", tz=UTC),
+            pd.Timestamp("2024-01-01 00:01:00", tz=UTC),
+            pd.Timestamp("2024-01-01 00:03:00", tz=UTC),
+        ]
+    )
+    existing = expected.delete(1)
+
+    with pytest.raises(ValueError, match="Unable to determine expected_index frequency"):
+        detect_gaps(expected, existing)
+
+    gaps = detect_gaps(expected, existing, frequency="1min")
+    assert len(gaps) == 1
+    assert gaps[0].start == pd.Timestamp("2024-01-01 00:01:00", tz=UTC)
+    assert gaps[0].end == pd.Timestamp("2024-01-01 00:02:00", tz=UTC)
+
+
 def test_gap_fill_planner_full_refresh_and_apply() -> None:
     cache = LayerCache()
     planner = GapFillPlanner(cache)
