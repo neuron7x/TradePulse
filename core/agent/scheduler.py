@@ -675,7 +675,12 @@ class StrategyScheduler:
             state.in_flight = False
             state.sla_deadline = None
             backoff = self._compute_backoff(state)
-            self._schedule_interval(state, base=finished_at, interval_override=backoff)
+            interval_override = backoff if state.job.interval is not None else None
+            self._schedule_interval(
+                state,
+                base=finished_at,
+                interval_override=interval_override,
+            )
             self._schedule_cron(state, after=self._wall_datetime())
             self._finalize_event_consumption(
                 state,
