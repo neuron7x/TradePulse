@@ -70,6 +70,79 @@ const DASHBOARD_STYLES = `
     text-transform: uppercase;
   }
 
+  .tp-channel-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.85rem;
+    border-radius: 999px;
+    background: rgba(148, 163, 184, 0.15);
+    color: rgba(226, 232, 240, 0.9);
+    font-size: 0.85rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    transition: background 0.3s ease, color 0.3s ease;
+  }
+
+  .tp-channel-indicator__dot {
+    width: 0.65rem;
+    height: 0.65rem;
+    border-radius: 50%;
+    background: rgba(148, 163, 184, 0.6);
+    box-shadow: 0 0 0 0 rgba(148, 163, 184, 0.35);
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+  }
+
+  .tp-channel-indicator__meta {
+    font-weight: 500;
+    font-size: 0.75rem;
+    opacity: 0.85;
+  }
+
+  .tp-channel-indicator--open {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.15);
+  }
+
+  .tp-channel-indicator--open .tp-channel-indicator__dot {
+    background: #4ade80;
+    box-shadow: 0 0 0 6px rgba(74, 222, 128, 0.08);
+  }
+
+  .tp-channel-indicator--connecting,
+  .tp-channel-indicator--reconnecting {
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.15);
+  }
+
+  .tp-channel-indicator--connecting .tp-channel-indicator__dot,
+  .tp-channel-indicator--reconnecting .tp-channel-indicator__dot {
+    background: #fbbf24;
+    box-shadow: 0 0 0 6px rgba(251, 191, 36, 0.1);
+  }
+
+  .tp-channel-indicator--error {
+    color: #f87171;
+    background: rgba(248, 113, 113, 0.15);
+  }
+
+  .tp-channel-indicator--error .tp-channel-indicator__dot {
+    background: #f87171;
+    box-shadow: 0 0 0 6px rgba(248, 113, 113, 0.12);
+  }
+
+  .tp-channel-indicator--closed,
+  .tp-channel-indicator--idle {
+    color: rgba(226, 232, 240, 0.9);
+    background: rgba(148, 163, 184, 0.15);
+  }
+
+  .tp-channel-indicator--closed .tp-channel-indicator__dot,
+  .tp-channel-indicator--idle .tp-channel-indicator__dot {
+    background: rgba(148, 163, 184, 0.6);
+  }
+
   .tp-dashboard__grid {
     display: grid;
     gap: 1.5rem;
@@ -360,7 +433,35 @@ function renderMetricCards(metrics = [], currency = 'USD') {
     .join('');
 }
 
-function renderHeader({ title, subtitle, tags }) {
+function renderChannelStatus(channel = {}) {
+  if (!channel) {
+    return '';
+  }
+  const modifier = sanitizeModifier(channel.status || 'idle');
+  const label = escapeHtml(channel.label || 'Offline');
+  const metaParts = [];
+  if (Number.isFinite(channel.latencyMs)) {
+    metaParts.push(`${Math.round(channel.latencyMs)} ms latency`);
+  }
+  if (Number.isFinite(channel.retryCount) && channel.retryCount > 0) {
+    metaParts.push(`retry #${channel.retryCount}`);
+  }
+  if (channel.message) {
+    metaParts.push(channel.message);
+  }
+  const meta = metaParts.length
+    ? `<span class="tp-channel-indicator__meta">${escapeHtml(metaParts.join(' • '))}</span>`
+    : '';
+  return `
+    <span class="tp-channel-indicator tp-channel-indicator--${modifier}">
+      <span class="tp-channel-indicator__dot"></span>
+      <span>${label}</span>
+      ${meta}
+    </span>
+  `;
+}
+
+function renderHeader({ title, subtitle, tags, channel }) {
   const meta = [];
   if (subtitle) {
     meta.push(`<span>${escapeHtml(subtitle)}</span>`);
@@ -371,6 +472,7 @@ function renderHeader({ title, subtitle, tags }) {
   const metaBlock = meta.length
     ? `<div class="tp-dashboard__meta">${meta.join('')}</div>`
     : '';
+  const indicator = renderChannelStatus(channel) || '<span class="tp-badge">Live</span>';
 
   return `
     <header class="tp-dashboard__header">
@@ -379,7 +481,7 @@ function renderHeader({ title, subtitle, tags }) {
         ${metaBlock}
       </div>
       <div class="tp-dashboard__meta">
-        <span class="tp-badge">Live</span>
+        ${indicator}
       </div>
     </header>
   `;
@@ -394,9 +496,10 @@ export function renderDashboard(options = {}) {
     metrics = [],
     pnlSeries = [],
     statusItems = [],
+    channel,
   } = options;
 
-  const header = renderHeader({ title, subtitle, tags });
+  const header = renderHeader({ title, subtitle, tags, channel });
   const metricCards = renderMetricCards(metrics, currency);
   const pnlRows = buildPnLPanels(pnlSeries, currency);
   const statuses = buildStatusList(statusItems);

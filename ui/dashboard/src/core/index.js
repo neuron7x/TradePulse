@@ -147,6 +147,14 @@ export function exportReport(summary, options = {}) {
 }
 
 export { renderDashboard, DASHBOARD_STYLES, formatCurrency, formatPercent } from './dashboard_ui.js';
+export {
+  RealtimeEventClient,
+  deserializeEventEnvelope,
+  CHANNEL_STATUS,
+  bindClientToStore,
+  computeBackoffDelay,
+} from '../services/realtime_client.js';
+export { createDashboardStore, DashboardStore, DEFAULT_CHANNEL, CHANNEL_LEVEL } from '../state/dashboard_store.js';
 
 export class DashboardState {
   constructor({ strategies = [], backtests = [] } = {}) {
