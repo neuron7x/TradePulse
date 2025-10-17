@@ -979,12 +979,12 @@ def create_app(
         metrics_registry = prometheus_registry
 
     metrics_module = __import__("core.utils.metrics", fromlist=["MetricsCollector"])
-    metrics = get_metrics_collector(metrics_registry)
-    if metrics_registry is not None and getattr(metrics, "registry", None) is None:
+    metrics_collector = get_metrics_collector(metrics_registry)
+    if metrics_registry is not None and getattr(metrics_collector, "registry", None) is None:
         refreshed_metrics = metrics_module.MetricsCollector(metrics_registry)
-        metrics.__dict__.update(refreshed_metrics.__dict__)
-        setattr(metrics_module, "_collector", metrics)
-    app.state.metrics = metrics
+        metrics_collector.__dict__.update(refreshed_metrics.__dict__)
+        setattr(metrics_module, "_collector", metrics_collector)
+    app.state.metrics = metrics_collector
 
     async def enforce_rate_limit(
         request: Request,
@@ -1120,8 +1120,8 @@ def create_app(
                 continue
 
             normalised = _coerce_dependency_result(result)
-            metrics = dict(normalised.data or {})
-            metrics["latency_ms"] = round(elapsed_ms, 2)
+            component_metrics = dict(normalised.data or {})
+            component_metrics["latency_ms"] = round(elapsed_ms, 2)
             status_value = "operational" if normalised.healthy else "failed"
             if not normalised.healthy:
                 dependency_failures = True
@@ -1129,7 +1129,7 @@ def create_app(
                 healthy=normalised.healthy,
                 status=status_value,
                 detail=normalised.detail,
-                metrics=metrics,
+                metrics=component_metrics,
             )
 
         severity = "ready"
@@ -1150,12 +1150,12 @@ def create_app(
             for name, component in components.items():
                 health_state.update_component(name, component.healthy, component.detail)
 
-        if metrics and metrics.enabled:
+        if metrics_collector and metrics_collector.enabled:
             duration = perf_counter() - overall_start
-            metrics.observe_health_check_latency("api.overall", duration)
-            metrics.set_health_check_status("api.overall", severity == "ready")
+            metrics_collector.observe_health_check_latency("api.overall", duration)
+            metrics_collector.set_health_check_status("api.overall", severity == "ready")
             for name, component in components.items():
-                metrics.set_health_check_status(f"component.{name}", component.healthy)
+                metrics_collector.set_health_check_status(f"component.{name}", component.healthy)
 
         return health_payload
 

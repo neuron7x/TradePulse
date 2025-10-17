@@ -1,4 +1,124 @@
 {
+  "$defs": {
+    "FeatureFilters": {
+      "description": "Echoed filter parameters for feature responses.",
+      "properties": {
+        "end_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End At"
+        },
+        "feature_keys": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Feature Keys",
+          "type": "array"
+        },
+        "feature_prefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Feature Prefix"
+        },
+        "start_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start At"
+        }
+      },
+      "title": "FeatureFilters",
+      "type": "object"
+    },
+    "FeatureSnapshot": {
+      "description": "Single feature vector at a specific timestamp.",
+      "properties": {
+        "features": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Features",
+          "type": "object"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        }
+      },
+      "required": [
+        "timestamp",
+        "features"
+      ],
+      "title": "FeatureSnapshot",
+      "type": "object"
+    },
+    "PaginationMeta": {
+      "description": "Pagination envelope used by collection responses.",
+      "properties": {
+        "cursor": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cursor"
+        },
+        "limit": {
+          "default": 0,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "next_cursor": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Cursor"
+        },
+        "returned": {
+          "default": 0,
+          "title": "Returned",
+          "type": "integer"
+        }
+      },
+      "title": "PaginationMeta",
+      "type": "object"
+    }
+  },
   "description": "Response containing the most recent feature snapshot.",
   "properties": {
     "features": {
@@ -8,10 +128,23 @@
       "title": "Features",
       "type": "object"
     },
+    "filters": {
+      "$ref": "#/$defs/FeatureFilters"
+    },
     "generated_at": {
       "format": "date-time",
       "title": "Generated At",
       "type": "string"
+    },
+    "items": {
+      "items": {
+        "$ref": "#/$defs/FeatureSnapshot"
+      },
+      "title": "Items",
+      "type": "array"
+    },
+    "pagination": {
+      "$ref": "#/$defs/PaginationMeta"
     },
     "symbol": {
       "title": "Symbol",
@@ -19,8 +152,7 @@
     }
   },
   "required": [
-    "symbol",
-    "features"
+    "symbol"
   ],
   "title": "FeatureResponse",
   "type": "object"

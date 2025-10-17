@@ -1,474 +1,9 @@
 {
-  "openapi": "3.1.0",
-  "info": {
-    "title": "TradePulse Online Inference API",
-    "description": "Production-ready endpoints for computing feature vectors and generating lightweight trading signals from streaming market data.",
-    "contact": {
-      "name": "TradePulse Platform Team",
-      "url": "https://github.com/neuron7x/TradePulse"
-    },
-    "license": {
-      "name": "MIT License",
-      "url": "https://opensource.org/licenses/MIT"
-    },
-    "version": "0.2.0"
-  },
-  "paths": {
-    "/admin/kill-switch": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Read the global kill-switch state",
-        "description": "Inspect the kill-switch state and append an immutable audit record.",
-        "operationId": "read_kill_switch_state_admin_kill_switch_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KillSwitchResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          }
-        },
-        "security": [
-          {
-            "OAuth2Bearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Engage the global kill-switch",
-        "description": "Engage or reaffirm the kill-switch and emit a signed audit log entry.",
-        "operationId": "engage_kill_switch_admin_kill_switch_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/KillSwitchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KillSwitchResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "OAuth2Bearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "admin"
-        ],
-        "summary": "Reset the global kill-switch",
-        "description": "Reset the kill-switch in an idempotent manner and preserve an audit trail.",
-        "operationId": "reset_kill_switch_admin_kill_switch_delete",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/KillSwitchResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Unauthorized"
-          }
-        },
-        "security": [
-          {
-            "OAuth2Bearer": []
-          }
-        ]
-      }
-    },
-    "/health": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Health probe",
-        "operationId": "health_check_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/features": {
-      "post": {
-        "tags": [
-          "features"
-        ],
-        "summary": "Generate the latest engineered feature vector",
-        "operationId": "compute_features_features_post",
-        "security": [
-          {
-            "OAuth2Bearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "description": "Number of feature snapshots to return.",
-              "default": 1,
-              "title": "Limit"
-            },
-            "description": "Number of feature snapshots to return."
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
-              "title": "Cursor"
-            },
-            "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp."
-          },
-          {
-            "name": "startAt",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter snapshots on or after this timestamp.",
-              "title": "Startat"
-            },
-            "description": "Filter snapshots on or after this timestamp."
-          },
-          {
-            "name": "endAt",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter snapshots on or before this timestamp.",
-              "title": "Endat"
-            },
-            "description": "Filter snapshots on or before this timestamp."
-          },
-          {
-            "name": "featurePrefix",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return only feature keys with the provided prefix.",
-              "title": "Featureprefix"
-            },
-            "description": "Return only feature keys with the provided prefix."
-          },
-          {
-            "name": "feature",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Specific feature keys to include.",
-              "title": "Feature"
-            },
-            "description": "Specific feature keys to include."
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/FeatureRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FeatureResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/predictions": {
-      "post": {
-        "tags": [
-          "predictions"
-        ],
-        "summary": "Produce a trading signal for the latest bar",
-        "operationId": "generate_prediction_predictions_post",
-        "security": [
-          {
-            "OAuth2Bearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 500,
-              "minimum": 1,
-              "description": "Number of predictions to return.",
-              "default": 1,
-              "title": "Limit"
-            },
-            "description": "Number of predictions to return."
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
-              "title": "Cursor"
-            },
-            "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp."
-          },
-          {
-            "name": "startAt",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return predictions generated at or after this time.",
-              "title": "Startat"
-            },
-            "description": "Return predictions generated at or after this time."
-          },
-          {
-            "name": "endAt",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Return predictions generated at or before this time.",
-              "title": "Endat"
-            },
-            "description": "Return predictions generated at or before this time."
-          },
-          {
-            "name": "action",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Filter predictions by signal action.",
-              "title": "Action"
-            },
-            "description": "Filter predictions by signal action."
-          },
-          {
-            "name": "minConfidence",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Minimum signal confidence to include.",
-              "title": "Minconfidence"
-            },
-            "description": "Minimum signal confidence to include."
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PredictionRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PredictionResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  },
   "components": {
     "schemas": {
       "ComponentHealth": {
+        "description": "Health status for an individual subsystem.",
         "properties": {
-          "healthy": {
-            "type": "boolean",
-            "title": "Healthy"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "operational",
-              "degraded",
-              "failed"
-            ],
-            "title": "Status"
-          },
           "detail": {
             "anyOf": [
               {
@@ -480,45 +15,53 @@
             ],
             "title": "Detail"
           },
+          "healthy": {
+            "title": "Healthy",
+            "type": "boolean"
+          },
           "metrics": {
             "additionalProperties": true,
-            "type": "object",
-            "title": "Metrics"
+            "title": "Metrics",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "operational",
+              "degraded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "healthy",
           "status"
         ],
         "title": "ComponentHealth",
-        "description": "Health status for an individual subsystem."
+        "type": "object"
       },
       "FeatureFilters": {
+        "description": "Echoed filter parameters for feature responses.",
         "properties": {
-          "start_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start At"
-          },
           "end_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "End At"
+          },
+          "feature_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Feature Keys",
+            "type": "array"
           },
           "feature_prefix": {
             "anyOf": [
@@ -531,105 +74,109 @@
             ],
             "title": "Feature Prefix"
           },
-          "feature_keys": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Feature Keys"
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
           }
         },
-        "type": "object",
         "title": "FeatureFilters",
-        "description": "Echoed filter parameters for feature responses."
+        "type": "object"
       },
       "FeatureRequest": {
+        "description": "Payload describing the series to transform into features.",
         "properties": {
-          "symbol": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Symbol",
-            "description": "Instrument identifier."
-          },
           "bars": {
+            "description": "Ordered price bars.",
             "items": {
               "$ref": "#/components/schemas/MarketBar"
             },
-            "type": "array",
             "minItems": 1,
             "title": "Bars",
-            "description": "Ordered price bars."
+            "type": "array"
+          },
+          "symbol": {
+            "description": "Instrument identifier.",
+            "minLength": 1,
+            "title": "Symbol",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "symbol",
           "bars"
         ],
         "title": "FeatureRequest",
-        "description": "Payload describing the series to transform into features."
+        "type": "object"
       },
       "FeatureResponse": {
+        "description": "Response containing the most recent feature snapshot.",
         "properties": {
-          "symbol": {
-            "type": "string",
-            "title": "Symbol"
-          },
-          "generated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Generated At"
-          },
           "features": {
             "additionalProperties": {
               "type": "number"
             },
-            "type": "object",
-            "title": "Features"
+            "title": "Features",
+            "type": "object"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/FeatureFilters"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
           },
           "items": {
             "items": {
               "$ref": "#/components/schemas/FeatureSnapshot"
             },
-            "type": "array",
-            "title": "Items"
+            "title": "Items",
+            "type": "array"
           },
           "pagination": {
             "$ref": "#/components/schemas/PaginationMeta"
           },
-          "filters": {
-            "$ref": "#/components/schemas/FeatureFilters"
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "symbol"
         ],
         "title": "FeatureResponse",
-        "description": "Response containing the most recent feature snapshot."
+        "type": "object"
       },
       "FeatureSnapshot": {
+        "description": "Single feature vector at a specific timestamp.",
         "properties": {
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Timestamp"
-          },
           "features": {
             "additionalProperties": {
               "type": "number"
             },
-            "type": "object",
-            "title": "Features"
+            "title": "Features",
+            "type": "object"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "timestamp",
           "features"
         ],
         "title": "FeatureSnapshot",
-        "description": "Single feature vector at a specific timestamp."
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -637,86 +184,86 @@
             "items": {
               "$ref": "#/components/schemas/ValidationError"
             },
-            "type": "array",
-            "title": "Detail"
+            "title": "Detail",
+            "type": "array"
           }
         },
-        "type": "object",
-        "title": "HTTPValidationError"
+        "title": "HTTPValidationError",
+        "type": "object"
       },
       "HealthResponse": {
+        "description": "Structured response for the readiness probe.",
         "properties": {
+          "components": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ComponentHealth"
+            },
+            "title": "Components",
+            "type": "object"
+          },
           "status": {
-            "type": "string",
             "enum": [
               "ready",
               "degraded",
               "failed"
             ],
-            "title": "Status"
+            "title": "Status",
+            "type": "string"
           },
           "timestamp": {
-            "type": "string",
             "format": "date-time",
-            "title": "Timestamp"
-          },
-          "components": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/ComponentHealth"
-            },
-            "type": "object",
-            "title": "Components"
+            "title": "Timestamp",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "status",
           "components"
         ],
         "title": "HealthResponse",
-        "description": "Structured response for the readiness probe."
+        "type": "object"
       },
       "KillSwitchRequest": {
+        "description": "Request payload for activating the kill-switch.",
         "properties": {
           "reason": {
-            "type": "string",
+            "description": "Human readable reason.",
             "maxLength": 256,
             "minLength": 3,
             "title": "Reason",
-            "description": "Human readable reason."
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "reason"
         ],
         "title": "KillSwitchRequest",
-        "description": "Request payload for activating the kill-switch."
+        "type": "object"
       },
       "KillSwitchResponse": {
+        "description": "Response payload describing the kill-switch state.",
         "properties": {
-          "status": {
-            "type": "string",
-            "title": "Status",
-            "description": "Status message of the kill-switch operation."
+          "already_engaged": {
+            "description": "True if the kill-switch was already active.",
+            "title": "Already Engaged",
+            "type": "boolean"
           },
           "kill_switch_engaged": {
-            "type": "boolean",
+            "description": "Whether the kill-switch is active.",
             "title": "Kill Switch Engaged",
-            "description": "Whether the kill-switch is active."
+            "type": "boolean"
           },
           "reason": {
-            "type": "string",
+            "description": "Reason supplied when the kill-switch was engaged.",
             "title": "Reason",
-            "description": "Reason supplied when the kill-switch was engaged."
+            "type": "string"
           },
-          "already_engaged": {
-            "type": "boolean",
-            "title": "Already Engaged",
-            "description": "True if the kill-switch was already active."
+          "status": {
+            "description": "Status message of the kill-switch operation.",
+            "title": "Status",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "status",
           "kill_switch_engaged",
@@ -724,17 +271,12 @@
           "already_engaged"
         ],
         "title": "KillSwitchResponse",
-        "description": "Response payload describing the kill-switch state."
+        "type": "object"
       },
       "MarketBar": {
+        "description": "Representation of a single OHLCV bar for online inference.",
         "properties": {
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Timestamp",
-            "description": "Timestamp of the bar in ISO 8601 format."
-          },
-          "open": {
+          "askVolume": {
             "anyOf": [
               {
                 "type": "number"
@@ -743,35 +285,8 @@
                 "type": "null"
               }
             ],
-            "title": "Open",
-            "description": "Opening price for the interval."
-          },
-          "high": {
-            "type": "number",
-            "title": "High",
-            "description": "High price for the interval."
-          },
-          "low": {
-            "type": "number",
-            "title": "Low",
-            "description": "Low price for the interval."
-          },
-          "close": {
-            "type": "number",
-            "title": "Close",
-            "description": "Close price for the interval."
-          },
-          "volume": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Volume",
-            "description": "Traded volume for the bar. Optional for illiquid venues."
+            "description": "Ask-side queue volume for microstructure features.",
+            "title": "Askvolume"
           },
           "bidVolume": {
             "anyOf": [
@@ -782,10 +297,25 @@
                 "type": "null"
               }
             ],
-            "title": "Bidvolume",
-            "description": "Bid-side queue volume for microstructure features."
+            "description": "Bid-side queue volume for microstructure features.",
+            "title": "Bidvolume"
           },
-          "askVolume": {
+          "close": {
+            "description": "Close price for the interval.",
+            "title": "Close",
+            "type": "number"
+          },
+          "high": {
+            "description": "High price for the interval.",
+            "title": "High",
+            "type": "number"
+          },
+          "low": {
+            "description": "Low price for the interval.",
+            "title": "Low",
+            "type": "number"
+          },
+          "open": {
             "anyOf": [
               {
                 "type": "number"
@@ -794,8 +324,8 @@
                 "type": "null"
               }
             ],
-            "title": "Askvolume",
-            "description": "Ask-side queue volume for microstructure features."
+            "description": "Opening price for the interval.",
+            "title": "Open"
           },
           "signedVolume": {
             "anyOf": [
@@ -806,11 +336,28 @@
                 "type": "null"
               }
             ],
-            "title": "Signedvolume",
-            "description": "Signed volume (buy-sell imbalance)."
+            "description": "Signed volume (buy-sell imbalance).",
+            "title": "Signedvolume"
+          },
+          "timestamp": {
+            "description": "Timestamp of the bar in ISO 8601 format.",
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Traded volume for the bar. Optional for illiquid venues.",
+            "title": "Volume"
           }
         },
-        "type": "object",
         "required": [
           "timestamp",
           "high",
@@ -818,15 +365,16 @@
           "close"
         ],
         "title": "MarketBar",
-        "description": "Representation of a single OHLCV bar for online inference."
+        "type": "object"
       },
       "PaginationMeta": {
+        "description": "Pagination envelope used by collection responses.",
         "properties": {
           "cursor": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -834,11 +382,16 @@
             ],
             "title": "Cursor"
           },
+          "limit": {
+            "default": 0,
+            "title": "Limit",
+            "type": "integer"
+          },
           "next_cursor": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -846,53 +399,36 @@
             ],
             "title": "Next Cursor"
           },
-          "limit": {
-            "type": "integer",
-            "title": "Limit",
-            "default": 0
-          },
           "returned": {
-            "type": "integer",
+            "default": 0,
             "title": "Returned",
-            "default": 0
+            "type": "integer"
           }
         },
-        "type": "object",
         "title": "PaginationMeta",
-        "description": "Pagination envelope used by collection responses."
+        "type": "object"
       },
       "PredictionFilters": {
+        "description": "Echoed filter parameters for prediction responses.",
         "properties": {
-          "start_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Start At"
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/SignalAction"
+            },
+            "title": "Actions",
+            "type": "array"
           },
           "end_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "format": "date-time",
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
             "title": "End At"
-          },
-          "actions": {
-            "items": {
-              "$ref": "#/components/schemas/SignalAction"
-            },
-            "type": "array",
-            "title": "Actions"
           },
           "min_confidence": {
             "anyOf": [
@@ -904,60 +440,81 @@
               }
             ],
             "title": "Min Confidence"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
           }
         },
-        "type": "object",
         "title": "PredictionFilters",
-        "description": "Echoed filter parameters for prediction responses."
+        "type": "object"
       },
       "PredictionRequest": {
+        "description": "Prediction request payload, optionally specifying a forecast horizon.",
         "properties": {
-          "symbol": {
-            "type": "string",
-            "minLength": 1,
-            "title": "Symbol",
-            "description": "Instrument identifier."
-          },
           "bars": {
+            "description": "Ordered price bars.",
             "items": {
               "$ref": "#/components/schemas/MarketBar"
             },
-            "type": "array",
             "minItems": 1,
             "title": "Bars",
-            "description": "Ordered price bars."
+            "type": "array"
           },
           "horizon_seconds": {
-            "type": "integer",
+            "default": 300,
+            "description": "Prediction horizon in seconds for contextual metadata.",
             "maximum": 3600.0,
             "minimum": 60.0,
             "title": "Horizon Seconds",
-            "description": "Prediction horizon in seconds for contextual metadata.",
-            "default": 300
+            "type": "integer"
+          },
+          "symbol": {
+            "description": "Instrument identifier.",
+            "minLength": 1,
+            "title": "Symbol",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "symbol",
           "bars"
         ],
         "title": "PredictionRequest",
-        "description": "Prediction request payload, optionally specifying a forecast horizon."
+        "type": "object"
       },
       "PredictionResponse": {
+        "description": "Response representing the generated trading signal.",
         "properties": {
-          "symbol": {
-            "type": "string",
-            "title": "Symbol"
+          "filters": {
+            "$ref": "#/components/schemas/PredictionFilters"
           },
           "generated_at": {
-            "type": "string",
             "format": "date-time",
-            "title": "Generated At"
+            "title": "Generated At",
+            "type": "string"
           },
           "horizon_seconds": {
-            "type": "integer",
-            "title": "Horizon Seconds"
+            "title": "Horizon Seconds",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PredictionSnapshot"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/PaginationMeta"
           },
           "score": {
             "anyOf": [
@@ -968,8 +525,8 @@
                 "type": "null"
               }
             ],
-            "title": "Score",
-            "description": "Composite alpha score driving the primary action."
+            "description": "Composite alpha score driving the primary action.",
+            "title": "Score"
           },
           "signal": {
             "anyOf": [
@@ -981,59 +538,49 @@
                 "type": "null"
               }
             ],
-            "title": "Signal",
-            "description": "Primary trading signal at the head of the page."
+            "description": "Primary trading signal at the head of the page.",
+            "title": "Signal"
           },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/PredictionSnapshot"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "pagination": {
-            "$ref": "#/components/schemas/PaginationMeta"
-          },
-          "filters": {
-            "$ref": "#/components/schemas/PredictionFilters"
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "symbol",
           "horizon_seconds"
         ],
         "title": "PredictionResponse",
-        "description": "Response representing the generated trading signal."
+        "type": "object"
       },
       "PredictionSnapshot": {
+        "description": "Snapshot of a derived signal at a point in time.",
         "properties": {
-          "timestamp": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Timestamp"
-          },
           "score": {
-            "type": "number",
-            "title": "Score"
+            "title": "Score",
+            "type": "number"
           },
           "signal": {
             "additionalProperties": true,
-            "type": "object",
-            "title": "Signal"
+            "title": "Signal",
+            "type": "object"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "timestamp",
           "score",
           "signal"
         ],
         "title": "PredictionSnapshot",
-        "description": "Snapshot of a derived signal at a point in time."
+        "type": "object"
       },
       "SignalAction": {
-        "type": "string",
+        "description": "Supported signal directives.",
         "enum": [
           "buy",
           "sell",
@@ -1041,7 +588,7 @@
           "exit"
         ],
         "title": "SignalAction",
-        "description": "Supported signal directives."
+        "type": "string"
       },
       "ValidationError": {
         "properties": {
@@ -1056,46 +603,520 @@
                 }
               ]
             },
-            "type": "array",
-            "title": "Location"
+            "title": "Location",
+            "type": "array"
           },
           "msg": {
-            "type": "string",
-            "title": "Message"
+            "title": "Message",
+            "type": "string"
           },
           "type": {
-            "type": "string",
-            "title": "Error Type"
+            "title": "Error Type",
+            "type": "string"
           }
         },
-        "type": "object",
         "required": [
           "loc",
           "msg",
           "type"
         ],
-        "title": "ValidationError"
+        "title": "ValidationError",
+        "type": "object"
       }
     },
     "securitySchemes": {
       "OAuth2Bearer": {
-        "type": "http",
-        "scheme": "bearer"
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "name": "TradePulse Platform Team",
+      "url": "https://github.com/neuron7x/TradePulse"
+    },
+    "description": "Production-ready endpoints for computing feature vectors and generating lightweight trading signals from streaming market data.",
+    "license": {
+      "name": "MIT License",
+      "url": "https://opensource.org/licenses/MIT"
+    },
+    "title": "TradePulse Online Inference API",
+    "version": "0.2.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/admin/kill-switch": {
+      "delete": {
+        "description": "Reset the kill-switch in an idempotent manner and preserve an audit trail.",
+        "operationId": "reset_kill_switch_admin_kill_switch_delete",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
+        "summary": "Reset the global kill-switch",
+        "tags": [
+          "admin"
+        ]
+      },
+      "get": {
+        "description": "Inspect the kill-switch state and append an immutable audit record.",
+        "operationId": "read_kill_switch_state_admin_kill_switch_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
+        "summary": "Read the global kill-switch state",
+        "tags": [
+          "admin"
+        ]
+      },
+      "post": {
+        "description": "Engage or reaffirm the kill-switch and emit a signed audit log entry.",
+        "operationId": "engage_kill_switch_admin_kill_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/KillSwitchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KillSwitchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
+        "summary": "Engage the global kill-switch",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/features": {
+      "post": {
+        "operationId": "compute_features_features_post",
+        "parameters": [
+          {
+            "description": "Number of feature snapshots to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Number of feature snapshots to return.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Filter snapshots on or after this timestamp.",
+            "in": "query",
+            "name": "startAt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter snapshots on or after this timestamp.",
+              "title": "Startat"
+            }
+          },
+          {
+            "description": "Filter snapshots on or before this timestamp.",
+            "in": "query",
+            "name": "endAt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter snapshots on or before this timestamp.",
+              "title": "Endat"
+            }
+          },
+          {
+            "description": "Return only feature keys with the provided prefix.",
+            "in": "query",
+            "name": "featurePrefix",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only feature keys with the provided prefix.",
+              "title": "Featureprefix"
+            }
+          },
+          {
+            "description": "Specific feature keys to include.",
+            "in": "query",
+            "name": "feature",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Specific feature keys to include.",
+              "title": "Feature"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
+        "summary": "Generate the latest engineered feature vector",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health probe",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "operationId": "prometheus_metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Prometheus metrics",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/predictions": {
+      "post": {
+        "operationId": "generate_prediction_predictions_post",
+        "parameters": [
+          {
+            "description": "Number of predictions to return.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "description": "Number of predictions to return.",
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Pagination cursor (exclusive) encoded as ISO 8601 timestamp.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Return predictions generated at or after this time.",
+            "in": "query",
+            "name": "startAt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return predictions generated at or after this time.",
+              "title": "Startat"
+            }
+          },
+          {
+            "description": "Return predictions generated at or before this time.",
+            "in": "query",
+            "name": "endAt",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return predictions generated at or before this time.",
+              "title": "Endat"
+            }
+          },
+          {
+            "description": "Filter predictions by signal action.",
+            "in": "query",
+            "name": "action",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter predictions by signal action.",
+              "title": "Action"
+            }
+          },
+          {
+            "description": "Minimum signal confidence to include.",
+            "in": "query",
+            "name": "minConfidence",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Minimum signal confidence to include.",
+              "title": "Minconfidence"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PredictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PredictionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2Bearer": []
+          }
+        ],
+        "summary": "Produce a trading signal for the latest bar",
+        "tags": [
+          "predictions"
+        ]
       }
     }
   },
   "tags": [
     {
-      "name": "health",
-      "description": "Operational endpoints"
+      "description": "Operational endpoints",
+      "name": "health"
     },
     {
-      "name": "features",
-      "description": "Feature engineering APIs"
+      "description": "Feature engineering APIs",
+      "name": "features"
     },
     {
-      "name": "predictions",
-      "description": "Signal forecasting APIs"
+      "description": "Signal forecasting APIs",
+      "name": "predictions"
     }
   ]
 }
