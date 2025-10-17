@@ -1,25 +1,10 @@
+import {
+  sanitizeReportValue,
+  formatCurrency,
+  formatPercent,
+} from './formatters.js';
+
 const DEFAULT_METRIC = 'sharpe';
-
-const RISKY_LEADING_CHAR_PATTERN = /^[=+\-@]/;
-const MARKDOWN_META_CHAR_PATTERN = /([\\`*_{}\[\]()#+!|>])/g;
-
-export function sanitizeReportValue(value) {
-  if (value === null || value === undefined) {
-    return '';
-  }
-
-  let text = String(value);
-
-  if (RISKY_LEADING_CHAR_PATTERN.test(text)) {
-    text = `'${text}`;
-  }
-
-  if (text.length === 0) {
-    return text;
-  }
-
-  return text.replace(MARKDOWN_META_CHAR_PATTERN, '\\$1');
-}
 
 export function createStrategyConfigurator(strategies = []) {
   const state = new Map();
@@ -146,7 +131,9 @@ export function exportReport(summary, options = {}) {
   throw new Error(`Unsupported export format: ${format}`);
 }
 
-export { renderDashboard, DASHBOARD_STYLES, formatCurrency, formatPercent } from './dashboard_ui.js';
+export { renderDashboard, DASHBOARD_STYLES } from './dashboard_ui.js';
+export { sanitizeReportValue, formatCurrency, formatPercent } from './formatters.js';
+export { createRouter, Router } from '../router/index.js';
 
 export class DashboardState {
   constructor({ strategies = [], backtests = [] } = {}) {

@@ -8,6 +8,7 @@ import {
   DASHBOARD_STYLES,
   formatCurrency,
   formatPercent,
+  createRouter,
 } from '../src/core/index.js';
 import {
   TRACEPARENT_HEADER,
@@ -15,6 +16,9 @@ import {
   ensureTraceHeaders,
   extractTraceparent,
 } from '../src/core/telemetry.js';
+import { renderPositionsView } from '../src/views/positions.js';
+import { renderOrdersView } from '../src/views/orders.js';
+import { renderPnlQuotesView } from '../src/views/pnl_quotes.js';
 
 const configurator = createStrategyConfigurator([
   { name: 'trend', defaults: { lookback: 20, threshold: 0.6 } },
@@ -98,47 +102,184 @@ assert.strictEqual(headers[TRACEPARENT_HEADER], generatedTraceparent);
 assert.strictEqual(extractTraceparent(headers), generatedTraceparent);
 console.log('telemetry tests passed');
 
+const now = Date.now();
+const orderEvents = [
+  {
+    event_id: 'order-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 120000,
+    order_id: 'ord-1',
+    side: 'BUY',
+    order_type: 'LIMIT',
+    quantity: 100,
+    price: 150.25,
+    time_in_force: 'DAY',
+    routing: 'XNAS',
+    metadata: {},
+  },
+  {
+    event_id: 'order-2',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 90000,
+    order_id: 'ord-2',
+    side: 'SELL',
+    order_type: 'LIMIT',
+    quantity: 50,
+    price: 311.4,
+    time_in_force: 'DAY',
+    routing: 'XNAS',
+    metadata: {},
+  },
+];
+
+const fillEvents = [
+  {
+    event_id: 'fill-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 60000,
+    order_id: 'ord-1',
+    fill_id: 'fill-1',
+    status: 'PARTIAL',
+    filled_qty: 60,
+    fill_price: 149.9,
+    fees: 1.2,
+    liquidity: 'MAKER',
+    metadata: {},
+  },
+  {
+    event_id: 'fill-2',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 30000,
+    order_id: 'ord-1',
+    fill_id: 'fill-2',
+    status: 'FILLED',
+    filled_qty: 40,
+    fill_price: 150.75,
+    metadata: {},
+  },
+  {
+    event_id: 'fill-3',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 15000,
+    order_id: 'ord-2',
+    fill_id: 'fill-3',
+    status: 'FILLED',
+    filled_qty: 50,
+    fill_price: 310.95,
+    metadata: {},
+  },
+];
+
+const ticks = [
+  {
+    event_id: 'tick-1',
+    schema_version: '1',
+    symbol: 'AAPL',
+    timestamp: now - 5000,
+    bid_price: 151.1,
+    ask_price: 151.3,
+    last_price: 151.2,
+  },
+  {
+    event_id: 'tick-2',
+    schema_version: '1',
+    symbol: 'MSFT',
+    timestamp: now - 4000,
+    bid_price: 310.5,
+    ask_price: 310.7,
+    last_price: 310.6,
+  },
+];
+
+const pnlPoints = [
+  { timestamp: now - 3600000, value: 12500 },
+  { timestamp: now - 1800000, value: 16850 },
+  { timestamp: now - 600000, value: 17200 },
+  { timestamp: now - 300000, value: 18120 },
+  { timestamp: now, value: 18750 },
+];
+
+const quotes = ticks.map((tick) => ({
+  event_id: `quote-${tick.symbol}`,
+  schema_version: '1',
+  symbol: tick.symbol,
+  timestamp: tick.timestamp,
+  bid_price: tick.bid_price,
+  ask_price: tick.ask_price,
+  last_price: tick.last_price,
+}));
+
 const dashboardView = renderDashboard({
-  title: 'Execution Control Center',
-  subtitle: 'Live oversight across strategies.',
-  tags: ['derivatives', 'equities'],
-  currency: 'USD',
-  metrics: [
-    { label: 'Net Exposure', value: 1250000, kind: 'currency', change: 0.012 },
-    { label: 'Open Positions', value: 12 },
-  ],
-  pnlSeries: [
-    { label: 'Today', value: 18250, change: 0.024, target: 25000 },
-    { label: 'MTD', value: -12250, change: -0.018, target: 30000 },
-  ],
-  statusItems: [
-    { label: 'Exchange Connectivity', state: 'Operational', level: 'ok', description: 'All exchanges responding within latency budget.' },
-    { label: 'Risk Engine', state: 'Degraded', level: 'warning', description: 'Position limits approaching 80% threshold.' },
-  ],
+  route: 'positions',
+  header: {
+    title: 'Execution Control Center',
+    subtitle: 'Live oversight across strategies.',
+    tags: ['derivatives', 'equities'],
+  },
+  positions: { fills: fillEvents, orders: orderEvents, ticks },
+  orders: { orders: orderEvents, fills: fillEvents },
+  pnl: { pnlPoints, quotes },
 });
 
-assert.ok(dashboardView.html.includes('PnL Overview'), 'rendered dashboard should include PnL panel heading');
-assert.ok(dashboardView.html.includes('System Status'), 'rendered dashboard should include status panel heading');
-assert.ok(dashboardView.html.includes('Operational'), 'status label should be present');
-assert.ok(dashboardView.html.includes('−1.80%'), 'negative change should use minus symbol and percentage');
-assert.ok(dashboardView.styles.includes('.tp-dashboard'), 'styles should expose dashboard root selector');
+assert.ok(dashboardView.html.includes('PnL &amp; Quotes'), 'navigation should expose pnl route');
+assert.ok(dashboardView.html.includes('Open Positions'), 'positions component should be rendered for active route');
+assert.ok(dashboardView.styles.includes('.tp-live-table'), 'styles should include live table classes');
 assert.strictEqual(dashboardView.styles, DASHBOARD_STYLES, 'render should expose shared stylesheet reference');
+assert.strictEqual(dashboardView.route, 'positions');
+
+const applePosition = dashboardView.view.rows.find((row) => row.symbol === 'AAPL');
+assert.ok(applePosition, 'positions view should aggregate AAPL position');
+assert.strictEqual(Math.round(applePosition.netQuantity), 100);
+assert.ok(applePosition.exposure > 0, 'exposure should be positive for long positions');
+
+const ordersView = renderOrdersView({ orders: orderEvents, fills: fillEvents });
+assert.ok(ordersView.html.includes('Order Blotter'));
+const orderProgress = ordersView.table.getSortedRows()[0];
+assert.ok(orderProgress.progress <= 1, 'order progress must be clamped');
+
+const pnlView = renderPnlQuotesView({ pnlPoints, quotes });
+assert.ok(pnlView.html.includes('Net PnL'));
+assert.ok(pnlView.charts.pnl.points.length > 0);
+
+const router = createRouter({
+  defaultRoute: 'orders',
+  routes: {
+    orders: () => renderOrdersView({ orders: orderEvents, fills: fillEvents }),
+    pnl: () => pnlView,
+  },
+});
+const active = router.navigate('pnl');
+assert.strictEqual(active.name, 'pnl');
+assert.ok(active.view.html.includes('PnL & Quotes Intelligence'));
 
 assert.strictEqual(formatCurrency(10500), '$10,500');
 assert.strictEqual(formatPercent(0.256), '25.6%');
 assert.strictEqual(formatPercent(0.025), '2.50%');
 console.log('dashboard ui rendering tests passed');
 
-const sanitizedView = renderDashboard({
-  statusItems: [
+const sanitizedView = renderPositionsView({
+  fills: [
     {
-      label: '<b>Automation</b>',
-      state: '<script>alert(1)</script>',
-      level: 'critical',
-      description: 'Check <i>agent</i> response.',
+      event_id: 'fill-sanitized',
+      schema_version: '1',
+      symbol: '<b>Automation</b>',
+      timestamp: now,
+      order_id: 'ord-x',
+      fill_id: 'fill-x',
+      status: 'FILLED',
+      filled_qty: 10,
+      fill_price: 100,
+      metadata: { side: 'BUY' },
     },
   ],
+  orders: [],
+  ticks: [],
 });
 
-assert.ok(!sanitizedView.html.includes('<script>'), 'dashboard should escape script tags');
+assert.ok(!sanitizedView.html.includes('<script>'), 'positions view should escape script tags');
 assert.ok(sanitizedView.html.includes('&lt;b&gt;Automation&lt;/b&gt;'), 'escaped HTML should remain visible as text');
