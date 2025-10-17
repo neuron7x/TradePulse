@@ -283,28 +283,52 @@ def _enforce_temporal_contract(
     first = timestamps.iloc[0]
     last = timestamps.iloc[-1]
     tz = getattr(last, "tz", None)
-    if contract.earliest is not None and first < contract.earliest:
+
+    def _align_contract_timestamp(
+        value: pd.Timestamp | None, *, field: str
+    ) -> pd.Timestamp | None:
+        if value is None:
+            return None
+        value_tz = getattr(value, "tz", None)
+        if tz is None:
+            if value_tz is not None:
+                raise QualityGateError(
+                    "Temporal contract uses timezone-aware value for"
+                    f" '{field}' but the ingested timestamps are tz-naive"
+                )
+            return value
+        if value_tz is None:
+            return value.tz_localize(tz)
+        if value_tz != tz:
+            return value.tz_convert(tz)
+        return value
+
+    earliest = _align_contract_timestamp(contract.earliest, field="earliest")
+    latest = _align_contract_timestamp(contract.latest, field="latest")
+    expected_start = _align_contract_timestamp(contract.expected_start, field="expected_start")
+    expected_end = _align_contract_timestamp(contract.expected_end, field="expected_end")
+    if earliest is not None and first < earliest:
         breaches.append(
-            f"First timestamp {first} is earlier than allowed earliest {contract.earliest}"
+            f"First timestamp {first} is earlier than allowed earliest {earliest}"
         )
         blocked = True
-    if contract.latest is not None and last > contract.latest:
+    if latest is not None and last > latest:
         breaches.append(
-            f"Last timestamp {last} exceeds allowed latest {contract.latest}"
+            f"Last timestamp {last} exceeds allowed latest {latest}"
         )
         blocked = True
-    if contract.expected_start is not None:
-        delta = abs(first - contract.expected_start)
+    if expected_start is not None:
+        delta = abs(first - expected_start)
         if delta > contract.tolerance:
             breaches.append(
-                f"Batch starts at {first} but expected {contract.expected_start} ± {contract.tolerance}"
+                f"Batch starts at {first} but expected {expected_start} ± {contract.tolerance}"
             )
             blocked = True
-    if contract.expected_end is not None:
-        delta = abs(last - contract.expected_end)
+    if expected_end is not None:
+        delta = abs(last - expected_end)
         if delta > contract.tolerance:
             breaches.append(
-                f"Batch ends at {last} but expected {contract.expected_end} ± {contract.tolerance}"
+                f"Batch ends at {last} but expected {expected_end} ± {contract.tolerance}"
             )
             blocked = True
     if contract.max_lag is not None:
