@@ -28,6 +28,10 @@ teams can reach production readiness without tribal knowledge.
   drill cadence live in [`docs/reliability.md`](reliability.md). Combine those
   policies with the communications plan embedded in the runbooks above to keep
   incidents contained and retrospectives complete.
+- **Time synchronisation** – Follow the dedicated NTP/PTP playbook in
+  [`docs/runbook_time_synchronization.md`](runbook_time_synchronization.md) to
+  monitor drift, enforce automated remediation, and keep event timestamps
+  audit-grade across trading surfaces.
 
 ## Golden Data and Quality Playbooks
 
