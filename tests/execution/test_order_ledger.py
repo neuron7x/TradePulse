@@ -135,3 +135,19 @@ def test_oms_writes_and_recovers_from_order_ledger(tmp_path: Path, simple_order:
     replayed_events = list(oms_recovered._ledger.replay())  # type: ignore[attr-defined]
     assert replayed_events[-1].event == "state_restored"
     assert replayed_events[-1].metadata["source"] == "ledger"
+
+
+def test_default_ledger_path_scoped_to_instance(tmp_path: Path) -> None:
+    state_dir = tmp_path / "instance"
+    state_dir.mkdir()
+    state_path = state_dir / "oms-state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = DummyConnector()
+    risk = DummyRiskController()
+
+    oms = OrderManagementSystem(connector, risk, config)
+
+    assert oms._ledger is not None  # type: ignore[attr-defined]
+    expected_ledger = state_dir / "oms-state" / "order-ledger.jsonl"
+    assert oms._ledger.path == expected_ledger  # type: ignore[attr-defined]
+    assert expected_ledger.parent.is_dir()

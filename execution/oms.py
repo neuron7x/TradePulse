@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import time
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Deque, Dict, Iterable, Mapping, MutableMapping
@@ -21,7 +21,8 @@ from .connectors import ExecutionConnector, OrderError, TransientOrderError
 from .order_ledger import OrderLedger
 
 
-DEFAULT_LEDGER_PATH = Path("observability/audit/order-ledger.jsonl")
+_DEFAULT_LEDGER_SENTINEL = object()
+DEFAULT_LEDGER_FILENAME = "order-ledger.jsonl"
 
 
 @dataclass(slots=True)
@@ -42,7 +43,7 @@ class OMSConfig:
     auto_persist: bool = True
     max_retries: int = 3
     backoff_seconds: float = 0.0
-    ledger_path: Path | None = DEFAULT_LEDGER_PATH
+    ledger_path: Path | None = field(default=_DEFAULT_LEDGER_SENTINEL, repr=False)  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
         if not isinstance(self.state_path, Path):
@@ -51,8 +52,16 @@ class OMSConfig:
             object.__setattr__(self, "max_retries", 1)
         if self.backoff_seconds < 0.0:
             object.__setattr__(self, "backoff_seconds", 0.0)
-        if self.ledger_path is not None and not isinstance(self.ledger_path, Path):
-            object.__setattr__(self, "ledger_path", Path(self.ledger_path))
+        ledger_path = self.ledger_path
+        if ledger_path is _DEFAULT_LEDGER_SENTINEL:
+            ledger_path = self._default_ledger_path()
+        elif ledger_path is not None and not isinstance(ledger_path, Path):
+            ledger_path = Path(ledger_path)
+        object.__setattr__(self, "ledger_path", ledger_path)
+
+    def _default_ledger_path(self) -> Path:
+        instance_dir = self.state_path.parent / self.state_path.stem
+        return instance_dir / DEFAULT_LEDGER_FILENAME
 
 
 class OrderManagementSystem:
