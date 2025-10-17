@@ -197,7 +197,6 @@ def test_feature_endpoint_computes_latest_vector(
     assert response.status_code == 200
     body = response.json()
     assert body["symbol"] == "TEST-USD"
-    assert "features" in body
     features = body["features"]
     for column in [
         "macd",
@@ -208,6 +207,19 @@ def test_feature_endpoint_computes_latest_vector(
     ]:
         assert column in features, f"Expected {column} in feature payload"
         assert features[column] is not None
+    items = body["items"]
+    assert isinstance(items, list)
+    assert len(items) == 1
+    assert items[0]["features"] == features
+    assert "timestamp" in items[0]
+    pagination = body["pagination"]
+    assert pagination["limit"] == 1
+    assert pagination["returned"] == 1
+    assert pagination["cursor"] is None
+    assert isinstance(pagination["next_cursor"], str)
+    filters = body["filters"]
+    assert filters["feature_prefix"] is None
+    assert filters["feature_keys"] == []
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
@@ -237,6 +249,18 @@ def test_prediction_endpoint_returns_signal(
     assert signal["symbol"] == "TEST-USD"
     assert 0.0 <= signal["confidence"] <= 1.0
     assert "score" in signal["metadata"]
+    items = body["items"]
+    assert isinstance(items, list)
+    assert len(items) == 1
+    assert items[0]["signal"]["symbol"] == "TEST-USD"
+    assert items[0]["score"] == pytest.approx(body["score"], rel=1e-6)
+    pagination = body["pagination"]
+    assert pagination["limit"] == 1
+    assert pagination["returned"] == 1
+    assert isinstance(pagination["next_cursor"], str)
+    filters = body["filters"]
+    assert filters["actions"] == []
+    assert filters["min_confidence"] is None
     assert response.headers["X-Cache-Status"] == "miss"
     assert response.headers["Cache-Control"] == "private, max-age=30"
     assert "Accept" in response.headers.get("Vary", "")
@@ -244,6 +268,121 @@ def test_prediction_endpoint_returns_signal(
     cached = client.post("/predictions", json=payload, headers=headers)
     assert cached.headers["X-Cache-Status"] == "hit"
     assert cached.json() == body
+
+
+def test_feature_endpoint_supports_pagination_and_filters(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+    headers = _auth_headers(token)
+
+    first_page = client.post(
+        "/features?limit=3&featurePrefix=macd", json=payload, headers=headers
+    )
+    assert first_page.status_code == 200
+    first_body = first_page.json()
+    assert first_body["pagination"]["limit"] == 3
+    for item in first_body["items"]:
+        assert all(key.startswith("macd") for key in item["features"])
+
+    cursor = first_body["pagination"]["next_cursor"]
+    assert cursor
+
+    second_page = client.post(
+        f"/features?limit=3&cursor={cursor}&featurePrefix=macd",
+        json=payload,
+        headers=headers,
+    )
+    assert second_page.status_code == 200
+    second_body = second_page.json()
+    assert second_body["pagination"]["cursor"] == cursor
+    assert 0 < second_body["pagination"]["returned"] <= 3
+    for item in second_body["items"]:
+        assert all(key.startswith("macd") for key in item["features"])
+
+
+def test_feature_filter_returns_404_for_unknown_prefix(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+    headers = _auth_headers(token)
+
+    response = client.post(
+        "/features?featurePrefix=does-not-exist", json=payload, headers=headers
+    )
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert error["code"] == "ERR_FEATURES_FILTER_MISMATCH"
+
+
+def test_prediction_endpoint_filters_by_action_and_confidence(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="prediction-user")
+    headers = _auth_headers(token)
+
+    baseline = client.post("/predictions?limit=5", json=payload, headers=headers)
+    assert baseline.status_code == 200
+    baseline_body = baseline.json()
+    assert baseline_body["pagination"]["limit"] == 5
+    sample_action = baseline_body["items"][0]["signal"]["action"]
+    confidence_threshold = max(
+        0.0, baseline_body["items"][0]["signal"]["confidence"] - 0.05
+    )
+
+    filtered = client.post(
+        f"/predictions?limit=5&action={sample_action}&minConfidence={confidence_threshold}",
+        json=payload,
+        headers=headers,
+    )
+    assert filtered.status_code == 200
+    filtered_body = filtered.json()
+    assert filtered_body["filters"]["actions"] == [sample_action]
+    assert filtered_body["filters"]["min_confidence"] == pytest.approx(
+        confidence_threshold
+    )
+    for item in filtered_body["items"]:
+        assert item["signal"]["action"] == sample_action
+        assert item["signal"]["confidence"] >= confidence_threshold
+
+
+def test_prediction_endpoint_returns_404_when_no_predictions_match(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="prediction-user")
+    headers = _auth_headers(token)
+
+    response = client.post(
+        "/predictions?action=exit", json=payload, headers=headers
+    )
+    assert response.status_code == 404
+    error = response.json()["error"]
+    assert error["code"] == "ERR_PREDICTIONS_FILTER_MISMATCH"
+
+
+def test_prediction_endpoint_rejects_invalid_confidence_filter(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="prediction-user")
+    headers = _auth_headers(token)
+
+    response = client.post(
+        "/predictions?minConfidence=2.5", json=payload, headers=headers
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "ERR_INVALID_CONFIDENCE"
+    assert error["path"] == "/predictions"
 
 
 def test_invalid_token_is_rejected(
