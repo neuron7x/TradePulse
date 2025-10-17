@@ -18,8 +18,15 @@ function normaliseSeries(series = []) {
   }
 
   const values = points.map((point) => point.value);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
+  let min = Math.min(...values);
+  let max = Math.max(...values);
+
+  if (min === max) {
+    const padding = Math.abs(min) * 0.01 || 1;
+    min -= padding;
+    max += padding;
+  }
+
   return { points, min, max };
 }
 

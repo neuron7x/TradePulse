@@ -19,6 +19,11 @@ import {
 import { renderPositionsView } from '../src/views/positions.js';
 import { renderOrdersView } from '../src/views/orders.js';
 import { renderPnlQuotesView } from '../src/views/pnl_quotes.js';
+import { renderAreaChart } from '../src/components/area_chart.js';
+import { createLiveTable, LiveTable } from '../src/components/live_table.js';
+import { escapeHtml, formatNumber, formatTimestamp } from '../src/core/formatters.js';
+
+// --- Core strategy + reporting utilities ------------------------------------------------------
 
 const configurator = createStrategyConfigurator([
   { name: 'trend', defaults: { lookback: 20, threshold: 0.6 } },
@@ -93,7 +98,13 @@ state.addBacktest({ metadata: { id: 'bt-3', strategy: 'volatility' }, metrics: {
 const exportedMarkdown = state.export('markdown');
 assert.ok(exportedMarkdown.includes('volatility'));
 
-console.log('dashboard tests passed');
+assert.strictEqual(escapeHtml('<script>'), '&lt;script&gt;');
+assert.strictEqual(formatNumber(1250.567, { maximumFractionDigits: 1 }), '1,250.6');
+assert.strictEqual(formatTimestamp(0), '1970-01-01 00:00:00.000 UTC');
+
+console.log('core reporting tests passed');
+
+// --- Telemetry helpers -----------------------------------------------------------------------
 
 const generatedTraceparent = createTraceparent();
 assert.ok(generatedTraceparent.startsWith('00-'));
@@ -214,6 +225,70 @@ const quotes = ticks.map((tick) => ({
   last_price: tick.last_price,
 }));
 
+// --- Live table component -------------------------------------------------------------------
+
+const table = createLiveTable({
+  columns: [
+    { id: 'symbol', label: 'Symbol' },
+    { id: 'pnl', label: 'PnL', sortValue: (row) => row.pnl, formatter: (value) => `<strong>${escapeHtml(value)}</strong>`, align: 'right' },
+  ],
+  rows: [
+    { symbol: 'XYZ', pnl: 10 },
+    { symbol: 'ABC', pnl: 20 },
+  ],
+  sortBy: 'pnl',
+  sortDirection: 'asc',
+  pageSize: 1,
+});
+
+assert.ok(table instanceof LiveTable, 'createLiveTable should return a LiveTable instance');
+
+const ascRows = table.getSortedRows();
+assert.deepStrictEqual(ascRows.map((row) => row.symbol), ['XYZ', 'ABC']);
+
+table.setSort('pnl', 'desc');
+const descRows = table.getSortedRows();
+assert.deepStrictEqual(descRows.map((row) => row.symbol), ['ABC', 'XYZ']);
+
+const { page, pageCount, html: tableHtml } = table.render(10);
+assert.strictEqual(page, 2, 'page should clamp to the last available page');
+assert.strictEqual(pageCount, 2);
+assert.ok(tableHtml.includes('<table'), 'render should output a table element');
+
+table.setPageSize(2);
+table.setRows([{ symbol: 'AAA', pnl: 5 }]);
+const emptyTable = table.render();
+assert.strictEqual(emptyTable.totalRows, 1);
+assert.ok(!emptyTable.html.includes('No data available'), 'table renders populated rows when present');
+
+assert.throws(() => new LiveTable({ columns: [] }), /at least one column/);
+assert.throws(() => table.setPageSize(0), /positive number/);
+
+console.log('live table tests passed');
+
+// --- Area chart component -------------------------------------------------------------------
+
+const areaChart = renderAreaChart({
+  id: 'test',
+  width: 100,
+  height: 50,
+  series: [
+    { timestamp: 1, value: 100 },
+    { timestamp: 2, value: 100 },
+  ],
+});
+assert.ok(areaChart.html.includes('tp-area-chart'));
+assert.strictEqual(areaChart.min, 99, 'identical values should expand range symmetrically');
+assert.strictEqual(areaChart.max, 101);
+
+const emptyChart = renderAreaChart({ series: [{ timestamp: 3, value: NaN }] });
+assert.strictEqual(emptyChart.points.length, 0, 'non-finite values should be filtered out');
+assert.ok(emptyChart.html.includes('Chart data is not available'), 'empty charts should display placeholder');
+
+console.log('area chart tests passed');
+
+// --- Dashboard shell + views ----------------------------------------------------------------
+
 const dashboardView = renderDashboard({
   route: 'positions',
   header: {
@@ -232,6 +307,9 @@ assert.ok(dashboardView.styles.includes('.tp-live-table'), 'styles should includ
 assert.strictEqual(dashboardView.styles, DASHBOARD_STYLES, 'render should expose shared stylesheet reference');
 assert.strictEqual(dashboardView.route, 'positions');
 
+const navigationLinks = (dashboardView.html.match(/<a class=\"tp-nav__link/g) || []).length;
+assert.strictEqual(navigationLinks, 3, 'dashboard should render all navigation links');
+
 const applePosition = dashboardView.view.rows.find((row) => row.symbol === 'AAPL');
 assert.ok(applePosition, 'positions view should aggregate AAPL position');
 assert.strictEqual(Math.round(applePosition.netQuantity), 100);
@@ -241,10 +319,12 @@ const ordersView = renderOrdersView({ orders: orderEvents, fills: fillEvents });
 assert.ok(ordersView.html.includes('Order Blotter'));
 const orderProgress = ordersView.table.getSortedRows()[0];
 assert.ok(orderProgress.progress <= 1, 'order progress must be clamped');
+assert.ok(orderProgress.remaining >= 0, 'remaining quantity should never be negative');
 
 const pnlView = renderPnlQuotesView({ pnlPoints, quotes });
 assert.ok(pnlView.html.includes('Net PnL'));
 assert.ok(pnlView.charts.pnl.points.length > 0);
+assert.ok(pnlView.charts.quotes.points.every((point, index, arr) => index === 0 || arr[index - 1].timestamp <= point.timestamp));
 
 const router = createRouter({
   defaultRoute: 'orders',
@@ -256,6 +336,11 @@ const router = createRouter({
 const active = router.navigate('pnl');
 assert.strictEqual(active.name, 'pnl');
 assert.ok(active.view.html.includes('PnL & Quotes Intelligence'));
+assert.deepStrictEqual(router.list().sort(), ['orders', 'pnl']);
+assert.throws(() => router.register('invalid route', () => null), /Invalid route name/);
+assert.throws(() => router.register('bad', 123), /must be a function/);
+assert.throws(() => router.navigate('missing'), /Unknown route/);
+assert.strictEqual(router.navigate(null).name, 'orders', 'null navigation should fallback to default route');
 
 assert.strictEqual(formatCurrency(10500), '$10,500');
 assert.strictEqual(formatPercent(0.256), '25.6%');
@@ -283,3 +368,8 @@ const sanitizedView = renderPositionsView({
 
 assert.ok(!sanitizedView.html.includes('<script>'), 'positions view should escape script tags');
 assert.ok(sanitizedView.html.includes('&lt;b&gt;Automation&lt;/b&gt;'), 'escaped HTML should remain visible as text');
+
+const pnlStats = renderPnlQuotesView({ pnlPoints: [], quotes: [] });
+assert.ok(pnlStats.html.includes('Chart data is not available'), 'empty series should surface chart placeholder');
+
+console.log('view sanitisation tests passed');
