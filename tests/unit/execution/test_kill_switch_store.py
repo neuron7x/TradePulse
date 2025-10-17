@@ -25,84 +25,42 @@ class _InMemoryKillSwitchDB:
         self.lock = threading.Lock()
 
 
-class _FakeCursor:
+class _InMemoryKillSwitchRepository:
+    """Repository used to exercise retry and validation logic without a database."""
+
     def __init__(self, database: _InMemoryKillSwitchDB) -> None:
         self._database = database
-        self._result: tuple[bool, str, datetime] | None = None
-        self.rowcount = -1
 
-    def execute(self, query: str, params: object | None = None) -> None:
-        if self._database.failures:
-            failure = self._database.failures.popleft()
-            raise failure
+    def ensure_schema(self) -> None:
+        return None
 
-        normalised = " ".join(query.split()).lower()
+    def load(self) -> tuple[bool, str, datetime] | None:
         with self._database.lock:
-            if normalised.startswith("create table"):
-                self.rowcount = 0
-                return
-            if normalised.startswith("select"):
-                self._result = self._database.state
-                self.rowcount = 0 if self._result is None else 1
-                return
-            if normalised.startswith("insert into kill_switch_state"):
-                if isinstance(params, dict):
-                    engaged = bool(params.get("engaged", False))
-                    reason = params.get("reason", "") or ""
-                else:  # pragma: no cover - defensive guard
-                    engaged = bool(params[1])
-                    reason = params[2]
-                timestamp = datetime.now(timezone.utc)
-                self._database.state = (engaged, reason, timestamp)
-                self.rowcount = 1
-                return
-        raise AssertionError(f"Unsupported query in fake cursor: {query}")
+            if self._database.failures:
+                raise self._database.failures.popleft()
+            return self._database.state
 
-    def fetchone(self) -> tuple[bool, str, datetime] | None:
-        return self._result
-
-    def fetchall(self) -> list[tuple[bool, str, datetime]]:
-        return [] if self._result is None else [self._result]
-
-    def close(self) -> None:
-        return None
-
-
-class _FakeConnection:
-    def __init__(self, database: _InMemoryKillSwitchDB) -> None:
-        self._database = database
-        self.closed = False
-
-    def cursor(self) -> _FakeCursor:
-        return _FakeCursor(self._database)
-
-    def commit(self) -> None:
-        return None
-
-    def rollback(self) -> None:
-        return None
-
-    def close(self) -> None:
-        self.closed = True
+    def upsert(self, *, engaged: bool, reason: str) -> tuple[bool, str, datetime]:
+        timestamp = datetime.now(timezone.utc)
+        with self._database.lock:
+            if self._database.failures:
+                raise self._database.failures.popleft()
+            self._database.state = (bool(engaged), reason, timestamp)
+            return self._database.state
 
 
 @pytest.fixture()
 def postgres_store() -> tuple[PostgresKillSwitchStateStore, _InMemoryKillSwitchDB]:
     database = _InMemoryKillSwitchDB()
-
-    def connection_factory() -> _FakeConnection:
-        return _FakeConnection(database)
-
     store = PostgresKillSwitchStateStore(
-        "postgresql://test",  # DSN is not used by the fake connection factory.
+        "postgresql://example",
         tls=None,
         pool_min_size=0,
-        pool_max_size=4,
-        acquire_timeout=0.01,
-        max_retries=2,
-        retry_interval=0.0,
-        backoff_multiplier=1.0,
-        connection_factory=connection_factory,
+        pool_max_size=2,
+        pool_max_overflow=0,
+        retry_policy=None,
+        repository=_InMemoryKillSwitchRepository(database),
+        ensure_schema=False,
     )
 
     try:
