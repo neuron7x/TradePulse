@@ -16,6 +16,14 @@ from .feature_store import (
     IntegrityReport,
     OnlineFeatureStore,
 )
+from .parity import (
+    FeatureParityCoordinator,
+    FeatureParityError,
+    FeatureParityReport,
+    FeatureParitySpec,
+    FeatureTimeSkewError,
+    FeatureUpdateBlocked,
+)
 from .materialization import (
     Checkpoint,
     CheckpointStore,
@@ -94,9 +102,15 @@ __all__ = [
     "normalize_venue",
     "CatalogEntry",
     "FeatureCatalog",
+    "FeatureParityCoordinator",
+    "FeatureParityError",
+    "FeatureParityReport",
+    "FeatureParitySpec",
     "FeatureStoreIntegrityError",
     "IntegrityReport",
     "OnlineFeatureStore",
+    "FeatureTimeSkewError",
+    "FeatureUpdateBlocked",
     "Checkpoint",
     "CheckpointStore",
     "InMemoryCheckpointStore",
