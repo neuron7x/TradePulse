@@ -1,3 +1,6 @@
+import { DEFAULT_FILTERS, DEFAULT_TIMEFRAMES, DEFAULT_STRATEGIES } from '../state/globalFilters.js';
+import { formatSymbolsInput, formatDateInput } from './filter_controls.js';
+
 const DEFAULT_TITLE = 'TradePulse Monitoring Hub';
 
 const DASHBOARD_STYLES = `
@@ -44,6 +47,64 @@ const DASHBOARD_STYLES = `
       align-items: center;
       justify-content: space-between;
     }
+  }
+
+  .tp-filters {
+    margin-top: 1.5rem;
+    display: grid;
+    gap: 1rem;
+    padding: 1.25rem;
+    border-radius: 16px;
+    background: rgba(15, 23, 42, 0.65);
+    border: 1px solid rgba(148, 163, 184, 0.2);
+  }
+
+  @media (min-width: 720px) {
+    .tp-filters {
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      align-items: end;
+    }
+  }
+
+  .tp-filters__group {
+    display: grid;
+    gap: 0.5rem;
+  }
+
+  .tp-filters__group--range {
+    min-width: min(100%, 320px);
+  }
+
+  .tp-filters__label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(226, 232, 240, 0.75);
+  }
+
+  .tp-filters__input {
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.35);
+    border-radius: 10px;
+    padding: 0.65rem 0.75rem;
+    color: #f8fafc;
+    font-size: 0.95rem;
+  }
+
+  .tp-filters__input:focus {
+    outline: 2px solid rgba(56, 189, 248, 0.45);
+    outline-offset: 1px;
+  }
+
+  .tp-filters__range {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tp-filters__range-separator {
+    font-size: 1.25rem;
+    color: rgba(148, 163, 184, 0.65);
   }
 
   .tp-dashboard__title {
@@ -385,6 +446,92 @@ function renderHeader({ title, subtitle, tags }) {
   `;
 }
 
+function renderFiltersPanel(filters = {}, options = {}) {
+  const mergedFilters = {
+    ...DEFAULT_FILTERS,
+    ...(filters || {}),
+    dateRange: {
+      ...DEFAULT_FILTERS.dateRange,
+      ...(filters?.dateRange || {}),
+    },
+  };
+
+  const timeframes = options.timeframes?.length ? options.timeframes : DEFAULT_TIMEFRAMES;
+  const strategies = options.strategies?.length ? options.strategies : DEFAULT_STRATEGIES;
+
+  const timeframeOptions = timeframes
+    .map((value) => {
+      const selected = value === mergedFilters.timeframe ? ' selected' : '';
+      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(value)}</option>`;
+    })
+    .join('');
+
+  const strategyOptions = strategies
+    .map((value) => {
+      const selected = value === mergedFilters.strategy ? ' selected' : '';
+      return `<option value="${escapeHtml(value)}"${selected}>${escapeHtml(value)}</option>`;
+    })
+    .join('');
+
+  return `
+    <section class="tp-filters" data-tp-filters-root>
+      <div class="tp-filters__group">
+        <label class="tp-filters__label" for="tp-filter-symbols">Symbols</label>
+        <input
+          id="tp-filter-symbols"
+          data-tp-filter-control="symbols"
+          data-tp-filter-event="input"
+          class="tp-filters__input"
+          type="text"
+          autocomplete="off"
+          placeholder="BTC-USD, ETH-USD"
+          value="${escapeHtml(formatSymbolsInput(mergedFilters.symbols))}"
+        />
+      </div>
+      <div class="tp-filters__group">
+        <label class="tp-filters__label" for="tp-filter-timeframe">Timeframe</label>
+        <select
+          id="tp-filter-timeframe"
+          data-tp-filter-control="timeframe"
+          class="tp-filters__input"
+        >
+          ${timeframeOptions}
+        </select>
+      </div>
+      <div class="tp-filters__group">
+        <label class="tp-filters__label" for="tp-filter-strategy">Strategy</label>
+        <select
+          id="tp-filter-strategy"
+          data-tp-filter-control="strategy"
+          class="tp-filters__input"
+        >
+          ${strategyOptions}
+        </select>
+      </div>
+      <div class="tp-filters__group tp-filters__group--range">
+        <label class="tp-filters__label" for="tp-filter-from">Date range</label>
+        <div class="tp-filters__range">
+          <input
+            id="tp-filter-from"
+            type="date"
+            data-tp-filter-control="dateRange.from"
+            class="tp-filters__input"
+            value="${escapeHtml(formatDateInput(mergedFilters.dateRange?.from))}"
+          />
+          <span class="tp-filters__range-separator">→</span>
+          <input
+            id="tp-filter-to"
+            type="date"
+            data-tp-filter-control="dateRange.to"
+            class="tp-filters__input"
+            value="${escapeHtml(formatDateInput(mergedFilters.dateRange?.to))}"
+          />
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 export function renderDashboard(options = {}) {
   const {
     title = DEFAULT_TITLE,
@@ -394,9 +541,12 @@ export function renderDashboard(options = {}) {
     metrics = [],
     pnlSeries = [],
     statusItems = [],
+    filters = DEFAULT_FILTERS,
+    filterOptions = {},
   } = options;
 
   const header = renderHeader({ title, subtitle, tags });
+  const filtersPanel = renderFiltersPanel(filters, filterOptions);
   const metricCards = renderMetricCards(metrics, currency);
   const pnlRows = buildPnLPanels(pnlSeries, currency);
   const statuses = buildStatusList(statusItems);
@@ -405,6 +555,7 @@ export function renderDashboard(options = {}) {
     <section class="tp-dashboard">
       <div class="tp-dashboard__panel">
         ${header}
+        ${filtersPanel}
         <div class="tp-dashboard__grid" style="margin-top:1.5rem;">
           <section class="tp-dashboard__panel">
             <header style="margin-bottom:1rem;">
@@ -436,4 +587,4 @@ export function renderDashboard(options = {}) {
   return { html, styles: DASHBOARD_STYLES };
 }
 
-export { DASHBOARD_STYLES, formatCurrency, formatPercent };
+export { DASHBOARD_STYLES, formatCurrency, formatPercent, renderFiltersPanel };

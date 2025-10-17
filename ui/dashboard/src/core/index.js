@@ -1,3 +1,16 @@
+export {
+  createGlobalFiltersStore,
+  DEFAULT_FILTERS,
+  DEFAULT_TIMEFRAMES,
+  DEFAULT_STRATEGIES,
+  FILTER_VALIDATORS,
+  serialiseFiltersToQuery,
+  deserializeFiltersFromQuery,
+} from '../state/globalFilters.js';
+
+export { attachFilterControls } from './filter_controls.js';
+export { createRestDataSource, createWebSocketDataSource, buildQueryFromFilters } from './data_sources.js';
+
 const DEFAULT_METRIC = 'sharpe';
 
 const RISKY_LEADING_CHAR_PATTERN = /^[=+\-@]/;
@@ -146,7 +159,7 @@ export function exportReport(summary, options = {}) {
   throw new Error(`Unsupported export format: ${format}`);
 }
 
-export { renderDashboard, DASHBOARD_STYLES, formatCurrency, formatPercent } from './dashboard_ui.js';
+export { renderDashboard, DASHBOARD_STYLES, formatCurrency, formatPercent, renderFiltersPanel } from './dashboard_ui.js';
 
 export class DashboardState {
   constructor({ strategies = [], backtests = [] } = {}) {
