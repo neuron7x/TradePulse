@@ -257,6 +257,145 @@ jobs:
           fail_ci_if_error: false
           use_oidc: true
 
+  benchmarks:
+    name: Performance Benchmarks (Python 3.11)
+    runs-on: ubuntu-latest
+    env:
+      TP_BENCHMARK_ARTIFACT_DIR: reports/benchmarks
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v3
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          uv pip install -r requirements.txt
+          uv pip install -r requirements-dev.txt
+      - name: Run performance benchmarks
+        id: run_benchmarks
+        run: |
+          mkdir -p "$TP_BENCHMARK_ARTIFACT_DIR"
+          .venv/bin/python -m pytest tests/performance \
+            --benchmark-only \
+            --benchmark-autosave \
+            --benchmark-save=ci-latest \
+            --benchmark-columns=mean,stddev,median,rounds \
+            --benchmark-name=short
+      - name: Summarize benchmark results
+        if: always()
+        id: benchmark_summary
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          import os
+          from pathlib import Path
+
+          artifact_dir = Path(os.environ.get("TP_BENCHMARK_ARTIFACT_DIR", "reports/benchmarks"))
+          summary_lines: list[str] = ["### Performance Benchmark Summary", ""]
+          comment_lines: list[str] = summary_lines.copy()
+          regression_count = 0
+
+          if not artifact_dir.exists():
+              message = "Benchmark artifact directory was not created."
+              summary_lines.append(message)
+              comment_lines.append(message)
+          else:
+              candidates = sorted(artifact_dir.glob("benchmark-summary-*.json"), key=lambda p: p.stat().st_mtime)
+              if not candidates:
+                  message = "No benchmark summary files were generated."
+                  summary_lines.append(message)
+                  comment_lines.append(message)
+              else:
+                  latest = candidates[-1]
+                  data = json.loads(latest.read_text())
+                  records = data.get("records", [])
+                  summary_lines.append(f"Latest results captured in `{latest.as_posix()}`.")
+                  summary_lines.append("")
+                  comment_lines.append(f"Latest results captured in `{latest.as_posix()}`.")
+                  comment_lines.append("")
+                  if not records:
+                      message = "Benchmark summary file did not contain any records."
+                      summary_lines.append(message)
+                      comment_lines.append(message)
+                  else:
+                      header = "| Benchmark | Observed (s) | Baseline (s) | Δ% | Threshold | Status |"
+                      divider = "| --- | --- | --- | --- | --- | --- |"
+                      summary_lines.extend([header, divider])
+                      comment_lines.extend([header, divider])
+                      for record in records:
+                          name = record.get("name", "<unknown>")
+                          observed = float(record.get("measurement", 0.0))
+                          baseline = float(record.get("baseline", 0.0))
+                          threshold = float(record.get("threshold", 0.0))
+                          ratio = float(record.get("regression_ratio", float("nan")))
+                          if baseline > 0.0 and math.isfinite(ratio):
+                              delta_pct = (ratio - 1.0) * 100.0
+                              delta_str = f"{delta_pct:+.2f}%"
+                          else:
+                              delta_str = "n/a"
+                          exceeds = bool(record.get("exceeds_budget", False))
+                          status = "⚠️ Regression" if exceeds else "✅ Within budget"
+                          if exceeds:
+                              regression_count += 1
+                          row = f"| {name} | {observed:.6f} | {baseline:.6f} | {delta_str} | {threshold:.0%} | {status} |"
+                          summary_lines.append(row)
+                          comment_lines.append(row)
+
+                      summary_lines.append("")
+                      comment_lines.append("")
+                      if regression_count:
+                          summary_lines.append(f"⚠️ {regression_count} benchmark(s) exceeded the configured thresholds.")
+                          comment_lines.append(f"⚠️ {regression_count} benchmark(s) exceeded the configured thresholds.")
+                      else:
+                          summary_lines.append("✅ All benchmarks remained within the configured thresholds.")
+                          comment_lines.append("✅ All benchmarks remained within the configured thresholds.")
+
+          step_summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if step_summary:
+              with open(step_summary, "a", encoding="utf-8") as handle:
+                  handle.write("\n".join(summary_lines) + "\n")
+
+          github_output = os.environ.get("GITHUB_OUTPUT")
+          if github_output:
+              with open(github_output, "a", encoding="utf-8") as handle:
+                  handle.write(f"regression_count={regression_count}\n")
+                  body = "\n".join(comment_lines)
+                  handle.write("comment_body<<'EOF'\n")
+                  handle.write(body)
+                  handle.write("\nEOF\n")
+          PY
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-reports
+          path: |
+            reports/benchmarks
+            .benchmarks
+          if-no-files-found: warn
+      - name: Find existing benchmark comment
+        if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork }}
+        id: find_benchmark_comment
+        uses: peter-evans/find-comment@v3
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '### Performance Benchmark Summary'
+      - name: Post benchmark summary comment
+        if: ${{ always() && github.event_name == 'pull_request' && !github.event.pull_request.head.repo.fork && steps.benchmark_summary.outputs.comment_body != '' }}
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-id: ${{ steps.find_benchmark_comment.outputs.comment-id }}
+          edit-mode: replace
+          body: ${{ steps.benchmark_summary.outputs.comment_body }}
+
   pytest-xdist:
     name: Pytest (xdist profiling)
     runs-on: ubuntu-latest
