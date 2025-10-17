@@ -4,16 +4,27 @@ The calendar tracks regular trading hours, exchange holidays, and ad-hoc
 session overrides while handling timezone daylight-saving transitions. The
 intent is to provide deterministic scheduling utilities for backtests that need
 to respect venue trading windows.
+
+This module additionally exposes helpers to coordinate trading hours across
+multiple venues. ``MarketCalendarCoordinator`` can derive shared trading
+windows, build event calendars, and filter timestamps or signal-like payloads
+so that downstream pipelines do not act on closed markets.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
-from typing import Iterable, Mapping, Sequence
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
 from zoneinfo import ZoneInfo
 
-__all__ = ["SessionHours", "MarketCalendar"]
+__all__ = [
+    "SessionHours",
+    "MarketCalendar",
+    "MarketSessionEvent",
+    "TradingWindow",
+    "MarketCalendarCoordinator",
+]
 
 
 @dataclass(frozen=True)
@@ -169,3 +180,323 @@ class MarketCalendar:
 
     def _combine(self, session_date: date, when: time) -> datetime:
         return datetime.combine(session_date, when, tzinfo=self._tz)
+
+
+@dataclass(frozen=True)
+class MarketSessionEvent:
+    """Represents an opening or closing event for a market session."""
+
+    market: str
+    kind: str
+    timestamp: datetime
+    local_timestamp: datetime
+
+    def __post_init__(self) -> None:
+        if self.kind not in {"open", "close"}:
+            raise ValueError("kind must be 'open' or 'close'")
+        if self.timestamp.tzinfo is None:
+            raise ValueError("timestamp must be timezone-aware")
+        if self.local_timestamp.tzinfo is None:
+            raise ValueError("local_timestamp must be timezone-aware")
+
+    def as_timezone(self, zone: ZoneInfo) -> datetime:
+        """Return the event timestamp converted to ``zone``."""
+
+        return self.timestamp.astimezone(zone)
+
+
+@dataclass(frozen=True)
+class TradingWindow:
+    """Defines a coordinated trading window across one or more markets."""
+
+    start: datetime
+    end: datetime
+    markets: frozenset[str]
+
+    def __post_init__(self) -> None:
+        if self.start.tzinfo is None or self.end.tzinfo is None:
+            raise ValueError("start and end must be timezone-aware")
+        if self.end <= self.start:
+            raise ValueError("end must be after start")
+        if not self.markets:
+            raise ValueError("markets must be a non-empty collection")
+
+    def duration(self) -> timedelta:
+        """Return the length of the trading window."""
+
+        return self.end - self.start
+
+    def as_timezone(self, zone: ZoneInfo) -> tuple[datetime, datetime]:
+        """Return the window bounds converted to ``zone``."""
+
+        return self.start.astimezone(zone), self.end.astimezone(zone)
+
+
+class MarketCalendarCoordinator:
+    """Coordinates trading hours across multiple :class:`MarketCalendar`s."""
+
+    def __init__(self, calendars: Mapping[str, MarketCalendar]) -> None:
+        if not calendars:
+            raise ValueError("at least one market calendar must be provided")
+        self._calendars: MutableMapping[str, MarketCalendar] = {
+            name: calendar for name, calendar in calendars.items()
+        }
+
+    # ------------------------------------------------------------------
+    # Event calendar construction
+    # ------------------------------------------------------------------
+    def session_events(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        markets: Iterable[str] | None = None,
+    ) -> list[MarketSessionEvent]:
+        """Enumerate session open/close events within ``[start, end]``.
+
+        Event timestamps are normalised to UTC to simplify downstream ordering
+        and comparisons while ``local_timestamp`` retains the venue-local
+        representation.
+        """
+
+        start_utc, end_utc = self._normalize_range(start, end)
+        subset = self._select_markets(markets)
+
+        events: list[MarketSessionEvent] = []
+        for market, calendar in subset.items():
+            for open_dt, close_dt in calendar.sessions_between(start, end):
+                open_utc = self._to_utc(open_dt)
+                close_utc = self._to_utc(close_dt)
+                if start_utc <= open_utc <= end_utc:
+                    events.append(
+                        MarketSessionEvent(
+                            market=market,
+                            kind="open",
+                            timestamp=open_utc,
+                            local_timestamp=open_dt,
+                        )
+                    )
+                if start_utc <= close_utc <= end_utc:
+                    events.append(
+                        MarketSessionEvent(
+                            market=market,
+                            kind="close",
+                            timestamp=close_utc,
+                            local_timestamp=close_dt,
+                        )
+                    )
+
+        events.sort(key=lambda evt: (evt.timestamp, 0 if evt.kind == "open" else 1, evt.market))
+        return events
+
+    # ------------------------------------------------------------------
+    # Trading window alignment
+    # ------------------------------------------------------------------
+    def trading_windows(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        mode: str = "union",
+        markets: Iterable[str] | None = None,
+    ) -> list[TradingWindow]:
+        """Return trading windows across the selected markets.
+
+        ``mode`` can be ``"union"`` (any market open) or ``"intersection"``
+        (all selected markets open). Windows are normalised to UTC.
+        """
+
+        start_utc, end_utc = self._normalize_range(start, end)
+        subset = self._select_markets(markets)
+        events = self._ordered_events(start, end, subset)
+
+        if mode not in {"union", "intersection"}:
+            raise ValueError("mode must be 'union' or 'intersection'")
+
+        required = frozenset(subset.keys())
+        active = {
+            market
+            for market, open_dt, close_dt in self._collect_sessions(start, end, subset)
+            if self._to_utc(open_dt) <= start_utc < self._to_utc(close_dt)
+        }
+
+        windows: list[TradingWindow] = []
+        last_ts = start_utc
+
+        def condition() -> bool:
+            if mode == "union":
+                return bool(active)
+            return required.issubset(active)
+
+        for market, kind, timestamp in events:
+            if timestamp < start_utc:
+                if kind == "open":
+                    active.add(market)
+                else:
+                    active.discard(market)
+                continue
+            if timestamp > end_utc:
+                break
+            if condition() and last_ts < timestamp:
+                windows.append(
+                    TradingWindow(
+                        start=last_ts,
+                        end=timestamp,
+                        markets=frozenset(active),
+                    )
+                )
+            if kind == "open":
+                active.add(market)
+            else:
+                active.discard(market)
+            last_ts = max(last_ts, timestamp)
+
+        if condition() and last_ts < end_utc:
+            windows.append(
+                TradingWindow(start=last_ts, end=end_utc, markets=frozenset(active))
+            )
+
+        return windows
+
+    def aligned_windows(
+        self,
+        start: datetime,
+        end: datetime,
+        *,
+        markets: Iterable[str] | None = None,
+    ) -> list[TradingWindow]:
+        """Return windows where all selected markets are simultaneously open."""
+
+        return self.trading_windows(
+            start,
+            end,
+            mode="intersection",
+            markets=markets,
+        )
+
+    # ------------------------------------------------------------------
+    # Filtering helpers
+    # ------------------------------------------------------------------
+    def filter_timestamps(
+        self,
+        timestamps: Iterable[datetime],
+        *,
+        mode: str = "union",
+        markets: Iterable[str] | None = None,
+    ) -> list[datetime]:
+        """Return timestamps that fall inside the configured trading hours."""
+
+        subset = self._select_markets(markets)
+        self._validate_mode(mode)
+        filtered: list[datetime] = []
+        for ts in timestamps:
+            self._ensure_aware(ts)
+            if self._is_open(ts, subset, mode):
+                filtered.append(ts)
+        return filtered
+
+    def filter_signals(
+        self,
+        signals: Iterable[object],
+        *,
+        timestamp_getter: Callable[[object], datetime] | None = None,
+        mode: str = "union",
+        markets: Iterable[str] | None = None,
+    ) -> list[object]:
+        """Filter signal-like payloads based on trading hours.
+
+        ``timestamp_getter`` should return a timezone-aware ``datetime`` for the
+        provided signal. When omitted, an attribute named ``timestamp`` is
+        accessed.
+        """
+
+        subset = self._select_markets(markets)
+        self._validate_mode(mode)
+
+        if timestamp_getter is None:
+            timestamp_getter = self._default_timestamp_getter
+
+        filtered: list[object] = []
+        for signal in signals:
+            ts = timestamp_getter(signal)
+            self._ensure_aware(ts)
+            if self._is_open(ts, subset, mode):
+                filtered.append(signal)
+        return filtered
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _default_timestamp_getter(self, signal: object) -> datetime:
+        ts = getattr(signal, "timestamp", None)
+        if ts is None:
+            raise AttributeError(
+                "signal does not provide a 'timestamp' attribute and no getter was supplied"
+            )
+        return ts
+
+    def _validate_mode(self, mode: str) -> None:
+        if mode not in {"union", "intersection"}:
+            raise ValueError("mode must be 'union' or 'intersection'")
+
+    def _is_open(
+        self,
+        timestamp: datetime,
+        calendars: Mapping[str, MarketCalendar],
+        mode: str,
+    ) -> bool:
+        if mode == "union":
+            return any(calendar.is_open(timestamp) for calendar in calendars.values())
+        return all(calendar.is_open(timestamp) for calendar in calendars.values())
+
+    def _select_markets(
+        self, markets: Iterable[str] | None
+    ) -> Mapping[str, MarketCalendar]:
+        if markets is None:
+            return self._calendars
+        subset = {name: self._calendars[name] for name in markets}
+        if not subset:
+            raise ValueError("markets must reference at least one configured calendar")
+        return subset
+
+    def _normalize_range(self, start: datetime, end: datetime) -> tuple[datetime, datetime]:
+        self._ensure_aware(start)
+        self._ensure_aware(end)
+        if end < start:
+            raise ValueError("end must be greater than or equal to start")
+        return start.astimezone(timezone.utc), end.astimezone(timezone.utc)
+
+    def _ensure_aware(self, timestamp: datetime) -> None:
+        if timestamp.tzinfo is None:
+            raise ValueError("timestamp must be timezone-aware")
+
+    def _to_utc(self, timestamp: datetime) -> datetime:
+        self._ensure_aware(timestamp)
+        return timestamp.astimezone(timezone.utc)
+
+    def _collect_sessions(
+        self,
+        start: datetime,
+        end: datetime,
+        calendars: Mapping[str, MarketCalendar],
+    ) -> list[tuple[str, datetime, datetime]]:
+        sessions: list[tuple[str, datetime, datetime]] = []
+        for market, calendar in calendars.items():
+            sessions.extend(
+                (market, open_dt, close_dt)
+                for open_dt, close_dt in calendar.sessions_between(start, end)
+            )
+        return sessions
+
+    def _ordered_events(
+        self,
+        start: datetime,
+        end: datetime,
+        calendars: Mapping[str, MarketCalendar],
+    ) -> list[tuple[str, str, datetime]]:
+        events: list[tuple[str, str, datetime]] = []
+        for market, open_dt, close_dt in self._collect_sessions(start, end, calendars):
+            events.append((market, "open", self._to_utc(open_dt)))
+            events.append((market, "close", self._to_utc(close_dt)))
+        events.sort(key=lambda evt: (evt[2], 0 if evt[1] == "open" else 1, evt[0]))
+        return events
