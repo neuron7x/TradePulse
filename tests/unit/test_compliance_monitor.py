@@ -24,6 +24,12 @@ def test_compliance_monitor_blocks_invalid(normalizer):
         monitor.check("BTCUSDT", quantity=0.0005, price=10000.0)
 
 
+def test_compliance_monitor_blocks_tick_misalignment(normalizer):
+    monitor = ComplianceMonitor(normalizer, strict=True, auto_round=False)
+    with pytest.raises(ComplianceViolation):
+        monitor.check("BTCUSDT", quantity=0.001, price=10000.03)
+
+
 def test_compliance_monitor_reports(normalizer):
     monitor = ComplianceMonitor(normalizer, strict=False, auto_round=True)
     report = monitor.check("BTCUSDT", quantity=0.0012, price=10000.0)
