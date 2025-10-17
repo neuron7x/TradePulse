@@ -188,7 +188,8 @@ Connectors inheriting from `AuthenticatedRESTExecutionConnector` automatically r
 
 - **HTTP probes** – reuse the metrics endpoint for readiness and liveness, or expose a lightweight `/healthz` endpoint that validates downstream dependencies before returning `200`.
 - **Prometheus** – keep the scrape configuration aligned with your target service names (`tradepulse:8001` in Docker Compose, `<service-name>:8001` in Kubernetes).【F:deploy/prometheus.yml†L2-L7】
-- **Dashboards** – point Grafana or your preferred UI to the Prometheus instance and alert on failed health probes, high error rates, or scrape gaps.
+- **Dashboards** – Grafana now provisions Prometheus as the default data source and automatically loads dashboards stored under `observability/grafana/`. Docker Compose mounts these files directly while the Kubernetes manifests project them through ConfigMaps so staging and production stay in sync.
+- **Credentials** – Admin credentials are templated via environment variables (`GRAFANA_ADMIN_USER`/`GRAFANA_ADMIN_PASSWORD`) for local runs and by Kustomize secrets in each overlay (`deploy/kustomize/overlays/*/secrets/grafana-admin.env`). Rotate these per environment and distribute them with your secret manager before exposing Grafana outside the cluster.
 
 Following these practices keeps deployments reproducible across environments while giving operations teams the hooks they need for automation, alerting, and incident response.
 

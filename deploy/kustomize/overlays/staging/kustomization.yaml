@@ -6,6 +6,7 @@ namespace: tradepulse-staging
 resources:
   - ../../namespaces/staging
   - ../../base
+  - ../../grafana
 
 images:
   - name: ghcr.io/neuron7x/tradepulse
@@ -13,3 +14,12 @@ images:
 
 patches:
   - path: patches/deployment-resources.yaml
+
+secretGenerator:
+  - name: grafana-admin-credentials
+    behavior: replace
+    envs:
+      - secrets/grafana-admin.env
+
+generatorOptions:
+  disableNameSuffixHash: true

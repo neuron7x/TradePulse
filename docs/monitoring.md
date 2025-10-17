@@ -751,60 +751,33 @@ sum(tradepulse_trades_total) by (symbol)
 ### Installation
 
 ```bash
-# Using Docker Compose
-docker compose up grafana
+# Using Docker Compose with explicit credentials
+GRAFANA_ADMIN_USER=observability GRAFANA_ADMIN_PASSWORD=supersecret docker compose up grafana prometheus
 
-# Access at http://localhost:3000
-# Default credentials: admin/admin
+# Access Grafana at http://localhost:3000 with the credentials above
 ```
+
+For Kubernetes deployments the Grafana manifests live under `deploy/kustomize/grafana`. Each overlay wires in an environment-specific secret so you can apply everything in a single command:
+
+```bash
+# Staging
+kustomize build deploy/kustomize/overlays/staging | kubectl apply -f -
+
+# Production
+kustomize build deploy/kustomize/overlays/production | kubectl apply -f -
+```
+
+Update the files in `deploy/kustomize/overlays/*/secrets/grafana-admin.env` (or replace them with your secret manager integration) before rolling out. The generated secret injects `GF_SECURITY_ADMIN_USER` and `GF_SECURITY_ADMIN_PASSWORD` into the Grafana pod.
 
 ### Dashboard Configuration
 
-```json
-{
-  "dashboard": {
-    "title": "TradePulse Overview",
-    "panels": [
-      {
-        "title": "Trades per Minute",
-        "targets": [
-          {
-            "expr": "rate(tradepulse_trades_total[1m]) * 60"
-          }
-        ],
-        "type": "graph"
-      },
-      {
-        "title": "Current Drawdown",
-        "targets": [
-          {
-            "expr": "tradepulse_drawdown_percent"
-          }
-        ],
-        "type": "singlestat"
-      },
-      {
-        "title": "Order Latency (p95)",
-        "targets": [
-          {
-            "expr": "histogram_quantile(0.95, rate(tradepulse_order_latency_seconds_bucket[5m]))"
-          }
-        ],
-        "type": "graph"
-      },
-      {
-        "title": "Open Positions by Symbol",
-        "targets": [
-          {
-            "expr": "tradepulse_open_positions"
-          }
-        ],
-        "type": "bargauge"
-      }
-    ]
-  }
-}
-```
+Dashboards and data sources are provisioned automatically:
+
+- Prometheus is registered as the default data source via `observability/grafana/provisioning/datasources/prometheus.yaml`, which points at the in-cluster Prometheus service (or the Docker Compose container).
+- All JSON dashboards under `observability/grafana/` are mounted read-only and discoverable at **Dashboards → Browse**. The initial bundle includes the _TradePulse AMM_ panel set.
+- Grafana persists state to a volume/claim so alert rules, annotations, and personal preferences survive pod restarts.
+
+After deploying, log in with the admin credentials you configured and navigate to `http://localhost:3000/dashboards` (or the `/dashboards` path on your ingress host) to open the pre-provisioned panels.
 
 ### Key Dashboards
 

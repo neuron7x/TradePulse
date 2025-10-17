@@ -7,6 +7,7 @@ resources:
   - ../../namespaces/production
   - priorityclass.yaml
   - ../../base
+  - ../../grafana
 
 images:
   - name: ghcr.io/neuron7x/tradepulse
@@ -14,3 +15,12 @@ images:
 
 patches:
   - path: patches/deployment-high-availability.yaml
+
+secretGenerator:
+  - name: grafana-admin-credentials
+    behavior: replace
+    envs:
+      - secrets/grafana-admin.env
+
+generatorOptions:
+  disableNameSuffixHash: true
