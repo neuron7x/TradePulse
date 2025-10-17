@@ -25,13 +25,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
-      - name: Cache uv
+      - name: Cache uv packages
         uses: actions/cache@v4
         with:
           path: ~/.cache/uv
-          key: lint-uv-${{ runner.os }}-${{ matrix.python-version }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
-          restore-keys: |
-            lint-uv-${{ runner.os }}-${{ matrix.python-version }}-
+          key: uv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('requirements*.txt', 'requirements*.lock') }}
       - name: Cache pre-commit environments
         uses: actions/cache@v4
         with:
@@ -76,6 +74,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-py${{ matrix.python-version }}-${{ hashFiles('requirements*.txt', 'requirements*.lock') }}
       - name: Create virtual environment
         run: uv venv
       - name: Install dependencies
@@ -269,6 +272,11 @@ jobs:
           python-version: '3.11'
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-py3.11-${{ hashFiles('requirements*.txt', 'requirements*.lock') }}
       - name: Create virtual environment
         run: uv venv
       - name: Install dependencies
@@ -301,6 +309,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
       - name: Install web dependencies
         working-directory: apps/web
         run: npm ci
@@ -337,6 +347,11 @@ jobs:
           python-version: '3.11'
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
+      - name: Cache uv packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-py3.11-${{ hashFiles('requirements*.txt', 'requirements*.lock') }}
       - name: Create virtual environment
         run: uv venv
       - name: Install dependencies
