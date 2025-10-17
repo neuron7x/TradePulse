@@ -7,12 +7,12 @@ from pathlib import Path
 from typing import Any, Dict
 
 import hydra
-import mlflow
 from hydra.core.config_store import ConfigStore
 from omegaconf import DictConfig, OmegaConf
 
 from core.backtest import Backtester, BarData
 from core.execution import ExecutionModel
+from core.mlflow_utils import mlflow
 from core.tca import TCA
 from data.loaders import CSVLoaderConfig, load_csv_bars
 from risk.limits import LimitConfig

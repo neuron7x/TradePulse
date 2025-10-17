@@ -8,7 +8,7 @@ from math import sqrt
 from statistics import mean, pstdev
 from typing import Dict, Iterable, Iterator, List, Sequence, Tuple
 
-import mlflow
+from core.mlflow_utils import mlflow
 
 from core.execution import ExecutionModel, Order
 from core.tca import TCA
