@@ -105,6 +105,21 @@ def configured_app(
     return create_app(settings=settings)
 
 
+class _InstrumentedMetricsCollector:
+    """Minimal metrics collector capturing health probe observations."""
+
+    def __init__(self) -> None:
+        self.enabled = True
+        self.latency_samples: list[tuple[str, float]] = []
+        self.status_flags: dict[str, bool] = {}
+
+    def observe_health_check_latency(self, name: str, duration: float) -> None:
+        self.latency_samples.append((name, duration))
+
+    def set_health_check_status(self, name: str, healthy: bool) -> None:
+        self.status_flags[name] = healthy
+
+
 def test_create_app_requires_secrets(
     monkeypatch: pytest.MonkeyPatch, security_context: Callable[..., str]
 ) -> None:
@@ -488,6 +503,28 @@ def test_health_probe_reports_ready_state(configured_app: FastAPI) -> None:
     assert risk_component["status"] == "operational"
     assert "inference_cache" in body["components"]
     assert "client_rate_limiter" in body["components"]
+
+
+def test_health_probe_emits_metrics_when_collector_present(
+    configured_app: FastAPI,
+) -> None:
+    collector = _InstrumentedMetricsCollector()
+    configured_app.state.metrics = collector
+
+    client = TestClient(configured_app)
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert collector.latency_samples, "Health probe should record latency metrics"
+    latency_name, duration = collector.latency_samples[-1]
+    assert latency_name == "api.overall"
+    assert duration >= 0
+
+    assert collector.status_flags.get("api.overall") is True
+    component_keys = {
+        name for name in collector.status_flags if name.startswith("component.")
+    }
+    assert component_keys, "Component health metrics should be recorded"
 
 
 def test_health_probe_reflects_kill_switch(configured_app: FastAPI) -> None:

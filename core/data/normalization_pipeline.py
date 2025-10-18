@@ -324,15 +324,15 @@ def _from_ticks(
 
 def _ensure_ohlcv_columns(frame: pd.DataFrame) -> pd.DataFrame:
     expected_columns = ["open", "high", "low", "close", "volume"]
-    missing = [column for column in expected_columns if column not in frame.columns]
+    missing_columns = [
+        column for column in expected_columns if column not in frame.columns
+    ]
     aligned = frame.copy()
-    for column in expected_columns:
-        if column not in aligned:
-            if column == "volume":
-                aligned[column] = 0.0
-            else:
-                aligned[column] = np.nan
-    aligned = aligned[expected_columns]
+    for column in missing_columns:
+        aligned[column] = 0.0 if column == "volume" else np.nan
+    aligned = aligned[expected_columns].copy()
+    if "volume" in missing_columns:
+        aligned["volume"] = aligned["volume"].fillna(0.0)
     aligned.index = pd.DatetimeIndex(aligned.index).tz_convert("UTC")
     return aligned
 
