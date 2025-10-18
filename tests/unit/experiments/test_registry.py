@@ -93,3 +93,20 @@ def test_list_experiments_is_sorted(tmp_path: Path) -> None:
     registry.register_run(experiment="a", parameters={}, artifacts=[artifact])
 
     assert registry.list_experiments() == ["a", "b"]
+
+
+def test_artifact_spec_rejects_path_escape_names(tmp_path: Path) -> None:
+    artifact = tmp_path / "model.bin"
+    artifact.write_text("data")
+
+    spec_with_parent = ArtifactSpec(path=artifact, name="../../../../etc/passwd")
+    with pytest.raises(ValueError):
+        spec_with_parent.resolved_name()
+
+    spec_with_separator = ArtifactSpec(path=artifact, name="nested/evil.bin")
+    with pytest.raises(ValueError):
+        spec_with_separator.resolved_name()
+
+    spec_absolute = ArtifactSpec(path=artifact, name="/tmp/evil.bin")
+    with pytest.raises(ValueError):
+        spec_absolute.resolved_name()

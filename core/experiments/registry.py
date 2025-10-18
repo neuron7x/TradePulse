@@ -46,7 +46,24 @@ class ArtifactSpec:
     def resolved_name(self) -> str:
         """Return the concrete name that should be used when storing the artifact."""
 
-        return self.name or self.path.name
+        candidate = self.name or self.path.name
+        if not candidate:
+            raise ValueError("Artifact name must not be empty")
+
+        candidate_path = Path(candidate)
+        if candidate_path.is_absolute():
+            raise ValueError(f"Artifact name '{candidate}' must not be an absolute path")
+
+        normalised = candidate_path.name
+        if normalised in {"", ".", ".."}:
+            raise ValueError(f"Artifact name '{candidate}' is not valid")
+
+        if normalised != candidate:
+            raise ValueError(
+                f"Artifact name '{candidate}' must not contain path separators or parent traversals"
+            )
+
+        return normalised
 
 
 class ArtifactRecord(BaseModel):
@@ -267,12 +284,13 @@ class ModelRegistry:
         for spec in self._normalise_artifacts(artifacts):
             if not spec.path.exists():
                 raise FileNotFoundError(f"Artifact '{spec.path}' does not exist")
-            target = artifact_dir / spec.resolved_name()
+            resolved_name = spec.resolved_name()
+            target = artifact_dir / resolved_name
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(spec.path, target)
             checksum = _file_checksum(target)
             yield ArtifactRecord(
-                name=spec.resolved_name(),
+                name=resolved_name,
                 stored_path=target.relative_to(self._base_dir),
                 original_path=spec.path.resolve(),
                 checksum=checksum,
