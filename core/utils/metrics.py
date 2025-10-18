@@ -13,6 +13,9 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, Optional, Sequence
 
+from observability.tracing import current_span as _current_span
+from observability.tracing import record_span_event as _record_span_event
+
 try:  # pragma: no cover - exercised indirectly in environments without numpy
     import numpy as np
 except ModuleNotFoundError:  # pragma: no cover - handled in fallback logic
@@ -72,6 +75,36 @@ def _fallback_quantiles(
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type hints
     from analytics.environment_parity import MetricDeviation
+
+
+def _set_span_attributes(attributes: Dict[str, Any]) -> None:
+    span = _current_span()
+    if span is None or not attributes:
+        return
+    setter = getattr(span, "set_attributes", None)
+    if callable(setter):
+        try:
+            setter(dict(attributes))
+            return
+        except Exception:  # pragma: no cover - defensive guard
+            return
+    single = getattr(span, "set_attribute", None)
+    if callable(single):
+        for key, value in attributes.items():
+            try:
+                single(key, value)
+            except Exception:  # pragma: no cover - defensive guard
+                continue
+
+
+def _emit_metric_event(name: str, attributes: Dict[str, Any]) -> None:
+    span = _current_span()
+    if span is None:
+        return
+    payload = {k: v for k, v in attributes.items() if v is not None}
+    if not payload:
+        payload = {"status": attributes.get("status", "unknown")}
+    _record_span_event(span, name, payload)
 
 
 class MetricsCollector:
@@ -432,12 +465,20 @@ class MetricsCollector:
             >>> with collector.measure_feature_transform("RSI", "momentum"):
             ...     result = compute_rsi(prices)
         """
-        if not self._enabled:
-            yield
-            return
+        span_attributes = {
+            "metrics.feature.name": feature_name,
+            "metrics.feature.type": feature_type,
+        }
+        _set_span_attributes(span_attributes)
 
+        metrics_enabled = self._enabled
         start_time = time.time()
         status = "success"
+
+        _emit_metric_event(
+            "metrics.feature_transform.start",
+            {**span_attributes, "status": status},
+        )
 
         try:
             yield
@@ -446,38 +487,47 @@ class MetricsCollector:
             raise
         finally:
             duration = time.time() - start_time
-            self.feature_transform_duration.labels(
-                feature_name=feature_name, feature_type=feature_type
-            ).observe(duration)
-            self.feature_transform_total.labels(
-                feature_name=feature_name, feature_type=feature_type, status=status
-            ).inc()
+            if metrics_enabled:
+                self.feature_transform_duration.labels(
+                    feature_name=feature_name, feature_type=feature_type
+                ).observe(duration)
+                self.feature_transform_total.labels(
+                    feature_name=feature_name,
+                    feature_type=feature_type,
+                    status=status,
+                ).inc()
+            _emit_metric_event(
+                "metrics.feature_transform.end",
+                {
+                    **span_attributes,
+                    "status": status,
+                    "duration_ms": duration * 1000.0,
+                },
+            )
 
     @contextmanager
     def measure_backtest(self, strategy: str) -> Iterator[Dict[str, Any]]:
         """Context manager for measuring backtest execution.
 
         Args:
-            strategy: Name of the strategy being backtested
+            strategy: Name of the strategy being backtested.
 
         Yields:
-            Dictionary to store backtest results
-
-        Example:
-            >>> collector = MetricsCollector()
-            >>> with collector.measure_backtest("momentum_strategy") as ctx:
-            ...     result = run_backtest(...)
-            ...     ctx["pnl"] = result.pnl
-            ...     ctx["max_dd"] = result.max_dd
-            ...     ctx["trades"] = result.trades
+            Dictionary to store backtest results that can be enriched with
+            performance metadata.
         """
-        if not self._enabled:
-            yield {}
-            return
 
+        span_attributes = {"metrics.backtest.strategy": strategy}
+        _set_span_attributes(span_attributes)
+
+        metrics_enabled = self._enabled
         start_time = time.time()
         status = "success"
         ctx: Dict[str, Any] = {}
+
+        _emit_metric_event(
+            "metrics.backtest.start", {**span_attributes, "status": status}
+        )
 
         try:
             yield ctx
@@ -486,18 +536,31 @@ class MetricsCollector:
             raise
         finally:
             duration = time.time() - start_time
-            self.backtest_duration.labels(strategy=strategy).observe(duration)
-            self.backtest_total.labels(strategy=strategy, status=status).inc()
+            if metrics_enabled:
+                self.backtest_duration.labels(strategy=strategy).observe(duration)
+                self.backtest_total.labels(strategy=strategy, status=status).inc()
 
-            if status == "success" and ctx:
-                if "pnl" in ctx:
-                    self.backtest_pnl.labels(strategy=strategy).set(ctx["pnl"])
-                if "max_dd" in ctx:
-                    self.backtest_max_drawdown.labels(strategy=strategy).set(
-                        abs(ctx["max_dd"])
-                    )
-                if "trades" in ctx:
-                    self.backtest_trades.labels(strategy=strategy).set(ctx["trades"])
+                if status == "success" and ctx:
+                    if "pnl" in ctx:
+                        self.backtest_pnl.labels(strategy=strategy).set(ctx["pnl"])
+                    if "max_dd" in ctx:
+                        self.backtest_max_drawdown.labels(strategy=strategy).set(
+                            abs(ctx["max_dd"])
+                        )
+                    if "trades" in ctx:
+                        self.backtest_trades.labels(strategy=strategy).set(
+                            ctx["trades"]
+                        )
+
+            payload = {
+                **span_attributes,
+                "status": status,
+                "duration_ms": duration * 1000.0,
+            }
+            for key in ("pnl", "max_dd", "trades"):
+                if key in ctx and ctx[key] is not None:
+                    payload[f"backtest.{key}"] = ctx[key]
+            _emit_metric_event("metrics.backtest.end", payload)
 
     def record_feature_value(self, feature_name: str, value: float) -> None:
         """Record a feature value.
@@ -545,13 +608,17 @@ class MetricsCollector:
     def measure_signal_generation(self, strategy: str) -> Iterator[Dict[str, Any]]:
         """Measure latency of strategy signal generation."""
 
-        if not self._enabled:
-            yield {}
-            return
+        span_attributes = {"metrics.signal.strategy": strategy}
+        _set_span_attributes(span_attributes)
 
+        metrics_enabled = self._enabled
         start_time = time.time()
         ctx: Dict[str, Any] = {}
         status = "success"
+
+        _emit_metric_event(
+            "metrics.signal.start", {**span_attributes, "status": status}
+        )
 
         try:
             yield ctx
@@ -561,16 +628,24 @@ class MetricsCollector:
         finally:
             duration = time.time() - start_time
             final_status = self._resolve_status(ctx, status)
-            samples = self._signal_latency_samples[strategy]
-            samples.append(duration)
-            self._update_latency_quantiles(
-                self.signal_generation_latency_quantiles,
-                {"strategy": strategy},
-                samples,
-            )
-            self.signal_generation_total.labels(
-                strategy=strategy, status=final_status
-            ).inc()
+            if metrics_enabled:
+                samples = self._signal_latency_samples[strategy]
+                samples.append(duration)
+                self._update_latency_quantiles(
+                    self.signal_generation_latency_quantiles,
+                    {"strategy": strategy},
+                    samples,
+                )
+                self.signal_generation_total.labels(
+                    strategy=strategy, status=final_status
+                ).inc()
+
+            payload = {
+                **span_attributes,
+                "status": final_status,
+                "duration_ms": duration * 1000.0,
+            }
+            _emit_metric_event("metrics.signal.end", payload)
 
     @contextmanager
     def measure_data_ingestion(
@@ -587,13 +662,20 @@ class MetricsCollector:
         Yields:
             Dictionary that can be populated with metadata (e.g. ``{"status": "error"}``).
         """
-        if not self._enabled:
-            yield {}
-            return
+        span_attributes = {
+            "metrics.ingestion.source": source,
+            "metrics.ingestion.symbol": symbol,
+        }
+        _set_span_attributes(span_attributes)
 
+        metrics_enabled = self._enabled
         start_time = time.time()
         ctx: Dict[str, Any] = {}
         status = "success"
+
+        _emit_metric_event(
+            "metrics.ingestion.start", {**span_attributes, "status": status}
+        )
 
         try:
             yield ctx
@@ -603,22 +685,30 @@ class MetricsCollector:
         finally:
             duration = time.time() - start_time
             final_status = self._resolve_status(ctx, status)
-            self.data_ingestion_duration.labels(
-                source=source,
-                symbol=symbol,
-            ).observe(duration)
-            samples = self._ingestion_latency_samples[(source, symbol)]
-            samples.append(duration)
-            self._update_latency_quantiles(
-                self.data_ingestion_latency_quantiles,
-                {"source": source, "symbol": symbol},
-                samples,
-            )
-            self.data_ingestion_total.labels(
-                source=source,
-                symbol=symbol,
-                status=final_status,
-            ).inc()
+            if metrics_enabled:
+                self.data_ingestion_duration.labels(
+                    source=source,
+                    symbol=symbol,
+                ).observe(duration)
+                samples = self._ingestion_latency_samples[(source, symbol)]
+                samples.append(duration)
+                self._update_latency_quantiles(
+                    self.data_ingestion_latency_quantiles,
+                    {"source": source, "symbol": symbol},
+                    samples,
+                )
+                self.data_ingestion_total.labels(
+                    source=source,
+                    symbol=symbol,
+                    status=final_status,
+                ).inc()
+
+            payload = {
+                **span_attributes,
+                "status": final_status,
+                "duration_ms": duration * 1000.0,
+            }
+            _emit_metric_event("metrics.ingestion.end", payload)
 
     def set_ingestion_throughput(
         self, source: str, symbol: str, throughput: float
@@ -679,13 +769,21 @@ class MetricsCollector:
     ) -> Iterator[Dict[str, Any]]:
         """Context manager for measuring order placement latency and outcomes."""
 
-        if not self._enabled:
-            yield {}
-            return
+        span_attributes = {
+            "metrics.execution.exchange": exchange,
+            "metrics.execution.symbol": symbol,
+            "metrics.execution.order_type": order_type,
+        }
+        _set_span_attributes(span_attributes)
 
+        metrics_enabled = self._enabled
         start_time = time.time()
         ctx: Dict[str, Any] = {}
         status = "success"
+
+        _emit_metric_event(
+            "metrics.orders.start", {**span_attributes, "status": status}
+        )
 
         try:
             yield ctx
@@ -695,23 +793,31 @@ class MetricsCollector:
         finally:
             duration = time.time() - start_time
             final_status = self._resolve_status(ctx, status)
-            self.order_placement_duration.labels(
-                exchange=exchange,
-                symbol=symbol,
-            ).observe(duration)
-            samples = self._order_submission_latency_samples[(exchange, symbol)]
-            samples.append(duration)
-            self._update_latency_quantiles(
-                self.order_submission_latency_quantiles,
-                {"exchange": exchange, "symbol": symbol},
-                samples,
-            )
-            self.orders_placed.labels(
-                exchange=exchange,
-                symbol=symbol,
-                order_type=order_type,
-                status=final_status,
-            ).inc()
+            if metrics_enabled:
+                self.order_placement_duration.labels(
+                    exchange=exchange,
+                    symbol=symbol,
+                ).observe(duration)
+                samples = self._order_submission_latency_samples[(exchange, symbol)]
+                samples.append(duration)
+                self._update_latency_quantiles(
+                    self.order_submission_latency_quantiles,
+                    {"exchange": exchange, "symbol": symbol},
+                    samples,
+                )
+                self.orders_placed.labels(
+                    exchange=exchange,
+                    symbol=symbol,
+                    order_type=order_type,
+                    status=final_status,
+                ).inc()
+
+            payload = {
+                **span_attributes,
+                "status": final_status,
+                "duration_ms": duration * 1000.0,
+            }
+            _emit_metric_event("metrics.orders.end", payload)
 
     def set_open_positions(self, exchange: str, symbol: str, positions: float) -> None:
         """Update the gauge tracking open positions."""

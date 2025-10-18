@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Deque, Dict, Iterable, Mapping, MutableMapping
 
 from core.utils.metrics import get_metrics_collector
+from observability.tracing import pipeline_span, record_span_event
 from domain import Order, OrderStatus
 from interfaces.execution import RiskController
 
@@ -215,79 +216,139 @@ class OrderManagementSystem:
     def submit(self, order: Order, *, correlation_id: str) -> Order:
         """Submit an order, enforcing idempotency with correlation IDs."""
 
-        if correlation_id in self._processed:
-            order_id = self._processed[correlation_id]
-            return self._orders[order_id]
-        if correlation_id in self._pending:
-            return self._pending[correlation_id]
+        venue = getattr(
+            self.connector, "name", self.connector.__class__.__name__.lower()
+        )
+        span_attrs = {
+            "orders.venue": venue,
+            "orders.symbol": order.symbol,
+            "orders.side": order.side.value,
+            "orders.type": order.order_type.value,
+            "orders.correlation_id": correlation_id,
+            "orders.quantity": float(order.quantity),
+        }
+        if order.price is not None:
+            span_attrs["orders.price"] = float(order.price)
 
-        if self._compliance is not None:
-            report = None
-            try:
-                report = self._compliance.check(
-                    order.symbol, order.quantity, order.price
+        with pipeline_span("orders.submit", **span_attrs) as span:
+            if correlation_id in self._processed:
+                order_id = self._processed[correlation_id]
+                existing = self._orders[order_id]
+                record_span_event(
+                    span,
+                    "orders.submit.deduplicated",
+                    {"orders.order_id": order_id},
                 )
-            except ComplianceViolation as exc:
-                report = exc.report
-                self._metrics.record_compliance_check(
-                    order.symbol,
-                    "blocked",
-                    () if report is None else report.violations,
+                return existing
+            if correlation_id in self._pending:
+                record_span_event(
+                    span,
+                    "orders.submit.pending",
+                    {"orders.order_id": self._pending[correlation_id].order_id},
                 )
-                self._emit_compliance_audit(order, correlation_id, report, str(exc))
-                self._record_ledger_event(
-                    "compliance_blocked",
-                    order=order,
-                    correlation_id=correlation_id,
-                    metadata={
-                        "violations": []
-                        if report is None
-                        else report.violations,
-                        "error": str(exc),
-                    },
-                )
-                raise
-            status = "passed" if report is None or report.is_clean() else "warning"
-            if report is not None:
-                self._metrics.record_compliance_check(
-                    order.symbol,
-                    "blocked" if report.blocked else status,
-                    report.violations,
-                )
-                self._emit_compliance_audit(order, correlation_id, report, None)
-                if report.blocked:
+                return self._pending[correlation_id]
+
+            if span is not None and order.order_id:
+                span.set_attribute("orders.order_id", order.order_id)
+
+            if self._compliance is not None:
+                report = None
+                try:
+                    report = self._compliance.check(
+                        order.symbol, order.quantity, order.price
+                    )
+                except ComplianceViolation as exc:
+                    report = exc.report
+                    self._metrics.record_compliance_check(
+                        order.symbol,
+                        "blocked",
+                        () if report is None else report.violations,
+                    )
+                    self._emit_compliance_audit(order, correlation_id, report, str(exc))
                     self._record_ledger_event(
                         "compliance_blocked",
                         order=order,
                         correlation_id=correlation_id,
                         metadata={
-                            "violations": report.violations,
-                            "blocked": True,
+                            "violations": []
+                            if report is None
+                            else report.violations,
+                            "error": str(exc),
                         },
                     )
-                    raise ComplianceViolation(
-                        "Compliance check blocked order", report=report
+                    record_span_event(
+                        span,
+                        "orders.compliance.blocked",
+                        {
+                            "orders.compliance.status": "blocked",
+                            "orders.compliance.error": str(exc),
+                        },
                     )
+                    raise
+                status = "passed" if report is None or report.is_clean() else "warning"
+                if span is not None:
+                    span.set_attribute("orders.compliance.status", status)
+                if report is not None:
+                    self._metrics.record_compliance_check(
+                        order.symbol,
+                        "blocked" if report.blocked else status,
+                        report.violations,
+                    )
+                    self._emit_compliance_audit(order, correlation_id, report, None)
+                    if report.blocked:
+                        self._record_ledger_event(
+                            "compliance_blocked",
+                            order=order,
+                            correlation_id=correlation_id,
+                            metadata={
+                                "violations": report.violations,
+                                "blocked": True,
+                            },
+                        )
+                        record_span_event(
+                            span,
+                            "orders.compliance.blocked",
+                            {
+                                "orders.compliance.status": "blocked",
+                                "orders.compliance.error": "policy_blocked",
+                            },
+                        )
+                        raise ComplianceViolation(
+                            "Compliance check blocked order", report=report
+                        )
 
-        reference_price = (
-            order.price
-            if order.price is not None
-            else max(order.average_price or 0.0, 1.0)
-        )
-        self.risk.validate_order(
-            order.symbol, order.side.value, order.quantity, reference_price
-        )
+            reference_price = (
+                order.price
+                if order.price is not None
+                else max(order.average_price or 0.0, 1.0)
+            )
+            self.risk.validate_order(
+                order.symbol, order.side.value, order.quantity, reference_price
+            )
+            record_span_event(
+                span,
+                "orders.risk.validated",
+                {"orders.reference_price": float(reference_price)},
+            )
 
-        queued_order = QueuedOrder(correlation_id, order)
-        self._queue.append(queued_order)
-        self._pending[correlation_id] = order
-        self._persist_state()
-        self._record_ledger_event(
-            "order_queued",
-            order=order,
-            correlation_id=correlation_id,
-        )
-        return order
+            queued_order = QueuedOrder(correlation_id, order)
+            self._queue.append(queued_order)
+            self._pending[correlation_id] = order
+            self._persist_state()
+            self._record_ledger_event(
+                "order_queued",
+                order=order,
+                correlation_id=correlation_id,
+            )
+            record_span_event(
+                span,
+                "orders.submit.queued",
+                {
+                    "orders.queue_depth": len(self._queue),
+                    "orders.retries": queued_order.attempts,
+                },
+            )
+            return order
 
     def _emit_compliance_audit(
         self,
@@ -323,23 +384,82 @@ class OrderManagementSystem:
         if not self._queue:
             raise LookupError("No orders pending")
         item = self._queue[0]
+        venue = getattr(
+            self.connector, "name", self.connector.__class__.__name__.lower()
+        )
+        span_attrs = {
+            "orders.venue": venue,
+            "orders.symbol": item.order.symbol,
+            "orders.side": item.order.side.value,
+            "orders.correlation_id": item.correlation_id,
+        }
         retryable: tuple[type[Exception], ...] = (
             TransientOrderError,
             TimeoutError,
             ConnectionError,
         )
         max_retries = max(1, int(self.config.max_retries))
-        while True:
-            item.attempts += 1
-            try:
-                start = time.perf_counter()
-                submitted = self.connector.place_order(
-                    item.order, idempotency_key=item.correlation_id
-                )
-                ack_latency = time.perf_counter() - start
-            except retryable as exc:
-                item.last_error = str(exc)
-                if item.attempts >= max_retries:
+        with pipeline_span("orders.dispatch", **span_attrs) as span:
+            while True:
+                item.attempts += 1
+                try:
+                    start = time.perf_counter()
+                    submitted = self.connector.place_order(
+                        item.order, idempotency_key=item.correlation_id
+                    )
+                    ack_latency = time.perf_counter() - start
+                except retryable as exc:
+                    item.last_error = str(exc)
+                    if item.attempts >= max_retries:
+                        self._queue.popleft()
+                        self._pending.pop(item.correlation_id, None)
+                        item.order.reject(str(exc))
+                        self._persist_state()
+                        self._record_ledger_event(
+                            "order_rejected",
+                            order=item.order,
+                            correlation_id=item.correlation_id,
+                            metadata={
+                                "reason": str(exc),
+                                "attempts": item.attempts,
+                                "transient": True,
+                            },
+                        )
+                        record_span_event(
+                            span,
+                            "orders.dispatch.failure",
+                            {
+                                "orders.error": str(exc),
+                                "orders.attempts": item.attempts,
+                                "orders.retry_exhausted": True,
+                            },
+                        )
+                        return item.order
+                    backoff = max(0.0, float(self.config.backoff_seconds))
+                    self._persist_state()
+                    self._record_ledger_event(
+                        "order_retry_scheduled",
+                        order=item.order,
+                        correlation_id=item.correlation_id,
+                        metadata={
+                            "attempts": item.attempts,
+                            "error": str(exc),
+                            "backoff_seconds": backoff * item.attempts,
+                        },
+                    )
+                    record_span_event(
+                        span,
+                        "orders.dispatch.retry",
+                        {
+                            "orders.error": str(exc),
+                            "orders.attempts": item.attempts,
+                            "orders.backoff_seconds": backoff * item.attempts,
+                        },
+                    )
+                    if backoff:
+                        time.sleep(backoff * item.attempts)
+                    continue
+                except OrderError as exc:
                     self._queue.popleft()
                     self._pending.pop(item.correlation_id, None)
                     item.order.reject(str(exc))
@@ -348,64 +468,48 @@ class OrderManagementSystem:
                         "order_rejected",
                         order=item.order,
                         correlation_id=item.correlation_id,
-                        metadata={
-                            "reason": str(exc),
-                            "attempts": item.attempts,
-                            "transient": True,
+                        metadata={"reason": str(exc)},
+                    )
+                    record_span_event(
+                        span,
+                        "orders.dispatch.failure",
+                        {
+                            "orders.error": str(exc),
+                            "orders.attempts": item.attempts,
+                            "orders.retry_exhausted": False,
                         },
                     )
                     return item.order
-                backoff = max(0.0, float(self.config.backoff_seconds))
-                self._persist_state()
-                self._record_ledger_event(
-                    "order_retry_scheduled",
-                    order=item.order,
-                    correlation_id=item.correlation_id,
-                    metadata={
-                        "attempts": item.attempts,
-                        "error": str(exc),
-                        "backoff_seconds": backoff * item.attempts,
-                    },
+                break
+            self._queue.popleft()
+            self._pending.pop(item.correlation_id, None)
+            if submitted.order_id is None:
+                raise RuntimeError("Connector returned order without ID")
+            self._orders[submitted.order_id] = submitted
+            self._processed[item.correlation_id] = submitted.order_id
+            self._correlations[submitted.order_id] = item.correlation_id
+            if self._metrics.enabled:
+                self._metrics.record_order_ack_latency(
+                    venue, submitted.symbol, max(0.0, ack_latency)
                 )
-                if backoff:
-                    time.sleep(backoff * item.attempts)
-                continue
-            except OrderError as exc:
-                self._queue.popleft()
-                self._pending.pop(item.correlation_id, None)
-                item.order.reject(str(exc))
-                self._persist_state()
-                self._record_ledger_event(
-                    "order_rejected",
-                    order=item.order,
-                    correlation_id=item.correlation_id,
-                    metadata={"reason": str(exc)},
-                )
-                return item.order
-            break
-        self._queue.popleft()
-        self._pending.pop(item.correlation_id, None)
-        if submitted.order_id is None:
-            raise RuntimeError("Connector returned order without ID")
-        self._orders[submitted.order_id] = submitted
-        self._processed[item.correlation_id] = submitted.order_id
-        self._correlations[submitted.order_id] = item.correlation_id
-        if self._metrics.enabled:
-            exchange = getattr(
-                self.connector, "name", self.connector.__class__.__name__.lower()
+                self._ack_timestamps[submitted.order_id] = datetime.now(timezone.utc)
+            self._persist_state()
+            self._record_ledger_event(
+                "order_acknowledged",
+                order=submitted,
+                correlation_id=item.correlation_id,
+                metadata={"attempts": item.attempts, "ack_latency": ack_latency},
             )
-            self._metrics.record_order_ack_latency(
-                exchange, submitted.symbol, max(0.0, ack_latency)
+            record_span_event(
+                span,
+                "orders.dispatch.ack",
+                {
+                    "orders.order_id": submitted.order_id,
+                    "orders.ack_latency_ms": ack_latency * 1000.0,
+                    "orders.attempts": item.attempts,
+                },
             )
-            self._ack_timestamps[submitted.order_id] = datetime.now(timezone.utc)
-        self._persist_state()
-        self._record_ledger_event(
-            "order_acknowledged",
-            order=submitted,
-            correlation_id=item.correlation_id,
-            metadata={"attempts": item.attempts, "ack_latency": ack_latency},
-        )
-        return submitted
+            return submitted
 
     def process_all(self) -> None:
         while self._queue:
@@ -430,45 +534,73 @@ class OrderManagementSystem:
 
     def register_fill(self, order_id: str, quantity: float, price: float) -> Order:
         order = self._orders[order_id]
-        order.record_fill(quantity, price)
-        self.risk.register_fill(order.symbol, order.side.value, quantity, price)
-        if self._metrics.enabled:
-            exchange = getattr(
-                self.connector, "name", self.connector.__class__.__name__.lower()
-            )
-            now = datetime.now(timezone.utc)
-            ack_ts = self._ack_timestamps.get(order_id)
-            if ack_ts is not None:
-                latency = max(0.0, (now - ack_ts).total_seconds())
-                self._metrics.record_order_fill_latency(exchange, order.symbol, latency)
-            signal_origin = getattr(order, "created_at", None)
-            signal_latency = None
-            if isinstance(signal_origin, datetime):
-                if signal_origin.tzinfo is None:
-                    signal_origin = signal_origin.replace(tzinfo=timezone.utc)
-                signal_latency = max(0.0, (now - signal_origin).total_seconds())
-            if signal_latency is not None:
-                metadata = getattr(order, "metadata", None)
-                strategy = "unspecified"
-                if isinstance(metadata, dict):
-                    strategy = str(metadata.get("strategy") or strategy)
-                else:
-                    strategy = str(getattr(order, "strategy", strategy))
-                self._metrics.record_signal_to_fill_latency(
-                    strategy,
-                    exchange,
-                    order.symbol,
-                    signal_latency,
-                )
-            self._ack_timestamps.pop(order_id, None)
-        self._persist_state()
-        self._record_ledger_event(
-            "order_fill_recorded",
-            order=order,
-            correlation_id=self._correlations.get(order_id),
-            metadata={"fill_quantity": quantity, "fill_price": price},
+        venue = getattr(
+            self.connector, "name", self.connector.__class__.__name__.lower()
         )
-        return order
+        span_attrs = {
+            "orders.venue": venue,
+            "orders.symbol": order.symbol,
+            "orders.order_id": order_id,
+            "orders.fill_quantity": float(quantity),
+            "orders.fill_price": float(price),
+        }
+        with pipeline_span("orders.fill", **span_attrs) as span:
+            order.record_fill(quantity, price)
+            self.risk.register_fill(order.symbol, order.side.value, quantity, price)
+            if self._metrics.enabled:
+                now = datetime.now(timezone.utc)
+                ack_ts = self._ack_timestamps.get(order_id)
+                if ack_ts is not None:
+                    latency = max(0.0, (now - ack_ts).total_seconds())
+                    self._metrics.record_order_fill_latency(venue, order.symbol, latency)
+                    record_span_event(
+                        span,
+                        "orders.fill.latency",
+                        {"orders.fill_latency_ms": latency * 1000.0},
+                    )
+                signal_origin = getattr(order, "created_at", None)
+                signal_latency = None
+                if isinstance(signal_origin, datetime):
+                    if signal_origin.tzinfo is None:
+                        signal_origin = signal_origin.replace(tzinfo=timezone.utc)
+                    signal_latency = max(0.0, (now - signal_origin).total_seconds())
+                if signal_latency is not None:
+                    metadata = getattr(order, "metadata", None)
+                    strategy = "unspecified"
+                    if isinstance(metadata, dict):
+                        strategy = str(metadata.get("strategy") or strategy)
+                    else:
+                        strategy = str(getattr(order, "strategy", strategy))
+                    self._metrics.record_signal_to_fill_latency(
+                        strategy,
+                        venue,
+                        order.symbol,
+                        signal_latency,
+                    )
+                    record_span_event(
+                        span,
+                        "orders.fill.signal_to_fill",
+                        {
+                            "orders.signal_strategy": strategy,
+                            "orders.signal_to_fill_latency_ms": signal_latency * 1000.0,
+                        },
+                    )
+                self._ack_timestamps.pop(order_id, None)
+            self._persist_state()
+            self._record_ledger_event(
+                "order_fill_recorded",
+                order=order,
+                correlation_id=self._correlations.get(order_id),
+                metadata={"fill_quantity": quantity, "fill_price": price},
+            )
+            record_span_event(
+                span,
+                "orders.fill.recorded",
+                {
+                    "orders.position_after_fill": float(order.filled_quantity),
+                },
+            )
+            return order
 
     def sync_remote_state(self, order: Order) -> Order:
         """Synchronize terminal state reported by the venue without reissuing API calls."""

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping, Sequence
 from concurrent.futures import Executor, Future, ProcessPoolExecutor, ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -14,6 +15,7 @@ import numpy as np
 
 from ..utils.memory import ArrayPool
 from .base import BaseFeature, FeatureResult
+from observability.tracing import pipeline_span, record_span_event
 
 
 @dataclass(slots=True)
@@ -113,41 +115,85 @@ class IndicatorPipeline:
                 self._prewarmed = True
 
     def run(self, data: np.ndarray | Sequence[float], **kwargs: Any) -> PipelineResult:
-        buffer, borrowed = self._prepare_buffer(data)
-        values: dict[str, Any] = {}
-        try:
-            if self._execution == "sequential":
-                for feature in self._features:
-                    result = feature.transform(buffer, **kwargs)
-                    values[result.name] = result.value
-            else:
-                self._ensure_executor_ready()
-                if self._executor is None:
-                    raise RuntimeError("Parallel execution requires an executor")
-                tasks: list[Future[FeatureResult]] = []
-                for feature in self._features:
-                    tasks.append(
-                        self._executor.submit(_run_feature, feature, buffer, kwargs)
+        span_attributes = {
+            "pipeline.name": self.__class__.__name__,
+            "pipeline.execution_mode": self._execution,
+            "pipeline.feature_count": len(self._features),
+            "pipeline.warm_start": bool(self._warm_start),
+        }
+        if self._max_workers is not None:
+            span_attributes["pipeline.max_workers"] = int(self._max_workers)
+        stage = "features.pipeline"
+        start = time.perf_counter()
+
+        with pipeline_span(stage, **span_attributes) as span:
+            buffer, borrowed = self._prepare_buffer(data)
+            values: dict[str, Any] = {}
+            error: BaseException | None = None
+            try:
+                if self._execution == "sequential":
+                    for feature in self._features:
+                        result = feature.transform(buffer, **kwargs)
+                        values[result.name] = result.value
+                else:
+                    self._ensure_executor_ready()
+                    if self._executor is None:
+                        raise RuntimeError("Parallel execution requires an executor")
+                    tasks: list[Future[FeatureResult]] = []
+                    for feature in self._features:
+                        tasks.append(
+                            self._executor.submit(
+                                _run_feature,
+                                feature,
+                                buffer,
+                                kwargs,
+                            )
+                        )
+                    for future in tasks:
+                        result = future.result()
+                        values[result.name] = result.value
+            except BaseException as exc:  # pragma: no cover - propagated upwards
+                error = exc
+                if borrowed:
+                    self._pool.release(buffer)
+                raise
+            finally:
+                duration_ms = (time.perf_counter() - start) * 1000.0
+                if span is not None:
+                    details: dict[str, Any] = {
+                        "pipeline.buffer.borrowed": bool(borrowed),
+                        "pipeline.result.count": len(values),
+                        "pipeline.duration_ms": duration_ms,
+                    }
+                    try:
+                        input_size = int(np.asarray(buffer).size)
+                    except Exception:  # pragma: no cover - fallback for custom sequences
+                        input_size = None
+                    if input_size is not None:
+                        details["pipeline.input_length"] = input_size
+                    if error is not None:
+                        details["pipeline.error_type"] = error.__class__.__name__
+                    for key, value in details.items():
+                        if value is None:
+                            continue
+                        span.set_attribute(key, value)
+                    record_span_event(
+                        span,
+                        "features.pipeline.summary",
+                        {k: v for k, v in details.items() if v is not None},
                     )
-                for future in tasks:
-                    result = future.result()
-                    values[result.name] = result.value
-        except Exception:
+
+            cleanup: Callable[[], None] | None = None
             if borrowed:
-                self._pool.release(buffer)
-            raise
+                cleanup = partial(self._pool.release, buffer)
 
-        cleanup: Callable[[], None] | None = None
-        if borrowed:
-            cleanup = partial(self._pool.release, buffer)
+            finalizer = None
+            if cleanup is not None:
+                finalizer = _finalize(buffer, cleanup)
 
-        finalizer = None
-        if cleanup is not None:
-            finalizer = _finalize(buffer, cleanup)
-
-        result = PipelineResult(
-            values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer
-        )
+            result = PipelineResult(
+                values=values, buffer=buffer, _cleanup=cleanup, _finalizer=finalizer
+            )
         return result
 
     def close(self, *, wait: bool = False) -> None:

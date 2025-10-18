@@ -15,6 +15,7 @@ import os
 import re
 from contextlib import contextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - optional dependency import guarded at runtime
@@ -50,7 +51,13 @@ except Exception:  # pragma: no cover - the dependencies are optional
 LOGGER = logging.getLogger(__name__)
 
 _DEFAULT_TRACER_NAME = "tradepulse.pipeline"
+_DEFAULT_TRACER_VERSION = ""
 _TRACEPARENT_HEADER = "traceparent"
+
+
+_ACTIVE_CONFIG: "TracingConfig | None" = None
+_HOT_PATH_PATTERNS: tuple[str, ...] = ()
+_HOT_PATH_ATTRIBUTE = "pipeline.hot_path"
 
 
 if _TRACE_AVAILABLE:
@@ -80,6 +87,111 @@ else:  # pragma: no cover - tracing stack unavailable
     _W3C_PROPAGATOR = None  # type: ignore[assignment]
 
 
+def _service_version() -> str | None:
+    env_version = os.environ.get("TRADEPULSE_RELEASE") or os.environ.get(
+        "TRADEPULSE_VERSION"
+    )
+    if env_version:
+        return env_version.strip() or None
+
+    try:
+        repo_root = Path(__file__).resolve().parents[1]
+    except Exception:  # pragma: no cover - defensive guard
+        return None
+
+    version_file = repo_root / "VERSION"
+    if version_file.is_file():
+        try:
+            content = version_file.read_text(encoding="utf-8").strip()
+        except OSError:  # pragma: no cover - IO failure fallback
+            return None
+        return content or None
+    return None
+
+
+def _current_span_is_valid(span: Any) -> bool:
+    if span is None:
+        return False
+    is_recording = getattr(span, "is_recording", None)
+    try:
+        if callable(is_recording) and not is_recording():
+            return False
+    except Exception:  # pragma: no cover - defensive guard
+        return True
+
+    context = getattr(span, "get_span_context", None)
+    if not callable(context):
+        return True
+    try:
+        span_context = context()
+    except Exception:  # pragma: no cover - defensive guard
+        return True
+    if span_context is None:
+        return False
+    is_valid = getattr(span_context, "is_valid", None)
+    if callable(is_valid):
+        try:
+            return bool(is_valid())
+        except Exception:  # pragma: no cover - defensive guard
+            return True
+    if is_valid is not None:
+        return bool(is_valid)
+    return True
+
+
+def _safe_set_attributes(span: Any, attributes: Mapping[str, Any]) -> None:
+    if not attributes or span is None:
+        return
+    setter = getattr(span, "set_attributes", None)
+    if callable(setter):
+        try:
+            setter(dict(attributes))
+            return
+        except Exception:  # pragma: no cover - defensive guard
+            pass
+    single = getattr(span, "set_attribute", None)
+    if callable(single):
+        for key, value in attributes.items():
+            try:
+                single(key, value)
+            except Exception:  # pragma: no cover - defensive guard
+                continue
+
+
+def _safe_add_event(span: Any, name: str, attributes: Mapping[str, Any] | None) -> None:
+    if span is None:
+        return
+    attrs = {k: v for k, v in (attributes or {}).items() if v is not None}
+    adder = getattr(span, "add_event", None)
+    if callable(adder):
+        try:
+            adder(name, attrs)
+            return
+        except Exception:  # pragma: no cover - defensive guard
+            return
+    events = getattr(span, "events", None)
+    if isinstance(events, list):  # pragma: no cover - test shim path
+        events.append({"name": name, "attributes": attrs})
+
+
+def _matches_hot_path(stage: str, attributes: Mapping[str, Any]) -> bool:
+    if not stage:
+        return False
+    attribute_flag = attributes.get(_HOT_PATH_ATTRIBUTE)
+    if isinstance(attribute_flag, bool):
+        return attribute_flag
+    if isinstance(attribute_flag, str) and attribute_flag.lower() in {
+        "1",
+        "true",
+        "yes",
+    }:
+        return True
+    for pattern in _HOT_PATH_PATTERNS:
+        if fnmatch.fnmatch(stage, pattern):
+            return True
+    return False
+
+
 @dataclass(frozen=True)
 class TracingConfig:
     """Container with tracing configuration options."""
@@ -93,7 +205,11 @@ class TracingConfig:
     pii_attributes: Sequence[str] = ()
     pii_patterns: Sequence[str] = ()
     pii_redaction: str = "[redacted]"
-    hot_path_globs: Sequence[str] = ()
+    hot_path_globs: Sequence[str] = (
+        "orders.*",
+        "signals.*",
+        "ingest.live*",
+    )
     hot_path_attribute: str = "pipeline.hot_path"
     default_sample_ratio: float = 1.0
     hot_path_sample_ratio: float = 1.0
@@ -108,6 +224,10 @@ def configure_tracing(config: TracingConfig | None = None) -> bool:
         return False
 
     cfg = config or TracingConfig()
+    global _ACTIVE_CONFIG, _HOT_PATH_PATTERNS, _HOT_PATH_ATTRIBUTE
+    _ACTIVE_CONFIG = cfg
+    _HOT_PATH_PATTERNS = tuple(cfg.hot_path_globs or ())
+    _HOT_PATH_ATTRIBUTE = cfg.hot_path_attribute or "pipeline.hot_path"
 
     resource_attrs: Dict[str, Any] = {
         "service.name": cfg.service_name,
@@ -117,6 +237,11 @@ def configure_tracing(config: TracingConfig | None = None) -> bool:
         resource_attrs["deployment.environment"] = cfg.environment
     if cfg.resource_attributes:
         resource_attrs.update(dict(cfg.resource_attributes))
+
+    version = _service_version()
+    if version:
+        resource_attrs.setdefault("service.version", version)
+        resource_attrs.setdefault("deployment.release", version)
 
     endpoint = cfg.exporter_endpoint or os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT")
     insecure_env = os.environ.get("OTEL_EXPORTER_OTLP_INSECURE")
@@ -139,6 +264,9 @@ def configure_tracing(config: TracingConfig | None = None) -> bool:
     _register_pii_filter(provider, cfg)
 
     trace.set_tracer_provider(provider)
+
+    global _DEFAULT_TRACER_VERSION
+    _DEFAULT_TRACER_VERSION = version or _DEFAULT_TRACER_VERSION
 
     if cfg.enable_w3c_propagation:
         _ensure_w3c_propagator()
@@ -214,6 +342,8 @@ def get_tracer(name: str = _DEFAULT_TRACER_NAME):
 
     if not _TRACE_AVAILABLE:
         return _NoOpTracer()
+    if _DEFAULT_TRACER_VERSION:
+        return trace.get_tracer(name, version=_DEFAULT_TRACER_VERSION)
     return trace.get_tracer(name)
 
 
@@ -276,15 +406,52 @@ def pipeline_span(stage: str, **attributes: Any) -> Iterator[Any]:
         return
 
     tracer = get_tracer()
+    span_attributes: Dict[str, Any] = {"pipeline.stage": stage}
+    if attributes:
+        span_attributes.update(attributes)
+    if _matches_hot_path(stage, span_attributes):
+        span_attributes[_HOT_PATH_ATTRIBUTE] = True
+
     with tracer.start_as_current_span(stage) as span:  # type: ignore[assignment]
-        if attributes:
-            span.set_attributes(attributes)  # type: ignore[call-arg]
+        _safe_set_attributes(span, span_attributes)
         try:
+            _safe_add_event(
+                span,
+                "pipeline.stage.start",
+                {"pipeline.stage": stage, "pipeline.hot_path": span_attributes.get(_HOT_PATH_ATTRIBUTE)},
+            )
             yield span
         except Exception as exc:  # pragma: no cover - exercised via integration
             span.record_exception(exc)  # type: ignore[call-arg]
             span.set_status(Status(StatusCode.ERROR, str(exc)))  # type: ignore[call-arg]
             raise
+        finally:
+            _safe_add_event(
+                span,
+                "pipeline.stage.end",
+                {"pipeline.stage": stage, "pipeline.hot_path": span_attributes.get(_HOT_PATH_ATTRIBUTE)},
+            )
+
+
+def current_span():
+    """Return the active span when tracing is enabled."""
+
+    if not _TRACE_AVAILABLE:
+        return None
+    span = trace.get_current_span()
+    if not _current_span_is_valid(span):
+        return None
+    return span
+
+
+def record_span_event(
+    span: Any, name: str, attributes: Mapping[str, Any] | None = None
+) -> None:
+    """Safely attach an event to ``span`` when tracing is enabled."""
+
+    if not (_TRACE_AVAILABLE and span):
+        return
+    _safe_add_event(span, name, attributes)
 
 
 class _NoOpSpan:
@@ -442,6 +609,8 @@ __all__ = [
     "extract_trace_context",
     "current_traceparent",
     "activate_traceparent",
+    "current_span",
+    "record_span_event",
     "pipeline_span",
     "SelectiveSampler",
     "PIIFilterSpanProcessor",

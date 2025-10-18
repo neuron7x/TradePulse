@@ -23,10 +23,12 @@ from .tracing import (  # noqa: F401
     activate_traceparent,
     configure_tracing,
     current_traceparent,
+    current_span,
     extract_trace_context,
     get_tracer,
     inject_trace_context,
     pipeline_span,
+    record_span_event,
 )
 
 __all__ = [
@@ -49,8 +51,10 @@ __all__ = [
     "activate_traceparent",
     "configure_tracing",
     "current_traceparent",
+    "current_span",
     "extract_trace_context",
     "get_tracer",
     "inject_trace_context",
     "pipeline_span",
+    "record_span_event",
 ]
