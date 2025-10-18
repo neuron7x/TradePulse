@@ -259,9 +259,17 @@ def _trade_attributes_provider(request: Request, _: AdminIdentity) -> Mapping[st
     """Extract trade-related attributes for RBAC evaluation."""
 
     headers = request.headers
-    environment = headers.get("X-Trade-Environment", "production")
-    desk = headers.get("X-Trade-Desk", "execution")
-    return {"environment": environment, "desk": desk}
+    attributes: dict[str, Any] = {}
+
+    environment = headers.get("X-Trade-Environment")
+    if environment:
+        attributes["environment"] = environment
+
+    desk = headers.get("X-Trade-Desk")
+    if desk:
+        attributes["desk"] = desk
+
+    return attributes
 
 
 class SystemAccess:

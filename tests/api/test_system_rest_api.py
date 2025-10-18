@@ -19,6 +19,9 @@ from src.audit.audit_logger import AuditLogger
 from src.admin.remote_control import AdminIdentity
 
 
+TRADE_HEADERS = {"X-Trade-Environment": "production", "X-Trade-Desk": "execution"}
+
+
 class _EagerFillConnector(SimulatedExchangeConnector):
     """Connector that immediately fills orders and exposes static positions."""
 
@@ -127,6 +130,7 @@ def test_order_submission_returns_filled_order(client: TestClient) -> None:
             "quantity": 1.0,
             "price": 1800.0,
         },
+        headers=TRADE_HEADERS,
     )
 
     payload = response.json()
@@ -146,6 +150,7 @@ def test_limit_order_requires_price_validation(client: TestClient) -> None:
             "order_type": "limit",
             "quantity": 1.0,
         },
+        headers=TRADE_HEADERS,
     )
 
     assert response.status_code == 422
@@ -161,6 +166,7 @@ def test_market_order_requires_reference_price(client: TestClient) -> None:
             "side": "buy",
             "quantity": 0.5,
         },
+        headers=TRADE_HEADERS,
     )
 
     assert response.status_code == 422
@@ -188,10 +194,28 @@ def test_market_order_uses_reference_price_for_risk_validation(
             "quantity": 0.25,
             "reference_price": 1900.0,
         },
+        headers=TRADE_HEADERS,
     )
 
     assert response.status_code == 201
     assert captured["price"] == 1900.0
+
+
+def test_trade_denied_when_trade_attributes_missing(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "ETHUSD",
+            "side": "buy",
+            "order_type": "limit",
+            "quantity": 1.0,
+            "price": 1800.0,
+        },
+    )
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["detail"]["failure_reason"] == "attribute_mismatch"
 
 
 def test_trade_denied_when_desk_not_authorized(client: TestClient) -> None:
@@ -204,7 +228,7 @@ def test_trade_denied_when_desk_not_authorized(client: TestClient) -> None:
             "quantity": 1.0,
             "price": 1800.0,
         },
-        headers={"X-Trade-Desk": "research"},
+        headers={**TRADE_HEADERS, "X-Trade-Desk": "research"},
     )
 
     assert response.status_code == 403
@@ -239,6 +263,7 @@ def test_trader_role_is_required(system: TradePulseSystem) -> None:
             "quantity": 1.0,
             "reference_price": 42000.0,
         },
+        headers=TRADE_HEADERS,
     )
 
     assert response.status_code == 403
@@ -289,6 +314,7 @@ def test_order_submission_emits_notification(
             "quantity": 1.0,
             "price": 1800.0,
         },
+        headers=TRADE_HEADERS,
     )
 
     assert response.status_code == 201
