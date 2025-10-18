@@ -1,5 +1,12 @@
 """Observability helpers for TradePulse."""
 
+from .cache_warmup import (  # noqa: F401
+    CacheUsageStats,
+    CacheWarmupController,
+    CacheWarmupResult,
+    CacheWarmupSpec,
+    CacheWarmupStatus,
+)
 from .finops import (  # noqa: F401
     AlertSink,
     Budget,
@@ -30,6 +37,11 @@ from .tracing import (  # noqa: F401
 )
 
 __all__ = [
+    "CacheUsageStats",
+    "CacheWarmupController",
+    "CacheWarmupResult",
+    "CacheWarmupSpec",
+    "CacheWarmupStatus",
     "HealthServer",
     "ResourceUsageSample",
     "Budget",
