@@ -50,7 +50,7 @@ def _fetch_license_from_pypi(name: str, version: str) -> list[str]:
     return sorted(set(filter(None, resolved)))
 
 
-def _extract_license_names(entry: dict[str, Any]) -> list[str]:
+def extract_license_names(entry: dict[str, Any]) -> list[str]:
     licenses: list[str] = []
     for license_block in entry.get("licenses", []) or []:
         license_info = license_block.get("license")
@@ -70,6 +70,10 @@ def _extract_license_names(entry: dict[str, Any]) -> list[str]:
     return sorted(set(filter(None, licenses)))
 
 
+# Backwards compatibility for older imports expecting the private helper name.
+_extract_license_names = extract_license_names
+
+
 def build_rows(components: list[dict[str, Any]]) -> list[tuple[str, str, str, str]]:
     rows: list[tuple[str, str, str, str]] = []
     for component in components:
@@ -79,7 +83,7 @@ def build_rows(components: list[dict[str, Any]]) -> list[tuple[str, str, str, st
         name = component.get("name") or "UNKNOWN"
         version = component.get("version") or "Unspecified"
         purl = component.get("purl") or ""
-        license_names = "; ".join(_extract_license_names(component))
+        license_names = "; ".join(extract_license_names(component))
         rows.append((str(name), str(version), license_names, str(purl)))
     rows.sort(key=lambda item: (item[0].lower(), item[1]))
     return rows
