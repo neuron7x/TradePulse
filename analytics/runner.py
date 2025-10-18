@@ -20,6 +20,11 @@ import pandas as pd
 from hydra.utils import get_original_cwd, to_absolute_path
 from omegaconf import DictConfig, OmegaConf
 
+from core.config.hydra_profiles import (
+    ExperimentProfileError,
+    ExperimentProfileRegistry,
+    validate_experiment_profile,
+)
 from core.indicators.entropy import delta_entropy, entropy
 from core.indicators.kuramoto import compute_phase, kuramoto_order
 from core.indicators.ricci import build_price_graph, mean_ricci
@@ -235,8 +240,20 @@ def run_pipeline(cfg: DictConfig) -> dict[str, Any]:
 def main(cfg: DictConfig) -> None:
     """Hydra entrypoint that orchestrates experiment execution."""
 
-    configure_logging(str(cfg.experiment.log_level))
-    set_random_seeds(int(cfg.experiment.random_seed))
+    registry: ExperimentProfileRegistry
+    try:
+        experiment = validate_experiment_profile(cfg)
+        registry = ExperimentProfileRegistry.discover()
+        selected_profile = OmegaConf.select(
+            cfg, "hydra.runtime.choices.experiment", default=None
+        )
+        if selected_profile is not None:
+            registry.ensure(str(selected_profile))
+    except ExperimentProfileError as exc:
+        raise SystemExit(str(exc)) from exc
+
+    configure_logging(experiment.log_level)
+    set_random_seeds(experiment.random_seed)
     apply_reproducibility_settings(cfg)
 
     run_dir = Path.cwd()
@@ -244,6 +261,11 @@ def main(cfg: DictConfig) -> None:
     metadata = collect_run_metadata(run_dir, original_cwd, cfg)
 
     logger = logging.getLogger(__name__)
+    logger.info(
+        "Using Hydra experiment profile '%s'. Available profiles: %s",
+        experiment.name,
+        ", ".join(registry.names()),
+    )
     try:
         safe_yaml = _redacted_config_yaml(cfg)
     except Exception:

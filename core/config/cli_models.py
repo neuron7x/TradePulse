@@ -68,6 +68,30 @@ class ExperimentAnalyticsConfig(BaseModel):
     bins: int
     delta: float
 
+    @field_validator("window")
+    @classmethod
+    def _validate_window(cls, value: int) -> int:
+        if value <= 0:
+            msg = "window must be a positive integer"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("bins")
+    @classmethod
+    def _validate_bins(cls, value: int) -> int:
+        if value <= 0:
+            msg = "bins must be a positive integer"
+            raise ValueError(msg)
+        return value
+
+    @field_validator("delta")
+    @classmethod
+    def _validate_delta(cls, value: float) -> float:
+        if value <= 0:
+            msg = "delta must be a positive float"
+            raise ValueError(msg)
+        return value
+
 
 class ExperimentTrackingConfig(BaseModel):
     """Where to persist experiment tracking artifacts."""
@@ -88,6 +112,26 @@ class ExperimentConfig(BaseModel):
     data: ExperimentDataConfig
     analytics: ExperimentAnalyticsConfig
     tracking: ExperimentTrackingConfig
+
+    @field_validator("log_level")
+    @classmethod
+    def _normalize_log_level(cls, value: str) -> str:
+        normalized = value.upper()
+        valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+        if normalized not in valid_levels:
+            msg = (
+                "log_level must be one of CRITICAL, ERROR, WARNING, INFO, DEBUG, or NOTSET"
+            )
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("random_seed")
+    @classmethod
+    def _validate_random_seed(cls, value: int) -> int:
+        if value < 0:
+            msg = "random_seed must be greater than or equal to zero"
+            raise ValueError(msg)
+        return value
 
     @model_validator(mode="after")
     def _validate_database_security(self) -> "ExperimentConfig":
