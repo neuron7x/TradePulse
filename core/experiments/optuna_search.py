@@ -298,7 +298,11 @@ class StrategyHyperparameterSearch:
         best_trial = study.best_trial
         best_params = _normalise_params(best_trial.params)
         best_score = float(best_trial.value)
-        improvement = best_score - float(baseline_score)
+        delta = best_score - float(baseline_score)
+        if config.direction == optuna.study.StudyDirection.MINIMIZE:
+            improvement = -delta
+        else:
+            improvement = delta
         improvement_pct: float | None
         if baseline_score == 0.0:
             improvement_pct = None
