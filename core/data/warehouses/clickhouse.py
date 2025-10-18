@@ -65,7 +65,7 @@ class ClickHouseWarehouse(TimeSeriesWarehouse):
                 "create raw tick table",
                 (
                     f"CREATE TABLE IF NOT EXISTS {cfg.database}.{cfg.raw_table} (\n"
-                    "    ts DateTime64(6, '{cfg.timezone_name}') CODEC(Delta, ZSTD),\n"
+                    f"    ts DateTime64(6, '{cfg.timezone_name}') CODEC(Delta, ZSTD),\n"
                     "    symbol LowCardinality(String),\n"
                     "    venue LowCardinality(String),\n"
                     "    instrument_type LowCardinality(String),\n"
@@ -73,7 +73,7 @@ class ClickHouseWarehouse(TimeSeriesWarehouse):
                     "    volume Decimal64(10),\n"
                     "    trade_id String DEFAULT '',\n"
                     "    ingest_id UUID DEFAULT generateUUIDv4(),\n"
-                    "    ingest_ts DateTime64(6, '{cfg.timezone_name}') DEFAULT now('{cfg.timezone_name}')\n"
+                    f"    ingest_ts DateTime64(6, '{cfg.timezone_name}') DEFAULT now('{cfg.timezone_name}')\n"
                     "    , INDEX idx_symbol symbol TYPE set(0) GRANULARITY 1\n"
                     ")\n"
                     "ENGINE = MergeTree\n"
@@ -88,7 +88,7 @@ class ClickHouseWarehouse(TimeSeriesWarehouse):
                 "create minute bar table",
                 (
                     f"CREATE TABLE IF NOT EXISTS {cfg.database}.{cfg.rollup_table} (\n"
-                    "    window_start DateTime64(6, '{cfg.timezone_name}'),\n"
+                    f"    window_start DateTime64(6, '{cfg.timezone_name}'),\n"
                     "    symbol LowCardinality(String),\n"
                     "    venue LowCardinality(String),\n"
                     "    instrument_type LowCardinality(String),\n"
@@ -98,7 +98,7 @@ class ClickHouseWarehouse(TimeSeriesWarehouse):
                     "    close_price Decimal64(10),\n"
                     "    volume Decimal64(12),\n"
                     "    trade_count UInt64,\n"
-                    "    ingest_ts DateTime64(6, '{cfg.timezone_name}') DEFAULT now('{cfg.timezone_name}')\n"
+                    f"    ingest_ts DateTime64(6, '{cfg.timezone_name}') DEFAULT now('{cfg.timezone_name}')\n"
                     "    , INDEX idx_rollup_symbol symbol TYPE set(0) GRANULARITY 1\n"
                     ")\n"
                     "ENGINE = MergeTree\n"
@@ -115,7 +115,7 @@ class ClickHouseWarehouse(TimeSeriesWarehouse):
                     f"CREATE MATERIALIZED VIEW IF NOT EXISTS {cfg.database}.mv_{cfg.rollup_table} \n"
                     f"TO {cfg.database}.{cfg.rollup_table} AS\n"
                     "SELECT\n"
-                    "    toStartOfInterval(ts, INTERVAL 1 MINUTE, '{cfg.timezone_name}') AS window_start,\n"
+                    f"    toStartOfInterval(ts, INTERVAL 1 MINUTE, '{cfg.timezone_name}') AS window_start,\n"
                     "    symbol,\n"
                     "    venue,\n"
                     "    instrument_type,\n"
