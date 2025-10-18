@@ -9,7 +9,10 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterator, Mapping
+from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, Mapping
+
+if TYPE_CHECKING:
+    from .vault import SecretVault
 
 from src.audit.audit_logger import AuditLogger
 
@@ -19,6 +22,7 @@ __all__ = [
     "SecretManager",
     "SecretManagerError",
     "secret_caller_context",
+    "managed_secret_from_vault",
 ]
 
 
@@ -32,6 +36,7 @@ class ManagedSecretConfig:
 
     name: str
     path: Path | None = None
+    resolver: Callable[[], str] | None = None
     min_length: int = 16
 
 
@@ -56,11 +61,11 @@ class ManagedSecret:
         if fallback is not None:
             self._ensure_min_length(fallback)
             self._value = fallback
-        if config.path is None and self._value is None:
+        if config.path is None and config.resolver is None and self._value is None:
             raise SecretManagerError(
                 f"Secret '{config.name}' must provide a fallback value or managed path."
             )
-        if config.path is not None:
+        if config.path is not None or config.resolver is not None:
             # Attempt an eager refresh so missing files are detected on startup. If the refresh fails but a fallback value is
             # available we continue using the fallback and log the failure so operators can investigate.
             try:
@@ -92,7 +97,7 @@ class ManagedSecret:
             self._refresh(force=True)
 
     def _refresh(self, *, force: bool = False) -> None:
-        if self._config.path is None:
+        if self._config.path is None and self._config.resolver is None:
             return
         now = time.monotonic()
         if (
@@ -101,31 +106,60 @@ class ManagedSecret:
             and now - self._last_refresh < self._refresh_interval
         ):
             return
+        secret: str | None = None
+        if self._config.path is not None:
+            try:
+                secret = self._config.path.read_text(encoding="utf-8").strip()
+            except FileNotFoundError as exc:
+                self._logger.warning(
+                    "Managed secret file missing",
+                    extra={"secret": self._config.name, "path": str(self._config.path)},
+                )
+                if self._value is not None:
+                    self._last_refresh = now
+                    return
+                raise SecretManagerError(
+                    f"Secret '{self._config.name}' missing at {self._config.path}"
+                ) from exc
+            if not secret:
+                self._logger.warning(
+                    "Managed secret file is empty",
+                    extra={"secret": self._config.name, "path": str(self._config.path)},
+                )
+                if self._value is not None:
+                    self._last_refresh = now
+                    return
+                raise SecretManagerError(
+                    f"Secret '{self._config.name}' read from {self._config.path} is empty."
+                )
+        if secret is None and self._config.resolver is not None:
+            try:
+                secret = self._config.resolver()
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self._logger.error(
+                    "Managed secret resolver failed",
+                    extra={"secret": self._config.name},
+                    exc_info=(type(exc), exc, exc.__traceback__),
+                )
+                if self._value is not None:
+                    self._last_refresh = now
+                    return
+                raise SecretManagerError(
+                    f"Secret '{self._config.name}' resolver failed"
+                ) from exc
+            if not secret:
+                self._logger.warning(
+                    "Managed secret resolver returned empty value",
+                    extra={"secret": self._config.name},
+                )
+                if self._value is not None:
+                    self._last_refresh = now
+                    return
+                raise SecretManagerError(
+                    f"Secret '{self._config.name}' resolved empty value"
+                )
         try:
-            secret = self._config.path.read_text(encoding="utf-8").strip()
-        except FileNotFoundError as exc:
-            self._logger.warning(
-                "Managed secret file missing",
-                extra={"secret": self._config.name, "path": str(self._config.path)},
-            )
-            if self._value is not None:
-                self._last_refresh = now
-                return
-            raise SecretManagerError(
-                f"Secret '{self._config.name}' missing at {self._config.path}"
-            ) from exc
-        if not secret:
-            self._logger.warning(
-                "Managed secret file is empty",
-                extra={"secret": self._config.name, "path": str(self._config.path)},
-            )
-            if self._value is not None:
-                self._last_refresh = now
-                return
-            raise SecretManagerError(
-                f"Secret '{self._config.name}' read from {self._config.path} is empty."
-            )
-        try:
+            assert secret is not None
             self._ensure_min_length(secret)
         except SecretManagerError:
             self._logger.warning(
@@ -171,6 +205,7 @@ class ManagedSecret:
             "path": str(path) if path is not None else None,
             "min_length": self._config.min_length,
             "has_fallback": self._has_fallback,
+            "uses_resolver": self._config.resolver is not None,
             "cached": self._value is not None,
             "refresh_interval_seconds": self._refresh_interval,
         }
@@ -319,3 +354,32 @@ def secret_caller_context(
         yield
     finally:
         _SECRET_CALLER_CONTEXT.reset(token)
+
+
+def managed_secret_from_vault(
+    *,
+    vault: "SecretVault",
+    vault_secret_name: str,
+    managed_name: str | None = None,
+    refresh_interval_seconds: float = 30.0,
+    min_length: int = 32,
+) -> ManagedSecret:
+    """Create a :class:`ManagedSecret` backed by a :class:`SecretVault` secret."""
+
+    from .vault import build_vault_resolver
+
+    config = ManagedSecretConfig(
+        name=managed_name or vault_secret_name,
+        path=None,
+        min_length=min_length,
+        resolver=build_vault_resolver(
+            vault=vault,
+            secret_name=vault_secret_name,
+            context_provider=_SECRET_CALLER_CONTEXT.get,
+        ),
+    )
+    return ManagedSecret(
+        config=config,
+        fallback=None,
+        refresh_interval_seconds=refresh_interval_seconds,
+    )
