@@ -63,14 +63,30 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
         def set_status(self, status):
             self.status = status
 
+        def add_event(self, name, attributes=None):
+            self.events.append({"name": name, "attributes": attributes or {}})
+
+        def is_recording(self):
+            return True
+
+        def get_span_context(self):
+            class _Ctx:
+                def is_valid(self):
+                    return True
+
+            return _Ctx()
+
     class _SpanContext:
         def __init__(self, span: _Span) -> None:
             self._span = span
 
         def __enter__(self):
+            trace_mod._span_stack.append(self._span)
             return self._span
 
         def __exit__(self, exc_type, exc, tb):
+            if trace_mod._span_stack:
+                trace_mod._span_stack.pop()
             return False
 
     class _Tracer:
@@ -85,6 +101,33 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     trace_mod.Status = Status
     trace_mod.StatusCode = StatusCode
     trace_mod._provider = None
+    trace_mod._span_stack = []
+
+    class _NoopSpan:
+        def is_recording(self):
+            return False
+
+        def set_attribute(self, key, value):
+            return None
+
+        def set_attributes(self, attrs):
+            return None
+
+        def add_event(self, name, attributes=None):
+            return None
+
+        def record_exception(self, exc):
+            return None
+
+        def set_status(self, status):
+            return None
+
+        def get_span_context(self):
+            class _Ctx:
+                def is_valid(self):
+                    return False
+
+            return _Ctx()
 
     def set_tracer_provider(provider):
         trace_mod._provider = provider
@@ -92,8 +135,14 @@ def _install_stub_opentelemetry(monkeypatch: pytest.MonkeyPatch) -> None:
     def get_tracer(name):
         return _Tracer(name)
 
+    def get_current_span():
+        if trace_mod._span_stack:
+            return trace_mod._span_stack[-1]
+        return _NoopSpan()
+
     trace_mod.set_tracer_provider = set_tracer_provider
     trace_mod.get_tracer = get_tracer
+    trace_mod.get_current_span = get_current_span
     sys.modules["opentelemetry.trace"] = trace_mod
 
     propagate_mod = types.ModuleType("opentelemetry.propagate")
@@ -352,3 +401,11 @@ def test_trace_context_helpers_roundtrip(tracing_module):
         assert injected["traceparent"] == traceparent
 
     assert tracing_module.current_traceparent() is None
+
+
+def test_current_span_and_record_event(tracing_module):
+    tracing_module.get_tracer("test")
+    with tracing_module.pipeline_span("orders.instrument", foo="bar") as span:
+        assert tracing_module.current_span() is span
+        tracing_module.record_span_event(span, "unit.event", {"hello": "world"})
+        assert any(event.get("name") == "unit.event" for event in span.events)
