@@ -11,13 +11,13 @@ fpma-check:
 
 .PHONY: lock
 lock:
-python -m pip install --upgrade pip
-python -m pip install pip-tools
-python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=requirements.txt requirements.in -c constraints.txt
-python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=dev.txt dev.in -c constraints.txt
-printf '# Managed via pip-tools; see requirements.in for sources.\n-r requirements.txt\n' > requirements.lock
-printf '# Managed via pip-tools; see dev.in for sources.\n-r dev.txt\n' > requirements-dev.txt
-cp requirements-dev.txt requirements-dev.lock
+	python -m pip install --upgrade pip
+	python -m pip install pip-tools
+	python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=requirements.txt requirements.in -c constraints.txt
+	python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=dev.txt dev.in -c constraints.txt
+	printf '# Managed via pip-tools; see requirements.in for sources.\n-r requirements.txt\n' > requirements.lock
+	printf '# Managed via pip-tools; see dev.in for sources.\n-r dev.txt\n' > requirements-dev.txt
+	cp requirements-dev.txt requirements-dev.lock
 
 .PHONY: build-package
 build-package: clean-dist
@@ -67,7 +67,7 @@ supply-chain-verify:
 
 .PHONY: security-audit
 security-audit:
-python scripts/dependency_audit.py --requirement requirements.txt --requirement dev.txt
+	python scripts/dependency_audit.py --requirement requirements.txt --requirement dev.txt
 
 .PHONY: test\:fast
 test\:fast:
