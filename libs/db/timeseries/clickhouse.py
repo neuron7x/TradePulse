@@ -264,7 +264,7 @@ class ClickHouseQueryBuilder:
             [
                 f"    min({price_column}) AS low",
                 f"    max({price_column}) AS high",
-                f"    anyLast({price_column}) AS close",
+                f"    argMax({price_column}, {timestamp_column}) AS close",
                 f"    argMin({price_column}, {timestamp_column}) AS open",
             ]
         )
