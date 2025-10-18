@@ -83,6 +83,7 @@ nav:
       - Data Incident Runbook: runbook_data_incident.md
       - Governance and Data Controls: governance.md
       - Deployment: deployment.md
+      - Canary Release Guardrails: canary_release_guardrails.md
   - Security:
       - Program Overview: ../SECURITY.md
       - Production Security Architecture: security/architecture.md
