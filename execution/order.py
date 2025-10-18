@@ -225,12 +225,15 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
             peak_equity=max(balance, 0.0),
             volatility=0.0,
         )
-        direction = 1 if risk >= 0.0 else -1
+        clamped_risk = max(0.0, min(risk, 1.0))
+        direction = 0
+        if clamped_risk > 0.0:
+            direction = 1
         request = PositionSizingRequest(
             symbol="__anonymous__",
             direction=direction,
             price=price,
-            risk_fraction=abs(risk),
+            risk_fraction=clamped_risk,
             leverage_limit=max_leverage,
         )
         result = self.size_order(request, state)
@@ -328,7 +331,9 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
             candidate_fraction *= scale
             notes["drawdown_scale"] = scale
 
-        leverage_cap = min(constraints.max_leverage, request.leverage_limit or constraints.max_leverage)
+        leverage_cap = constraints.max_leverage
+        if request.leverage_limit is not None:
+            leverage_cap = min(leverage_cap, max(request.leverage_limit, 0.0))
         cppi_limit = self._cppi_fraction(state, leverage_cap)
         notes["cppi_limit"] = cppi_limit
         if cppi_limit <= 0.0:

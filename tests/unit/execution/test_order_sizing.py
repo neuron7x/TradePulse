@@ -159,3 +159,34 @@ def test_constrained_sizer_size_method_matches_risk_aware_for_small_risk() -> No
     qty = sizer.size(balance=10_000.0, risk=0.02, price=25_000.0)
 
     assert qty == pytest.approx(0.008)
+
+
+def test_constrained_sizer_size_clamps_negative_risk_to_zero() -> None:
+    sizer = ConstrainedPositionSizer()
+
+    qty = sizer.size(balance=5_000.0, risk=-0.3, price=200.0)
+
+    assert qty == 0.0
+
+
+def test_constrained_sizer_honours_zero_leverage_limit() -> None:
+    constraints = PositionSizingConstraints(max_leverage=3.0)
+    sizer = ConstrainedPositionSizer(constraints)
+    state = PortfolioState(
+        balance=50_000.0,
+        equity=50_000.0,
+        peak_equity=50_000.0,
+        volatility=0.1,
+    )
+    request = PositionSizingRequest(
+        symbol="BTC",
+        direction=1,
+        price=25_000.0,
+        risk_fraction=0.5,
+        leverage_limit=0.0,
+    )
+
+    result = sizer.size_order(request, state)
+
+    assert result.order_quantity == 0.0
+    assert result.target_position == 0.0
