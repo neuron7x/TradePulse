@@ -61,18 +61,18 @@ def test_extract_license_names_falls_back_to_pypi(monkeypatch):
             {"expression": "GPL-2.0"},
         ],
     }
-    licenses = report._extract_license_names(entry)
+    licenses = report.extract_license_names(entry)
     assert licenses == ["BSD-3-Clause", "GPL-2.0"]
 
     fallback_entry = {"name": "pkg", "version": "1.0"}
     monkeypatch.setattr(report, "_fetch_license_from_pypi", lambda name, version: [])
-    unknown = report._extract_license_names(fallback_entry)
+    unknown = report.extract_license_names(fallback_entry)
     assert unknown == ["UNKNOWN"]
 
     monkeypatch.setattr(
         report, "_fetch_license_from_pypi", lambda name, version: ["Apache-2.0"]
     )
-    resolved = report._extract_license_names({"name": "pkg", "version": "1.1"})
+    resolved = report.extract_license_names({"name": "pkg", "version": "1.1"})
     assert resolved == ["Apache-2.0"]
 
 
@@ -82,7 +82,7 @@ def test_build_rows_filters_and_sorts(monkeypatch):
         {"name": "Z", "version": "0", "type": "container"},
         {"name": "B", "version": "2", "type": "framework"},
     ]
-    monkeypatch.setattr(report, "_extract_license_names", lambda entry: [entry["name"]])
+    monkeypatch.setattr(report, "extract_license_names", lambda entry: [entry["name"]])
 
     rows = report.build_rows(components)
     assert rows == [
