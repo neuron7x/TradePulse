@@ -120,6 +120,7 @@ class DriftDetector:
         if ks:
             pvalue = float(assessment.details.get("pvalue", 1.0))
             value = max(0.0, min(1.0, 1.0 - pvalue))
+            threshold = self._ks_alpha
             details = {
                 **assessment.details,
                 "statistic": assessment.value,
