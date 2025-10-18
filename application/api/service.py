@@ -12,20 +12,38 @@ from enum import Enum
 from http import HTTPStatus
 from json import JSONDecodeError
 from time import perf_counter
-from typing import Any, Awaitable, Callable, Literal, Mapping
+from typing import Any, Awaitable, Callable, Literal, Mapping, TypeVar
 
 import numpy as np
 import pandas as pd
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse, PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp
 
+ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
+
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
+from application.api.idempotency import (
+    IdempotencyCache,
+    IdempotencyConflictError,
+    IdempotencySnapshot,
+)
 from application.api.rate_limit import (
     RateLimiterSnapshot,
     SlidingWindowRateLimiter,
@@ -201,6 +219,8 @@ class ApiErrorCode(str, Enum):
     INVALID_CURSOR = "ERR_INVALID_CURSOR"
     INVALID_CONFIDENCE = "ERR_INVALID_CONFIDENCE"
     PREDICTIONS_FILTER_MISMATCH = "ERR_PREDICTIONS_FILTER_MISMATCH"
+    IDEMPOTENCY_CONFLICT = "ERR_IDEMPOTENCY_CONFLICT"
+    IDEMPOTENCY_INVALID = "ERR_IDEMPOTENCY_INVALID"
 
 
 DEFAULT_ERROR_CODES: dict[int, ApiErrorCode] = {
@@ -210,8 +230,136 @@ DEFAULT_ERROR_CODES: dict[int, ApiErrorCode] = {
     status.HTTP_404_NOT_FOUND: ApiErrorCode.NOT_FOUND,
     status.HTTP_422_UNPROCESSABLE_CONTENT: ApiErrorCode.VALIDATION_FAILED,
     status.HTTP_429_TOO_MANY_REQUESTS: ApiErrorCode.RATE_LIMIT,
+    status.HTTP_409_CONFLICT: ApiErrorCode.IDEMPOTENCY_CONFLICT,
     status.HTTP_500_INTERNAL_SERVER_ERROR: ApiErrorCode.INTERNAL,
     status.HTTP_503_SERVICE_UNAVAILABLE: ApiErrorCode.INTERNAL,
+}
+
+
+def _resolve_error_code(value: Any, default: ApiErrorCode) -> ApiErrorCode:
+    if isinstance(value, ApiErrorCode):
+        return value
+    if isinstance(value, str):
+        try:
+            return ApiErrorCode(value)
+        except ValueError:
+            return default
+    return default
+
+
+class ErrorPayload(BaseModel):
+    """Canonical error payload returned by the HTTP API."""
+
+    code: ApiErrorCode = Field(..., description="Stable application error code.")
+    message: str = Field(..., description="Human-readable description of the error.")
+    path: str = Field(..., description="Request path that triggered the error.")
+    meta: dict[str, Any] | None = Field(
+        default=None,
+        description="Optional machine-parsable context for troubleshooting.",
+    )
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "code": ApiErrorCode.VALIDATION_FAILED.value,
+                    "message": "Invalid request payload.",
+                    "path": "/v1/features",
+                    "meta": {
+                        "errors": [
+                            {
+                                "type": "missing",
+                                "loc": ["body", "symbol"],
+                                "msg": "Field required",
+                            }
+                        ]
+                    },
+                }
+            ]
+        },
+    )
+
+
+class ErrorResponse(BaseModel):
+    """Envelope structuring error responses."""
+
+    error: ErrorPayload
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+COMMON_ERROR_RESPONSES: dict[int, dict[str, Any]] = {
+    status.HTTP_400_BAD_REQUEST: {
+        "model": ErrorResponse,
+        "description": "Request payload failed validation or business rules.",
+    },
+    status.HTTP_401_UNAUTHORIZED: {
+        "model": ErrorResponse,
+        "description": "Authentication token missing or invalid.",
+    },
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponse,
+        "description": "Authenticated caller lacks sufficient privileges.",
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "Requested resource could not be located.",
+    },
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponse,
+        "description": "Idempotency key conflict detected for the supplied payload.",
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {
+        "model": ErrorResponse,
+        "description": "Payload schema is syntactically valid but semantically incorrect.",
+    },
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponse,
+        "description": "Client exceeded configured rate limits.",
+    },
+    status.HTTP_500_INTERNAL_SERVER_ERROR: {
+        "model": ErrorResponse,
+        "description": "Unexpected server-side failure.",
+    },
+}
+
+
+FEATURE_ERROR_RESPONSES: dict[int, dict[str, Any]] = {
+    **COMMON_ERROR_RESPONSES,
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "No feature snapshots matched the requested filters.",
+    },
+}
+
+
+PREDICTION_ERROR_RESPONSES: dict[int, dict[str, Any]] = {
+    **COMMON_ERROR_RESPONSES,
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponse,
+        "description": "No predictions matched the requested filters.",
+    },
+}
+
+
+SUCCESS_HEADERS: dict[str, dict[str, Any]] = {
+    "Idempotency-Key": {
+        "description": "Echoes the idempotency key associated with the response.",
+        "schema": {"type": "string", "maxLength": 128},
+    },
+    "X-Cache-Status": {
+        "description": "Indicates whether the response was served from cache.",
+        "schema": {"type": "string", "enum": ["hit", "miss"]},
+    },
+    "ETag": {
+        "description": "Entity tag representing the hash of the response body.",
+        "schema": {"type": "string"},
+    },
+    "X-Idempotent-Replay": {
+        "description": "Present with value 'true' when the response is replayed from the idempotency ledger.",
+        "schema": {"type": "string", "enum": ["true"]},
+    },
 }
 
 
@@ -436,6 +584,30 @@ class FeatureRequest(BaseModel):
     symbol: str = Field(..., min_length=1, description="Instrument identifier.")
     bars: list[MarketBar] = Field(..., min_length=1, description="Ordered price bars.")
 
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "symbol": "BTC-USD",
+                    "bars": [
+                        {
+                            "timestamp": "2025-01-01T00:00:00Z",
+                            "open": 42000.1,
+                            "high": 42010.5,
+                            "low": 41980.0,
+                            "close": 42005.2,
+                            "volume": 18.2,
+                            "bidVolume": 9.1,
+                            "askVolume": 9.0,
+                            "signedVolume": 0.25,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
     def to_frame(self) -> pd.DataFrame:
         records = [bar.as_record() for bar in self.bars]
         frame = pd.DataFrame.from_records(records)
@@ -453,7 +625,17 @@ class PaginationMeta(BaseModel):
     limit: int = 0
     returned: int = 0
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "cursor": None,
+                "next_cursor": "2025-01-01T00:00:00Z",
+                "limit": 50,
+                "returned": 50,
+            }
+        },
+    )
 
 
 class FeatureFilters(BaseModel):
@@ -464,7 +646,17 @@ class FeatureFilters(BaseModel):
     feature_prefix: str | None = None
     feature_keys: tuple[str, ...] = Field(default_factory=tuple)
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "start_at": "2025-01-01T00:00:00Z",
+                "end_at": None,
+                "feature_prefix": "macd",
+                "feature_keys": ["macd", "macd_signal"],
+            }
+        },
+    )
 
 
 class FeatureSnapshot(BaseModel):
@@ -473,7 +665,19 @@ class FeatureSnapshot(BaseModel):
     timestamp: datetime
     features: dict[str, float]
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "timestamp": "2025-01-01T00:00:30Z",
+                "features": {
+                    "macd": 0.42,
+                    "macd_signal": 0.37,
+                    "macd_histogram": 0.05,
+                },
+            }
+        },
+    )
 
 
 class FeatureResponse(BaseModel):
@@ -486,7 +690,46 @@ class FeatureResponse(BaseModel):
     pagination: PaginationMeta = Field(default_factory=PaginationMeta)
     filters: FeatureFilters = Field(default_factory=FeatureFilters)
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "symbol": "BTC-USD",
+                    "generated_at": "2025-01-01T00:00:30Z",
+                    "features": {
+                        "macd": 0.42,
+                        "macd_signal": 0.37,
+                        "macd_histogram": 0.05,
+                        "rsi": 61.2,
+                    },
+                    "items": [
+                        {
+                            "timestamp": "2025-01-01T00:00:30Z",
+                            "features": {
+                                "macd": 0.42,
+                                "macd_signal": 0.37,
+                                "macd_histogram": 0.05,
+                                "rsi": 61.2,
+                            },
+                        }
+                    ],
+                    "pagination": {
+                        "cursor": None,
+                        "next_cursor": "2025-01-01T00:00:00Z",
+                        "limit": 1,
+                        "returned": 1,
+                    },
+                    "filters": {
+                        "start_at": None,
+                        "end_at": None,
+                        "feature_prefix": "macd",
+                        "feature_keys": ["macd", "macd_signal"],
+                    },
+                }
+            ]
+        },
+    )
 
 
 class PredictionRequest(FeatureRequest):
@@ -499,6 +742,31 @@ class PredictionRequest(FeatureRequest):
         description="Prediction horizon in seconds for contextual metadata.",
     )
 
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "symbol": "BTC-USD",
+                    "horizon_seconds": 900,
+                    "bars": [
+                        {
+                            "timestamp": "2025-01-01T00:00:00Z",
+                            "open": 42000.1,
+                            "high": 42010.5,
+                            "low": 41980.0,
+                            "close": 42005.2,
+                            "volume": 18.2,
+                            "bidVolume": 9.1,
+                            "askVolume": 9.0,
+                            "signedVolume": 0.25,
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+
 
 class PredictionFilters(BaseModel):
     """Echoed filter parameters for prediction responses."""
@@ -508,7 +776,17 @@ class PredictionFilters(BaseModel):
     actions: tuple[SignalAction, ...] = Field(default_factory=tuple)
     min_confidence: float | None = None
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "start_at": "2025-01-01T00:00:00Z",
+                "end_at": None,
+                "actions": [SignalAction.BUY.value],
+                "min_confidence": 0.6,
+            }
+        },
+    )
 
 
 class PredictionSnapshot(BaseModel):
@@ -518,7 +796,19 @@ class PredictionSnapshot(BaseModel):
     score: float
     signal: dict[str, Any]
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "example": {
+                "timestamp": "2025-01-01T00:00:30Z",
+                "score": 0.42,
+                "signal": {
+                    "action": "BUY",
+                    "confidence": 0.78,
+                },
+            }
+        },
+    )
 
 
 class PredictionResponse(BaseModel):
@@ -538,7 +828,64 @@ class PredictionResponse(BaseModel):
     pagination: PaginationMeta = Field(default_factory=PaginationMeta)
     filters: PredictionFilters = Field(default_factory=PredictionFilters)
 
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(
+        populate_by_name=True,
+        json_schema_extra={
+            "examples": [
+                {
+                    "symbol": "BTC-USD",
+                    "generated_at": "2025-01-01T00:00:30Z",
+                    "horizon_seconds": 900,
+                    "score": 0.42,
+                    "signal": {
+                        "action": "BUY",
+                        "confidence": 0.78,
+                        "rationale": "Composite heuristic weighting MACD trend...",
+                    },
+                    "items": [
+                        {
+                            "timestamp": "2025-01-01T00:00:30Z",
+                            "score": 0.42,
+                            "signal": {
+                                "action": "BUY",
+                                "confidence": 0.78,
+                            },
+                        }
+                    ],
+                    "pagination": {
+                        "cursor": None,
+                        "next_cursor": "2025-01-01T00:00:00Z",
+                        "limit": 1,
+                        "returned": 1,
+                    },
+                    "filters": {
+                        "start_at": None,
+                        "end_at": None,
+                        "actions": ["BUY"],
+                        "min_confidence": 0.6,
+                    },
+                }
+            ]
+        },
+    )
+
+
+FEATURE_SUCCESS_RESPONSE: dict[int, dict[str, Any]] = {
+    status.HTTP_200_OK: {
+        "model": FeatureResponse,
+        "description": "Latest feature vector computed from the submitted bar window.",
+        "headers": SUCCESS_HEADERS,
+    }
+}
+
+
+PREDICTION_SUCCESS_RESPONSE: dict[int, dict[str, Any]] = {
+    status.HTTP_200_OK: {
+        "model": PredictionResponse,
+        "description": "Latest prediction derived from engineered features.",
+        "headers": SUCCESS_HEADERS,
+    }
+}
 
 
 class OnlineSignalForecaster:
@@ -754,6 +1101,40 @@ def _hash_payload(
     return f"{prefix}:{digest}"
 
 
+_IDEMPOTENCY_ALLOWED_CHARS = frozenset(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_.:"
+)
+
+
+def _validate_idempotency_key(raw: str) -> str:
+    key = raw.strip()
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": ApiErrorCode.IDEMPOTENCY_INVALID.value,
+                "message": "Idempotency-Key header must not be empty.",
+            },
+        )
+    if len(key) > 128:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": ApiErrorCode.IDEMPOTENCY_INVALID.value,
+                "message": "Idempotency-Key header exceeds 128 characters.",
+            },
+        )
+    if any(character not in _IDEMPOTENCY_ALLOWED_CHARS for character in key):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": ApiErrorCode.IDEMPOTENCY_INVALID.value,
+                "message": "Idempotency-Key contains unsupported characters.",
+            },
+        )
+    return key
+
+
 class PayloadGuardMiddleware(BaseHTTPMiddleware):
     """Inspect incoming JSON payloads for size and suspicious content."""
 
@@ -857,6 +1238,81 @@ def _resolve_ip(request: Request) -> str:
     return "unknown"
 
 
+def configure_openapi(app: FastAPI) -> None:
+    """Install a deterministic OpenAPI generator with TradePulse extensions."""
+
+    def custom_openapi() -> dict[str, Any]:
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+
+        schema["servers"] = [
+            {
+                "url": "https://api.tradepulse.example.com/v1",
+                "description": "Production",
+            },
+            {
+                "url": "https://staging-api.tradepulse.example.com/v1",
+                "description": "Staging",
+            },
+        ]
+
+        info = schema.setdefault("info", {})
+        info.setdefault(
+            "x-api-lifecycle",
+            {
+                "current": "v1",
+                "deprecated": ["v0"],
+                "retirement": "v0 endpoints are removed 90 days after deprecation notice.",
+            },
+        )
+        info.setdefault(
+            "x-deprecation-policy",
+            {
+                "policy": "Breaking changes require a new major version with 90-day overlap.",
+                "notificationChannels": ["release-notes", "status-page"],
+            },
+        )
+        info.setdefault(
+            "x-backwards-compatibility",
+            {
+                "guarantees": [
+                    "Schemas for existing response fields remain backward compatible within a major version.",
+                    "Deprecated fields retain original semantics until removal.",
+                ]
+            },
+        )
+
+        components = schema.setdefault("components", {})
+        headers = components.setdefault("headers", {})
+        headers.setdefault(
+            "Idempotency-Key",
+            {
+                "description": "Idempotency key echoed on responses. Keys are valid for 15 minutes.",
+                "schema": {"type": "string", "maxLength": 128},
+            },
+        )
+
+        headers.setdefault(
+            "X-Idempotent-Replay",
+            {
+                "description": "Sent with value 'true' when a response is replayed from the idempotency ledger.",
+                "schema": {"type": "string", "enum": ["true"]},
+            },
+        )
+
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[assignment]
+
+
 def create_app(
     *,
     rate_limiter: SlidingWindowRateLimiter | None = None,
@@ -883,6 +1339,7 @@ def create_app(
     resolved_rate_settings = rate_limit_settings or ApiRateLimitSettings()
     limiter = rate_limiter or build_rate_limiter(resolved_rate_settings)
     ttl_cache = cache or TTLCache(ttl_seconds=30, max_entries=512)
+    idempotency_cache = IdempotencyCache(ttl_seconds=900, max_entries=2048)
     forecaster_provider = forecaster_factory or (lambda: OnlineSignalForecaster())
     forecaster = forecaster_provider()
     dependency_probe_map: dict[str, DependencyProbe] = dict(dependency_probes or {})
@@ -1007,6 +1464,8 @@ def create_app(
         ],
     )
 
+    configure_openapi(app)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
@@ -1043,6 +1502,7 @@ def create_app(
     app.state.client_rate_limiter = limiter
     app.state.rate_limit_settings = resolved_rate_settings
     app.state.ttl_cache = ttl_cache
+    app.state.idempotency_cache = idempotency_cache
     app.state.dependency_probes = dependency_probe_map
     app.state.health_server = health_server
     metrics_registry = None
@@ -1080,6 +1540,63 @@ def create_app(
         values = {entry.strip() for entry in existing.split(",") if entry.strip()}
         if value not in values:
             response.headers["Vary"] = f"{existing}, {value}"
+
+    v1_router = APIRouter(prefix="/v1")
+
+    async def replay_if_available(
+        *,
+        key: str,
+        fingerprint: str,
+        response: Response,
+        factory: Callable[[dict[str, Any]], ResponseModelT],
+    ) -> ResponseModelT | None:
+        record = await idempotency_cache.get(key)
+        if record is None:
+            return None
+        if record.payload_hash != fingerprint:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": ApiErrorCode.IDEMPOTENCY_CONFLICT.value,
+                    "message": "Idempotency-Key already used with a different payload.",
+                },
+            )
+        for header_name, header_value in record.headers.items():
+            response.headers[header_name] = header_value
+        response.headers["Idempotency-Key"] = key
+        response.headers["X-Idempotent-Replay"] = "true"
+        response.status_code = record.status_code
+        return factory(record.body)
+
+    async def persist_idempotency_result(
+        *,
+        key: str,
+        fingerprint: str,
+        model: BaseModel,
+        response: Response,
+        status_code: int = status.HTTP_200_OK,
+    ) -> None:
+        header_subset = {
+            header: response.headers[header]
+            for header in ("ETag", "X-Cache-Status")
+            if header in response.headers
+        }
+        try:
+            await idempotency_cache.set(
+                key=key,
+                payload_hash=fingerprint,
+                body=model.model_dump(mode="json"),
+                status_code=status_code,
+                headers=header_subset,
+            )
+        except IdempotencyConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": ApiErrorCode.IDEMPOTENCY_CONFLICT.value,
+                    "message": "Idempotency-Key already used with a different payload.",
+                },
+            ) from exc
 
     @app.middleware("http")
     async def add_cache_headers(
@@ -1176,6 +1693,17 @@ def create_app(
             healthy=client_healthy,
             status=client_status,
             metrics=client_metrics,
+        )
+
+        idempotency_snapshot: IdempotencySnapshot = await idempotency_cache.snapshot()
+        idempotency_metrics = {
+            "entries": idempotency_snapshot.entries,
+            "ttl_seconds": idempotency_snapshot.ttl_seconds,
+        }
+        components["idempotency_ledger"] = ComponentHealth(
+            healthy=True,
+            status="operational",
+            metrics=idempotency_metrics,
         )
 
         admin_snapshot: AdminRateLimiterSnapshot = await admin_rate_limiter.snapshot()
@@ -1286,25 +1814,50 @@ def create_app(
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.post(
+    @v1_router.post(
         "/features",
         response_model=FeatureResponse,
         tags=["features"],
         summary="Generate the latest engineered feature vector",
+        responses={**FEATURE_SUCCESS_RESPONSE, **FEATURE_ERROR_RESPONSES},
     )
-    async def compute_features(
+    async def v1_compute_features(
         payload: FeatureRequest,
         response: Response,
         query: FeatureQueryParams = Depends(get_feature_query_params),
         _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
+        idempotency_key_header: str | None = Header(
+            default=None, alias="Idempotency-Key", convert_underscores=False
+        ),
     ) -> FeatureResponse:
         cache_key = _hash_payload("features", payload, query.cache_fragment())
+        idempotency_key: str | None = None
+        if idempotency_key_header is not None:
+            idempotency_key = _validate_idempotency_key(idempotency_key_header)
+            replay = await replay_if_available(
+                key=idempotency_key,
+                fingerprint=cache_key,
+                response=response,
+                factory=FeatureResponse.model_validate,
+            )
+            if replay is not None:
+                return replay
+
         cached = await ttl_cache.get(cache_key)
         if cached is not None:
             response.headers["X-Cache-Status"] = "hit"
             response.headers["ETag"] = cached.etag
-            return cached.payload  # type: ignore[return-value]
+            result_model: FeatureResponse = cached.payload  # type: ignore[assignment]
+            if idempotency_key is not None:
+                await persist_idempotency_result(
+                    key=idempotency_key,
+                    fingerprint=cache_key,
+                    model=result_model,
+                    response=response,
+                )
+                response.headers["Idempotency-Key"] = idempotency_key
+            return result_model
 
         features = predictor.compute_features(payload)
         filtered = _filter_feature_frame(
@@ -1390,27 +1943,63 @@ def create_app(
         await ttl_cache.set(cache_key, body, etag)
         response.headers["X-Cache-Status"] = "miss"
         response.headers["ETag"] = etag
+        if idempotency_key is not None:
+            await persist_idempotency_result(
+                key=idempotency_key,
+                fingerprint=cache_key,
+                model=body,
+                response=response,
+            )
+            response.headers["Idempotency-Key"] = idempotency_key
         return body
 
-    @app.post(
+    @v1_router.post(
         "/predictions",
         response_model=PredictionResponse,
         tags=["predictions"],
         summary="Produce a trading signal for the latest bar",
+        responses={
+            **PREDICTION_SUCCESS_RESPONSE,
+            **PREDICTION_ERROR_RESPONSES,
+        },
     )
-    async def generate_prediction(
+    async def v1_generate_prediction(
         payload: PredictionRequest,
         response: Response,
         query: PredictionQueryParams = Depends(get_prediction_query_params),
         _identity: AdminIdentity = Depends(enforce_rate_limit),
         predictor: OnlineSignalForecaster = Depends(get_forecaster),
+        idempotency_key_header: str | None = Header(
+            default=None, alias="Idempotency-Key", convert_underscores=False
+        ),
     ) -> PredictionResponse:
         cache_key = _hash_payload("predictions", payload, query.cache_fragment())
+        idempotency_key: str | None = None
+        if idempotency_key_header is not None:
+            idempotency_key = _validate_idempotency_key(idempotency_key_header)
+            replay = await replay_if_available(
+                key=idempotency_key,
+                fingerprint=cache_key,
+                response=response,
+                factory=PredictionResponse.model_validate,
+            )
+            if replay is not None:
+                return replay
+
         cached = await ttl_cache.get(cache_key)
         if cached is not None:
             response.headers["X-Cache-Status"] = "hit"
             response.headers["ETag"] = cached.etag
-            return cached.payload  # type: ignore[return-value]
+            result_model: PredictionResponse = cached.payload  # type: ignore[assignment]
+            if idempotency_key is not None:
+                await persist_idempotency_result(
+                    key=idempotency_key,
+                    fingerprint=cache_key,
+                    model=result_model,
+                    response=response,
+                )
+                response.headers["Idempotency-Key"] = idempotency_key
+            return result_model
 
         features = predictor.compute_features(payload)
         filtered = _filter_feature_frame(
@@ -1505,22 +2094,55 @@ def create_app(
         await ttl_cache.set(cache_key, body, etag)
         response.headers["X-Cache-Status"] = "miss"
         response.headers["ETag"] = etag
+        if idempotency_key is not None:
+            await persist_idempotency_result(
+                key=idempotency_key,
+                fingerprint=cache_key,
+                model=body,
+                response=response,
+            )
+            response.headers["Idempotency-Key"] = idempotency_key
         return body
+
+    app.include_router(v1_router)
+
+    app.add_api_route(
+        "/features",
+        v1_compute_features,
+        methods=["POST"],
+        response_model=FeatureResponse,
+        tags=["features"],
+        summary="Generate the latest engineered feature vector",
+        responses={**FEATURE_SUCCESS_RESPONSE, **FEATURE_ERROR_RESPONSES},
+        deprecated=True,
+    )
+    app.add_api_route(
+        "/predictions",
+        v1_generate_prediction,
+        methods=["POST"],
+        response_model=PredictionResponse,
+        tags=["predictions"],
+        summary="Produce a trading signal for the latest bar",
+        responses={
+            **PREDICTION_SUCCESS_RESPONSE,
+            **PREDICTION_ERROR_RESPONSES,
+        },
+        deprecated=True,
+    )
 
     @app.exception_handler(RequestValidationError)
     async def request_validation_handler(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
+        payload = ErrorPayload(
+            code=ApiErrorCode.VALIDATION_FAILED,
+            message="Invalid request payload.",
+            path=request.url.path,
+            meta={"errors": exc.errors()},
+        )
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            content={
-                "error": {
-                    "code": ApiErrorCode.VALIDATION_FAILED.value,
-                    "message": "Invalid request payload.",
-                    "path": request.url.path,
-                    "meta": {"errors": exc.errors()},
-                }
-            },
+            content=ErrorResponse(error=payload).model_dump(),
         )
 
     @app.exception_handler(HTTPException)
@@ -1529,13 +2151,13 @@ def create_app(
     ) -> JSONResponse:
         default_code = DEFAULT_ERROR_CODES.get(
             exc.status_code, ApiErrorCode.INTERNAL
-        ).value
+        )
         detail = exc.detail
         message: str | None = None
         meta: Any | None = None
         code = default_code
         if isinstance(detail, dict):
-            code = str(detail.get("code") or default_code)
+            code = _resolve_error_code(detail.get("code"), default_code)
             message = detail.get("message") or detail.get("detail")
             meta = detail.get("meta")
         elif isinstance(detail, str):
@@ -1546,15 +2168,16 @@ def create_app(
             except ValueError:  # pragma: no cover - defensive
                 message = "An error occurred"
 
-        error_content: dict[str, Any] = {
-            "code": code,
-            "message": message,
-            "path": request.url.path,
-        }
-        if meta is not None:
-            error_content["meta"] = meta
+        meta_payload: dict[str, Any] | None = meta if isinstance(meta, dict) else None
+        payload = ErrorPayload(
+            code=code,
+            message=message,
+            path=request.url.path,
+            meta=meta_payload,
+        )
         return JSONResponse(
-            status_code=exc.status_code, content={"error": error_content}
+            status_code=exc.status_code,
+            content=ErrorResponse(error=payload).model_dump(),
         )
 
     return app
