@@ -47,6 +47,17 @@ from .portfolio_risk import (  # noqa: F401
     VolatilityScenario,
     VolatilityScenarioResult,
 )
+from .portfolio_attribution import (  # noqa: F401
+    AttributionBreakdown,
+    ConcentrationAlert,
+    ExposureBreakdown,
+    HedgeEffectivenessResult,
+    PortfolioAttributionConfig,
+    PortfolioAttributionEngine,
+    PortfolioAttributionReport,
+    RegimeMetric,
+    StrategyRegimeStability,
+)
 
 __all__ = [
     "EnvironmentParityChecker",
@@ -85,6 +96,15 @@ __all__ = [
     "StressScenarioResult",
     "VolatilityScenario",
     "VolatilityScenarioResult",
+    "AttributionBreakdown",
+    "ConcentrationAlert",
+    "ExposureBreakdown",
+    "HedgeEffectivenessResult",
+    "PortfolioAttributionConfig",
+    "PortfolioAttributionEngine",
+    "PortfolioAttributionReport",
+    "RegimeMetric",
+    "StrategyRegimeStability",
     "compute_code_digest",
     "compute_parameters_digest",
 ]
