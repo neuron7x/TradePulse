@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -271,19 +272,22 @@ def verify_dependencies(
                 )
             )
 
-    denylist_map = {entry.canonical_name: entry for entry in denylist}
+    denylist_map: dict[str, list[DenylistEntry]] = defaultdict(list)
+    for entry in denylist:
+        denylist_map[entry.canonical_name].append(entry)
+
     for dependency in dependencies:
-        entry = denylist_map.get(dependency.canonical_name)
-        if entry and entry.matches(dependency):
-            issues.append(
-                VerificationIssue(
-                    dependency=dependency,
-                    message=entry.reason,
-                    severity=Severity.CRITICAL,
-                    references=entry.references,
-                    cves=entry.cves,
+        for entry in denylist_map.get(dependency.canonical_name, []):
+            if entry.matches(dependency):
+                issues.append(
+                    VerificationIssue(
+                        dependency=dependency,
+                        message=entry.reason,
+                        severity=Severity.CRITICAL,
+                        references=entry.references,
+                        cves=entry.cves,
+                    )
                 )
-            )
 
     report = DependencyVerificationReport(
         generated_at=datetime.now(tz=timezone.utc),
