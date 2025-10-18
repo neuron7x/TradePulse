@@ -76,6 +76,10 @@ decision trees for the checkpoints summarised above.
   and halt procedure, including emergency branches.
 - [`docs/runbook_data_incident.md`](runbook_data_incident.md) – Data feed
   containment and recovery guidance.
+- [`docs/runbook_secret_rotation.md`](runbook_secret_rotation.md) – End-to-end
+  secret rotation procedure with Vault automation hooks.
+- [`docs/runbook_secret_leak.md`](runbook_secret_leak.md) – Incident response
+  plan for suspected credential exposure.
 - [`docs/incident_playbooks.md`](incident_playbooks.md) – Communication and
   escalation expectations for high-severity events.
 - [`docs/operational_handbook.md`](operational_handbook.md) – Governance context,
