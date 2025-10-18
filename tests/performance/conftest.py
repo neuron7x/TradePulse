@@ -98,7 +98,7 @@ def benchmark_guard(
     request:
         Current pytest request object (used to report test id).
     benchmark_baselines:
-        Mapping of benchmark keys to baseline mean runtimes in seconds.
+        Mapping of benchmark keys to baseline median runtimes in seconds.
     """
 
     try:
@@ -162,7 +162,7 @@ def benchmark_guard(
             raise AssertionError(
                 (
                     f"Benchmark '{baseline_key}' regressed: median {median:.6f}s vs baseline {baseline:.6f}s "
-                    f"(+{(record.regression_ratio - 1.0):.1%} > allowed {threshold:.1%})."
+                    f"(+{(record.regression_ratio - 1.0):.1%} > allowed {record.threshold:.1%})."
                 )
             )
 
@@ -222,7 +222,7 @@ def pytest_terminal_summary(terminalreporter: Any, exitstatus: int) -> None:
         return
 
     terminalreporter.write_sep("=", "benchmark regression summary")
-    header = f"{'benchmark':40} {'mean (s)':>12} {'baseline (s)':>14} {'delta':>9} {'budget':>8}"
+    header = f"{'benchmark':40} {'median (s)':>12} {'baseline (s)':>14} {'delta':>9} {'budget':>8}"
     terminalreporter.write_line(header)
     for record in _monitor.records:
         delta_pct = (record.regression_ratio - 1.0) * 100.0
