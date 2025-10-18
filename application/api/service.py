@@ -1106,7 +1106,9 @@ def create_app(
     )
     async def health_check(response: Response) -> HealthResponse:
         overall_start = perf_counter()
-        metrics: MetricsCollector | None = getattr(app.state, "metrics", None)
+        metrics_collector: MetricsCollector | None = getattr(
+            app.state, "metrics", None
+        )
         components: dict[str, ComponentHealth] = {}
 
         risk_manager: RiskManager = app.state.risk_manager
