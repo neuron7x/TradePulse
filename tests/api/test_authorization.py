@@ -1,7 +1,15 @@
+from unittest.mock import MagicMock
+
 import pytest
 from fastapi import HTTPException
+from starlette.requests import Request
 
-from application.api.authorization import _normalise_roles, require_roles
+from application.api.authorization import (
+    _normalise_roles,
+    require_permission,
+    require_roles,
+)
+from application.security.rbac import AuthorizationGateway
 from src.admin.remote_control import AdminIdentity
 
 
@@ -71,3 +79,67 @@ async def test_require_roles_invalid_match_mode() -> None:
 
     with pytest.raises(ValueError, match="Unsupported match strategy: none"):
         await dependency(identity)
+
+
+@pytest.mark.anyio
+async def test_require_permission_delegates_to_gateway() -> None:
+    identity = AdminIdentity(subject="frank", roles=("system:trade",))
+
+    async def _identity_dependency() -> AdminIdentity:
+        return identity
+
+    gateway = MagicMock(spec=AuthorizationGateway)
+
+    def _gateway_dependency() -> AuthorizationGateway:
+        return gateway
+
+    def _attributes_provider(request: Request, _: AdminIdentity) -> dict[str, str]:
+        return {"desk": "execution"}
+
+    dependency = require_permission(
+        "orders",
+        "submit",
+        identity_dependency=_identity_dependency,
+        attributes_provider=_attributes_provider,
+        gateway_dependency=_gateway_dependency,
+    )
+
+    request = Request({"type": "http", "headers": []})
+    result = await dependency(request, identity, gateway)
+
+    assert result is identity
+    gateway.enforce.assert_called_once()
+    _, kwargs = gateway.enforce.call_args
+    assert kwargs["resource"] == "orders"
+    assert kwargs["action"] == "submit"
+    assert kwargs["attributes"] == {"desk": "execution"}
+
+
+@pytest.mark.anyio
+async def test_require_permission_propagates_http_errors() -> None:
+    identity = AdminIdentity(subject="grace", roles=("system:read",))
+
+    async def _identity_dependency() -> AdminIdentity:
+        return identity
+
+    gateway = MagicMock(spec=AuthorizationGateway)
+    gateway.enforce.side_effect = HTTPException(
+        status_code=403,
+        detail={"message": "denied"},
+    )
+
+    def _gateway_dependency() -> AuthorizationGateway:
+        return gateway
+
+    dependency = require_permission(
+        "orders",
+        "submit",
+        identity_dependency=_identity_dependency,
+        gateway_dependency=_gateway_dependency,
+    )
+
+    request = Request({"type": "http", "headers": []})
+    with pytest.raises(HTTPException):
+        await dependency(request, identity, gateway)
+
+    gateway.enforce.assert_called_once()

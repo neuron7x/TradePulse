@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping
 
 import pytest
 from fastapi.testclient import TestClient
 
 from application.api.system_access import create_system_app
+from application.security.rbac import AuthorizationGateway, build_authorization_gateway
 from application.system import (
     ExchangeAdapterConfig,
     TradePulseSystem,
@@ -13,6 +15,7 @@ from application.system import (
 )
 from domain import Order
 from execution.connectors import SimulatedExchangeConnector
+from src.audit.audit_logger import AuditLogger
 from src.admin.remote_control import AdminIdentity
 
 
@@ -66,15 +69,24 @@ def identity_dependency(authorized_identity: AdminIdentity):
 
 
 @pytest.fixture()
+def authorization_gateway() -> AuthorizationGateway:
+    policy_path = Path(__file__).resolve().parents[2] / "configs" / "rbac" / "policy.yaml"
+    audit_logger = AuditLogger(secret="integration-rbac-secret")
+    return build_authorization_gateway(policy_path=policy_path, audit_logger=audit_logger)
+
+
+@pytest.fixture()
 def client(
     system: TradePulseSystem,
     identity_dependency: Callable[[], Awaitable[AdminIdentity]],
+    authorization_gateway: AuthorizationGateway,
 ) -> TestClient:
     app = create_system_app(
         system,
         identity_dependency=identity_dependency,
         reader_roles=("system:read",),
         trader_roles=("system:trade",),
+        authorization_gateway=authorization_gateway,
     )
     return TestClient(app)
 
@@ -182,15 +194,40 @@ def test_market_order_uses_reference_price_for_risk_validation(
     assert captured["price"] == 1900.0
 
 
+def test_trade_denied_when_desk_not_authorized(client: TestClient) -> None:
+    response = client.post(
+        "/api/v1/orders",
+        json={
+            "symbol": "ETHUSD",
+            "side": "buy",
+            "order_type": "limit",
+            "quantity": 1.0,
+            "price": 1800.0,
+        },
+        headers={"X-Trade-Desk": "research"},
+    )
+
+    assert response.status_code == 403
+    payload = response.json()
+    assert payload["detail"]["failure_reason"] == "attribute_mismatch"
+    required_roles = payload["detail"]["required_roles"]
+    assert "system:trade" in required_roles
+
+
 def test_trader_role_is_required(system: TradePulseSystem) -> None:
     async def _limited_identity() -> AdminIdentity:
         return AdminIdentity(subject="integration-test", roles=("system:read",))
 
+    gateway = build_authorization_gateway(
+        policy_path=Path(__file__).resolve().parents[2] / "configs" / "rbac" / "policy.yaml",
+        audit_logger=AuditLogger(secret="integration-rbac-secret"),
+    )
     app = create_system_app(
         system,
         identity_dependency=_limited_identity,
         reader_roles=("system:read",),
         trader_roles=("system:trade",),
+        authorization_gateway=gateway,
     )
     client = TestClient(app)
 
@@ -206,8 +243,9 @@ def test_trader_role_is_required(system: TradePulseSystem) -> None:
 
     assert response.status_code == 403
     payload = response.json()
-    assert "missing_roles" in payload["detail"]
-    assert payload["detail"]["missing_roles"] == ["system:trade"]
+    required_roles = payload["detail"]["required_roles"]
+    assert "system:trade" in required_roles
+    assert payload["detail"]["failure_reason"] == "missing_role"
 
 
 def test_order_submission_emits_notification(

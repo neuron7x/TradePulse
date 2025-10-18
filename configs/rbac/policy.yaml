@@ -1,0 +1,56 @@
+roles:
+  system:read:
+    description: "Read-only monitoring for system health and portfolio exposure."
+    permissions:
+      - resource: system.status
+        action: read
+      - resource: system.positions
+        action: read
+      - resource: ui.dashboard
+        action: view
+  system:trade:
+    description: "Execute and manage orders under production safeguards."
+    inherits:
+      - system:read
+    permissions:
+      - resource: orders
+        action: submit
+        attributes:
+          environment: ["production"]
+          desk: ["execution", "quant"]
+      - resource: orders
+        action: cancel
+        attributes:
+          environment: ["production"]
+          desk: ["execution", "quant"]
+  risk:officer:
+    description: "Operate risk controls and circuit breakers."
+    inherits:
+      - system:read
+    permissions:
+      - resource: risk.kill_switch
+        action: execute
+        attributes:
+          environment: ["production"]
+  admin:superuser:
+    description: "Full administrative control for break-glass scenarios."
+    inherits:
+      - system:trade
+      - risk:officer
+    permissions:
+      - resource: admin.configuration
+        action: manage
+      - resource: audit.records
+        action: read
+        attributes:
+          environment: ["production", "staging"]
+
+temporary_grants:
+  - subject: incident-responder
+    resource: risk.kill_switch
+    action: execute
+    attributes:
+      environment: ["production"]
+    expires_at: "2099-01-01T00:00:00Z"
+    reason: "Disaster recovery standing authorisation"
+    requested_by: "security-team"
