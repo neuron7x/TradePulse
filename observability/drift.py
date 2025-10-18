@@ -116,13 +116,20 @@ class DriftDetector:
     ) -> FeatureDriftMetric:
         threshold = assessment.threshold
         details: Mapping[str, float] = assessment.details
+        value = assessment.value
         if ks:
-            threshold = self._ks_alpha
-            details = {**assessment.details, "confidence": 1.0 - self._ks_alpha}
+            pvalue = float(assessment.details.get("pvalue", 1.0))
+            value = max(0.0, min(1.0, 1.0 - pvalue))
+            details = {
+                **assessment.details,
+                "statistic": assessment.value,
+                "confidence": assessment.threshold,
+                "alpha": self._ks_alpha,
+            }
         return FeatureDriftMetric(
             feature=feature,
             metric=assessment.metric,
-            value=assessment.value,
+            value=value,
             threshold=threshold,
             drifted=assessment.drifted,
             details=details,
