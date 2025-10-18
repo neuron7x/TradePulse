@@ -373,6 +373,7 @@ class ConfigRegistry:
             if history.published.get(env) == version_obj:
                 return
 
+            self._ensure_approvals_satisfied(profile_name, record)
             self._run_compatibility(profile_name, record)
             if env == Environment.PROD:
                 self._run_release_checks(profile_name, record)

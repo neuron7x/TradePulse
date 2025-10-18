@@ -259,6 +259,42 @@ def test_rollback_restores_previous_version() -> None:
     assert registry.get_active_version("alpha-strategy", Environment.STAGE) == Version("1.0.0")
 
 
+def test_rollback_requires_approvals_for_target_version() -> None:
+    registry = ConfigRegistry()
+    registry.register_profile(
+        "alpha-strategy",
+        "1.0.0",
+        _base_payload(risk_mode="baseline"),
+        actor="quant",
+        required_approvals=0,
+    )
+    registry.publish_profile(
+        "alpha-strategy",
+        "1.0.0",
+        actor="deployer",
+        environments=[Environment.STAGE],
+    )
+
+    registry.register_profile(
+        "alpha-strategy",
+        "1.1.0",
+        _base_payload(risk_mode="aggressive"),
+        actor="quant",
+        required_approvals=2,
+    )
+
+    with pytest.raises(ConfigApprovalError):
+        registry.rollback_profile(
+            "alpha-strategy",
+            environment=Environment.STAGE,
+            target_version="1.1.0",
+            actor="deployer",
+            reason="Rolling forward without approvals should fail",
+        )
+
+    assert registry.get_active_version("alpha-strategy", Environment.STAGE) == Version("1.0.0")
+
+
 def test_audit_trail_includes_lifecycle_events() -> None:
     registry = ConfigRegistry()
     registry.register_profile(
