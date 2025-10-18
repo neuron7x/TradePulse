@@ -29,10 +29,16 @@ publish-package: build-package
 clean-dist:
 	rm -rf dist build *.egg-info
 
-.PHONY: generate
+.PHONY: generate schema-validate schema-catalog
 generate:
 	buf generate
 	PYTHONPATH=. python tools/schema/generate_event_types.py
+
+schema-validate:
+	PYTHONPATH=. python tools/schema/validate_compatibility.py --registry schemas/events
+
+schema-catalog:
+	PYTHONPATH=. python tools/schema/render_catalog.py --registry schemas/events --output docs/integrations/event_channels.md
 
 .PHONY: scripts-lint scripts-test scripts-gen-proto scripts-dev-up scripts-dev-down
 scripts-lint:

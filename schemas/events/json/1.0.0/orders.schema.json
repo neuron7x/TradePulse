@@ -93,6 +93,14 @@
       ],
       "title": "TimeInForce"
     },
+    "OrderSide": {
+      "type": "string",
+      "enum": [
+        "BUY",
+        "SELL"
+      ],
+      "title": "OrderSide"
+    },
     "OrderType": {
       "type": "string",
       "enum": [
@@ -102,14 +110,6 @@
         "STOP_LIMIT"
       ],
       "title": "OrderType"
-    },
-    "OrderSide": {
-      "type": "string",
-      "enum": [
-        "BUY",
-        "SELL"
-      ],
-      "title": "OrderSide"
     }
   }
 }
