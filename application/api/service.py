@@ -39,7 +39,11 @@ from starlette.types import ASGIApp
 ResponseModelT = TypeVar("ResponseModelT", bound=BaseModel)
 
 from analytics.signals.pipeline import FeaturePipelineConfig, SignalFeaturePipeline
-from application.api.idempotency import IdempotencyCache, IdempotencySnapshot
+from application.api.idempotency import (
+    IdempotencyCache,
+    IdempotencyConflictError,
+    IdempotencySnapshot,
+)
 from application.api.rate_limit import (
     RateLimiterSnapshot,
     SlidingWindowRateLimiter,
@@ -1577,13 +1581,22 @@ def create_app(
             for header in ("ETag", "X-Cache-Status")
             if header in response.headers
         }
-        await idempotency_cache.set(
-            key=key,
-            payload_hash=fingerprint,
-            body=model.model_dump(mode="json"),
-            status_code=status_code,
-            headers=header_subset,
-        )
+        try:
+            await idempotency_cache.set(
+                key=key,
+                payload_hash=fingerprint,
+                body=model.model_dump(mode="json"),
+                status_code=status_code,
+                headers=header_subset,
+            )
+        except IdempotencyConflictError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": ApiErrorCode.IDEMPOTENCY_CONFLICT.value,
+                    "message": "Idempotency-Key already used with a different payload.",
+                },
+            ) from exc
 
     @app.middleware("http")
     async def add_cache_headers(

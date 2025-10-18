@@ -22,6 +22,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
+class IdempotencyConflictError(RuntimeError):
+    """Raised when attempting to overwrite an idempotency record with a new payload."""
+
+    def __init__(self, key: str) -> None:
+        super().__init__(f"Idempotency key '{key}' already used with a different payload.")
+        self.key = key
+
+
 @dataclass(slots=True)
 class IdempotencyRecord:
     """Materialised response for an idempotent request."""
@@ -91,6 +99,9 @@ class IdempotencyCache:
         )
         async with self._lock:
             self._purge_locked()
+            existing = self._entries.get(key)
+            if existing is not None and existing.payload_hash != payload_hash:
+                raise IdempotencyConflictError(key)
             if len(self._entries) >= self._max_entries:
                 oldest_key = min(
                     self._entries, key=lambda name: self._entries[name].stored_at
@@ -114,5 +125,10 @@ class IdempotencyCache:
             self._entries.pop(name, None)
 
 
-__all__ = ["IdempotencyCache", "IdempotencyRecord", "IdempotencySnapshot"]
+__all__ = [
+    "IdempotencyCache",
+    "IdempotencyConflictError",
+    "IdempotencyRecord",
+    "IdempotencySnapshot",
+]
 
