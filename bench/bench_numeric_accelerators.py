@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import math
+import json
+import sys
+from pathlib import Path
 from time import perf_counter
-from typing import Callable, Iterable, Sequence
+from typing import Callable, Iterable, Mapping, Sequence
 
 import numpy as np
 
@@ -116,6 +119,60 @@ else:
 
 
 BenchmarkCallable = Callable[[], object]
+BenchmarkResults = dict[str, dict[str, float]]
+
+
+def _load_baseline(path: Path) -> tuple[dict[str, object], BenchmarkResults]:
+    with path.open("r", encoding="utf-8") as handle:
+        payload = json.load(handle)
+    raw_metadata = payload.get("metadata", {})
+    if isinstance(raw_metadata, Mapping):
+        metadata = dict(raw_metadata)
+    else:
+        raise ValueError("baseline file metadata must be a mapping")
+    results = payload.get("results")
+    if not isinstance(results, Mapping):
+        raise ValueError("baseline file does not contain a 'results' mapping")
+    normalized: BenchmarkResults = {}
+    for suite, backend_map in results.items():
+        if not isinstance(backend_map, Mapping):
+            raise ValueError(f"baseline suite '{suite}' is not a mapping")
+        normalized[suite] = {
+            backend: float(value)
+            for backend, value in backend_map.items()
+        }
+    return metadata, normalized
+
+
+def _write_json(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write("\n")
+
+
+def _analyze(
+    current: BenchmarkResults,
+    baseline: BenchmarkResults,
+    threshold: float,
+) -> tuple[list[tuple[str, str, float]], list[tuple[str, str, float]], list[tuple[str, str]]]:
+    regressions: list[tuple[str, str, float]] = []
+    improvements: list[tuple[str, str, float]] = []
+    missing: list[tuple[str, str]] = []
+    for suite, backend_map in current.items():
+        for backend, elapsed in backend_map.items():
+            base_elapsed = baseline.get(suite, {}).get(backend)
+            if base_elapsed is None:
+                missing.append((suite, backend))
+                continue
+            if base_elapsed <= 0.0:
+                continue
+            delta = (elapsed - base_elapsed) / base_elapsed
+            if delta > threshold:
+                regressions.append((suite, backend, delta))
+            elif delta < -threshold:
+                improvements.append((suite, backend, delta))
+    return regressions, improvements, missing
 
 
 def _consume(result: object) -> float:
@@ -225,7 +282,36 @@ def main() -> None:
     parser.add_argument(
         "--warmup", type=int, default=1, help="Warmup iterations before timing"
     )
+    parser.add_argument(
+        "--save-baseline",
+        type=Path,
+        help="Write the current benchmark results to the given JSON baseline file",
+    )
+    parser.add_argument(
+        "--load-baseline",
+        type=Path,
+        help="Compare results against a previously saved JSON baseline",
+    )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        help="Write raw benchmark results to a JSON file (same format as baselines)",
+    )
+    parser.add_argument(
+        "--regression-threshold",
+        type=float,
+        default=0.05,
+        help="Allowed relative slowdown before flagging a regression (default: 5%)",
+    )
+    parser.add_argument(
+        "--fail-on-missing",
+        action="store_true",
+        help="Treat missing baseline entries as regressions",
+    )
     args = parser.parse_args()
+
+    if args.regression_threshold < 0:
+        raise SystemExit("--regression-threshold must be non-negative")
 
     if not numpy_available():
         raise SystemExit("NumPy is required to run the numeric benchmarks")
@@ -242,17 +328,29 @@ def main() -> None:
         "convolve": _register_convolution(data, kernel, args.mode),
     }
 
-    print("TradePulse numeric accelerator benchmarks")
-    print(f"  data size: {args.size}")
-    print(f"  window:    {args.window}")
-    print(f"  step:      {args.step}")
-    print(f"  mode:      {args.mode}")
-    print(f"  numpy:     {'yes' if numpy_available() else 'no'}")
-    print(f"  rust:      {'yes' if rust_available() else 'no'}")
-    print(f"  numba:     {'yes' if NUMBA_AVAILABLE else 'no'}\n")
+    metadata = {
+        "size": args.size,
+        "window": args.window,
+        "step": args.step,
+        "mode": args.mode,
+        "repeat": args.repeat,
+        "warmup": args.warmup,
+        "numpy": numpy_available(),
+        "rust": rust_available(),
+        "numba": NUMBA_AVAILABLE,
+    }
 
+    print("TradePulse numeric accelerator benchmarks")
+    for key in ("size", "window", "step", "mode", "repeat", "warmup"):
+        print(f"  {key:>7}: {metadata[key]}")
+    print(f"  numpy:   {'yes' if metadata['numpy'] else 'no'}")
+    print(f"  rust:    {'yes' if metadata['rust'] else 'no'}")
+    print(f"  numba:   {'yes' if metadata['numba'] else 'no'}\n")
+
+    results: BenchmarkResults = {suite: {} for suite in suites}
     for suite_name, registrations in suites.items():
         print(f"== {suite_name} ==")
+        suite_results = results[suite_name]
         for backend, func in registrations:
             try:
                 elapsed = _benchmark(
@@ -261,15 +359,82 @@ def main() -> None:
             except Exception as exc:
                 print(f"  {backend:>8}: error ({exc})")
                 continue
+            suite_results[backend] = elapsed
             throughput = args.size / elapsed / 1e6 if elapsed > 0 else float("inf")
             print(
                 f"  {backend:>8}: {elapsed * 1e3:8.3f} ms  ({throughput:8.3f} M items/s)"
             )
         print()
 
+    payload = {"metadata": metadata, "results": results}
+
+    if args.json_output:
+        _write_json(args.json_output, payload)
+        print(f"Wrote raw results to {args.json_output}")
+
+    exit_code = 0
+    if args.load_baseline:
+        try:
+            baseline_meta, baseline_results = _load_baseline(args.load_baseline)
+        except FileNotFoundError:
+            print(f"Baseline file {args.load_baseline} does not exist")
+            exit_code = 1
+        except ValueError as exc:
+            print(f"Failed to read baseline {args.load_baseline}: {exc}")
+            exit_code = 1
+        else:
+            regressions, improvements, missing = _analyze(
+                results, baseline_results, args.regression_threshold
+            )
+            extra = [
+                (suite, backend)
+                for suite, backend_map in baseline_results.items()
+                for backend in backend_map
+                if backend not in results.get(suite, {})
+            ]
+            print("Baseline comparison (threshold {:.1%}):".format(args.regression_threshold))
+            if regressions:
+                print("  Regressions detected:")
+                for suite, backend, delta in regressions:
+                    print(
+                        f"    - {suite}:{backend} slower by {delta * 100:.2f}%"
+                    )
+                exit_code = 1
+            else:
+                print("  No regressions detected.")
+            if improvements:
+                print("  Improvements:")
+                for suite, backend, delta in improvements:
+                    print(
+                        f"    - {suite}:{backend} faster by {-delta * 100:.2f}%"
+                    )
+            if missing:
+                prefix = "ERROR" if args.fail_on_missing else "Warning"
+                print(f"  {prefix}: missing baseline entries for")
+                for suite, backend in missing:
+                    print(f"    - {suite}:{backend}")
+                if args.fail_on_missing:
+                    exit_code = 1
+            if extra:
+                print("  Note: baseline contains entries absent from current run:")
+                for suite, backend in extra:
+                    print(f"    - {suite}:{backend}")
+            if baseline_meta:
+                meta_summary = " ".join(
+                    f"{key}={value}" for key, value in sorted(baseline_meta.items())
+                )
+                print(f"  Baseline metadata: {meta_summary}")
+
+    if args.save_baseline:
+        _write_json(args.save_baseline, payload)
+        print(f"Saved baseline to {args.save_baseline}")
+
     print(
         "Tip: run with `python bench/bench_numeric_accelerators.py --help` for options."
     )
+
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":
