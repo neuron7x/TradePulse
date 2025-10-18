@@ -9,11 +9,16 @@ import hmac
 import json
 import os
 import time
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping
 
 from domain import Order, OrderSide, OrderStatus, OrderType
 
-from .base import RESTWebSocketConnector
+from .base import (
+    RESTWebSocketConnector,
+    _coerce_float,
+    _coerce_optional_float,
+    _first_present,
+)
 from .plugin import (
     AdapterCheckResult,
     AdapterContract,
@@ -214,51 +219,46 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
     ) -> Order:
         if "order" in payload and isinstance(payload["order"], Mapping):
             payload = payload["order"]
-        symbol = str(payload.get("product_id") or (original.symbol if original else ""))
+        symbol_value = _first_present(payload, "product_id")
+        symbol = (str(symbol_value).strip() if symbol_value is not None else "") or (
+            original.symbol if original else ""
+        )
         if not symbol:
             raise ValueError("Order payload missing product identifier")
         side = str(
-            payload.get("side") or (original.side.value if original else "buy")
-        ).lower()
+            _first_present(payload, "side")
+            or (original.side.value if original else "buy")
+        ).strip().lower()
         order_type = self._coerce_order_type(
             str(
-                payload.get("order_type")
-                or payload.get("type")
+                _first_present(payload, "order_type", "type")
                 or (original.order_type.value if original else "market")
             ),
             original,
         )
-        order_id = str(
-            payload.get("order_id") or payload.get("id") or payload.get("orderId") or ""
-        )
+        order_id_value = _first_present(payload, "order_id", "id", "orderId")
+        order_id = str(order_id_value).strip() if order_id_value is not None else ""
         if not order_id:
             raise ValueError("Order payload missing identifier")
-        size_value = (
-            payload.get("size")
-            or payload.get("base_size")
-            or payload.get("filled_size")
+        size_value = _first_present(payload, "size", "base_size", "filled_size")
+        quantity = _coerce_float(
+            size_value,
+            default=float(original.quantity if original else 0.0),
         )
-        quantity = float(size_value or (original.quantity if original else 0.0))
-        filled_value = (
-            payload.get("filled_size") or payload.get("executed_value") or 0.0
+        if quantity <= 0 and original is not None and original.quantity > 0:
+            quantity = float(original.quantity)
+        filled = _coerce_float(
+            _first_present(payload, "filled_size", "executed_value"), default=0.0
         )
-        try:
-            filled = float(filled_value)
-        except (TypeError, ValueError):
-            filled = 0.0
-        price_value = (
-            payload.get("price")
-            or payload.get("limit_price")
-            or (original.price if original else None)
+        price_value = _first_present(payload, "price", "limit_price")
+        price = _coerce_optional_float(price_value)
+        if price is None and original is not None:
+            price = float(original.price) if original.price is not None else None
+        avg_price_val = _first_present(
+            payload, "average_filled_price", "average_price"
         )
-        price = float(price_value) if price_value not in (None, "") else None
-        avg_price_val = payload.get("average_filled_price") or payload.get(
-            "average_price"
-        )
-        average_price = (
-            float(avg_price_val) if avg_price_val not in (None, "") else None
-        )
-        status_value = str(payload.get("status") or "OPEN").upper()
+        average_price = _coerce_optional_float(avg_price_val)
+        status_value = str(_first_present(payload, "status") or "OPEN").strip().upper()
         status = _STATUS_MAP.get(status_value, OrderStatus.OPEN)
         return Order(
             symbol=symbol,
@@ -287,19 +287,28 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         return "/accounts", {}
 
     def _parse_positions(self, payload: Mapping[str, Any]) -> list[dict]:
-        accounts = payload.get("accounts", [])
+        raw_accounts = payload.get("accounts", [])
+        if isinstance(raw_accounts, Mapping):
+            accounts_iter: Iterable[Any] = raw_accounts.values()
+        elif isinstance(raw_accounts, Iterable) and not isinstance(
+            raw_accounts, (str, bytes)
+        ):
+            accounts_iter = raw_accounts
+        else:
+            accounts_iter = []
         positions: list[dict] = []
-        for account in accounts or []:
+        for account in accounts_iter:
+            if not isinstance(account, Mapping):
+                continue
             balance = account.get("available_balance") or {}
             if not isinstance(balance, Mapping):
                 continue
-            try:
-                qty = float(balance.get("value", 0.0))
-            except (TypeError, ValueError):
-                qty = 0.0
-            if not qty:
+            qty = _coerce_optional_float(balance.get("value")) or 0.0
+            if qty <= 0:
                 continue
-            asset = str(account.get("currency", "")).upper()
+            asset = str(account.get("currency", "")).strip().upper()
+            if not asset:
+                continue
             positions.append(
                 {"symbol": asset, "qty": qty, "side": "long", "price": 0.0}
             )
