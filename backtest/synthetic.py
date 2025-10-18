@@ -342,7 +342,7 @@ class SyntheticScenarioGenerator:
         base_quantity = cfg.order_book.base_quantity
 
         order_book_profiles: list[OrderBookDepthProfile] = []
-        level_offsets = np.arange(1, cfg.order_book.levels + 1, dtype=float)
+        level_steps = np.arange(cfg.order_book.levels, dtype=float)
 
         for t in range(length - 1):
             mu = drift_series[t]
@@ -364,8 +364,10 @@ class SyntheticScenarioGenerator:
             bid_sizes = level_sizes * bid_multiplier
             ask_sizes = level_sizes * ask_multiplier
             mid_price = prices[t + 1]
-            bid_prices = mid_price - level_offsets * tick_size
-            ask_prices = mid_price + level_offsets * tick_size
+            half_spread = 0.5 * spread
+            price_offsets = half_spread + level_steps * tick_size
+            bid_prices = mid_price - price_offsets
+            ask_prices = mid_price + price_offsets
             profile = OrderBookDepthProfile(
                 mid_price=mid_price,
                 bid_prices=bid_prices,
