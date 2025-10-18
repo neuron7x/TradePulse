@@ -244,7 +244,11 @@ def main(cfg: DictConfig) -> None:
     try:
         experiment = validate_experiment_profile(cfg)
         registry = ExperimentProfileRegistry.discover()
-        registry.ensure(experiment.name)
+        selected_profile = OmegaConf.select(
+            cfg, "hydra.runtime.choices.experiment", default=None
+        )
+        if selected_profile is not None:
+            registry.ensure(str(selected_profile))
     except ExperimentProfileError as exc:
         raise SystemExit(str(exc)) from exc
 
