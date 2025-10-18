@@ -25,8 +25,9 @@ registry = AdapterRegistry()
 
 from .binance import BinanceRESTConnector, PLUGIN as BINANCE_PLUGIN  # noqa: E402  (import side effects)
 from .coinbase import CoinbaseRESTConnector, PLUGIN as COINBASE_PLUGIN  # noqa: E402
+from .kraken import KrakenRESTConnector, PLUGIN as KRAKEN_PLUGIN  # noqa: E402
 
-for plugin in (BINANCE_PLUGIN, COINBASE_PLUGIN):
+for plugin in (BINANCE_PLUGIN, COINBASE_PLUGIN, KRAKEN_PLUGIN):
     try:
         registry.register(plugin, override=True)
     except ValueError:  # pragma: no cover - defensive guard
@@ -76,6 +77,7 @@ __all__ = [
     "SlidingWindowRateLimiter",
     "BinanceRESTConnector",
     "CoinbaseRESTConnector",
+    "KrakenRESTConnector",
     "available_adapters",
     "get_adapter_class",
     "get_adapter_factory",

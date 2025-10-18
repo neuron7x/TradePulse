@@ -138,7 +138,7 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         params: Dict[str, Any],
         json_payload: Dict[str, Any] | None,
         headers: Dict[str, str],
-    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str]]:
+    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str], Any | None]:
         self._ensure_time_sync()
         timestamp = str(self._timestamp())
         body = json.dumps(json_payload or {}) if json_payload is not None else ""
@@ -148,7 +148,7 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         signature = hmac.new(secret, message.encode("utf-8"), hashlib.sha256).digest()
         headers["CB-ACCESS-TIMESTAMP"] = timestamp
         headers["CB-ACCESS-SIGN"] = base64.b64encode(signature).decode("utf-8")
-        return params, json_payload, headers
+        return params, json_payload, headers, None
 
     def _order_endpoint(self) -> str:
         return "/orders"

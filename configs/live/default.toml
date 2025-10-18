@@ -55,3 +55,22 @@ sandbox = true
       API_KEY = "apiKey"
       API_SECRET = "apiSecret"
       PASSPHRASE = "passphrase"
+
+[[venues]]
+name = "kraken"
+class = "execution.adapters.KrakenRESTConnector"
+sandbox = true
+
+  [venues.credentials]
+  env_prefix = "KRAKEN"
+  required = ["API_KEY", "API_SECRET"]
+  optional = ["OTP"]
+
+    [venues.credentials.secret_backend]
+    adapter = "vault"
+    path_env = "KRAKEN_VAULT_PATH"
+
+      [venues.credentials.secret_backend.field_mapping]
+      API_KEY = "api_key"
+      API_SECRET = "api_secret"
+      OTP = "otp"
