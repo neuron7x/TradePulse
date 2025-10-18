@@ -4,15 +4,23 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
 import time
 from typing import Callable
+from urllib.parse import urlencode
 
 import httpx
 import pytest
 
 from domain import Order, OrderSide, OrderStatus, OrderType
-from execution.adapters import BinanceRESTConnector, CoinbaseRESTConnector
+from execution.adapters import (
+    BinanceRESTConnector,
+    CoinbaseRESTConnector,
+    KrakenRESTConnector,
+)
 
 
 class QueueWebSocketFactory:
@@ -565,3 +573,160 @@ def base64_secret(secret: str) -> str:
     import base64
 
     return base64.b64encode(secret.encode("utf-8")).decode("utf-8")
+
+
+def _kraken_signature(secret: bytes, path: str, params: httpx.QueryParams) -> str:
+    ordered = dict(params.multi_items())
+    nonce = ordered.get("nonce", "")
+    payload = urlencode(ordered)
+    digest = hashlib.sha256((str(nonce) + payload).encode("utf-8")).digest()
+    signature = hmac.new(secret, path.encode("utf-8") + digest, hashlib.sha512).digest()
+    return base64.b64encode(signature).decode("utf-8")
+
+
+def test_kraken_rest_connector_signs_and_streams(
+    monkeypatch: pytest.MonkeyPatch, ws_factory: QueueWebSocketFactory
+) -> None:
+    raw_secret = b"very-secret-key"
+    api_secret = base64.b64encode(raw_secret).decode("utf-8")
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        assert request.headers["API-Key"] == "key"
+        if request.method != "POST":
+            raise AssertionError("Kraken private endpoints must use POST")
+        if path.endswith("/GetWebSocketsToken"):
+            expected = _kraken_signature(raw_secret, path, request.url.params)
+            assert request.headers["API-Sign"] == expected
+            return httpx.Response(200, json={"result": {"token": "ws-token"}})
+        expected_signature = _kraken_signature(raw_secret, path, request.url.params)
+        assert request.headers["API-Sign"] == expected_signature
+        if path.endswith("/AddOrder"):
+            params = request.url.params
+            assert params["pair"] == "BTCUSD"
+            assert params["ordertype"] == "limit"
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "txid": ["O123"],
+                        "descr": {
+                            "pair": "BTCUSD",
+                            "type": "buy",
+                            "ordertype": "limit",
+                            "price": "20000.0",
+                        },
+                        "status": "open",
+                        "vol": "0.5",
+                        "vol_exec": "0.0",
+                    }
+                },
+            )
+        if path.endswith("/QueryOrders"):
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "O123": {
+                            "status": "closed",
+                            "descr": {
+                                "pair": "BTCUSD",
+                                "type": "buy",
+                                "ordertype": "limit",
+                                "price": "20000.0",
+                            },
+                            "vol": "0.5",
+                            "vol_exec": "0.5",
+                            "avg_price": "20050.0",
+                        }
+                    }
+                },
+            )
+        if path.endswith("/OpenOrders"):
+            return httpx.Response(
+                200,
+                json={
+                    "result": {
+                        "open": {
+                            "O124": {
+                                "status": "open",
+                                "descr": {
+                                    "pair": "ETHUSD",
+                                    "type": "sell",
+                                    "ordertype": "limit",
+                                    "price": "1500.0",
+                                },
+                                "vol": "1.0",
+                                "vol_exec": "0.0",
+                            }
+                        }
+                    }
+                },
+            )
+        if path.endswith("/Balance"):
+            return httpx.Response(
+                200,
+                json={"result": {"XXBT": "0.25", "ZUSD": "1000"}},
+            )
+        if path.endswith("/CancelOrder"):
+            return httpx.Response(200, json={"result": {"count": 1}})
+        raise AssertionError(f"Unhandled Kraken request {request.method} {path}")
+
+    transport = httpx.MockTransport(handler)
+    client = httpx.Client(base_url="https://api.sandbox.kraken.com", transport=transport)
+    connector = KrakenRESTConnector(
+        sandbox=True, http_client=client, ws_factory=ws_factory
+    )
+    monkeypatch.setattr("execution.adapters.kraken.time.time", lambda: 1_700_000_000.0)
+
+    connector.connect({"api_key": "key", "api_secret": api_secret, "otp": "000000"})
+    assert requests and requests[0].url.path.endswith("/GetWebSocketsToken")
+
+    order = Order(
+        symbol="BTCUSD",
+        side=OrderSide.BUY,
+        quantity=0.5,
+        price=20000.0,
+        order_type=OrderType.LIMIT,
+    )
+    submitted = connector.place_order(order, idempotency_key="abc")
+    assert submitted.order_id == "O123"
+    assert submitted.status is OrderStatus.OPEN
+
+    asyncio.run(
+        ws_factory.queue.put(
+            json.dumps(
+                {
+                    "event": "execution",
+                    "order": {
+                        "ordertxid": "O123",
+                        "status": "partial",
+                        "vol": "0.5",
+                        "vol_exec": "0.25",
+                        "avg_price": "20010.0",
+                        "pair": "BTCUSD",
+                        "type": "buy",
+                        "ordertype": "limit",
+                    },
+                }
+            )
+        )
+    )
+    cached = _await_cache(connector, "O123", lambda o: o.filled_quantity >= 0.25)
+    assert cached is not None
+    assert cached.filled_quantity == pytest.approx(0.25)
+    assert cached.average_price == pytest.approx(20010.0)
+
+    fetched = connector.fetch_order("O123")
+    assert fetched.status == OrderStatus.FILLED
+    assert fetched.average_price == pytest.approx(20050.0)
+
+    open_orders = connector.open_orders()
+    assert any(order.order_id == "O124" for order in open_orders)
+
+    positions = connector.get_positions()
+    assert {p["symbol"] for p in positions} == {"XXBT", "ZUSD"}
+
+    assert connector.cancel_order("O123") is True

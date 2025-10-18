@@ -93,6 +93,7 @@ the following keys before starting the live execution loop:
 |----------|--------------------------------------------------------------------|--------------------|
 | Binance  | `BINANCE_API_KEY`, `BINANCE_API_SECRET`                            | `BINANCE_RECV_WINDOW` |
 | Coinbase | `COINBASE_API_KEY`, `COINBASE_API_SECRET`, `COINBASE_API_PASSPHRASE` | – |
+| Kraken   | `KRAKEN_API_KEY`, `KRAKEN_API_SECRET`                              | `KRAKEN_OTP` |
 
 Place these variables directly in the environment or commit them to your secret manager
 flow (Vault, AWS Secrets Manager, etc.). `BINANCE_RECV_WINDOW` lets operators widen the
@@ -108,6 +109,9 @@ BINANCE_API_SECRET=live_secret_here
 COINBASE_API_KEY=coinbase_key_here
 COINBASE_API_SECRET=coinbase_secret_here
 COINBASE_API_PASSPHRASE=optional_passphrase
+KRAKEN_API_KEY=kraken_key_here
+KRAKEN_API_SECRET=kraken_secret_here
+KRAKEN_OTP=optional_totp_here
 ```
 
 Sample configuration overlays that map symbols, rate limits, and risk tolerances for each

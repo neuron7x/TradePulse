@@ -16,6 +16,7 @@ from execution.adapters import (
     AdapterPlugin,
     AdapterRegistry,
     BinanceRESTConnector,
+    KrakenRESTConnector,
     available_adapters,
     get_adapter_class,
     load_adapter,
@@ -126,6 +127,8 @@ def test_registry_discover_entry_points(monkeypatch: pytest.MonkeyPatch) -> None
 def test_load_adapter_supports_dotted_paths() -> None:
     connector = load_adapter("execution.adapters.BinanceRESTConnector", sandbox=True)
     assert isinstance(connector, BinanceRESTConnector)
+    kraken = load_adapter("execution.adapters.KrakenRESTConnector", sandbox=True)
+    assert isinstance(kraken, KrakenRESTConnector)
 
 
 def test_available_adapters_contains_builtins() -> None:
@@ -134,3 +137,7 @@ def test_available_adapters_contains_builtins() -> None:
     assert contracts["binance.spot"].provider == "Binance"
     klass = get_adapter_class("binance.spot")
     assert klass is BinanceRESTConnector
+    assert "kraken.spot" in contracts
+    assert contracts["kraken.spot"].provider == "Kraken"
+    kraken_class = get_adapter_class("kraken.spot")
+    assert kraken_class is KrakenRESTConnector

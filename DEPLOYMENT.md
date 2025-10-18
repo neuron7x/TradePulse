@@ -166,6 +166,24 @@ class = "execution.adapters.BinanceRESTConnector"
       [venues.credentials.secret_backend.field_mapping]
       API_KEY = "api_key"
       API_SECRET = "api_secret"
+
+[[venues]]
+name = "kraken"
+class = "execution.adapters.KrakenRESTConnector"
+
+  [venues.credentials]
+  env_prefix = "KRAKEN"
+  required = ["API_KEY", "API_SECRET"]
+  optional = ["OTP"]
+
+    [venues.credentials.secret_backend]
+    adapter = "vault"
+    path_env = "KRAKEN_VAULT_PATH"
+
+      [venues.credentials.secret_backend.field_mapping]
+      API_KEY = "api_key"
+      API_SECRET = "api_secret"
+      OTP = "otp"
 ```
 
 At runtime register backend resolvers on the `LiveTradingRunner`. For example, when HashiCorp Vault agents render JSON secrets locally you can expose a resolver that reads and parses the file, while a cloud KMS adapter might call the vendor SDK and return a decoded dictionary:
