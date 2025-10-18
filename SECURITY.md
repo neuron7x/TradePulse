@@ -158,6 +158,18 @@ The helper script wraps `pip-audit` with consistent flags, emits a human-readabl
 and optionally writes a JSON report (see `python scripts/dependency_audit.py --help`). Use
 `--include-dev` to cover development tooling as well.
 
+**Supply-chain guardrails:**
+
+```bash
+make sbom
+make supply-chain-verify
+```
+
+- `make sbom` materializes a CycloneDX 1.5 SBOM covering runtime and development dependencies.
+- `make supply-chain-verify` enforces pinning requirements, cross-checks the deny list defined in
+  `configs/security/denylist.yaml`, and writes a transparency report to
+  `reports/supply_chain/dependency-verification.json`.
+
 #### Encryption & Key Management
 
 - **In transit**: Terminate all external-facing services with **TLS 1.3** using modern cipher
