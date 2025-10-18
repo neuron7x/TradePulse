@@ -92,10 +92,13 @@ class TimescaleWarehouse(TimeSeriesWarehouse):
         raw_literal = literal(ids.raw_qualified)
         rollup_literal = literal(ids.rollup_qualified)
 
+        extensions_sql = (
+            "CREATE EXTENSION IF NOT EXISTS timescaledb;\n"
+            "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+        )
         create_extensions = WarehouseStatement(
             "enable extensions",
-            "CREATE EXTENSION IF NOT EXISTS timescaledb;\n"
-            "CREATE EXTENSION IF NOT EXISTS pgcrypto;",
+            extensions_sql,
         )
 
         raw_table_lines = [
