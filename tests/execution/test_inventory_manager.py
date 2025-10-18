@@ -61,6 +61,32 @@ def test_liquidity_ledger_commit_rejects_negative_balances() -> None:
         ledger.commit(reservation.reservation_id)
 
 
+def test_liquidity_ledger_commit_failure_does_not_mutate_state() -> None:
+    ledger = _build_ledger()
+    ledger.set_balance(
+        "EX1",
+        "BTCUSDT",
+        base_available=Decimal("2"),
+        quote_available=Decimal("10000"),
+    )
+    reservation = ledger.reserve(
+        "res-failure",
+        "EX1",
+        "BTCUSDT",
+        base_amount=Decimal("2"),
+        quote_amount=Decimal("0"),
+    )
+    ledger.apply_fill("EX1", "BTCUSDT", base_delta=Decimal("-1"))
+    with pytest.raises(LiquidityError):
+        ledger.commit(reservation.reservation_id)
+
+    # Reservation should still be outstanding and the balances unchanged.
+    ledger.release(reservation.reservation_id)
+    balances = ledger.available_balances()[("EX1", "BTCUSDT")]
+    assert balances[0] == Decimal("1")
+    assert balances[1] == Decimal("10000")
+
+
 def test_inventory_manager_identifies_balanced_state() -> None:
     ledger = _build_ledger()
     ledger.set_balance(

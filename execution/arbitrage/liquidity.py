@@ -136,7 +136,7 @@ class LiquidityLedger:
 
     def commit(self, reservation_id: str) -> None:
         with self._lock:
-            reservation = self._reservations.pop(reservation_id, None)
+            reservation = self._reservations.get(reservation_id)
             if reservation is None:
                 raise LiquidityError(f"Unknown reservation_id {reservation_id}")
             key = (reservation.exchange_id, reservation.symbol)
@@ -149,12 +149,15 @@ class LiquidityLedger:
                 raise LiquidityError("reserved base less than reservation")
             if reservation.quote_amount > state.quote_reserved:
                 raise LiquidityError("reserved quote less than reservation")
+            new_base_available = state.base_available - reservation.base_amount
+            new_quote_available = state.quote_available - reservation.quote_amount
+            if new_base_available < Decimal("0") or new_quote_available < Decimal("0"):
+                raise LiquidityError("negative balance after commit")
             state.base_reserved -= reservation.base_amount
             state.quote_reserved -= reservation.quote_amount
-            state.base_available -= reservation.base_amount
-            state.quote_available -= reservation.quote_amount
-            if state.base_available < Decimal("0") or state.quote_available < Decimal("0"):
-                raise LiquidityError("negative balance after commit")
+            state.base_available = new_base_available
+            state.quote_available = new_quote_available
+            self._reservations.pop(reservation_id, None)
 
     def apply_fill(
         self,
