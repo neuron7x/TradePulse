@@ -16,6 +16,14 @@ from analytics.runner import (
     run_pipeline,
     set_random_seeds,
 )
+from core.config.hydra_profiles import (
+    ExperimentProfileError,
+    available_experiment_profiles,
+    validate_experiment_profile,
+)
+from hydra import compose
+from hydra import initialize_config_dir as hydra_initialize_config_dir
+from hydra.core.global_hydra import GlobalHydra
 
 omegaconf = pytest.importorskip("omegaconf")
 OmegaConf = omegaconf.OmegaConf
@@ -81,3 +89,44 @@ def test_run_pipeline_generates_results(tmp_path: Path, monkeypatch) -> None:
         "mean_ricci",
     }
     assert Path("results.json").exists()
+
+
+def test_validate_experiment_profile_rejects_invalid_values() -> None:
+    cfg = OmegaConf.create(
+        {
+            "experiment": {
+                "name": "local",
+                "db_uri": "sqlite:///memory",
+                "log_level": "INFO",
+                "random_seed": 1,
+                "data": {"price_csv": "sample.csv", "price_column": "price"},
+                "analytics": {"window": 0, "bins": 32, "delta": 0.01},
+                "tracking": {"enabled": True, "base_dir": "runs"},
+            }
+        }
+    )
+
+    with pytest.raises(ExperimentProfileError):
+        validate_experiment_profile(cfg)
+
+
+def test_available_experiment_profiles_excludes_base_profile() -> None:
+    profiles = available_experiment_profiles()
+
+    assert "base" not in profiles
+    assert {"ci", "local", "prod", "stage"}.issubset(set(profiles))
+
+
+def test_hydra_profiles_inherit_base_defaults() -> None:
+    conf_root = Path(__file__).resolve().parents[2] / "conf"
+
+    if GlobalHydra.instance().is_initialized():
+        GlobalHydra.instance().clear()
+
+    with hydra_initialize_config_dir(version_base="1.3", config_dir=str(conf_root)):
+        cfg = compose(config_name="config", overrides=["experiment=stage"])
+
+    stage_cfg = validate_experiment_profile(cfg)
+
+    assert stage_cfg.analytics.window == 256
+    assert stage_cfg.analytics.delta == pytest.approx(0.005)

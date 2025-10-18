@@ -21,6 +21,12 @@ from .cli_models import (
     TradePulseBaseConfig,
     VersioningConfig,
 )
+from .hydra_profiles import (
+    ExperimentProfileError,
+    ExperimentProfileRegistry,
+    available_experiment_profiles,
+    validate_experiment_profile,
+)
 from .kuramoto_ricci import (
     CompositeConfig,
     CompositeSignals,
@@ -80,6 +86,10 @@ __all__ = [
     "StrategyConfig",
     "TradePulseBaseConfig",
     "VersioningConfig",
+    "ExperimentProfileError",
+    "ExperimentProfileRegistry",
+    "available_experiment_profiles",
+    "validate_experiment_profile",
 ]
 
 __all__ += [
