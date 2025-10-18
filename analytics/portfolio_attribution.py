@@ -355,6 +355,27 @@ class PortfolioAttributionEngine:
         if factor_columns != set(self._factor_returns.columns):
             raise ValueError("factor_exposures and factor_returns columns must match")
 
+        if self._instrument_exposures is not None:
+            exposure_columns = set(self._instrument_exposures.columns)
+            instrument_columns = set(self._instrument_pnl.columns)
+            if exposure_columns != instrument_columns:
+                missing = instrument_columns.difference(exposure_columns)
+                extra = exposure_columns.difference(instrument_columns)
+                detail = []
+                if missing:
+                    detail.append(
+                        "missing exposures for instruments: "
+                        + ", ".join(sorted(missing))
+                    )
+                if extra:
+                    detail.append(
+                        "unexpected exposure columns: " + ", ".join(sorted(extra))
+                    )
+                message = "instrument_exposures columns must match instrument_pnl columns"
+                if detail:
+                    message = f"{message} ({'; '.join(detail)})"
+                raise ValueError(message)
+
         self._hedge_pairs = dict(hedge_pairs or {})
 
         if self._strategy_pnl.isnull().any().any():

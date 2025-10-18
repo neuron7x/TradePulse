@@ -140,3 +140,18 @@ def test_portfolio_attribution_validation_errors() -> None:
             regime_series=inputs["regime_series"],
         )
 
+
+def test_portfolio_attribution_instrument_exposure_validation() -> None:
+    inputs = _build_sample_inputs()
+    bad_exposures = inputs["instrument_exposures"].rename(columns={"AAPL": "AAPL_ALT"})
+
+    with pytest.raises(ValueError, match="instrument_exposures columns must match instrument_pnl columns"):
+        PortfolioAttributionEngine(
+            strategy_pnl=inputs["strategy_pnl"],
+            instrument_pnl=inputs["instrument_pnl"],
+            factor_exposures=inputs["factor_exposures"],
+            factor_returns=inputs["factor_returns"],
+            regime_series=inputs["regime_series"],
+            instrument_exposures=bad_exposures,
+        )
+
