@@ -9,11 +9,18 @@ readme = "README.md"
 
 [lib]
 name = "tradepulse_accel"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 numpy = "0.22"
 pyo3 = { version = "0.22", features = ["extension-module"] }
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
+
+[[bench]]
+name = "numeric"
+harness = false
 
 [package.metadata.maturin]
 name = "tradepulse_accel"
