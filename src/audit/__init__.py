@@ -7,7 +7,12 @@ from .audit_logger import (
     HttpAuditSink,
     SiemAuditSink,
 )
-from .stores import AuditRecordStore, JsonLinesAuditStore
+from .stores import (
+    AuditIntegrityError,
+    AuditLedgerEntry,
+    AuditRecordStore,
+    JsonLinesAuditStore,
+)
 
 __all__ = [
     "AuditLogger",
@@ -15,6 +20,8 @@ __all__ = [
     "AuditSink",
     "HttpAuditSink",
     "SiemAuditSink",
+    "AuditIntegrityError",
+    "AuditLedgerEntry",
     "AuditRecordStore",
     "JsonLinesAuditStore",
 ]
