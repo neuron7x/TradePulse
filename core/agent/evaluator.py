@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 from ..utils.metrics import get_metrics_collector
+from .sandbox import SandboxLimits, StrategySandbox, StrategySandboxError
 from .strategy import Strategy
 
 DatasetPreparer = Callable[[Any], Any]
@@ -88,6 +89,9 @@ class StrategyBatchEvaluator:
         dataset_preparer: DatasetPreparer = _default_dataset_preparer,
         executor_factory: Optional[ExecutorFactory] = None,
         optimizer_label: str = "batch_evaluator",
+        sandbox: StrategySandbox | None = None,
+        sandbox_limits: SandboxLimits | None = None,
+        priority_param: str = "priority",
     ) -> None:
         if max_workers is not None and max_workers <= 0:
             raise ValueError("max_workers must be positive when provided")
@@ -101,6 +105,8 @@ class StrategyBatchEvaluator:
             lambda workers: ThreadPoolExecutor(max_workers=workers)
         )
         self.optimizer_label = optimizer_label
+        self.sandbox = sandbox or StrategySandbox(limits=sandbox_limits)
+        self._priority_param = priority_param
 
     def evaluate(
         self,
@@ -172,15 +178,37 @@ class StrategyBatchEvaluator:
     ) -> EvaluationResult:
         start = time.perf_counter()
         try:
-            score = float(strategy.simulate_performance(data))
+            sandbox_result = self.sandbox.run(
+                strategy,
+                data,
+                priority=self._extract_priority(strategy),
+            )
+            _synchronise_strategy(strategy, sandbox_result.strategy)
+            score = float(sandbox_result.score)
             duration = time.perf_counter() - start
             self._record_metrics(collector, strategy, score, duration, None)
             return EvaluationResult(strategy, score, duration, None)
+        except StrategySandboxError as exc:
+            duration = time.perf_counter() - start
+            self._record_metrics(collector, strategy, None, duration, exc)
+            return EvaluationResult(strategy, None, duration, exc)
         except BaseException as exc:  # pragma: no cover - defensive
             duration = time.perf_counter() - start
             self._record_metrics(collector, strategy, None, duration, exc)
             return EvaluationResult(strategy, None, duration, exc)
 
+    def _extract_priority(self, strategy: Strategy) -> int:
+        try:
+            raw = strategy.params.get(self._priority_param, 0)
+        except AttributeError:
+            return 0
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+
+    # ------------------------------------------------------------------
+    # Helpers
     def _record_metrics(
         self,
         collector: Any,
@@ -199,11 +227,26 @@ class StrategyBatchEvaluator:
             collector.optimization_duration.labels(
                 optimizer_type=self.optimizer_label
             ).observe(duration)
+            if error is not None:
+                collector.optimization_failures.labels(
+                    optimizer_type=self.optimizer_label
+                ).inc()
             if error is None and score is not None and math.isfinite(score):
                 collector.set_strategy_score(strategy.name, score)
         except AttributeError:
             # Metrics collector initialised without Prometheus backend.
             pass
+
+
+def _synchronise_strategy(target: Strategy, source: Strategy) -> None:
+    """Overwrite ``target`` attributes with the state from ``source``."""
+
+    target_dict = target.__dict__
+    source_dict = vars(source)
+    for key in list(target_dict.keys()):
+        if key not in source_dict:
+            target_dict.pop(key, None)
+    target_dict.update(source_dict)
 
 
 def evaluate_strategies(
@@ -213,6 +256,7 @@ def evaluate_strategies(
     max_workers: Optional[int] = None,
     chunk_size: int = 16,
     dataset_preparer: DatasetPreparer = _default_dataset_preparer,
+    sandbox_limits: SandboxLimits | None = None,
 ) -> List[EvaluationResult]:
     """Convenience wrapper that evaluates strategies with default settings."""
 
@@ -220,6 +264,7 @@ def evaluate_strategies(
         max_workers=max_workers,
         chunk_size=chunk_size,
         dataset_preparer=dataset_preparer,
+        sandbox_limits=sandbox_limits,
     )
     return evaluator.evaluate(strategies, data)
 

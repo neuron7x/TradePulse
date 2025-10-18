@@ -15,6 +15,7 @@ from core.agent.evaluator import (
     evaluate_strategies,
 )
 from core.agent.strategy import Strategy
+from core.agent.sandbox import SandboxResult
 
 
 class _SleepyStrategy(Strategy):
@@ -43,6 +44,16 @@ def _sample_frame() -> pd.DataFrame:
     return pd.DataFrame({"close": np.linspace(100.0, 101.0, 256)})
 
 
+class _PassthroughSandbox:
+    def __init__(self) -> None:
+        self.priorities: list[int] = []
+
+    def run(self, strategy: Strategy, data: Any, *, priority: int = 0) -> SandboxResult:
+        self.priorities.append(priority)
+        score = float(strategy.simulate_performance(data))
+        return SandboxResult(strategy=strategy, score=score)
+
+
 def test_batch_evaluator_preserves_strategy_order() -> None:
     strategies = [
         _SleepyStrategy("a", delay=0.0),
@@ -50,7 +61,7 @@ def test_batch_evaluator_preserves_strategy_order() -> None:
         _SleepyStrategy("c", delay=0.0),
     ]
 
-    evaluator = StrategyBatchEvaluator(max_workers=2)
+    evaluator = StrategyBatchEvaluator(max_workers=2, sandbox=_PassthroughSandbox())
     results = evaluator.evaluate(strategies, _sample_frame())
 
     assert [res.strategy.name for res in results] == ["a", "b", "c"]
@@ -61,7 +72,9 @@ def test_batch_evaluator_preserves_strategy_order() -> None:
 
 def test_batch_evaluator_parallelises_execution() -> None:
     strategies = [_SleepyStrategy(f"s{i}", delay=0.05) for i in range(4)]
-    evaluator = StrategyBatchEvaluator(max_workers=4, chunk_size=4)
+    evaluator = StrategyBatchEvaluator(
+        max_workers=4, chunk_size=4, sandbox=_PassthroughSandbox()
+    )
 
     start = time.perf_counter()
     results = evaluator.evaluate(strategies, _sample_frame())
@@ -73,7 +86,7 @@ def test_batch_evaluator_parallelises_execution() -> None:
 
 def test_batch_evaluator_reports_errors() -> None:
     strategies = [_SleepyStrategy("ok", delay=0.0), _FailingStrategy("bad")]
-    evaluator = StrategyBatchEvaluator(max_workers=2)
+    evaluator = StrategyBatchEvaluator(max_workers=2, sandbox=_PassthroughSandbox())
 
     results = evaluator.evaluate(strategies, _sample_frame())
     assert len(results) == 2
@@ -95,10 +108,26 @@ def test_evaluate_strategies_helper_uses_preparer_once() -> None:
         return data
 
     strategies = [_SleepyStrategy("a", delay=0.0), _SleepyStrategy("b", delay=0.0)]
-    evaluate_strategies(strategies, _sample_frame(), dataset_preparer=_preparer)
+    evaluate_strategies(
+        strategies,
+        _sample_frame(),
+        dataset_preparer=_preparer,
+        sandbox_limits=None,
+    )
     assert counter["calls"] == 1
 
 
 def test_invalid_chunk_size_raises() -> None:
     with pytest.raises(ValueError):
         StrategyBatchEvaluator(chunk_size=0)
+
+
+def test_strategy_priority_forwarded_to_sandbox() -> None:
+    strategy = _SleepyStrategy("prio", delay=0.0)
+    strategy.params["priority"] = "2"
+    sandbox = _PassthroughSandbox()
+    evaluator = StrategyBatchEvaluator(max_workers=1, sandbox=sandbox)
+
+    evaluator.evaluate([strategy], _sample_frame())
+
+    assert sandbox.priorities == [2]
