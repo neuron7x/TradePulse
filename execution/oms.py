@@ -51,8 +51,14 @@ class OMSConfig:
             object.__setattr__(self, "max_retries", 1)
         if self.backoff_seconds < 0.0:
             object.__setattr__(self, "backoff_seconds", 0.0)
-        if self.ledger_path is not None and not isinstance(self.ledger_path, Path):
-            object.__setattr__(self, "ledger_path", Path(self.ledger_path))
+        ledger_path = self.ledger_path
+        if ledger_path is not None and not isinstance(ledger_path, Path):
+            ledger_path = Path(ledger_path)
+        if ledger_path == DEFAULT_LEDGER_PATH:
+            ledger_path = self.state_path.parent / f"{self.state_path.stem}_ledger.jsonl"
+        if ledger_path is not None:
+            ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        object.__setattr__(self, "ledger_path", ledger_path)
 
 
 class OrderManagementSystem:

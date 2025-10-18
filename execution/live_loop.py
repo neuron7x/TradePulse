@@ -52,6 +52,7 @@ class LiveLoopConfig:
     heartbeat_interval: float = 10.0
     max_backoff: float = 60.0
     credentials: Mapping[str, Mapping[str, str]] | None = None
+    ledger_dir: Path | str | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.state_dir, Path):
@@ -77,6 +78,13 @@ class LiveLoopConfig:
             "max_backoff",
             max(self.heartbeat_interval, float(self.max_backoff)),
         )
+        ledger_dir = self.ledger_dir
+        if ledger_dir is None:
+            ledger_dir = self.state_dir
+        elif not isinstance(ledger_dir, Path):
+            ledger_dir = Path(ledger_dir)
+        ledger_dir.mkdir(parents=True, exist_ok=True)
+        object.__setattr__(self, "ledger_dir", ledger_dir)
 
 
 @dataclass(slots=True)
@@ -115,7 +123,8 @@ class LiveExecutionLoop:
 
         for name, connector in connectors.items():
             state_path = self._config.state_dir / f"{name}_oms.json"
-            oms_config = OMSConfig(state_path=state_path)
+            ledger_path = self._config.ledger_dir / f"{name}_ledger.jsonl"
+            oms_config = OMSConfig(state_path=state_path, ledger_path=ledger_path)
             oms = OrderManagementSystem(connector, self._risk_manager, oms_config)
             self._contexts[name] = _VenueContext(name, connector, oms, oms_config)
 
