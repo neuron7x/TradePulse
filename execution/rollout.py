@@ -152,12 +152,12 @@ class BlueGreenRolloutOrchestrator:
                 self._handle_failure(previous_share, decision, metrics)
 
             now = self._time()
-            if now - start >= step.min_duration:
-                return
-
             if deadline is not None and now >= deadline:
                 timeout_decision = CanaryDecision("disable", "step-timeout", {})
                 self._handle_failure(previous_share, timeout_decision, metrics)
+
+            if now - start >= step.min_duration:
+                return
 
             next_sleep = self._poll_interval
             remaining_min = step.min_duration - (now - start)
