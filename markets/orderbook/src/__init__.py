@@ -12,6 +12,23 @@ from .core import (
     QueueAwareSlippage,
     Side,
 )
+from .ingest import (
+    AppliedDiff,
+    ConsistencyError,
+    ConsistencyValidator,
+    IngestConfig,
+    InMemoryMetricsRecorder,
+    InstrumentOrderBookState,
+    MetricsRecorder,
+    MetricsSample,
+    OrderBookDiff,
+    OrderBookIngestService,
+    OrderBookSnapshot,
+    OrderBookStateError,
+    OrderBookStore,
+    PriceLevel,
+    SnapshotRequester,
+)
 
 __all__ = [
     "Execution",
@@ -23,4 +40,19 @@ __all__ = [
     "PriceTimeOrderBook",
     "QueueAwareSlippage",
     "Side",
+    "AppliedDiff",
+    "ConsistencyError",
+    "ConsistencyValidator",
+    "IngestConfig",
+    "InMemoryMetricsRecorder",
+    "InstrumentOrderBookState",
+    "MetricsRecorder",
+    "MetricsSample",
+    "OrderBookDiff",
+    "OrderBookIngestService",
+    "OrderBookSnapshot",
+    "OrderBookStateError",
+    "OrderBookStore",
+    "PriceLevel",
+    "SnapshotRequester",
 ]
