@@ -162,7 +162,7 @@ def benchmark_guard(
             raise AssertionError(
                 (
                     f"Benchmark '{baseline_key}' regressed: median {median:.6f}s vs baseline {baseline:.6f}s "
-                    f"(+{(record.regression_ratio - 1.0):.1%} > allowed {threshold:.1%})."
+                    f"(+{(record.regression_ratio - 1.0):.1%} > allowed {record.threshold:.1%})."
                 )
             )
 
