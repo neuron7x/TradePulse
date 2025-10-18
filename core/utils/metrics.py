@@ -11,7 +11,7 @@ import multiprocessing
 import time
 from collections import defaultdict, deque
 from contextlib import contextmanager
-from typing import Any, Dict, Iterable, Iterator, Optional
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, Optional, Sequence
 
 try:  # pragma: no cover - exercised indirectly in environments without numpy
     import numpy as np
@@ -68,6 +68,10 @@ def _fallback_quantiles(
         results[q] = float(lower + (upper - lower) * weight)
 
     return results
+
+
+if TYPE_CHECKING:  # pragma: no cover - import cycle guard for type hints
+    from analytics.environment_parity import MetricDeviation
 
 
 class MetricsCollector:
@@ -142,6 +146,21 @@ class MetricsCollector:
             "tradepulse_backtest_trades",
             "Number of trades in backtest",
             ["strategy"],
+            registry=registry,
+        )
+
+        # Environment parity metrics
+        self.environment_parity_checks = Counter(
+            "tradepulse_environment_parity_checks_total",
+            "Total number of environment parity evaluations grouped by status",
+            ["strategy", "status"],
+            registry=registry,
+        )
+
+        self.environment_parity_metric_deviation = Gauge(
+            "tradepulse_environment_parity_metric_deviation",
+            "Absolute deviation observed between environment metric pairs",
+            ["strategy", "metric", "baseline", "comparison"],
             registry=registry,
         )
 
@@ -784,6 +803,33 @@ class MetricsCollector:
         if not self._enabled:
             return
         self.backtest_equity_curve.labels(strategy=strategy, step=str(step)).set(value)
+
+    def record_environment_parity(
+        self,
+        *,
+        strategy: str,
+        status: str,
+        deviations: Sequence["MetricDeviation"] | None = None,
+    ) -> None:
+        """Record the outcome of an environment parity evaluation."""
+
+        if not self._enabled:
+            return
+
+        self.environment_parity_checks.labels(
+            strategy=strategy, status=status
+        ).inc()
+
+        if not deviations:
+            return
+
+        for deviation in deviations:
+            self.environment_parity_metric_deviation.labels(
+                strategy=strategy,
+                metric=deviation.metric,
+                baseline=deviation.baseline_environment,
+                comparison=deviation.comparison_environment,
+            ).set(deviation.absolute_difference)
 
     def render_prometheus(self) -> str:
         """Render the currently collected metrics in Prometheus text format."""
