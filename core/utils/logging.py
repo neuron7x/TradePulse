@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sys
 import time
 from contextlib import contextmanager
@@ -21,6 +22,21 @@ except Exception:  # pragma: no cover - optional dependency not installed
     get_current_span = None  # type: ignore[assignment]
     _TRACE_LOG_CORRELATION = False
 from uuid import uuid4
+
+
+class SecretRedactionFilter(logging.Filter):
+    """Filter that redacts secrets from log messages."""
+
+    _PATTERN = re.compile(r"(api[_-]?key|secret|token)\s*=\s*[^&\s]+", re.IGNORECASE)
+
+    def filter(self, record: logging.LogRecord) -> bool:  # noqa: D401 - standard logging signature
+        message = str(record.getMessage())
+        if message:
+            redacted = self._PATTERN.sub(r"\1=***", message)
+            if redacted != message:
+                record.msg = redacted
+                record.args = ()
+        return True
 
 
 class JSONFormatter(logging.Formatter):
@@ -172,6 +188,9 @@ def configure_logging(
 
     # Create handler
     handler = logging.StreamHandler(stream or sys.stdout)
+
+    # Install redaction filter to avoid leaking credentials
+    handler.addFilter(SecretRedactionFilter())
 
     # Set formatter
     if use_json:

@@ -19,7 +19,7 @@ This audits `requirements.txt` by default.
 ### Audit specific requirements files
 
 ```bash
-python scripts/dependency_audit.py --requirement requirements.txt --requirement requirements-dev.txt
+python scripts/dependency_audit.py --requirement requirements.txt --requirement dev.txt
 ```
 
 ### Include development dependencies
@@ -57,7 +57,7 @@ python scripts/dependency_audit.py --extra-arg --ignore-vuln GHSA-xxxx-yyyy-zzzz
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--requirement` | `requirements.txt` | Path to requirements file (repeatable) |
-| `--include-dev` | `False` | Include requirements-dev.txt |
+| `--include-dev` | `False` | Include dev.txt |
 | `--include-transitive` | `False` | Audit transitive dependencies |
 | `--write-json` | `None` | Write JSON report to specified path |
 | `--pip-audit-bin` | `pip-audit` | Path to pip-audit executable |
@@ -85,7 +85,7 @@ The script provides:
 ```bash
 python scripts/dependency_audit.py \
   --requirement requirements.txt \
-  --requirement requirements-dev.txt \
+  --requirement dev.txt \
   --include-transitive \
   --write-json reports/security-audit.json
 ```

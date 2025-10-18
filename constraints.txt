@@ -1,0 +1,4 @@
+# Global constraints for dependency resolution.
+# Use this file to override problematic transitive dependencies discovered via security advisories or CI failures.
+# Example:
+# some-package==1.2.3

@@ -11,7 +11,32 @@ on:
     branches: [ main, develop ]
 
 jobs:
+  deps:
+    name: Dependency hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+      - name: Install pip-tools
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-tools==7.5.1
+      - name: Ensure compiled requirements are up to date
+        run: |
+          python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=requirements.txt requirements.in -c constraints.txt
+          python -m piptools compile --generate-hashes --resolver=backtracking --allow-unsafe --output-file=dev.txt dev.in -c constraints.txt
+          git diff --exit-code requirements.txt dev.txt
+      - name: Verify compatibility aliases
+        run: |
+          printf '# Managed via pip-tools; see requirements.in for sources.\n-r requirements.txt\n' | diff -u - requirements.lock
+          printf '# Managed via pip-tools; see dev.in for sources.\n-r dev.txt\n' | diff -u - requirements-dev.txt
+          printf '# Managed via pip-tools; see dev.in for sources.\n-r dev.txt\n' | diff -u - requirements-dev.lock
+
   lint:
+    needs: deps
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -40,7 +65,7 @@ jobs:
       - name: Install Python dependencies
         run: |
           uv pip install -r requirements.txt
-          uv pip install -r requirements-dev.txt
+          uv pip install -r dev.txt
           uv pip install pre-commit detect-secrets
       - name: Install shellcheck
         run: |
@@ -61,6 +86,7 @@ jobs:
       - name: Run detect-secrets
         run: .venv/bin/pre-commit run --hook-stage manual --all-files detect-secrets --show-diff-on-failure
   tests:
+    needs: lint
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -84,7 +110,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install -r requirements.txt
-          uv pip install -r requirements-dev.txt
+          uv pip install -r dev.txt
       - name: Prepare test report directories
         run: |
           mkdir -p reports
@@ -278,7 +304,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install -r requirements.txt
-          uv pip install -r requirements-dev.txt
+          uv pip install -r dev.txt
       - name: Run performance benchmarks
         id: run_benchmarks
         run: |
@@ -421,7 +447,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install -r requirements.txt
-          uv pip install -r requirements-dev.txt
+          uv pip install -r dev.txt
       - name: Run pytest in parallel with profiling
         run: |
           .venv/bin/python -m pytest tests/ -n auto --durations=20 --profile
@@ -496,7 +522,7 @@ jobs:
       - name: Install dependencies
         run: |
           uv pip install -r requirements.txt
-          uv pip install -r requirements-dev.txt
+          uv pip install -r dev.txt
       - name: Prepare test report directories
         run: |
           mkdir -p reports
