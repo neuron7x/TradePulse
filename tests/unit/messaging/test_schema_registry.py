@@ -11,6 +11,7 @@ from core.messaging.schema_registry import (
     SchemaCompatibilityError,
     SchemaFormatCoverageError,
     SchemaFormat,
+    SchemaLintError,
     _field_name_index,
     _is_nullable,
     _normalise_avro_type,
@@ -144,3 +145,46 @@ def test_helper_normalises_complex_types() -> None:
     assert set(index.keys()) == {"optional", "required"}
     assert _is_nullable(index["optional"]) is True
     assert _is_nullable(index["required"]) is False
+
+
+def test_lint_detects_missing_avro_doc(tmp_path: Path) -> None:
+    source_dir = Path("schemas/events")
+    target = tmp_path / "events"
+    shutil.copytree(source_dir, target)
+
+    tick_path = target / "avro" / "v1.0.0" / "tick.avsc"
+    payload = json.loads(tick_path.read_text(encoding="utf-8"))
+    payload["fields"][0].pop("doc")
+    tick_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    registry = EventSchemaRegistry.from_directory(target)
+    with pytest.raises(SchemaLintError):
+        registry.lint_event("ticks")
+
+
+def test_lint_detects_json_schema_mismatch(tmp_path: Path) -> None:
+    source_dir = Path("schemas/events")
+    target = tmp_path / "events"
+    shutil.copytree(source_dir, target)
+
+    json_path = target / "json" / "1.0.0" / "ticks.schema.json"
+    json_payload = json.loads(json_path.read_text(encoding="utf-8"))
+    json_payload["properties"].pop("bid_price")
+    json_path.write_text(json.dumps(json_payload), encoding="utf-8")
+
+    registry = EventSchemaRegistry.from_directory(target)
+    with pytest.raises(SchemaLintError):
+        registry.lint_event("ticks")
+
+
+def test_catalogue_exposes_event_versions() -> None:
+    registry = EventSchemaRegistry.from_directory("schemas/events")
+    catalogue = registry.catalogue()
+    assert "ticks" in catalogue
+    tick_entry = catalogue["ticks"]
+    assert tick_entry["latest"] == "1.0.0"
+    assert tick_entry["versions"][0]["formats"] == [
+        "avro",
+        "json_schema",
+        "protobuf",
+    ]

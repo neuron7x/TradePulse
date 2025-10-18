@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from typing import Any, Dict, Iterable, Iterator, List, Mapping, Tuple
 
 from packaging.version import Version
 
@@ -25,6 +25,10 @@ class SchemaCompatibilityError(RuntimeError):
 
 class SchemaFormatCoverageError(RuntimeError):
     """Raised when required schema formats are missing for a version."""
+
+
+class SchemaLintError(RuntimeError):
+    """Raised when schema linting detects documentation or contract issues."""
 
 
 @dataclass(frozen=True)
@@ -293,6 +297,83 @@ class EventSchemaRegistry:
         for event in self.available_events():
             self.validate_format_coverage(event)
             self.validate_backward_and_forward(event)
+            self.lint_event(event)
+
+    def lint_all(self) -> None:
+        """Run linting for all registered events."""
+
+        for event in self.available_events():
+            self.lint_event(event)
+
+    def lint_event(self, event_type: str) -> None:
+        """Run schema linting checks for a specific event type."""
+
+        avro_versions = self.get_versions(event_type, SchemaFormat.AVRO)
+        if not avro_versions:
+            raise SchemaLintError(f"No Avro schema registered for '{event_type}'")
+        for avro_info in avro_versions:
+            schema = avro_info.load()
+            _lint_avro_schema(schema, event_type, avro_info.version_str)
+            json_info = self._versions[event_type][avro_info.version].get(
+                SchemaFormat.JSON
+            )
+            if json_info:
+                json_schema = json_info.load()
+                _lint_json_schema_alignment(
+                    schema,
+                    json_schema,
+                    event_type,
+                    avro_info.version_str,
+                )
+            proto_info = self._versions[event_type][avro_info.version].get(
+                SchemaFormat.PROTOBUF
+            )
+            if proto_info:
+                _lint_protobuf_alignment(
+                    schema,
+                    proto_info.path,
+                    event_type,
+                    avro_info.version_str,
+                )
+
+    def catalogue(self) -> Dict[str, Dict[str, Any]]:
+        """Return a serialisable catalogue of events and versions."""
+
+        summary: Dict[str, Dict[str, Any]] = {}
+        for event in sorted(self.available_events()):
+            versions = []
+            for version in sorted(
+                self._versions[event].items(), key=lambda item: item[0]
+            ):
+                version_id, formats = version
+                entry = {
+                    "version": str(version_id),
+                    "formats": sorted(fmt.value for fmt in formats.keys()),
+                }
+                if version_id in self._subjects[event]:
+                    entry["subject"] = self._subjects[event][version_id]
+                if version_id in self._namespaces[event]:
+                    entry["namespace"] = self._namespaces[event][version_id]
+                versions.append(entry)
+            summary[event] = {
+                "versions": versions,
+                "latest": str(self.latest(event, SchemaFormat.AVRO).version),
+            }
+            if self._subjects[event]:
+                summary[event]["subjects"] = {
+                    str(version): subject
+                    for version, subject in sorted(
+                        self._subjects[event].items(), key=lambda item: item[0]
+                    )
+                }
+            if self._namespaces[event]:
+                summary[event]["namespaces"] = {
+                    str(version): namespace
+                    for version, namespace in sorted(
+                        self._namespaces[event].items(), key=lambda item: item[0]
+                    )
+                }
+        return summary
 
     def _validate_sequential_backward(self, schemas: List[Mapping[str, Any]]) -> None:
         for previous, current in zip(schemas, schemas[1:]):
@@ -375,3 +456,185 @@ def _is_nullable(field: Mapping[str, Any]) -> bool:
             for member in avro_type
         )
     return False
+
+
+def _lint_avro_schema(
+    schema: Mapping[str, Any], event_type: str, version: str
+) -> None:
+    if schema.get("type") != "record":
+        raise SchemaLintError(
+            f"{event_type}@{version}: root schema must be an Avro record"
+        )
+    record_name = schema.get("name", "<unknown>")
+    namespace = schema.get("namespace", "")
+    if not schema.get("doc"):
+        raise SchemaLintError(
+            f"{event_type}@{version}: record '{record_name}' missing documentation"
+        )
+
+    fields = schema.get("fields", [])
+    if not isinstance(fields, list) or not fields:
+        raise SchemaLintError(
+            f"{event_type}@{version}: record '{record_name}' defines no fields"
+        )
+
+    schema_field_names = {field.get("name") for field in fields}
+    if "schema_version" not in schema_field_names:
+        raise SchemaLintError(
+            f"{event_type}@{version}: record '{record_name}' missing 'schema_version' field"
+        )
+    schema_version_field = next(
+        field for field in fields if field.get("name") == "schema_version"
+    )
+    if _normalise_avro_type(schema_version_field.get("type")) != ("string",):
+        raise SchemaLintError(
+            f"{event_type}@{version}: 'schema_version' must be a string"
+        )
+
+    for record in _iter_avro_records(schema):
+        record_doc = record.get("doc")
+        record_name = record.get("name", "<anonymous>")
+        if not record_doc:
+            raise SchemaLintError(
+                f"{event_type}@{version}: record '{record_name}' missing documentation"
+            )
+        for field in record.get("fields", []):
+            field_name = field.get("name")
+            if not field_name:
+                raise SchemaLintError(
+                    f"{event_type}@{version}: unnamed field in record '{record_name}'"
+                )
+            field_doc = field.get("doc")
+            if not field_doc:
+                raise SchemaLintError(
+                    f"{event_type}@{version}: field '{record_name}.{field_name}' missing documentation"
+                )
+            if _is_nullable(field) and "default" not in field:
+                raise SchemaLintError(
+                    f"{event_type}@{version}: field '{record_name}.{field_name}' is nullable but lacks a default"
+                )
+
+
+def _lint_json_schema_alignment(
+    avro_schema: Mapping[str, Any],
+    json_schema: Mapping[str, Any],
+    event_type: str,
+    version: str,
+) -> None:
+    properties = json_schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        raise SchemaLintError(
+            f"{event_type}@{version}: JSON schema missing object properties"
+        )
+
+    avro_fields = avro_schema.get("fields", [])
+    avro_field_names = [field["name"] for field in avro_fields]
+    json_field_names = set(properties.keys())
+    missing = set(avro_field_names) - json_field_names
+    extra = json_field_names - set(avro_field_names)
+    if missing or extra:
+        raise SchemaLintError(
+            f"{event_type}@{version}: JSON schema mismatch (missing={sorted(missing)}, extra={sorted(extra)})"
+        )
+
+    json_required = set(json_schema.get("required", []))
+    for field in avro_fields:
+        name = field["name"]
+        optional = _is_nullable(field) or "default" in field
+        if optional and name in json_required:
+            raise SchemaLintError(
+                f"{event_type}@{version}: JSON schema marks optional field '{name}' as required"
+            )
+        if not optional and name not in json_required:
+            raise SchemaLintError(
+                f"{event_type}@{version}: JSON schema missing required field '{name}'"
+            )
+        fragment = properties[name]
+        if not isinstance(fragment, Mapping):
+            raise SchemaLintError(
+                f"{event_type}@{version}: JSON property '{name}' must be an object"
+            )
+        if "description" not in fragment:
+            raise SchemaLintError(
+                f"{event_type}@{version}: JSON property '{name}' missing description"
+            )
+
+    for def_name, definition in json_schema.get("$defs", {}).items():
+        if not isinstance(definition, Mapping):
+            raise SchemaLintError(
+                f"{event_type}@{version}: JSON definition '{def_name}' must be an object"
+            )
+        if definition.get("type") == "object":
+            if "description" not in definition:
+                raise SchemaLintError(
+                    f"{event_type}@{version}: JSON definition '{def_name}' missing description"
+                )
+            nested_props = definition.get("properties", {})
+            if isinstance(nested_props, Mapping):
+                for nested_name, nested_fragment in nested_props.items():
+                    if (
+                        isinstance(nested_fragment, Mapping)
+                        and "description" not in nested_fragment
+                    ):
+                        raise SchemaLintError(
+                            f"{event_type}@{version}: JSON definition '{def_name}.{nested_name}' missing description"
+                        )
+
+
+def _lint_protobuf_alignment(
+    avro_schema: Mapping[str, Any],
+    proto_path: Path,
+    event_type: str,
+    version: str,
+) -> None:
+    record_name = avro_schema.get("name")
+    if not record_name:
+        raise SchemaLintError(
+            f"{event_type}@{version}: unable to infer record name for protobuf validation"
+        )
+    major_version = Version(version).major
+    expected_message = f"message {record_name}V{major_version}"
+    try:
+        contents = proto_path.read_text(encoding="utf-8")
+    except FileNotFoundError as exc:  # pragma: no cover - surfaced in linting
+        raise SchemaLintError(
+            f"{event_type}@{version}: protobuf file missing at {proto_path}"
+        ) from exc
+    if expected_message not in contents:
+        raise SchemaLintError(
+            f"{event_type}@{version}: protobuf definition missing '{expected_message}'"
+        )
+
+
+def _iter_avro_records(schema: Mapping[str, Any]) -> Iterator[Mapping[str, Any]]:
+    queue: List[Mapping[str, Any]] = []
+    if schema.get("type") == "record":
+        queue.append(schema)
+    seen: set[Tuple[str | None, str | None]] = set()
+    while queue:
+        record = queue.pop(0)
+        key = (record.get("namespace"), record.get("name"))
+        if key in seen:
+            continue
+        seen.add(key)
+        yield record
+        for field in record.get("fields", []):
+            queue.extend(_extract_record_types(field.get("type")))
+
+
+def _extract_record_types(avro_type: Any) -> List[Mapping[str, Any]]:
+    records: List[Mapping[str, Any]] = []
+    if isinstance(avro_type, Mapping):
+        avro_kind = avro_type.get("type")
+        if avro_kind == "record":
+            records.append(avro_type)
+            for field in avro_type.get("fields", []):
+                records.extend(_extract_record_types(field.get("type")))
+        elif avro_kind == "array":
+            records.extend(_extract_record_types(avro_type.get("items")))
+        elif avro_kind == "map":
+            records.extend(_extract_record_types(avro_type.get("values")))
+    elif isinstance(avro_type, list):
+        for member in avro_type:
+            records.extend(_extract_record_types(member))
+    return records

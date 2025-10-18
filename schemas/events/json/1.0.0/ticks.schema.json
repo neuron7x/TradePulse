@@ -72,21 +72,25 @@
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Aggregated best bid size."
         },
         "ask_size": {
           "type": [
             "integer",
             "null"
-          ]
+          ],
+          "description": "Aggregated best ask size."
         },
         "trade_condition": {
           "type": [
             "string",
             "null"
-          ]
+          ],
+          "description": "Venue-provided trade condition or quote qualifier."
         }
       },
+      "description": "Order book context captured alongside the tick.",
       "title": "TickMicrostructure"
     }
   }

@@ -14,6 +14,7 @@ from .schema_registry import (
     SchemaCompatibilityError,
     SchemaFormat,
     SchemaFormatCoverageError,
+    SchemaLintError,
 )
 
 __all__ = [
@@ -26,6 +27,7 @@ __all__ = [
     "SchemaFormat",
     "SchemaCompatibilityError",
     "SchemaFormatCoverageError",
+    "SchemaLintError",
     "SchemaContractValidator",
     "SchemaContractError",
     "EventIdempotencyStore",

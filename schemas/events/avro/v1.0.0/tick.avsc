@@ -12,10 +12,15 @@
     {"name": "ask_price", "type": "double", "doc": "Best ask price."},
     {"name": "last_price", "type": ["null", "double"], "default": null, "doc": "Last traded price if available."},
     {"name": "volume", "type": ["null", "long"], "default": null, "doc": "Trade volume associated with the tick."},
-    {"name": "microstructure", "type": ["null", {"type": "record", "name": "TickMicrostructure", "fields": [
-      {"name": "bid_size", "type": ["null", "long"], "default": null},
-      {"name": "ask_size", "type": ["null", "long"], "default": null},
-      {"name": "trade_condition", "type": ["null", "string"], "default": null}
-    ]}], "default": null, "doc": "Optional microstructure metadata."}
+    {"name": "microstructure", "type": ["null", {
+      "type": "record",
+      "name": "TickMicrostructure",
+      "doc": "Order book context captured alongside the tick.",
+      "fields": [
+        {"name": "bid_size", "type": ["null", "long"], "default": null, "doc": "Aggregated best bid size."},
+        {"name": "ask_size", "type": ["null", "long"], "default": null, "doc": "Aggregated best ask size."},
+        {"name": "trade_condition", "type": ["null", "string"], "default": null, "doc": "Venue-provided trade condition or quote qualifier."}
+      ]
+    }], "default": null, "doc": "Optional microstructure metadata."}
   ]
 }

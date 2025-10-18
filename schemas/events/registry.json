@@ -10,7 +10,7 @@
           "subject": "tradepulse.market.ticks.v1_0_0",
           "namespace": "tradepulse.events.marketdata.v1_0_0",
           "avro": "avro/v1.0.0/tick.avsc",
-          "json_schema": "json/v1.0.0/ticks.schema.json",
+          "json_schema": "json/1.0.0/ticks.schema.json",
           "protobuf": "../../libs/proto/events.proto"
         }
       ]
@@ -25,7 +25,7 @@
           "subject": "tradepulse.market.bars.v1_0_0",
           "namespace": "tradepulse.events.marketdata.v1_0_0",
           "avro": "avro/v1.0.0/bar.avsc",
-          "json_schema": "json/v1.0.0/bars.schema.json",
+          "json_schema": "json/1.0.0/bars.schema.json",
           "protobuf": "../../libs/proto/events.proto"
         }
       ]
@@ -40,7 +40,7 @@
           "subject": "tradepulse.signals.generated.v1_0_0",
           "namespace": "tradepulse.events.signals.v1_0_0",
           "avro": "avro/v1.0.0/signal.avsc",
-          "json_schema": "json/v1.0.0/signals.schema.json",
+          "json_schema": "json/1.0.0/signals.schema.json",
           "protobuf": "../../libs/proto/events.proto"
         }
       ]
@@ -55,7 +55,7 @@
           "subject": "tradepulse.execution.orders.v1_0_0",
           "namespace": "tradepulse.events.execution.v1_0_0",
           "avro": "avro/v1.0.0/order.avsc",
-          "json_schema": "json/v1.0.0/orders.schema.json",
+          "json_schema": "json/1.0.0/orders.schema.json",
           "protobuf": "../../libs/proto/events.proto"
         }
       ]
@@ -70,7 +70,7 @@
           "subject": "tradepulse.execution.fills.v1_0_0",
           "namespace": "tradepulse.events.execution.v1_0_0",
           "avro": "avro/v1.0.0/fill.avsc",
-          "json_schema": "json/v1.0.0/fills.schema.json",
+          "json_schema": "json/1.0.0/fills.schema.json",
           "protobuf": "../../libs/proto/events.proto"
         }
       ]
