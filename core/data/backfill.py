@@ -17,8 +17,16 @@ from the upstream provider.
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC
+import hashlib
+import logging
+from queue import Empty, PriorityQueue
+import threading
+import time
+import uuid
 from typing import List, MutableMapping, Optional
 
 import pandas as pd
@@ -61,6 +69,7 @@ class LayerCache:
 
     def __init__(self) -> None:
         self._entries: MutableMapping[CacheKey, CacheEntry] = {}
+        self._lock = threading.RLock()
 
     def put(self, key: CacheKey, frame: pd.DataFrame) -> None:
         if frame.empty:
@@ -69,7 +78,8 @@ class LayerCache:
             raise TypeError("Cache payload must be indexed by pd.DatetimeIndex")
         start = frame.index.min()
         end = frame.index.max()
-        self._entries[key] = CacheEntry(frame=frame.copy(), start=start, end=end)
+        with self._lock:
+            self._entries[key] = CacheEntry(frame=frame.copy(), start=start, end=end)
 
     def get(
         self,
@@ -78,13 +88,15 @@ class LayerCache:
         start: Optional[pd.Timestamp] = None,
         end: Optional[pd.Timestamp] = None,
     ) -> pd.DataFrame:
-        entry = self._entries.get(key)
+        with self._lock:
+            entry = self._entries.get(key)
         if entry is None:
             return pd.DataFrame()
         return entry.slice(start, end)
 
     def coverage(self, key: CacheKey) -> Optional[pd.Interval]:
-        entry = self._entries.get(key)
+        with self._lock:
+            entry = self._entries.get(key)
         if entry is None:
             return None
         return pd.Interval(entry.start, entry.end, closed="both")
@@ -172,6 +184,7 @@ class BackfillPlan:
 
     gaps: List[Gap] = field(default_factory=list)
     covered: Optional[pd.Interval] = None
+    segments: List["BackfillSegment"] = field(default_factory=list)
 
     @property
     def is_full_refresh(self) -> bool:
@@ -218,6 +231,368 @@ class GapFillPlanner:
         self._cache.put(key, combined)
 
 
+@dataclass
+class BackfillPayload:
+    """Result returned by an upstream loader."""
+
+    frame: pd.DataFrame
+    checksum: Optional[str] = None
+
+
+@dataclass
+class BackfillSegment:
+    """Atomic unit of work representing a backfill slice."""
+
+    id: str
+    gap: Gap
+    start: pd.Timestamp
+    end: pd.Timestamp
+    priority: int
+    attempts: int = 0
+    checksum: Optional[str] = None
+
+    def clone_for_retry(self) -> "BackfillSegment":
+        return BackfillSegment(
+            id=self.id,
+            gap=self.gap,
+            start=self.start,
+            end=self.end,
+            priority=self.priority,
+            attempts=self.attempts,
+            checksum=self.checksum,
+        )
+
+
+@dataclass(frozen=True)
+class BackfillProgressSnapshot:
+    """Immutable snapshot of the backfill execution progress."""
+
+    total_segments: int
+    completed_segments: int
+    failed_segments: int
+    bytes_transferred: int
+
+    @property
+    def remaining_segments(self) -> int:
+        return max(self.total_segments - self.completed_segments - self.failed_segments, 0)
+
+    @property
+    def completion_ratio(self) -> float:
+        if self.total_segments == 0:
+            return 1.0
+        return self.completed_segments / self.total_segments
+
+
+class _BackfillProgressTracker:
+    """Thread-safe tracker that produces :class:`BackfillProgressSnapshot`."""
+
+    def __init__(self, total_segments: int) -> None:
+        self._total_segments = total_segments
+        self._completed_segments = 0
+        self._failed_segments = 0
+        self._bytes_transferred = 0
+        self._lock = threading.Lock()
+
+    def mark_success(self, bytes_transferred: int) -> BackfillProgressSnapshot:
+        with self._lock:
+            self._completed_segments += 1
+            self._bytes_transferred += max(bytes_transferred, 0)
+            return self.snapshot()
+
+    def mark_failure(self) -> BackfillProgressSnapshot:
+        with self._lock:
+            self._failed_segments += 1
+            return self.snapshot()
+
+    def snapshot(self) -> BackfillProgressSnapshot:
+        with self._lock:
+            return BackfillProgressSnapshot(
+                total_segments=self._total_segments,
+                completed_segments=self._completed_segments,
+                failed_segments=self._failed_segments,
+                bytes_transferred=self._bytes_transferred,
+            )
+
+
+class _ThroughputLimiter:
+    """Token bucket limiting the rate at which segments are executed."""
+
+    def __init__(self, rate_per_second: float) -> None:
+        if rate_per_second <= 0:
+            raise ValueError("rate_per_second must be positive")
+        self._rate = rate_per_second
+        self._allowance = rate_per_second
+        self._last_check = time.monotonic()
+        self._lock = threading.Lock()
+
+    def acquire(self, tokens: float = 1.0) -> None:
+        if tokens <= 0:
+            return
+        while True:
+            with self._lock:
+                current = time.monotonic()
+                elapsed = current - self._last_check
+                self._last_check = current
+                self._allowance = min(self._rate, self._allowance + elapsed * self._rate)
+                if self._allowance >= tokens:
+                    self._allowance -= tokens
+                    return
+                deficit = tokens - self._allowance
+                wait_seconds = deficit / self._rate if self._rate > 0 else 0.0
+            time.sleep(wait_seconds)
+
+
+@dataclass(frozen=True)
+class SegmentError:
+    """Contextualised failure reason for a segment."""
+
+    segment: BackfillSegment
+    message: str
+
+
+@dataclass
+class BackfillResult:
+    """Execution result returned by :class:`BackfillPlanner`."""
+
+    plan: BackfillPlan
+    completed_segments: List[BackfillSegment]
+    failed_segments: List[BackfillSegment]
+    errors: List[SegmentError]
+    progress: BackfillProgressSnapshot
+
+    @property
+    def success(self) -> bool:
+        return not self.failed_segments and not self.errors
+
+
+def _default_checksum(frame: pd.DataFrame) -> str:
+    hashed = pd.util.hash_pandas_object(frame, index=True).values
+    return hashlib.sha256(hashed.tobytes()).hexdigest()
+
+
+class BackfillPlanner:
+    """End-to-end planner orchestrating detection, execution and validation."""
+
+    def __init__(
+        self,
+        cache: LayerCache,
+        *,
+        max_workers: int = 4,
+        segment_size: int = 10_000,
+        max_retries: int = 3,
+        throughput_per_second: float | None = None,
+        checksum_func: Callable[[pd.DataFrame], str] = _default_checksum,
+        logger: logging.Logger | None = None,
+    ) -> None:
+        if max_workers <= 0:
+            raise ValueError("max_workers must be positive")
+        if segment_size <= 0:
+            raise ValueError("segment_size must be positive")
+        if max_retries < 0:
+            raise ValueError("max_retries cannot be negative")
+        self._cache = cache
+        self._gap_planner = GapFillPlanner(cache)
+        self._max_workers = max_workers
+        self._segment_size = segment_size
+        self._max_retries = max_retries
+        self._limiter = (
+            _ThroughputLimiter(throughput_per_second)
+            if throughput_per_second is not None
+            else None
+        )
+        self._checksum_func = checksum_func
+        self._logger = logger or logging.getLogger(__name__)
+
+    def backfill(
+        self,
+        key: CacheKey,
+        *,
+        expected_index: pd.DatetimeIndex,
+        loader: Callable[[CacheKey, pd.Timestamp, pd.Timestamp], BackfillPayload | pd.DataFrame],
+        frequency: str | pd.Timedelta | pd.tseries.offsets.BaseOffset | None = None,
+        progress_callback: Callable[[BackfillProgressSnapshot], None] | None = None,
+    ) -> BackfillResult:
+        plan = self._gap_planner.plan(key, expected_index=expected_index, frequency=frequency)
+        if not plan.gaps:
+            snapshot = BackfillProgressSnapshot(
+                total_segments=0,
+                completed_segments=0,
+                failed_segments=0,
+                bytes_transferred=0,
+            )
+            plan.segments = []
+            return BackfillResult(
+                plan=plan,
+                completed_segments=[],
+                failed_segments=[],
+                errors=[],
+                progress=snapshot,
+            )
+
+        cadence = _resolve_cadence(expected_index, frequency=frequency)
+        segments = self._build_segments(plan.gaps, expected_index, cadence)
+        plan.segments = segments
+
+        tracker = _BackfillProgressTracker(len(segments))
+        completed: list[BackfillSegment] = []
+        failed: list[BackfillSegment] = []
+        errors: list[SegmentError] = []
+        completed_lock = threading.Lock()
+        failed_lock = threading.Lock()
+        error_lock = threading.Lock()
+
+        queue: PriorityQueue[tuple[int, str, Optional[BackfillSegment]]] = PriorityQueue()
+        for segment in segments:
+            queue.put((segment.priority, segment.id, segment))
+
+        stop_event = threading.Event()
+
+        def worker() -> None:
+            while True:
+                try:
+                    priority, token, segment = queue.get(timeout=0.5)
+                except Empty:
+                    if stop_event.is_set():
+                        break
+                    continue
+
+                if segment is None:
+                    queue.task_done()
+                    break
+
+                try:
+                    if self._limiter is not None:
+                        self._limiter.acquire()
+                    payload = loader(key, segment.start, segment.end)
+                    if isinstance(payload, pd.DataFrame):
+                        frame = payload
+                        checksum = self._checksum_func(frame)
+                    else:
+                        frame = payload.frame
+                        checksum = self._checksum_func(frame)
+                        if payload.checksum is not None and payload.checksum != checksum:
+                            raise ValueError(
+                                "Checksum mismatch for segment "
+                                f"{segment.start.isoformat()} - {segment.end.isoformat()}"
+                            )
+
+                    expected_slice = expected_index[
+                        (expected_index >= segment.start) & (expected_index < segment.end)
+                    ]
+                    self._validate_payload(frame, expected_slice)
+                    self._gap_planner.apply(key, frame)
+                    segment.checksum = checksum
+                    with completed_lock:
+                        completed.append(segment)
+                    snapshot = tracker.mark_success(
+                        int(frame.memory_usage(index=True, deep=True).sum())
+                    )
+                    if progress_callback is not None:
+                        progress_callback(snapshot)
+                except Exception as exc:  # noqa: BLE001
+                    segment.attempts += 1
+                    message = f"Backfill segment failed ({segment.attempts} attempts): {exc}"
+                    self._logger.exception(message)
+                    if segment.attempts <= self._max_retries:
+                        retry = segment.clone_for_retry()
+                        retry.attempts = segment.attempts
+                        retry.priority = self._retry_priority(segment)
+                        queue.put((retry.priority, uuid.uuid4().hex, retry))
+                    else:
+                        with failed_lock:
+                            failed.append(segment)
+                        with error_lock:
+                            errors.append(SegmentError(segment=segment, message=str(exc)))
+                        snapshot = tracker.mark_failure()
+                        if progress_callback is not None:
+                            progress_callback(snapshot)
+                finally:
+                    queue.task_done()
+
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            futures = [executor.submit(worker) for _ in range(self._max_workers)]
+            queue.join()
+            stop_event.set()
+            for _ in range(self._max_workers):
+                queue.put((int(1e9), uuid.uuid4().hex, None))
+            for future in futures:
+                future.result()
+
+        final_snapshot = tracker.snapshot()
+        return BackfillResult(
+            plan=plan,
+            completed_segments=completed,
+            failed_segments=failed,
+            errors=errors,
+            progress=final_snapshot,
+        )
+
+    def _build_segments(
+        self,
+        gaps: List[Gap],
+        expected_index: pd.DatetimeIndex,
+        cadence: pd.tseries.offsets.BaseOffset,
+    ) -> List[BackfillSegment]:
+        segments: list[BackfillSegment] = []
+        for gap in gaps:
+            gap_index = expected_index[
+                (expected_index >= gap.start) & (expected_index < gap.end)
+            ]
+            if gap_index.empty:
+                continue
+            for chunk_start in range(0, len(gap_index), self._segment_size):
+                chunk = gap_index[chunk_start : chunk_start + self._segment_size]
+                segment_start = chunk[0]
+                segment_end = chunk[-1] + cadence
+                priority = self._segment_priority(segment_start, segment_end)
+                segments.append(
+                    BackfillSegment(
+                        id=uuid.uuid4().hex,
+                        gap=gap,
+                        start=segment_start,
+                        end=segment_end,
+                        priority=priority,
+                    )
+                )
+        segments.sort(key=lambda segment: segment.priority)
+        return segments
+
+    @staticmethod
+    def _segment_priority(start: pd.Timestamp, end: pd.Timestamp) -> int:
+        return -int(end.value)
+
+    @staticmethod
+    def _retry_priority(segment: BackfillSegment) -> int:
+        return segment.priority - int(1e6) * segment.attempts
+
+    @staticmethod
+    def _validate_payload(
+        frame: pd.DataFrame, expected_index: pd.DatetimeIndex
+    ) -> None:
+        if frame.empty:
+            raise ValueError("Backfill loader returned an empty frame")
+        if not isinstance(frame.index, pd.DatetimeIndex):
+            raise TypeError("Backfill payload must use a DatetimeIndex")
+        if not frame.index.is_monotonic_increasing:
+            raise ValueError("Backfill payload index must be sorted in ascending order")
+        if not frame.index.is_unique:
+            raise ValueError("Backfill payload index must be unique")
+        expected_set = pd.Index(expected_index)
+        frame_index = pd.Index(frame.index)
+        missing = expected_set.difference(frame_index)
+        if not missing.empty:
+            raise ValueError(
+                "Backfill payload is missing timestamps: "
+                + ", ".join(ts.isoformat() for ts in missing[:5])
+            )
+        extra = frame_index.difference(expected_set)
+        if not extra.empty:
+            raise ValueError(
+                "Backfill payload contains unexpected timestamps: "
+                + ", ".join(ts.isoformat() for ts in extra[:5])
+            )
+
+
 class CacheRegistry:
     """Facade aggregating raw/ohlcv/feature caches."""
 
@@ -250,12 +625,18 @@ def normalise_index(
 
 
 __all__ = [
+    "BackfillPayload",
     "BackfillPlan",
+    "BackfillPlanner",
+    "BackfillProgressSnapshot",
+    "BackfillResult",
+    "BackfillSegment",
     "CacheEntry",
     "CacheKey",
     "CacheRegistry",
     "Gap",
     "GapFillPlanner",
+    "SegmentError",
     "LayerCache",
     "detect_gaps",
     "normalise_index",
