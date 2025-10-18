@@ -112,15 +112,19 @@ def _resolve_partitioned_sources(
     candidates: list[str] = []
     for file in base_path.rglob(f"*{suffix}"):
         relative_parts = file.relative_to(base_path).parts[:-1]
+        encountered_keys: set[str] = set()
         for part in relative_parts:
             if "=" not in part:
                 continue
             column, value = part.split("=", 1)
             allowed = normalized_filters.get(column)
-            if allowed is not None and value not in allowed:
-                break
+            if allowed is not None:
+                encountered_keys.add(column)
+                if value not in allowed:
+                    break
         else:
-            candidates.append(str(file))
+            if normalized_filters.keys() <= encountered_keys:
+                candidates.append(str(file))
 
     if not candidates:
         raise FileNotFoundError(

@@ -212,6 +212,25 @@ def test_scan_lazy_detects_parquet_and_routes_to_parquet_scan(tmp_path, monkeypa
     assert stub_lazy.row_count_name == "row_id"
 
 
+def test_resolve_partitioned_sources_skips_files_missing_keys(tmp_path):
+    partitioned_dir = tmp_path / "symbol=AAPL"
+    partitioned_dir.mkdir()
+    partitioned_file = partitioned_dir / "data.parquet"
+    partitioned_file.write_bytes(b"")
+
+    non_partitioned_file = tmp_path / "fallback.parquet"
+    non_partitioned_file.write_bytes(b"")
+
+    sources = polars_pipeline._resolve_partitioned_sources(
+        tmp_path,
+        file_glob=None,
+        suffix=".parquet",
+        partition_filters={"symbol": ["AAPL"]},
+    )
+
+    assert sources == [partitioned_file.as_posix()]
+
+
 def test_collect_streaming_invokes_sink(monkeypatch):
     data = {"volume": np.array([10, 20])}
     stub_lazy = DummyLazyFrame(data)
