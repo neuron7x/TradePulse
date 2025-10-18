@@ -238,6 +238,11 @@ class IdempotencyCoordinator(Generic[T]):
             record = self._ensure_record(key)
             record.last_seen_monotonic = now
             record.last_seen_at = timestamp
+            if record.status is OperationStatus.SUCCEEDED:
+                raise IdempotencyInputError(
+                    "Cannot mark a successful operation as failed without remediation.",
+                    detail={"operation_id": key.operation_id, "request_id": key.request_id},
+                )
             record.status = OperationStatus.FAILED
             record.failure_reason = reason
             record.ack_deadline = None

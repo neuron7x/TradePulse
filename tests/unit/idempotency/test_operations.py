@@ -99,6 +99,25 @@ def test_coordinator_rejects_retry_after_failure(key_factory: IdempotencyKeyFact
         coordinator.register_attempt(key)
 
 
+def test_coordinator_preserves_success_after_failure_attempt(
+    key_factory: IdempotencyKeyFactory,
+) -> None:
+    coordinator = IdempotencyCoordinator()
+    key = key_factory.build(service="orders", operation="submit", dedupe_fields={"id": 1})
+
+    coordinator.register_attempt(key)
+    succeeded = coordinator.complete_success(key, {"status": "accepted"})
+    assert succeeded.status is OperationStatus.SUCCEEDED
+
+    with pytest.raises(IdempotencyInputError):
+        coordinator.complete_failure(key, reason="broker_error")
+
+    replay = coordinator.register_attempt(key)
+    assert replay.status is OperationStatus.SUCCEEDED
+    assert replay.result == {"status": "accepted"}
+    assert replay.from_cache is True
+
+
 def test_acknowledgement_ttl_expires(key_factory: IdempotencyKeyFactory) -> None:
     clock = ManualClock()
     coordinator = IdempotencyCoordinator(ack_ttl_seconds=5.0, record_ttl_seconds=120.0, clock=clock)
