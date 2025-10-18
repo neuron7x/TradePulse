@@ -343,6 +343,8 @@ class PortfolioStressTester:
     def evaluate_historical_shocks(
         self, scenarios: Sequence[StressScenario], *, portfolio_value: float
     ) -> tuple[StressScenarioResult, ...]:
+        if portfolio_value <= 0:
+            raise ValueError("portfolio_value must be positive")
         results: list[StressScenarioResult] = []
         exposures = self._exposures
         for scenario in scenarios:
