@@ -22,6 +22,9 @@ focused document so contributors can quickly find the details they need.
 - **Risk, signals, and observability controls** – consolidated guardrails for
   portfolio risk, model governance, and Prometheus coverage are in
   [`docs/risk_ml_observability.md`](risk_ml_observability.md).
+- **Керування чергами та backpressure** – політики контролю навантаження,
+  sizing черг і runbook'и описані у
+  [`docs/queue_and_backpressure.md`](queue_and_backpressure.md).
 - **Reliability & SRE** – SLA commitments, SLOs, error budgets, and escalation
   policy are outlined in [`docs/reliability.md`](reliability.md).
 
