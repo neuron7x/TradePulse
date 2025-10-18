@@ -9,7 +9,7 @@ from typing import Any, AsyncIterator, List
 import pytest
 from packaging.version import Version
 
-from core.data.adapters.base import IngestionAdapter
+from core.data.adapters.base import IngestionAdapter, RetryConfig
 from core.data.connectors import (
     BinanceMarketDataConnector,
     CoinbaseMarketDataConnector,
@@ -28,8 +28,9 @@ class DummyAdapter(IngestionAdapter):
         fetch_result: List[Any] | None = None,
         stream_items: List[Any] | None = None,
         stream_error: Exception | None = None,
+        retry: RetryConfig | None = None,
     ) -> None:
-        super().__init__()
+        super().__init__(retry=retry)
         self.fetch_result = fetch_result or []
         self.stream_items = stream_items or []
         self.stream_error = stream_error
@@ -54,8 +55,17 @@ class DummyAdapter(IngestionAdapter):
 
 
 class FlakyAdapter(DummyAdapter):
-    def __init__(self, *, stream_items: List[Any] | None = None) -> None:
-        super().__init__(stream_items=stream_items, stream_error=RuntimeError("boom"))
+    def __init__(
+        self,
+        *,
+        stream_items: List[Any] | None = None,
+        retry: RetryConfig | None = None,
+    ) -> None:
+        super().__init__(
+            stream_items=stream_items,
+            stream_error=RuntimeError("boom"),
+            retry=retry,
+        )
         self._failures = 0
 
     async def stream(
@@ -116,15 +126,29 @@ async def test_streaming_errors_are_routed_to_dead_letter_queue() -> None:
 
 @pytest.mark.asyncio
 async def test_streaming_retry_applies_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
-    recorded: list[int] = []
+    computed: list[float] = []
+    recorded: list[float] = []
 
-    async def _fake_sleep(delay: int) -> None:
+    def _fake_backoff(self, attempt_number: int) -> float:  # type: ignore[override]
+        delay = float(2**attempt_number)
+        computed.append(delay)
+        return delay
+
+    async def _fake_sleep(delay: float) -> None:
         recorded.append(delay)
 
-    monkeypatch.setattr("core.data.connectors.market.asyncio.sleep", _fake_sleep)
+    monkeypatch.setattr(
+        "core.data.adapters.base.RetryConfig.compute_backoff",
+        _fake_backoff,
+        raising=False,
+    )
+    monkeypatch.setattr("core.data.adapters.base.asyncio.sleep", _fake_sleep)
 
     tick = _make_tick()
-    adapter = FlakyAdapter(stream_items=[tick])
+    adapter = FlakyAdapter(
+        stream_items=[tick],
+        retry=RetryConfig(multiplier=1.0, max_backoff=60.0, jitter=0.0),
+    )
     connector = BinanceMarketDataConnector(adapter=adapter)
 
     events = []
@@ -134,7 +158,8 @@ async def test_streaming_retry_applies_backoff(monkeypatch: pytest.MonkeyPatch) 
 
     assert events and events[0].symbol == tick.symbol
     assert adapter.stream_calls >= 2
-    assert recorded == [2]
+    assert computed == [2.0]
+    assert recorded == [2.0]
 
 
 def test_dead_letter_queue_eviction_and_serialisation() -> None:

@@ -3,16 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-import time
-from collections import deque
-from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from threading import Lock
-from typing import Any, AsyncIterator, Deque, Optional
+from typing import Any, AsyncIterator, Optional
 from uuid import uuid4
 
 from core.data.adapters.base import (
@@ -23,6 +17,7 @@ from core.data.adapters.base import (
 )
 from core.data.adapters.ccxt import CCXTIngestionAdapter
 from core.data.adapters.polygon import PolygonIngestionAdapter
+from core.data.dead_letter import DeadLetterQueue, DeadLetterReason
 from core.data.models import InstrumentType
 from core.data.models import PriceTick as Ticker
 from core.events import TickEvent
@@ -32,125 +27,6 @@ from core.utils.logging import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_SCHEMA_ROOT = Path(__file__).resolve().parents[3] / "schemas" / "events"
-
-
-@dataclass(frozen=True)
-class DeadLetterItem:
-    """Record captured when payload processing fails."""
-
-    payload: Any
-    error: str
-    context: str
-    timestamp: float
-
-    def asdict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable representation of the item."""
-
-        return {
-            "payload": self.payload,
-            "error": self.error,
-            "context": self.context,
-            "timestamp": self.timestamp,
-        }
-
-
-class DeadLetterQueue:
-    """In-memory bounded dead-letter queue retaining the latest failures."""
-
-    def __init__(
-        self,
-        max_items: int = 1024,
-        *,
-        persistent_path: str | os.PathLike[str] | None = None,
-    ) -> None:
-        if max_items <= 0:
-            raise ValueError("max_items must be positive")
-        self._items: Deque[DeadLetterItem] = deque(maxlen=max_items)
-        self._max_items = max_items
-        self._persistent_path = (
-            Path(persistent_path) if persistent_path is not None else None
-        )
-        self._lock = Lock()
-        if self._persistent_path is not None:
-            self._persistent_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def push(self, payload: Any, error: Exception | str, *, context: str) -> None:
-        message = str(error)
-        if hasattr(payload, "model_dump"):
-            try:
-                payload = payload.model_dump()
-            except Exception:  # pragma: no cover - defensive guard
-                payload = repr(payload)
-        elif isinstance(payload, (dict, list, tuple, str, int, float, type(None))):
-            pass
-        else:
-            payload = repr(payload)
-        item = DeadLetterItem(
-            payload=payload, error=message, context=context, timestamp=time.time()
-        )
-        self._items.append(item)
-        logger.debug("dead_letter_enqueued", size=len(self._items), context=context)
-        self._persist_item(item)
-
-    def drain(self) -> list[DeadLetterItem]:
-        items = list(self._items)
-        self._items.clear()
-        return items
-
-    def peek(self) -> list[DeadLetterItem]:
-        return list(self._items)
-
-    def __len__(self) -> int:  # pragma: no cover - trivial accessor
-        return len(self._items)
-
-    @property
-    def max_items(self) -> int:  # pragma: no cover - trivial accessor
-        return self._max_items
-
-    def persist(
-        self,
-        path: str | os.PathLike[str] | None = None,
-        *,
-        drain: bool = False,
-    ) -> Path:
-        """Persist the queue content to ``path`` for operational triage.
-
-        Args:
-            path: Destination file. When omitted, the queue must have been
-                initialised with ``persistent_path``.
-            drain: When ``True`` the queue is emptied after persisting.
-
-        Returns:
-            The resolved :class:`pathlib.Path` to the persisted payload.
-        """
-
-        target = Path(path) if path is not None else self._persistent_path
-        if target is None:
-            raise ValueError("No persistence path configured for dead-letter queue")
-
-        with self._lock:
-            if drain:
-                items = list(self._items)
-                self._items.clear()
-            else:
-                items = list(self._items)
-            payload = [item.asdict() for item in items]
-
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with target.open("w", encoding="utf-8") as handle:
-                json.dump(payload, handle, indent=2, sort_keys=True)
-                handle.write("\n")
-
-        return target
-
-    def _persist_item(self, item: DeadLetterItem) -> None:
-        if self._persistent_path is None:
-            return
-        record = json.dumps(item.asdict(), sort_keys=True)
-        with self._lock:
-            with self._persistent_path.open("a", encoding="utf-8") as handle:
-                handle.write(record)
-                handle.write("\n")
 
 
 class BaseMarketDataConnector:
@@ -203,7 +79,13 @@ class BaseMarketDataConnector:
                     context="fetch",
                     adapter=self._adapter.__class__.__name__,
                 )
-                self._dead_letters.push(tick, exc, context="fetch")
+                self._dead_letters.push(
+                    tick,
+                    exc,
+                    context="fetch",
+                    reason=self._classify_dead_letter(exc),
+                    metadata=self._dead_letter_metadata(tick, "fetch"),
+                )
             else:
                 events.append(event)
         return events
@@ -226,22 +108,26 @@ class BaseMarketDataConnector:
                             context="stream",
                             adapter=self._adapter.__class__.__name__,
                         )
-                        self._dead_letters.push(tick, exc, context="stream")
+                        self._dead_letters.push(
+                            tick,
+                            exc,
+                            context="stream",
+                            reason=self._classify_dead_letter(exc),
+                            metadata=self._dead_letter_metadata(tick, "stream"),
+                        )
                         continue
                     yield event
             except (
                 Exception
             ) as exc:  # pragma: no cover - exercised in tests via dummy adapters
                 attempt += 1
-                backoff = min(2**attempt, 60)
                 logger.warning(
                     "stream_restart",
                     attempt=attempt,
-                    delay=backoff,
                     error=str(exc),
                     adapter=self._adapter.__class__.__name__,
                 )
-                await asyncio.sleep(backoff)
+                await self._sleep_with_backoff(attempt)
             else:  # pragma: no cover - loop exit path
                 break
 
@@ -265,6 +151,41 @@ class BaseMarketDataConnector:
         for field_name in self._required_fields:
             if getattr(event, field_name) is None:
                 raise ValueError(f"Field '{field_name}' must not be None")
+
+    def _classify_dead_letter(self, error: Exception) -> DeadLetterReason:
+        if isinstance(error, ValueError):
+            message = str(error)
+            if "Field" in message or "schema" in message.lower():
+                return DeadLetterReason.SCHEMA_MISMATCH
+            return DeadLetterReason.VALIDATION_ERROR
+        if isinstance(error, asyncio.TimeoutError):
+            return DeadLetterReason.DOWNSTREAM_TIMEOUT
+        if isinstance(error, (ConnectionError, OSError)):
+            return DeadLetterReason.TRANSIENT_FAILURE
+        return DeadLetterReason.UNKNOWN
+
+    def _dead_letter_metadata(self, tick: Any, context: str) -> dict[str, Any]:
+        metadata = {
+            "adapter": self._adapter.__class__.__name__,
+            "event_type": self._event_type,
+            "schema_version": self._schema_version,
+            "context": context,
+        }
+        symbol = getattr(tick, "symbol", None)
+        if symbol is not None:
+            metadata["symbol"] = symbol
+        return metadata
+
+    async def _sleep_with_backoff(self, attempt: int) -> None:
+        policy = getattr(self._adapter, "_policy", None)
+        retry = getattr(policy, "retry", None)
+        if retry is None:
+            await asyncio.sleep(min(2**attempt, 60))
+            return
+        try:
+            await self._adapter._sleep_backoff(attempt)  # type: ignore[attr-defined]
+        except AttributeError:  # pragma: no cover - defensive fallback
+            await asyncio.sleep(min(2**attempt, 60))
 
     @property
     def dead_letter_queue(self) -> DeadLetterQueue:
@@ -408,7 +329,13 @@ class PolygonMarketDataConnector(BaseMarketDataConnector):
                     context="fetch",
                     adapter=self._adapter.__class__.__name__,
                 )
-                self._dead_letters.push(tick, exc, context="fetch")
+                self._dead_letters.push(
+                    tick,
+                    exc,
+                    context="fetch",
+                    reason=self._classify_dead_letter(exc),
+                    metadata=self._dead_letter_metadata(tick, "fetch"),
+                )
             else:
                 events.append(event)
         return events
