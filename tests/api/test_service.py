@@ -253,6 +253,50 @@ def test_feature_endpoint_computes_latest_vector(
     assert cached_response.json() == body
 
 
+def test_versioned_feature_endpoint_supports_idempotency(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+    headers = _auth_headers(token)
+    headers["Idempotency-Key"] = "feature-idempotency"
+
+    first = client.post("/v1/features", json=payload, headers=headers)
+    assert first.status_code == 200
+    assert first.headers["Idempotency-Key"] == "feature-idempotency"
+    assert first.headers["X-Cache-Status"] == "miss"
+    assert "X-Idempotent-Replay" not in first.headers
+
+    replay = client.post("/v1/features", json=payload, headers=headers)
+    assert replay.status_code == 200
+    assert replay.json() == first.json()
+    assert replay.headers["Idempotency-Key"] == "feature-idempotency"
+    assert replay.headers["X-Idempotent-Replay"] == "true"
+    assert replay.headers["ETag"] == first.headers["ETag"]
+
+
+def test_feature_idempotency_conflict_is_detected(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    token = security_context(subject="feature-user")
+    headers = _auth_headers(token)
+    headers["Idempotency-Key"] = "conflict-key"
+
+    first = client.post("/v1/features", json=payload, headers=headers)
+    assert first.status_code == 200
+
+    mutated = _build_payload()
+    mutated["bars"][0]["close"] += 1.0
+    conflict = client.post("/v1/features", json=mutated, headers=headers)
+    assert conflict.status_code == 409
+    error = conflict.json()["error"]
+    assert error["code"] == "ERR_IDEMPOTENCY_CONFLICT"
+    assert error["path"] == "/v1/features"
+
+
 def test_prediction_endpoint_returns_signal(
     configured_app: FastAPI, security_context: Callable[..., str]
 ) -> None:
@@ -292,6 +336,24 @@ def test_prediction_endpoint_returns_signal(
     cached = client.post("/predictions", json=payload, headers=headers)
     assert cached.headers["X-Cache-Status"] == "hit"
     assert cached.json() == body
+
+
+def test_prediction_endpoint_honours_idempotency(
+    configured_app: FastAPI, security_context: Callable[..., str]
+) -> None:
+    client = TestClient(configured_app)
+    payload = _build_payload()
+    payload["horizon_seconds"] = 300
+    token = security_context(subject="prediction-user")
+    headers = _auth_headers(token)
+    headers["Idempotency-Key"] = "prediction-key"
+
+    first = client.post("/v1/predictions", json=payload, headers=headers)
+    assert first.status_code == 200
+    replay = client.post("/v1/predictions", json=payload, headers=headers)
+    assert replay.status_code == 200
+    assert replay.headers["X-Idempotent-Replay"] == "true"
+    assert replay.json() == first.json()
 
 
 def test_feature_endpoint_supports_pagination_and_filters(
