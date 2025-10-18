@@ -14,6 +14,12 @@ from urllib.parse import urlencode
 from domain import Order, OrderSide, OrderStatus, OrderType
 
 from .base import RESTWebSocketConnector
+from .plugin import (
+    AdapterCheckResult,
+    AdapterContract,
+    AdapterDiagnostic,
+    AdapterPlugin,
+)
 
 _STATUS_MAP = {
     "NEW": OrderStatus.OPEN,
@@ -493,4 +499,67 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         super().disconnect()
 
 
-__all__ = ["BinanceRESTConnector"]
+def _self_test() -> AdapterDiagnostic:
+    checks = []
+    try:
+        connector = BinanceRESTConnector(sandbox=True)
+        checks.append(
+            AdapterCheckResult(
+                name="instantiate",
+                status="passed",
+                detail="Connector instantiated with sandbox configuration",
+            )
+        )
+        if not connector.sandbox:
+            raise AssertionError("Connector sandbox flag not set")
+        checks.append(
+            AdapterCheckResult(
+                name="sandbox-flag",
+                status="passed",
+                detail="Sandbox mode enabled by default",
+            )
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        checks.append(
+            AdapterCheckResult(name="instantiate", status="failed", detail=str(exc))
+        )
+    return AdapterDiagnostic(adapter_id="binance.spot", checks=tuple(checks))
+
+
+PLUGIN = AdapterPlugin(
+    contract=AdapterContract(
+        identifier="binance.spot",
+        name="Binance Spot",
+        provider="Binance",
+        version="1.0.0",
+        description="Binance spot trading connector using REST and WebSocket APIs.",
+        transports={
+            "rest": "https://api.binance.com",
+            "websocket": "wss://stream.binance.com:9443/ws",
+        },
+        supports_sandbox=True,
+        required_credentials=("api_key", "api_secret"),
+        optional_credentials=("recv_window",),
+        capabilities={
+            "order_types": [
+                "market",
+                "limit",
+                "stop",
+                "stop_limit",
+            ],
+            "supports_streaming": True,
+            "supports_positions": True,
+        },
+        metadata={
+            "sandbox_rest": "https://testnet.binance.vision",
+            "sandbox_websocket": "wss://testnet.binance.vision/ws",
+        },
+    ),
+    factory=BinanceRESTConnector,
+    implementation=BinanceRESTConnector,
+    self_test=_self_test,
+    module=__name__,
+)
+
+
+__all__ = ["BinanceRESTConnector", "PLUGIN"]
