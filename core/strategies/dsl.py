@@ -381,6 +381,10 @@ class StrategyPipelineDefinition(BaseModel):
 
     def compute_signature(self) -> str:
         payload = self.model_dump(exclude={"signature"}, mode="json")
+        if isinstance(payload, dict):
+            runtime = payload.get("runtime")
+            if isinstance(runtime, dict):
+                runtime.pop("created_at", None)
         canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
