@@ -1,5 +1,12 @@
 """High-level data ingestion services and helpers."""
 
+from src.data.backlog_watermark import (
+    BacklogEvent,
+    DelaySample,
+    LagSummary,
+    WatermarkBacklog,
+    WatermarkProgress,
+)
 from src.data.experiment_registry import (
     ArtifactRecord,
     ExperimentRegistry,
@@ -20,7 +27,9 @@ from src.data.streaming_aggregator import AggregationResult, TickStreamAggregato
 __all__ = [
     "ArtifactRecord",
     "AggregationResult",
+    "BacklogEvent",
     "CacheEntrySnapshot",
+    "DelaySample",
     "DataIngestionCacheService",
     "ExperimentRegistry",
     "ExperimentRunRecord",
@@ -31,5 +40,8 @@ __all__ = [
     "KafkaIngestionService",
     "LagRecord",
     "LagReport",
+    "LagSummary",
     "TickStreamAggregator",
+    "WatermarkBacklog",
+    "WatermarkProgress",
 ]
