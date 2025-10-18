@@ -108,7 +108,9 @@ class OrderBookIngestService:
             due_snapshot = True
 
         if due_snapshot:
-            snapshot = state.get_snapshot(self._config.snapshot_depth)
+            # Request the full depth image so the periodic snapshot does not
+            # truncate the in-memory book when it is re-applied.
+            snapshot = state.get_snapshot()
             self.process_snapshot(snapshot)
 
         return result
