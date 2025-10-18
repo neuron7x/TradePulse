@@ -20,6 +20,9 @@ import pandas as pd
 from core.config.cli_models import (
     BacktestConfig,
     ExecConfig,
+    FeatureFrameSourceConfig,
+    FeatureParityConfig,
+    FeatureParitySpecConfig,
     IngestConfig,
     OptimizeConfig,
     ReportConfig,
@@ -27,6 +30,13 @@ from core.config.cli_models import (
 )
 from core.config.template_manager import ConfigTemplateManager
 from core.data.feature_catalog import FeatureCatalog
+from core.data.feature_store import OnlineFeatureStore
+from core.data.parity import (
+    FeatureParityCoordinator,
+    FeatureParityError,
+    FeatureParityReport,
+    FeatureParitySpec,
+)
 from core.data.versioning import DataVersionManager
 from core.reporting import (
     generate_markdown_report,
@@ -59,6 +69,10 @@ class ArtifactError(CLIError):
 
 class ComputeError(CLIError):
     exit_code = 4
+
+
+class ParityError(CLIError):
+    exit_code = 5
 
 
 @contextmanager
@@ -159,6 +173,42 @@ def _load_prices(cfg: IngestConfig | BacktestConfig | ExecConfig) -> pd.DataFram
         raise ConfigError("Value column missing from data source")
     frame = frame.sort_values(data_cfg.timestamp_field).reset_index(drop=True)
     return frame
+
+
+def _load_feature_frame(source: FeatureFrameSourceConfig) -> pd.DataFrame:
+    if not source.path.exists():
+        raise ArtifactError(f"Offline feature snapshot {source.path} does not exist")
+    fmt = source.format
+    if fmt == "auto":
+        suffix = source.path.suffix.lower()
+        fmt = "parquet" if suffix == ".parquet" else "csv"
+    if fmt == "csv":
+        frame = pd.read_csv(source.path)
+    elif fmt == "parquet":
+        try:
+            frame = read_dataframe(source.path, allow_json_fallback=False)
+        except MissingParquetDependencyError as exc:
+            raise ArtifactError(
+                "Parquet sources require either pyarrow or polars. Install the 'tradepulse[feature_store]' extra."
+            ) from exc
+    else:  # pragma: no cover - guarded by Pydantic literal
+        raise ConfigError(f"Unsupported feature source format '{fmt}'")
+    return frame
+
+
+def _build_parity_spec(spec_cfg: FeatureParitySpecConfig) -> FeatureParitySpec:
+    return FeatureParitySpec(
+        feature_view=spec_cfg.feature_view,
+        entity_columns=tuple(spec_cfg.entity_columns),
+        timestamp_column=spec_cfg.timestamp_column,
+        timestamp_granularity=spec_cfg.timestamp_granularity,
+        numeric_tolerance=spec_cfg.numeric_tolerance,
+        max_clock_skew=spec_cfg.max_clock_skew,
+        allow_schema_evolution=spec_cfg.allow_schema_evolution,
+        value_columns=None
+        if spec_cfg.value_columns is None
+        else tuple(spec_cfg.value_columns),
+    )
 
 
 def _resolve_strategy(
@@ -740,6 +790,34 @@ def _emit_report_output(
     raise ConfigError(f"Unsupported output format '{output_format}'")
 
 
+def _emit_parity_summary(report: FeatureParityReport, *, command: str) -> None:
+    click.echo(
+        f"[{command}] • feature_view={report.feature_view} "
+        f"inserted={report.inserted_rows} updated={report.updated_rows} dropped={report.dropped_rows}"
+    )
+    integrity = report.integrity
+    click.echo(
+        f"[{command}] • integrity hash_differs={integrity.hash_differs} "
+        f"offline_rows={integrity.offline_rows} online_rows={integrity.online_rows} "
+        f"row_diff={integrity.row_count_diff}"
+    )
+    if report.max_value_drift is not None:
+        click.echo(f"[{command}] • max_value_drift={report.max_value_drift:.6g}")
+    if report.clock_skew is not None:
+        click.echo(
+            f"[{command}] • clock_skew={report.clock_skew} "
+            f"abs={report.clock_skew_abs}"
+        )
+    if report.columns_added:
+        click.echo(
+            f"[{command}] • columns_added={', '.join(report.columns_added)}"
+        )
+    if report.columns_removed:
+        click.echo(
+            f"[{command}] • columns_removed={', '.join(report.columns_removed)}"
+        )
+
+
 @cli.command()
 @click.option(
     "--config",
@@ -809,6 +887,62 @@ def report(
         version_mgr.snapshot(cfg.output_path, metadata={"sections": len(cfg.inputs)})
     _emit_report_output(cfg, report_text, output_format, command=command)
     click.echo(f"[{command}] completed sections={len(cfg.inputs)} sha256={digest}")
+
+
+@cli.command()
+@click.option(
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to feature parity YAML config.",
+)
+@click.option(
+    "--generate-config",
+    is_flag=True,
+    help="Write the default feature parity config template.",
+)
+@click.option(
+    "--template-output",
+    type=click.Path(path_type=Path),
+    help="Destination for generated template.",
+)
+@click.pass_context
+def parity(
+    ctx: click.Context,
+    config: Path | None,
+    generate_config: bool,
+    template_output: Path | None,
+) -> None:
+    """Reconcile offline feature snapshots with the online feature store."""
+
+    command = "parity"
+    manager = _get_manager(ctx)
+    if generate_config:
+        if template_output is None:
+            raise click.UsageError(
+                "--template-output must be provided when generating a template"
+            )
+        manager.render("parity", template_output)
+        click.echo(f"[{command}] template written to {template_output}")
+        return
+    if config is None:
+        raise click.UsageError("--config is required when not generating a template")
+
+    with step_logger(command, "load config"):
+        cfg = manager.load_config(config, FeatureParityConfig)
+    with step_logger(command, "load offline features"):
+        offline_frame = _load_feature_frame(cfg.offline)
+
+    spec = _build_parity_spec(cfg.spec)
+    store = OnlineFeatureStore(cfg.online_store)
+    coordinator = FeatureParityCoordinator(store)
+
+    with step_logger(command, "synchronize online store"):
+        try:
+            report = coordinator.synchronize(spec, offline_frame, mode=cfg.mode)
+        except FeatureParityError as exc:
+            raise ParityError(str(exc)) from exc
+
+    _emit_parity_summary(report, command=command)
 
 
 # ---------------------------------------------------------------------------

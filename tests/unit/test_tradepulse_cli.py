@@ -13,6 +13,7 @@ from cli.tradepulse_cli import cli
 from core.config.cli_models import IngestConfig, VersioningConfig
 from core.config.template_manager import ConfigTemplateManager
 from core.data.feature_catalog import FeatureCatalog
+from core.data.feature_store import OnlineFeatureStore
 from core.data.versioning import DataVersionManager
 
 
@@ -39,7 +40,7 @@ def _write_yaml(path: Path, data: Dict[str, Any]) -> None:
 
 def test_cli_generates_templates(tmp_path: Path) -> None:
     runner = CliRunner()
-    for command in ("ingest", "backtest", "optimize", "exec", "report"):
+    for command in ("ingest", "backtest", "optimize", "exec", "report", "parity"):
         destination = tmp_path / f"{command}.yaml"
         result = runner.invoke(
             cli, [command, "--generate-config", "--template-output", str(destination)]
@@ -152,6 +153,45 @@ def test_full_cli_flow(tmp_path: Path, sample_prices: Path) -> None:
 
     catalog = json.loads(catalog_path.read_text())
     assert len(catalog["artifacts"]) >= 3
+
+
+def test_parity_cli_synchronizes_store(tmp_path: Path) -> None:
+    runner = CliRunner()
+    manager = ConfigTemplateManager(Path("configs/templates"))
+
+    parity_cfg_path = tmp_path / "parity.yaml"
+    manager.render("parity", parity_cfg_path)
+    cfg = _load_yaml(parity_cfg_path)
+
+    offline_frame = pd.DataFrame(
+        {
+            "entity_id": ["A", "A"],
+            "ts": ["2024-01-01T00:00:00Z", "2024-01-01T00:01:00Z"],
+            "value": [1.0, 1.5],
+        }
+    )
+    offline_path = tmp_path / "offline_features.csv"
+    offline_frame.to_csv(offline_path, index=False)
+
+    feature_view = "demo_features"
+    online_store = tmp_path / "online"
+    cfg["offline"]["path"] = str(offline_path)
+    cfg["online_store"] = str(online_store)
+    cfg["spec"]["feature_view"] = feature_view
+    cfg["spec"]["timestamp_granularity"] = "1min"
+    cfg["spec"]["numeric_tolerance"] = 0.0
+    cfg["mode"] = "overwrite"
+    _write_yaml(parity_cfg_path, cfg)
+
+    result = runner.invoke(cli, ["parity", "--config", str(parity_cfg_path)])
+    assert result.exit_code == 0, result.output
+    assert "feature_view=demo_features" in result.output
+    assert "inserted=2" in result.output
+
+    store = OnlineFeatureStore(online_store)
+    stored = store.load(feature_view)
+    assert stored.shape[0] == 2
+    assert set(stored.columns) == {"entity_id", "ts", "value"}
 
 
 def test_backtest_outputs_jsonl(tmp_path: Path, sample_prices: Path) -> None:
