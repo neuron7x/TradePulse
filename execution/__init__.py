@@ -27,6 +27,12 @@ from .risk import (
     RiskManager,
     SQLiteKillSwitchStateStore,
 )
+from .rollout import (
+    BlueGreenRolloutOrchestrator,
+    RolloutAbortedError,
+    RolloutStep,
+    TrafficRouter,
+)
 from .watchdog import Watchdog
 
 __all__ = [
@@ -67,4 +73,8 @@ __all__ = [
     "PaperTradingEngine",
     "PaperOrderReport",
     "PnLAnalysis",
+    "BlueGreenRolloutOrchestrator",
+    "RolloutStep",
+    "TrafficRouter",
+    "RolloutAbortedError",
 ]
