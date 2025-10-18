@@ -102,3 +102,22 @@ def test_stress_scenario_validation() -> None:
     with pytest.raises(ValueError):
         StressScenario(name="Test", shocks={})
 
+
+def test_historical_shocks_require_positive_portfolio_value() -> None:
+    returns = _build_returns_frame()
+    exposures = {"AssetA": 500_000.0}
+    tester = PortfolioStressTester(
+        returns,
+        exposures,
+        portfolio_value=1_000_000.0,
+        min_history=100,
+    )
+
+    scenario = StressScenario(name="Shock", shocks={"AssetA": -0.05})
+
+    with pytest.raises(ValueError, match="portfolio_value must be positive"):
+        tester.evaluate_historical_shocks([scenario], portfolio_value=0.0)
+
+    with pytest.raises(ValueError, match="portfolio_value must be positive"):
+        tester.evaluate_historical_shocks([scenario], portfolio_value=-10.0)
+
