@@ -9,6 +9,12 @@ This playbook defines the safety rails for promoting new versions of TradePulse 
 
 The guidance applies to every production-bound deployment in equities, derivatives, and crypto execution clusters. Teams must adapt cluster-specific parameters but cannot relax the mandatory guardrails without governance approval.
 
+### Pre-flight Readiness Checklist
+- Change request in `governance/change_log.md` approved with sign-off from trading, risk, and SRE leads.
+- Synthetic order replay in `backtest/canary_validation.py` completed with zero schema or checksum diffs.
+- Dashboard snapshots for baseline services exported to `reports/baselines/<deployment_id>/` to enable delta comparisons.
+- Alert suppression windows for non-related alerts documented to avoid masking regressions.
+
 ## Release Phases and Traffic Allocation
 | Phase | Traffic Share | Duration | Objectives |
 |-------|---------------|----------|------------|
@@ -26,6 +32,12 @@ The guidance applies to every production-bound deployment in equities, derivativ
 
 ## Technical Guardrails and Thresholds
 All metrics are computed as rolling windows over the phase duration with 2-minute sampling. Thresholds marked "hard" trigger an immediate rollback; "soft" requires manual review and extension of the canary window.
+
+### Metric Calculation Principles
+- **Control Selection:** For each venue, the canary slice is matched against the most recent baseline orders with the same order type, symbol bucket, and client segment. Baseline queries are issued via `analytics/queries/control_cohort.sql`.
+- **Delta Computation:** Deltas are calculated as `(canary_value - control_value) / control_value` for ratios and `canary_value - control_value` for latency/PnL expressed in absolute units.
+- **Confidence Enforcement:** Guardrail comparisons require a minimum of 500 filled orders or 5 minutes of data (whichever is later). The deployment controller automatically pauses phase advancement until the sample size condition is met.
+- **Anomaly Filtering:** Metrics ingest from Prometheus is guarded by a 3-sigma outlier filter defined in `observability/promql/canary_common.libsonnet`. Filtered samples are still logged for audit but excluded from automated rollbacks.
 
 ### Core Stability Metrics
 | Metric | Baseline Source | Soft Threshold | Hard Threshold | Notes |
@@ -45,6 +57,24 @@ All metrics are computed as rolling windows over the phase duration with 2-minut
 | Missed spread capture | `execution.spread_capture.effective_bps` | -5% | -8% | Applies to market making strategies only. |
 | Agency order fill ratio | `execution.agency.fill_ratio` | -3% | -5% | Weighted by client priority tier. |
 
+### Phase Exit Criteria
+To progress from one phase to the next, **all** of the following must be true for the trailing five samples:
+
+1. No hard threshold breached.
+2. Fewer than two soft thresholds breached, and the cumulative guardrail risk score (see below) ≤ 2.
+3. No Sev-1 or Sev-2 incidents open in PagerDuty service `tradepulse-prod`.
+4. Release commander has uploaded the metric diff snapshot to `reports/release_decisions/<deployment_id>/phase_<n>/`.
+
+The guardrail risk score is computed as the sum of risk weights for soft-breached metrics using `analytics/calc_guardrail_score.py`:
+
+| Metric Category | Risk Weight |
+|-----------------|-------------|
+| Core stability metric | 1.0 |
+| Business impact metric | 0.8 |
+| Data quality metric | 1.2 |
+
+Any single soft breach persisting for more than 10 consecutive minutes escalates to the incident commander for a go/no-go decision.
+
 ### Data Quality and Risk Controls
 - **Schema Guardrails:** Any breaking change detected by schema diff (`schemas/*`) aborts deployment pre-flight.
 - **Reference Data Freshness:** `data.refdata.age_minutes` must remain below 5 minutes; breach triggers rollback.
@@ -61,6 +91,14 @@ All metrics are computed as rolling windows over the phase duration with 2-minut
 3. Soft threshold alerts route to the release commander Slack channel (`#deploy-ops`). Manual override requires documented rationale in the release decision log.
 
 Rollback automation is tested quarterly in the chaos game day (see `docs/resilience.md`).
+
+### Rollback Decision Matrix
+| Trigger | Automated Action | Human in the Loop | Additional Logging |
+|---------|------------------|-------------------|--------------------|
+| Hard threshold breach | Immediate rollback workflow | Incident commander acknowledges in PagerDuty | Metric snapshot + Kubernetes event dump stored in `reports/release_decisions/<deployment_id>/rollback/`. |
+| Repeated soft threshold (≥3 breaches within 15 minutes) | Hold at current traffic split | Release commander decides within 10 minutes | Append rationale to decision log, export Grafana comparison PNGs. |
+| Observability gap (missing metrics, >2 consecutive samples) | Freeze phase advancement, raise warning | SRE on-call validates exporters | Prometheus query + scrape status appended to log. |
+| Manual abort request | Drain canary pods, revert manifests | Release commander approval required | Change ticket cross-referenced in log entry. |
 
 ## Observability and Alerting Integration
 
@@ -95,6 +133,11 @@ Decision logs are immutable once GA is reached and retained for at least 12 mont
 - **Daily Canary Report:** Generated automatically by `reports/generate_canary_report.py`. Summarizes guardrail adherence, breaches, and rollback outcomes. Distributed to trading ops, risk, and product leads.
 - **Monthly Safety Review:** Aggregates canary performance across releases, highlights recurring guardrail breaches, and updates threshold proposals.
 - **Regulatory Archive:** Export sanitized reports and decision logs to the compliance vault (`infra/compliance/retention_bucket`) within 24 hours of GA.
+
+### Report Quality Gates
+- Reports must include distribution plots for `execution.match.latency.p99_ms` and `pnl.realized.delta_bps` with control overlays.
+- Any rollback event requires attachment of the final Alertmanager payload and PagerDuty timeline.
+- Compliance vault uploads are verified via checksum comparison logged in `reports/release_decisions/<deployment_id>/checksums.txt`.
 
 ## Governance and Continuous Improvement
 
