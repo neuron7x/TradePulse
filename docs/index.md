@@ -76,6 +76,9 @@ focused document so contributors can quickly find the details they need.
 - Consult the [Operational Excellence Handbook](operational_handbook.md) for a
   single index of runbooks, performance budgets, data lake procedures, and
   governance guardrails.
+- Enforce reproducible analytics with the
+  [Numeric Determinism Testing Playbook](numeric_determinism.md), covering
+  cross-platform drift detection and floating-point stability controls.
 - Enforce automation and exception handling with the
   [Quality Gates and Automated Governance guide](quality_gates.md).
 - Rehearse incident response with the dedicated
