@@ -220,7 +220,7 @@ class CrossExchangeArbitrageEngine:
             return None
         if notional > Decimal("0"):
             edge = net_profit / notional
-            if edge < self._min_edge and net_profit < self._min_profit:
+            if edge < self._min_edge:
                 return None
         if net_profit < self._min_profit:
             return None
