@@ -8,7 +8,13 @@ from .event_bus import (
     NATSEventBus,
 )
 from .idempotency import EventIdempotencyStore, InMemoryEventIdempotencyStore
-from .schema_registry import EventSchemaRegistry, SchemaCompatibilityError, SchemaFormat
+from .contracts import SchemaContractError, SchemaContractValidator
+from .schema_registry import (
+    EventSchemaRegistry,
+    SchemaCompatibilityError,
+    SchemaFormat,
+    SchemaFormatCoverageError,
+)
 
 __all__ = [
     "EventBusConfig",
@@ -19,6 +25,9 @@ __all__ = [
     "EventSchemaRegistry",
     "SchemaFormat",
     "SchemaCompatibilityError",
+    "SchemaFormatCoverageError",
+    "SchemaContractValidator",
+    "SchemaContractError",
     "EventIdempotencyStore",
     "InMemoryEventIdempotencyStore",
 ]
