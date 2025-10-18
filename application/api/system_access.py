@@ -12,7 +12,10 @@ from typing import Any, Awaitable, Callable, Mapping, Sequence
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from application.api.authorization import require_roles
+from application.api.authorization import (
+    get_authorization_gateway,
+    require_permission,
+)
 from application.api.security import verify_request_identity
 from application.settings import NotificationSettings
 from application.system import TradePulseSystem
@@ -24,6 +27,7 @@ from observability.notifications import (
     NotificationDispatcher,
     SlackNotifier,
 )
+from application.security.rbac import AuthorizationGateway
 from src.admin.remote_control import AdminIdentity
 
 
@@ -249,6 +253,29 @@ class _PositionNormaliser:
             current_price=current_price,
             unrealized_pnl=unrealized,
         )
+
+
+def _trade_attributes_provider(request: Request, _: AdminIdentity) -> Mapping[str, Any]:
+    """Extract trade-related attributes for RBAC evaluation."""
+
+    def _normalise_header(name: str) -> str | None:
+        value = request.headers.get(name)
+        if value is None:
+            return None
+        candidate = value.strip()
+        return candidate or None
+
+    attributes: dict[str, Any] = {}
+
+    environment = _normalise_header("X-Trade-Environment")
+    if environment is not None:
+        attributes["environment"] = environment
+
+    desk = _normalise_header("X-Trade-Desk")
+    if desk is not None:
+        attributes["desk"] = desk
+
+    return attributes
 
 
 class SystemAccess:
@@ -561,6 +588,7 @@ def create_system_app(
     ) = None,
     reader_roles: Sequence[str] = ("system:read",),
     trader_roles: Sequence[str] = ("system:trade",),
+    authorization_gateway: AuthorizationGateway | None = None,
     notification_dispatcher: NotificationDispatcher | None = None,
     notification_settings: NotificationSettings | None = None,
     log_sink: Callable[[dict[str, Any]], None] | None = None,
@@ -572,8 +600,31 @@ def create_system_app(
         configure_logging(level=log_level, sink=log_sink)
 
     base_dependency = identity_dependency or verify_request_identity()
-    reader_dependency = require_roles(reader_roles, identity_dependency=base_dependency)
-    trader_dependency = require_roles(trader_roles, identity_dependency=base_dependency)
+
+    def _gateway_dependency() -> AuthorizationGateway:
+        if authorization_gateway is not None:
+            return authorization_gateway
+        return get_authorization_gateway()
+
+    reader_dependency = require_permission(
+        "system.status",
+        "read",
+        identity_dependency=base_dependency,
+        gateway_dependency=_gateway_dependency,
+    )
+    positions_dependency = require_permission(
+        "system.positions",
+        "read",
+        identity_dependency=base_dependency,
+        gateway_dependency=_gateway_dependency,
+    )
+    trader_dependency = require_permission(
+        "orders",
+        "submit",
+        identity_dependency=base_dependency,
+        attributes_provider=_trade_attributes_provider,
+        gateway_dependency=_gateway_dependency,
+    )
 
     notifier = notification_dispatcher or _build_notification_dispatcher(
         notification_settings
@@ -594,7 +645,7 @@ def create_system_app(
 
     @app.get("/api/v1/positions", response_model=PositionsResponse, tags=["system"])
     async def read_positions(
-        identity: AdminIdentity = Depends(reader_dependency),
+        identity: AdminIdentity = Depends(positions_dependency),
         access: SystemAccess = Depends(_get_access),
     ) -> PositionsResponse:
         return await access.list_positions(identity=identity)
