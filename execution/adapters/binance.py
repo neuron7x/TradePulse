@@ -152,7 +152,7 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         params: Dict[str, Any],
         json_payload: Dict[str, Any] | None,
         headers: Dict[str, str],
-    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str]]:
+    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str], Any | None]:
         params = dict(params)
         self._ensure_time_sync()
         params.setdefault("timestamp", str(self._timestamp_ms()))
@@ -168,7 +168,7 @@ class BinanceRESTConnector(RESTWebSocketConnector):
             self._api_secret.encode("utf-8"), query.encode("utf-8"), hashlib.sha256
         ).hexdigest()
         params["signature"] = signature
-        return params, None, headers
+        return params, None, headers, None
 
     def _order_endpoint(self) -> str:
         return "/api/v3/order"

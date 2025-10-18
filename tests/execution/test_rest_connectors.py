@@ -575,7 +575,11 @@ def base64_secret(secret: str) -> str:
     return base64.b64encode(secret.encode("utf-8")).decode("utf-8")
 
 
-def _kraken_signature(secret: bytes, path: str, params: httpx.QueryParams) -> str:
+def _kraken_signature(secret: bytes, path: str, request: httpx.Request) -> str:
+    if request.content:
+        params = httpx.QueryParams(request.content.decode("utf-8"))
+    else:
+        params = request.url.params
     ordered = dict(params.multi_items())
     nonce = ordered.get("nonce", "")
     payload = urlencode(ordered)
@@ -598,13 +602,14 @@ def test_kraken_rest_connector_signs_and_streams(
         if request.method != "POST":
             raise AssertionError("Kraken private endpoints must use POST")
         if path.endswith("/GetWebSocketsToken"):
-            expected = _kraken_signature(raw_secret, path, request.url.params)
+            expected = _kraken_signature(raw_secret, path, request)
             assert request.headers["API-Sign"] == expected
             return httpx.Response(200, json={"result": {"token": "ws-token"}})
-        expected_signature = _kraken_signature(raw_secret, path, request.url.params)
+        expected_signature = _kraken_signature(raw_secret, path, request)
         assert request.headers["API-Sign"] == expected_signature
         if path.endswith("/AddOrder"):
-            params = request.url.params
+            params = httpx.QueryParams(request.content.decode("utf-8"))
+            assert not request.url.params
             assert params["pair"] == "BTCUSD"
             assert params["ordertype"] == "limit"
             return httpx.Response(

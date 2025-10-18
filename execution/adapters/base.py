@@ -113,7 +113,7 @@ class RESTWebSocketConnector(ExecutionConnector):
         params: Dict[str, Any],
         json_payload: Dict[str, Any] | None,
         headers: Dict[str, str],
-    ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, str]]:
+    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str], Any | None]:
         raise NotImplementedError
 
     def _order_endpoint(self) -> str:
@@ -206,8 +206,14 @@ class RESTWebSocketConnector(ExecutionConnector):
         request_params = dict(params or {})
         request_json = dict(json_payload) if json_payload is not None else None
         headers = self._default_headers()
+        data_payload: Any | None = None
         if signed:
-            request_params, request_json, headers = self._sign_request(
+            (
+                request_params,
+                request_json,
+                headers,
+                data_payload,
+            ) = self._sign_request(
                 method,
                 path,
                 params=request_params,
@@ -219,6 +225,7 @@ class RESTWebSocketConnector(ExecutionConnector):
             path,
             params=request_params,
             json=request_json,
+            data=data_payload,
             headers=headers,
         )
         if response.status_code == 429:

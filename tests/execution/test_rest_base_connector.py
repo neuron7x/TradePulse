@@ -29,7 +29,7 @@ class DummyRESTConnector(RESTWebSocketConnector):
         return dict(credentials or {})
 
     def _sign_request(self, method: str, path: str, *, params, json_payload, headers):  # type: ignore[override]
-        return params, json_payload, headers
+        return params, json_payload, headers, None
 
     def _order_endpoint(self) -> str:
         return "/order"

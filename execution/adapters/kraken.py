@@ -109,15 +109,15 @@ class KrakenRESTConnector(RESTWebSocketConnector):
         params: Dict[str, Any],
         json_payload: Dict[str, Any] | None,
         headers: Dict[str, str],
-    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str]]:
+    ) -> tuple[Dict[str, Any], Dict[str, Any] | None, Dict[str, str], Any | None]:
         method = method.upper()
         if method != "POST":
-            return params, json_payload, headers
+            return params, json_payload, headers, None
         nonce = str(int(time.time() * 1000))
-        params = dict(params)
-        params.setdefault("nonce", nonce)
-        postdata = urlencode(params)
-        sha256_hash = hashlib.sha256((params["nonce"] + postdata).encode("utf-8")).digest()
+        payload = dict(params)
+        payload.setdefault("nonce", nonce)
+        postdata = urlencode(payload)
+        sha256_hash = hashlib.sha256((payload["nonce"] + postdata).encode("utf-8")).digest()
         signature = hmac.new(
             self._api_secret,
             path.encode("utf-8") + sha256_hash,
@@ -126,10 +126,7 @@ class KrakenRESTConnector(RESTWebSocketConnector):
         headers = dict(headers)
         headers["Content-Type"] = "application/x-www-form-urlencoded; charset=utf-8"
         headers["API-Sign"] = base64.b64encode(signature).decode("utf-8")
-        # Kraken expects form payloads, but httpx will encode params as query string.
-        # We rely on the transport to interpret params for testing while preserving
-        # signature parity via the encoded payload.
-        return params, None, headers
+        return {}, None, headers, payload
 
     def _order_endpoint(self) -> str:
         return "/0/private/AddOrder"
