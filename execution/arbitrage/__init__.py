@@ -1,6 +1,13 @@
 """Cross-exchange arbitrage coordination primitives."""
 
 from .engine import CrossExchangeArbitrageEngine, ArbitrageOpportunity
+from .inventory import (
+    InventoryError,
+    InventoryManager,
+    InventoryTarget,
+    RebalanceLeg,
+    RebalancePlan,
+)
 from .liquidity import LiquidityLedger
 from .capital import AtomicCapitalMover, CapitalTransferPlan
 from .metrics import LatencyTracker
@@ -12,7 +19,12 @@ __all__ = [
     "CapitalTransferPlan",
     "CrossExchangeArbitrageEngine",
     "ExchangePriceState",
+    "InventoryError",
+    "InventoryManager",
+    "InventoryTarget",
     "LatencyTracker",
     "LiquidityLedger",
     "Quote",
+    "RebalanceLeg",
+    "RebalancePlan",
 ]

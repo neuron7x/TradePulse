@@ -65,6 +65,10 @@ class LiquidityLedger:
                 state = _LiquidityState(base_available, quote_available)
                 self._balances[key] = state
             else:
+                if state.base_reserved > base_available or state.quote_reserved > quote_available:
+                    raise LiquidityError(
+                        "cannot set balances below outstanding reservations"
+                    )
                 state.base_available = base_available
                 state.quote_available = quote_available
 
@@ -149,6 +153,8 @@ class LiquidityLedger:
             state.quote_reserved -= reservation.quote_amount
             state.base_available -= reservation.base_amount
             state.quote_available -= reservation.quote_amount
+            if state.base_available < Decimal("0") or state.quote_available < Decimal("0"):
+                raise LiquidityError("negative balance after commit")
 
     def apply_fill(
         self,
