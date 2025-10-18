@@ -46,8 +46,8 @@ def test_normalize_ticks_resamples_to_ohlcv() -> None:
     assert metadata.kind == "tick"
     assert metadata.frequency == "1min"
     assert metadata.duplicates_dropped == 1
-    assert metadata.missing_intervals == 2
-    assert metadata.filled_intervals == 2
+    assert metadata.missing_intervals == 1
+    assert metadata.filled_intervals == 1
     assert metadata.metadata["symbol"] == "ETHUSD"
     assert metadata.metadata["venue"] == "coinbase"
 

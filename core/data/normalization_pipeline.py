@@ -156,12 +156,37 @@ def normalize_market_data(
         duplicates_dropped = 0
 
     resolved_freq, inferred = _resolve_frequency(prepared.index, config.frequency)
-    reindexed, missing = _reindex(prepared, resolved_freq)
-    filled = _fill_gaps(reindexed, config.fill_method)
 
     if config.kind == "tick":
-        ohlcv = _from_ticks(filled, config, resolved_freq)
+        ohlcv_raw = _from_ticks(prepared, config, resolved_freq)
+        if ohlcv_raw.empty:
+            expected_index = pd.DatetimeIndex([], tz=prepared.index.tz)
+            missing = 0
+            reindexed = ohlcv_raw
+        else:
+            start = ohlcv_raw.index[0]
+            end = ohlcv_raw.index[-1]
+            expected_index = pd.date_range(
+                start=start,
+                end=end,
+                freq=resolved_freq,
+                tz=start.tz,
+            )
+            price_columns = [
+                column for column in ("open", "high", "low", "close") if column in ohlcv_raw
+            ]
+            if price_columns:
+                present_mask = ~ohlcv_raw[price_columns].isna().all(axis=1)
+                observed = ohlcv_raw.index[present_mask]
+            else:
+                observed = ohlcv_raw.index
+            missing = int(expected_index.difference(observed).shape[0])
+            reindexed = ohlcv_raw.reindex(expected_index)
+        filled = _fill_gaps(reindexed, config.fill_method)
+        ohlcv = _ensure_ohlcv_columns(filled)
     else:
+        reindexed, missing = _reindex(prepared, resolved_freq)
+        filled = _fill_gaps(reindexed, config.fill_method)
         ohlcv = _ensure_ohlcv_columns(filled)
 
     metadata = MarketNormalizationMetadata(
@@ -264,9 +289,36 @@ def _from_ticks(
     l1 = resample_ticks_to_l1(
         working[["price", "size"]], freq=freq, price_col="price", size_col="size"
     )
+
+    counts = frame.resample(freq).size()
+    counts_index = pd.DatetimeIndex(counts.index)
+    l1_index = pd.DatetimeIndex(l1.index)
+
+    if counts_index.tz is None and l1_index.tz is not None:
+        counts.index = counts_index.tz_localize(l1_index.tz)
+    elif counts_index.tz is not None and l1_index.tz is not None and counts_index.tz != l1_index.tz:
+        counts.index = counts_index.tz_convert(l1_index.tz)
+    empty_bins = counts[counts == 0].index
+    if not empty_bins.empty:
+        l1.loc[empty_bins, "mid_price"] = np.nan
+        l1.loc[empty_bins, "last_size"] = 0.0
+
     ohlcv = resample_l1_to_ohlcv(
         l1, freq=freq, price_col="mid_price", size_col="last_size"
     )
+
+    if config.volume_col in frame.columns:
+        volume = (
+            frame[config.volume_col]
+            .resample(freq)
+            .sum(min_count=1)
+            .reindex(ohlcv.index)
+            .fillna(0.0)
+        )
+        ohlcv["volume"] = volume
+    else:
+        ohlcv["volume"] = 0.0
+
     return _ensure_ohlcv_columns(ohlcv)
 
 
