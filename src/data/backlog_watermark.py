@@ -258,6 +258,7 @@ class WatermarkBacklog:
         return {source: list(samples) for source, samples in self._delay_samples.items()}
 
     def _update_watermark(self) -> None:
+        self._prune_inactive_sources()
         if not self._latest_event_time:
             self._watermark = None
             return
@@ -282,6 +283,23 @@ class WatermarkBacklog:
         if retained:
             heapq.heapify(retained)
         self._heap = retained
+
+    def _prune_inactive_sources(self) -> None:
+        if len(self._latest_event_time) <= 1:
+            return
+        newest_event_time = max(self._latest_event_time.values())
+        cutoff = newest_event_time - self._expiration
+        stale_sources = [
+            source
+            for source, last_event_time in self._latest_event_time.items()
+            if last_event_time < cutoff
+        ]
+        if not stale_sources:
+            return
+        for source in stale_sources:
+            self._latest_event_time.pop(source, None)
+            self._progress.pop(source, None)
+            self._last_index.pop(source, None)
 
 
 __all__ = [

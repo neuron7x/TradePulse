@@ -13,6 +13,17 @@ def _dt(seconds: float) -> datetime:
     return base + timedelta(seconds=seconds)
 
 
+class _FakeClock:
+    def __init__(self, start: datetime) -> None:
+        self._now = start
+
+    def advance(self, delta: timedelta) -> None:
+        self._now += delta
+
+    def __call__(self) -> datetime:
+        return self._now
+
+
 def test_watermark_backlog_orders_streams_and_filters_expired() -> None:
     backlog = WatermarkBacklog(
         allowed_lateness=timedelta(seconds=2),
@@ -136,4 +147,25 @@ def test_resampling_and_synchronisation_edge_cases() -> None:
     aligned = align_timeframes({"alpha": alpha_frame, "beta": beta_frame}, reference="alpha")
     assert aligned["alpha"].index.equals(aligned["beta"].index)
     assert aligned["alpha"].index.is_monotonic_increasing
+
+
+def test_inactive_sources_stop_blocking_watermark_progress() -> None:
+    clock = _FakeClock(_dt(0))
+    backlog = WatermarkBacklog(
+        allowed_lateness=timedelta(seconds=1),
+        expiration=timedelta(seconds=5),
+        clock=clock,
+    )
+    backlog.observe("alpha", _dt(0), payload={})
+    backlog.observe("beta", _dt(0), payload={})
+
+    clock.advance(timedelta(seconds=10))
+    backlog.observe("alpha", _dt(10), payload={})
+    clock.advance(timedelta(seconds=2))
+    backlog.observe("alpha", _dt(12), payload={})
+
+    ready = backlog.drain_ready()
+    ready_times = [event.event_time for event in ready]
+    assert _dt(10) in ready_times
+    assert backlog.watermark == _dt(11)
 
