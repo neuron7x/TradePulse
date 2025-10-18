@@ -91,10 +91,15 @@ from pathlib import Path
 import polars as pl
 
 from core.data.polars_pipeline import (
+    apply_vectorized,
+    cache_lazy_frame,
     collect_streaming,
     enable_global_string_cache,
+    enforce_schema,
     lazy_column_zero_copy,
+    profile_lazy_frame,
     scan_lazy,
+    summarize_parquet_dataset,
     use_arrow_memory_pool,
 )
 
@@ -102,19 +107,33 @@ from core.data.polars_pipeline import (
 enable_global_string_cache(True)
 
 lazy_scan = scan_lazy(
-    Path("data/trades.csv"),
+    Path("data/trades"),
     columns=["ts", "price", "volume"],
-    memory_map=True,
+    partition_filters={"symbol": ["AAPL", "MSFT"]},
     row_count_name="row_id",
+    cache=True,
 )
 
 # Apply feature engineering lazily; nothing is evaluated yet
-lazy_features = lazy_scan.with_columns(
-    [
-        pl.col("price").pct_change().alias("returns"),
-        pl.col("volume").rolling_mean(window_size=10).alias("vol_ma"),
-    ]
+lazy_features = apply_vectorized(
+    lazy_scan,
+    expressions={
+        "returns": lambda pl: pl.col("price").pct_change(),
+        "vol_ma": lambda pl: pl.col("volume").rolling_mean(window_size=10),
+    },
 )
+
+# Ensure downstream consumers see stable dtypes
+lazy_features = enforce_schema(
+    lazy_features,
+    {
+        "returns": float,
+        "vol_ma": float,
+    },
+)
+
+# Cache shared intermediates for reuse by multiple sinks
+lazy_features = cache_lazy_frame(lazy_features)
 
 # Route allocations through a dedicated Arrow memory pool to avoid fragmentation
 import pyarrow as pa
@@ -124,14 +143,23 @@ with use_arrow_memory_pool(pa.proxy_memory_pool(pa.default_memory_pool())):
 
 # Extract numpy views with zero-copy hand-off between stages
 returns = lazy_column_zero_copy(lazy_features, "returns")
+
+# Inspect plans and parquet metadata for hot-path diagnostics
+profile = profile_lazy_frame(lazy_features)
+parquet_summaries = summarize_parquet_dataset(Path("data/trades"))
 ```
 
 **Key benefits:**
 
-- `scan_lazy` uses `pl.scan_csv` so files are streamed in batches.
+- `scan_lazy` automatically detects parquet layouts, applies column/predicate
+  pushdown, and prunes partitions before hitting the filesystem.
+- `apply_vectorized` keeps transformations lazy and SIMD-friendly.
+- `cache_lazy_frame` avoids recomputing shared branches across multiple sinks.
 - `collect_streaming(..., streaming=True)` keeps peak memory flat on wide datasets.
 - `lazy_column_zero_copy` hands Arrow buffers to NumPy without copying so downstream
   indicator kernels run on the same memory.
+- `profile_lazy_frame` and `summarize_parquet_dataset` surface hot-path plans,
+  compression codecs, and file sizes for rapid diagnostics.
 - The optional `use_arrow_memory_pool` context keeps Arrow allocations inside a
   shared pool, reducing fragmentation when many tasks run concurrently.
 
