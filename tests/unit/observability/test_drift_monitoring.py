@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pytest
@@ -23,8 +23,8 @@ from observability.drift import (
 )
 
 
-def _utc(minutes: int = 0) -> dt.datetime:
-    return dt.datetime(2024, 1, 1, 12, minutes, tzinfo=dt.timezone.utc)
+def _utc(minutes: int = 0) -> datetime:
+    return datetime(2024, 1, 1, 12, minutes, tzinfo=timezone.utc)
 
 
 def test_drift_detector_evaluates_metrics() -> None:
@@ -63,7 +63,7 @@ def test_quality_guardrail_requires_ordered_bounds() -> None:
 
 def test_retraining_trigger_requires_multiple_events() -> None:
     trigger = RetrainingTrigger(
-        window=dt.timedelta(minutes=10), min_events=2, min_features=1
+        window=timedelta(minutes=10), min_events=2, min_features=1
     )
     first = trigger.evaluate(_utc(0), ["feature_a"])
     assert not first.triggered
@@ -133,7 +133,7 @@ def test_monitoring_service_generates_alerts_and_dashboard() -> None:
     )
     remediation_planner = RemediationPlanner()
     retraining_trigger = RetrainingTrigger(
-        window=dt.timedelta(minutes=30), min_events=1, min_features=1
+        window=timedelta(minutes=30), min_events=1, min_features=1
     )
     isolation_planner = ImpactIsolationPlanner(quarantine_severities=("major", "critical"))
     change_log = FeatureChangeLog(max_records=10)
