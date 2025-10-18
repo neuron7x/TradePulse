@@ -276,6 +276,7 @@ def test_trader_role_is_required(system: TradePulseSystem) -> None:
 def test_order_submission_emits_notification(
     system: TradePulseSystem,
     identity_dependency: Callable[[], Awaitable[AdminIdentity]],
+    authorization_gateway: AuthorizationGateway,
 ) -> None:
     events: list[dict[str, Any]] = []
 
@@ -301,6 +302,7 @@ def test_order_submission_emits_notification(
     app = create_system_app(
         system,
         identity_dependency=identity_dependency,
+        authorization_gateway=authorization_gateway,
         notification_dispatcher=recorder,
     )
     client = TestClient(app)

@@ -258,15 +258,21 @@ class _PositionNormaliser:
 def _trade_attributes_provider(request: Request, _: AdminIdentity) -> Mapping[str, Any]:
     """Extract trade-related attributes for RBAC evaluation."""
 
-    headers = request.headers
+    def _normalise_header(name: str) -> str | None:
+        value = request.headers.get(name)
+        if value is None:
+            return None
+        candidate = value.strip()
+        return candidate or None
+
     attributes: dict[str, Any] = {}
 
-    environment = headers.get("X-Trade-Environment")
-    if environment:
+    environment = _normalise_header("X-Trade-Environment")
+    if environment is not None:
         attributes["environment"] = environment
 
-    desk = headers.get("X-Trade-Desk")
-    if desk:
+    desk = _normalise_header("X-Trade-Desk")
+    if desk is not None:
         attributes["desk"] = desk
 
     return attributes

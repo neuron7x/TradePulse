@@ -23,7 +23,6 @@ _AUDIT_SECRET_ENV = "TRADEPULSE_RBAC_AUDIT_SECRET"
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _DEFAULT_POLICY_PATH = _PROJECT_ROOT / "configs" / "rbac" / "policy.yaml"
 _REPO_ROOT = _PROJECT_ROOT
-_DEFAULT_AUDIT_SECRET = "rbac-signing-secret"
 
 
 def _normalise_roles(roles: Iterable[str]) -> tuple[str, ...]:
@@ -84,16 +83,25 @@ def require_roles(
     return _dependency
 
 
+def _resolve_audit_secret() -> str:
+    secret = os.getenv(_AUDIT_SECRET_ENV)
+    if secret is None:
+        raise RuntimeError(
+            "TRADEPULSE_RBAC_AUDIT_SECRET must be set to enable audit logging"
+        )
+    candidate = secret.strip()
+    if not candidate:
+        raise RuntimeError("RBAC audit secret cannot be empty or whitespace")
+    if len(candidate) < 16:
+        raise ValueError("RBAC audit secret must be at least 16 characters long")
+    return candidate
+
+
 def _build_default_gateway() -> AuthorizationGateway:
     policy_path = Path(os.getenv(_POLICY_PATH_ENV, str(_DEFAULT_POLICY_PATH)))
     if not policy_path.is_absolute():
         policy_path = _REPO_ROOT / policy_path
-    secret = os.getenv(_AUDIT_SECRET_ENV)
-    if secret is None or not secret:
-        secret = _DEFAULT_AUDIT_SECRET
-    if len(secret) < 16:
-        raise ValueError("RBAC audit secret must be at least 16 characters long")
-    audit_logger = AuditLogger(secret=secret)
+    audit_logger = AuditLogger(secret=_resolve_audit_secret())
     return build_authorization_gateway(policy_path=policy_path, audit_logger=audit_logger)
 
 
