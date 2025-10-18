@@ -1,5 +1,16 @@
 """Observability helpers for TradePulse."""
 
+from .finops import (  # noqa: F401
+    AlertSink,
+    Budget,
+    BudgetStatus,
+    CostReport,
+    FinOpsAlert,
+    FinOpsController,
+    NotificationAlertSink,
+    OptimizationRecommendation,
+    ResourceUsageSample,
+)
 from .health import HealthServer  # noqa: F401
 from .logging import StructuredLogFormatter, configure_logging  # noqa: F401
 from .notifications import (  # noqa: F401
@@ -20,6 +31,15 @@ from .tracing import (  # noqa: F401
 
 __all__ = [
     "HealthServer",
+    "ResourceUsageSample",
+    "Budget",
+    "BudgetStatus",
+    "CostReport",
+    "OptimizationRecommendation",
+    "FinOpsAlert",
+    "AlertSink",
+    "NotificationAlertSink",
+    "FinOpsController",
     "configure_logging",
     "StructuredLogFormatter",
     "EmailSender",
