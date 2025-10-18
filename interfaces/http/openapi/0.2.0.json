@@ -2167,11 +2167,11 @@
   "servers": [
     {
       "description": "Production",
-      "url": "https://api.tradepulse.example.com"
+      "url": "https://api.tradepulse.example.com/v1"
     },
     {
       "description": "Staging",
-      "url": "https://staging-api.tradepulse.example.com"
+      "url": "https://staging-api.tradepulse.example.com/v1"
     }
   ]
 }
