@@ -291,6 +291,13 @@ def _from_ticks(
     )
 
     counts = frame.resample(freq).size()
+    counts_index = pd.DatetimeIndex(counts.index)
+    l1_index = pd.DatetimeIndex(l1.index)
+
+    if counts_index.tz is None and l1_index.tz is not None:
+        counts.index = counts_index.tz_localize(l1_index.tz)
+    elif counts_index.tz is not None and l1_index.tz is not None and counts_index.tz != l1_index.tz:
+        counts.index = counts_index.tz_convert(l1_index.tz)
     empty_bins = counts[counts == 0].index
     if not empty_bins.empty:
         l1.loc[empty_bins, "mid_price"] = np.nan
