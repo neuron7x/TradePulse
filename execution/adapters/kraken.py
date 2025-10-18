@@ -13,7 +13,12 @@ from urllib.parse import urlencode
 
 from domain import Order, OrderSide, OrderStatus, OrderType
 
-from .base import RESTWebSocketConnector
+from .base import (
+    RESTWebSocketConnector,
+    _coerce_float,
+    _coerce_optional_float,
+    _first_present,
+)
 from .plugin import (
     AdapterCheckResult,
     AdapterContract,
@@ -160,14 +165,19 @@ class KrakenRESTConnector(RESTWebSocketConnector):
         self, payload: Mapping[str, Any], *, original: Order | None = None
     ) -> Order:
         data = self._extract_order_payload(payload)
-        symbol = str(data.get("pair") or data.get("symbol") or "").upper()
+        symbol_value = _first_present(data, "pair", "symbol")
+        symbol = str(symbol_value).strip().upper() if symbol_value is not None else ""
         if not symbol and original is not None:
             symbol = original.symbol
         if not symbol:
             raise ValueError("Order payload missing symbol")
-        side_value = str(data.get("type") or data.get("side") or "buy").lower()
-        order_type = self._coerce_order_type(str(data.get("ordertype") or data.get("type")), original)
-        raw_id = data.get("ordertxid") or data.get("order_id") or data.get("txid")
+        side_value = str(
+            _first_present(data, "type", "side") or "buy"
+        ).strip().lower()
+        order_type = self._coerce_order_type(
+            str(_first_present(data, "ordertype", "type")), original
+        )
+        raw_id = _first_present(data, "ordertxid", "order_id", "txid")
         order_id = ""
         if isinstance(raw_id, Iterable) and not isinstance(raw_id, (str, bytes)):
             txids_list = [str(item) for item in raw_id if item]
@@ -178,28 +188,27 @@ class KrakenRESTConnector(RESTWebSocketConnector):
             order_id = original.order_id
         if not order_id:
             raise ValueError("Order payload missing identifier")
-        quantity_value = data.get("vol") or data.get("volume")
-        quantity = float(quantity_value) if quantity_value not in (None, "") else (
-            original.quantity if original else 0.0
+        quantity_value = _first_present(data, "vol", "volume")
+        quantity = _coerce_float(
+            quantity_value,
+            default=float(original.quantity if original else 0.0),
         )
-        filled_value = data.get("vol_exec") or data.get("filled")
-        filled_quantity = (
-            float(filled_value)
-            if filled_value not in (None, "")
-            else (original.filled_quantity if original else 0.0)
+        if quantity <= 0 and original is not None and original.quantity > 0:
+            quantity = float(original.quantity)
+        filled_value = _first_present(data, "vol_exec", "filled")
+        filled_quantity = _coerce_float(
+            filled_value,
+            default=float(original.filled_quantity if original else 0.0),
         )
-        price_value = data.get("price") or data.get("limitprice") or data.get("avg_price")
-        price = float(price_value) if price_value not in (None, "") else None
-        avg_price_value = data.get("avg_price") or data.get("price")
-        average_price = None
-        if avg_price_value not in (None, ""):
-            try:
-                candidate = float(avg_price_value)
-            except (TypeError, ValueError):
-                candidate = None
-            if candidate and candidate > 0:
-                average_price = candidate
-        status_value = str(data.get("status") or data.get("state") or "open").lower()
+        price_value = _first_present(data, "price", "limitprice", "avg_price")
+        price = _coerce_optional_float(price_value)
+        if price is None and original is not None:
+            price = float(original.price) if original.price is not None else None
+        avg_price_value = _first_present(data, "avg_price", "price")
+        average_price = _coerce_optional_float(avg_price_value)
+        status_value = str(
+            _first_present(data, "status", "state") or "open"
+        ).strip().lower()
         status = _STATUS_MAP.get(status_value, OrderStatus.OPEN)
         if filled_quantity and filled_quantity < quantity and status is OrderStatus.FILLED:
             status = OrderStatus.PARTIALLY_FILLED
@@ -232,15 +241,15 @@ class KrakenRESTConnector(RESTWebSocketConnector):
         positions: list[dict] = []
         if isinstance(result, Mapping):
             for asset, value in result.items():
-                try:
-                    qty = float(value)
-                except (TypeError, ValueError):
-                    continue
+                qty = _coerce_optional_float(value) or 0.0
                 if qty <= 0:
+                    continue
+                symbol = str(asset).strip().upper()
+                if not symbol:
                     continue
                 positions.append(
                     {
-                        "symbol": str(asset).upper(),
+                        "symbol": symbol,
                         "qty": qty,
                         "side": "long" if qty >= 0 else "short",
                         "price": 0.0,

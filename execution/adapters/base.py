@@ -25,6 +25,59 @@ from domain import Order
 from execution.connectors import ExecutionConnector, OrderError, TransientOrderError
 
 
+def _first_present(payload: Mapping[str, Any], *keys: str) -> Any:
+    """Return the first value found for ``keys`` in ``payload``.
+
+    The lookup preserves falsy but meaningful values such as ``0`` while
+    treating absent keys uniformly.  The function is intentionally tolerant of
+    non-mapping payloads because the execution adapters routinely deal with
+    partially structured API responses.
+    """
+
+    for key in keys:
+        if key in payload:
+            return payload[key]
+    return None
+
+
+def _coerce_optional_float(value: Any) -> float | None:
+    """Best-effort conversion of arbitrary payload values into ``float``.
+
+    Values that cannot be interpreted as numeric inputs (including booleans,
+    blank strings, nested structures, etc.) yield ``None`` instead of raising.
+    This makes downstream parsing logic resilient to schema drift and malformed
+    exchange responses uncovered by fuzz/property tests.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        candidate = value.strip()
+        if not candidate:
+            return None
+        try:
+            return float(candidate)
+        except ValueError:
+            return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _coerce_float(value: Any, *, default: float) -> float:
+    """Return ``value`` converted to ``float`` or ``default`` on failure."""
+
+    parsed = _coerce_optional_float(value)
+    if parsed is None:
+        return default
+    return parsed
+
+
 class SlidingWindowRateLimiter:
     """Simple sliding-window rate limiter with blocking semantics."""
 

@@ -8,12 +8,17 @@ import hmac
 import os
 import threading
 import time
-from typing import Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping
 from urllib.parse import urlencode
 
 from domain import Order, OrderSide, OrderStatus, OrderType
 
-from .base import RESTWebSocketConnector
+from .base import (
+    RESTWebSocketConnector,
+    _coerce_float,
+    _coerce_optional_float,
+    _first_present,
+)
 from .plugin import (
     AdapterCheckResult,
     AdapterContract,
@@ -211,61 +216,55 @@ class BinanceRESTConnector(RESTWebSocketConnector):
     def _parse_order(
         self, payload: Mapping[str, Any], *, original: Order | None = None
     ) -> Order:
-        symbol = str(payload.get("symbol") or (original.symbol if original else ""))
+        symbol_value = _first_present(payload, "symbol")
+        symbol = (str(symbol_value).strip() if symbol_value is not None else "") or (
+            original.symbol if original else ""
+        )
         if not symbol:
             raise ValueError("Order payload did not include symbol")
         side = str(
-            payload.get("side")
-            or payload.get("S")
+            _first_present(payload, "side", "S")
             or (original.side.value if original else "buy")
-        ).lower()
+        ).strip().lower()
         order_type = self._coerce_order_type(
             str(
-                payload.get("type")
-                or payload.get("o")
+                _first_present(payload, "type", "o")
                 or (original.order_type.value if original else "market")
             ),
             original,
         )
-        order_id = str(
-            payload.get("orderId") or payload.get("i") or payload.get("order_id") or ""
-        )
+        order_id_value = _first_present(payload, "orderId", "i", "order_id")
+        order_id = str(order_id_value).strip() if order_id_value is not None else ""
         if not order_id:
             raise ValueError("Order payload missing identifier")
-        quantity = float(
-            payload.get("origQty")
-            or payload.get("q")
-            or (original.quantity if original else 0.0)
+        quantity_value = _first_present(payload, "origQty", "q")
+        quantity = _coerce_float(
+            quantity_value,
+            default=float(original.quantity if original else 0.0),
         )
-        if quantity <= 0:
-            quantity = float(original.quantity if original else 0.0)
-        price_value = (
-            payload.get("price")
-            or payload.get("p")
-            or (original.price if original else None)
+        if quantity <= 0 and original is not None and original.quantity > 0:
+            quantity = float(original.quantity)
+        price_value = _first_present(payload, "price", "p")
+        price = _coerce_optional_float(price_value)
+        if price is None and original is not None:
+            price = float(original.price) if original.price is not None else None
+        filled = _coerce_float(
+            _first_present(payload, "executedQty", "z", "filledQty"), default=0.0
         )
-        price = float(price_value) if price_value not in (None, "") else None
-        filled = float(
-            payload.get("executedQty")
-            or payload.get("z")
-            or payload.get("filledQty")
-            or 0.0
+        cumulative_quote_value = _first_present(
+            payload, "cummulativeQuoteQty", "Z", "cumulativeQuoteQty"
         )
-        cumulative_quote = (
-            payload.get("cummulativeQuoteQty")
-            or payload.get("Z")
-            or payload.get("cumulativeQuoteQty")
-        )
-        avg_price = payload.get("avgPrice") or payload.get("ap")
-        average_price = None
-        if avg_price not in (None, ""):
-            average_price = float(avg_price)
-        elif filled and cumulative_quote not in (None, ""):
+        cumulative_quote = _coerce_optional_float(cumulative_quote_value)
+        avg_price_value = _first_present(payload, "avgPrice", "ap")
+        average_price = _coerce_optional_float(avg_price_value)
+        if average_price is None and filled > 0 and cumulative_quote is not None:
             try:
-                average_price = float(cumulative_quote) / filled if filled else None
-            except (TypeError, ValueError):
+                average_price = cumulative_quote / filled
+            except ZeroDivisionError:  # pragma: no cover - defensive guard
                 average_price = None
-        status_value = str(payload.get("status") or payload.get("X") or "NEW").upper()
+        status_value = str(
+            _first_present(payload, "status", "X") or "NEW"
+        ).strip().upper()
         status = _STATUS_MAP.get(status_value, OrderStatus.OPEN)
         return Order(
             symbol=symbol,
@@ -296,15 +295,24 @@ class BinanceRESTConnector(RESTWebSocketConnector):
         return "/api/v3/account", {}
 
     def _parse_positions(self, payload: Mapping[str, Any]) -> list[dict]:
-        balances = payload.get("balances", [])
+        raw_balances = payload.get("balances", [])
+        if isinstance(raw_balances, Mapping):
+            balances_iter: Iterable[Any] = raw_balances.values()
+        elif isinstance(raw_balances, Iterable) and not isinstance(
+            raw_balances, (str, bytes)
+        ):
+            balances_iter = raw_balances
+        else:
+            balances_iter = []
         positions: list[dict] = []
-        for balance in balances or []:
-            asset = str(balance.get("asset", "")).upper()
-            try:
-                qty = float(balance.get("free", 0)) + float(balance.get("locked", 0))
-            except (TypeError, ValueError):
-                qty = 0.0
-            if not qty:
+        for balance in balances_iter:
+            if not isinstance(balance, Mapping):
+                continue
+            asset = str(balance.get("asset", "")).strip().upper()
+            free_qty = _coerce_optional_float(balance.get("free")) or 0.0
+            locked_qty = _coerce_optional_float(balance.get("locked")) or 0.0
+            qty = free_qty + locked_qty
+            if qty <= 0 or not asset:
                 continue
             positions.append(
                 {"symbol": asset, "qty": qty, "side": "long", "price": 0.0}
