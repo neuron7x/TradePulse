@@ -33,8 +33,7 @@ import pandas as pd
 from core.data.timeutils import get_timezone
 
 try:  # pragma: no cover - exercised when pandera is installed
-    import pandera as pa
-    from pandera import Check, Column, DataFrameSchema
+    import pandera.pandas as pa
     from pandera.errors import SchemaError
 except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight test envs
     pa = None  # type: ignore[assignment]
@@ -63,7 +62,7 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight t
             self.checks = [c for c in (checks or []) if c is not None]
 
     class DataFrameSchema:  # type: ignore[override]
-        def __init__(self, columns: dict[str, Column], strict: bool = False):
+        def __init__(self, columns: dict[str, "Column"], strict: bool = False):
             self.columns = columns
             self.strict = strict
 
@@ -87,6 +86,10 @@ except ModuleNotFoundError:  # pragma: no cover - fallback used in lightweight t
                             getattr(check, "error", f"Check failed for {name}")
                         )
             return frame
+else:  # pragma: no cover - alias for typing convenience when pandera is present
+    Check = pa.Check
+    Column = pa.Column
+    DataFrameSchema = pa.DataFrameSchema
 
 
 from pydantic import (
