@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 from typing import Any, Iterable, List
 
@@ -54,6 +55,15 @@ def test_resolve_cadence_rejects_ambiguous_index() -> None:
         ValueError, match="Unable to determine expected_index frequency"
     ):
         _resolve_cadence(index)
+
+
+def test_resolve_cadence_accepts_explicit_frequency() -> None:
+    index = pd.DatetimeIndex(
+        [pd.Timestamp("2024-01-01", tz=UTC), pd.Timestamp("2024-01-03", tz=UTC)]
+    )
+    cadence = _resolve_cadence(index, frequency="1D")
+    assert cadence.n == 1
+    assert cadence.name == "D"
 
 
 def test_gap_fill_planner_ignores_empty_frames() -> None:

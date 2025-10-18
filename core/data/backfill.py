@@ -100,14 +100,31 @@ class Gap:
             raise ValueError("Gap requires start < end")
 
 
-def _resolve_cadence(expected_index: pd.DatetimeIndex) -> pd.tseries.offsets.BaseOffset:
+def _resolve_cadence(
+    expected_index: pd.DatetimeIndex,
+    *,
+    frequency: str | pd.Timedelta | pd.tseries.offsets.BaseOffset | None = None,
+) -> pd.tseries.offsets.BaseOffset:
     """Return the sampling cadence of ``expected_index``.
 
+    Parameters
+    ----------
+    expected_index:
+        Datetime index describing the canonical sampling grid.
+    frequency:
+        Optional explicit frequency override.  When provided it takes
+        precedence over the ``DatetimeIndex`` metadata.
+
+    Notes
+    -----
     Preference is given to an explicitly declared ``freq``.  When that is not
     available we fall back to the inferred frequency.  A clear error is raised
     if neither is defined so callers can correct the input before arithmetic is
     attempted.
     """
+
+    if frequency is not None:
+        return to_offset(frequency)
 
     freq = expected_index.freq or expected_index.inferred_freq
     if freq is None:
@@ -121,10 +138,17 @@ def _resolve_cadence(expected_index: pd.DatetimeIndex) -> pd.tseries.offsets.Bas
 def detect_gaps(
     expected_index: pd.DatetimeIndex,
     existing_index: pd.DatetimeIndex,
+    *,
+    frequency: str | pd.Timedelta | pd.tseries.offsets.BaseOffset | None = None,
 ) -> List[Gap]:
-    """Return gaps between ``expected_index`` and ``existing_index``."""
+    """Return gaps between ``expected_index`` and ``existing_index``.
 
-    cadence = _resolve_cadence(expected_index)
+    ``frequency`` mirrors the parameter accepted by :func:`_resolve_cadence` and
+    allows callers to supply a cadence when the ``DatetimeIndex`` has lost its
+    ``freq`` metadata (for example after being filtered by a trading calendar).
+    """
+
+    cadence = _resolve_cadence(expected_index, frequency=frequency)
     missing = expected_index.difference(existing_index)
     if missing.empty:
         return []
@@ -165,15 +189,16 @@ class GapFillPlanner:
         key: CacheKey,
         *,
         expected_index: pd.DatetimeIndex,
+        frequency: str | pd.Timedelta | pd.tseries.offsets.BaseOffset | None = None,
     ) -> BackfillPlan:
-        cadence = _resolve_cadence(expected_index)
+        cadence = _resolve_cadence(expected_index, frequency=frequency)
         coverage = self._cache.coverage(key)
         existing = self._cache.get(key)
         if existing.empty:
             return BackfillPlan(
                 gaps=[Gap(start=expected_index[0], end=expected_index[-1] + cadence)]
             )
-        gaps = detect_gaps(expected_index, existing.index)
+        gaps = detect_gaps(expected_index, existing.index, frequency=frequency)
         return BackfillPlan(gaps=gaps, covered=coverage)
 
     def apply(
