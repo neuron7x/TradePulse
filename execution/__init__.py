@@ -1,6 +1,13 @@
 """Execution connectors, order management, and risk tooling."""
 
 from .canary import CanaryConfig, CanaryController, CanaryDecision, MetricThreshold
+from .capital_optimizer import (
+    AllocationConstraints,
+    AllocationResult,
+    CapitalAllocationOptimizer,
+    PipelineMetrics,
+    TargetProfile,
+)
 from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError
 from .live_loop import LiveExecutionLoop, LiveLoopConfig
@@ -40,6 +47,11 @@ __all__ = [
     "CanaryController",
     "CanaryDecision",
     "MetricThreshold",
+    "CapitalAllocationOptimizer",
+    "AllocationConstraints",
+    "AllocationResult",
+    "PipelineMetrics",
+    "TargetProfile",
     "ExecutionConnector",
     "OrderError",
     "NormalizationError",
