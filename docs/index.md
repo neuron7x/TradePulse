@@ -84,6 +84,9 @@ focused document so contributors can quickly find the details they need.
 - Rehearse incident response with the dedicated
   [Incident Playbooks](incident_playbooks.md) and runbooks for data integrity
   and live-trading operations.
+- Harden key management workflows with the
+  [Secret Rotation Runbook](runbook_secret_rotation.md) and
+  [Secret Leak Response Runbook](runbook_secret_leak.md).
 
 ---
 

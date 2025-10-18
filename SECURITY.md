@@ -377,6 +377,9 @@ EXCHANGE_API_SECRET=your-secret
 
 - **Mount structure** – All runtime credentials are sourced from `secret/data/<service>/<env>` paths in HashiCorp Vault. Each service account has a scoped Vault role with narrowly defined policies that only allow reading its own path.
 - **Dynamic secrets** – Database and messaging credentials are provisioned via Vault database engines with 55-minute TTLs and automatic revocation on lease expiry. Application deployments request fresh leases during startup and refresh them every 45 minutes.
+- **Automation tooling** – The `python -m scripts.cli secrets-issue-dynamic` command wraps the Vault API using the
+  `application.secrets.hashicorp.DynamicCredentialManager` to fetch, renew, and persist short-lived credentials with full audit
+  coverage. Cron jobs invoke it for pre-flight rotations.
 - **Secret injection** – CI/CD pipelines authenticate to Vault using GitHub OIDC and render secrets into ephemeral environment variables. Long-lived static `.env` files are forbidden in production.
 
 #### Key rotation playbook
