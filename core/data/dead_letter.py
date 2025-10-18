@@ -274,10 +274,10 @@ class DeadLetterQueue:
                 items = list(self._items)
             payload = [item.asdict() for item in items]
 
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("w", encoding="utf-8") as handle:
-            json.dump(payload, handle, indent=2, sort_keys=True)
-            handle.write("\n")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with target.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, sort_keys=True)
+                handle.write("\n")
 
         duration = time.perf_counter() - start
         if duration > self._unload_slo_seconds:
