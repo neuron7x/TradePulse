@@ -14,6 +14,12 @@ from typing import Any, Dict, Mapping
 from domain import Order, OrderSide, OrderStatus, OrderType
 
 from .base import RESTWebSocketConnector
+from .plugin import (
+    AdapterCheckResult,
+    AdapterContract,
+    AdapterDiagnostic,
+    AdapterPlugin,
+)
 
 _STATUS_MAP = {
     "OPEN": OrderStatus.OPEN,
@@ -389,4 +395,66 @@ class CoinbaseRESTConnector(RESTWebSocketConnector):
         return parsed
 
 
-__all__ = ["CoinbaseRESTConnector"]
+def _self_test() -> AdapterDiagnostic:
+    checks = []
+    try:
+        connector = CoinbaseRESTConnector(sandbox=True)
+        checks.append(
+            AdapterCheckResult(
+                name="instantiate",
+                status="passed",
+                detail="Connector instantiated with sandbox configuration",
+            )
+        )
+        if not connector.sandbox:
+            raise AssertionError("Connector sandbox flag not set")
+        checks.append(
+            AdapterCheckResult(
+                name="sandbox-flag",
+                status="passed",
+                detail="Sandbox mode enabled by default",
+            )
+        )
+    except Exception as exc:  # pragma: no cover - defensive guard
+        checks.append(
+            AdapterCheckResult(name="instantiate", status="failed", detail=str(exc))
+        )
+    return AdapterDiagnostic(adapter_id="coinbase.advanced-trade", checks=tuple(checks))
+
+
+PLUGIN = AdapterPlugin(
+    contract=AdapterContract(
+        identifier="coinbase.advanced-trade",
+        name="Coinbase Advanced Trade",
+        provider="Coinbase",
+        version="1.0.0",
+        description="Coinbase Advanced Trade connector using REST and WebSocket APIs.",
+        transports={
+            "rest": "https://api.coinbase.com",
+            "websocket": "wss://advanced-trade-ws.coinbase.com",
+        },
+        supports_sandbox=True,
+        required_credentials=("api_key", "api_secret", "passphrase"),
+        capabilities={
+            "order_types": [
+                "market",
+                "limit",
+                "stop",
+                "stop_limit",
+            ],
+            "supports_streaming": True,
+            "supports_positions": True,
+        },
+        metadata={
+            "sandbox_rest": "https://api-public.sandbox.exchange.coinbase.com/api/v3/brokerage",
+            "sandbox_websocket": "wss://advanced-trade-ws-public.sandbox.exchange.coinbase.com",
+        },
+    ),
+    factory=CoinbaseRESTConnector,
+    implementation=CoinbaseRESTConnector,
+    self_test=_self_test,
+    module=__name__,
+)
+
+
+__all__ = ["CoinbaseRESTConnector", "PLUGIN"]
