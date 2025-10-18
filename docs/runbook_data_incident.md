@@ -13,7 +13,9 @@ updates.
 3. **Stabilise pipelines** – Pause downstream consumers (feature store writers,
    backtest exporters) via control plane toggles to prevent propagation.
 4. **Create incident ticket** – Open a PagerDuty bridge and log the incident in
-   `reports/incidents/data/<date>-<id>/timeline.md`.
+   `reports/incidents/data/<date>-<id>/timeline.md`, використовуючи шаблон
+   [`reports/incidents/incident_report_template.md`](../reports/incidents/incident_report_template.md)
+   для структурування запису.
 
 ## 2. Containment Actions
 
@@ -53,6 +55,9 @@ updates.
 3. Execute comparative indicator checks to ensure derived features (Kuramoto,
    Ricci, Hurst) match pre-incident baselines within tolerances.
 4. Update the incident dashboard with validation status and attach artefacts.
+5. Перенесіть чернетку постмортему в
+   [`reports/incidents/postmortem_template.md`](../reports/incidents/postmortem_template.md)
+   відразу після стабілізації сервісу, щоб не втратити деталі.
 
 ## 4. Communication Plan
 
