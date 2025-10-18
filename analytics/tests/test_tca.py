@@ -120,3 +120,15 @@ def test_transaction_cost_analyzer_empty_inputs() -> None:
     assert report.broker_comparison == ()
     assert report.periodic == ()
 
+
+def test_market_vwap_ignores_zero_volume_benchmarks() -> None:
+    benchmarks = [
+        BenchmarkPriceSample(timestamp=0.0, price=100.0, vwap_window_volume=0.0),
+        BenchmarkPriceSample(timestamp=60.0, price=200.0, vwap_window_volume=100.0),
+        BenchmarkPriceSample(timestamp=120.0, price=150.0, vwap_window_volume=None),
+    ]
+
+    result = TransactionCostAnalyzer._compute_market_vwap(benchmarks)
+
+    expected = ((200.0 * 100.0) + (150.0 * 1.0)) / (100.0 + 1.0)
+    assert _approx(result, expected, rel=1e-9)

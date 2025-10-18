@@ -472,7 +472,14 @@ class TransactionCostAnalyzer:
         total_value = 0.0
         total_volume = 0.0
         for sample in benchmarks:
-            weight = sample.vwap_window_volume if sample.vwap_window_volume and sample.vwap_window_volume > 0.0 else 1.0
+            volume = sample.vwap_window_volume
+            if volume is None:
+                weight = 1.0
+            elif volume > 0.0:
+                weight = volume
+            else:
+                # Explicit zero-volume benchmarks should not influence the VWAP.
+                continue
             total_value += sample.price * weight
             total_volume += weight
         if total_volume == 0.0:
