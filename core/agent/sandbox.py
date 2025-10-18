@@ -6,6 +6,7 @@ from __future__ import annotations
 import dataclasses
 import math
 import os
+import sys
 import time
 from multiprocessing.connection import Connection, wait
 from typing import Any, Dict
@@ -15,7 +16,8 @@ try:  # pragma: no cover - ``resource`` is unavailable on Windows
 except ModuleNotFoundError:  # pragma: no cover - handled gracefully in runtime
     resource = None  # type: ignore[assignment]
 
-from multiprocessing import get_context
+from multiprocessing import get_all_start_methods, get_context
+from multiprocessing.context import BaseContext
 
 
 @dataclasses.dataclass(frozen=True)
@@ -57,9 +59,11 @@ class StrategySandboxError(RuntimeError):
 class StrategySandbox:
     """Execute strategies in isolated, resource-governed subprocesses."""
 
-    def __init__(self, *, limits: SandboxLimits | None = None, start_method: str = "spawn") -> None:
+    def __init__(
+        self, *, limits: SandboxLimits | None = None, start_method: str | None = None
+    ) -> None:
         self._limits = limits or SandboxLimits()
-        self._ctx = get_context(start_method)
+        self._ctx = _resolve_context(start_method)
 
     # ------------------------------------------------------------------
     def run(self, strategy: Any, data: Any, *, priority: int = 0) -> SandboxResult:
@@ -161,6 +165,52 @@ def _sandbox_worker(
         conn.send({"status": "error", "error": exc, "message": str(exc)})
     finally:
         conn.close()
+
+
+def _resolve_context(start_method: str | None) -> BaseContext:
+    if start_method is not None:
+        return get_context(start_method)
+
+    available_methods = set(get_all_start_methods())
+
+    if not _running_without_main_file() and "spawn" in available_methods:
+        try:
+            return get_context("spawn")
+        except ValueError:  # pragma: no cover - defensive fallback
+            pass
+
+    try:
+        ctx = get_context()
+    except ValueError:
+        ctx = None
+
+    if ctx is not None and ctx.get_start_method() != "spawn":
+        return ctx
+
+    if _running_without_main_file() and "fork" in available_methods:
+        return get_context("fork")
+
+    if ctx is not None:
+        return ctx
+
+    for candidate in ("fork", "forkserver"):
+        if candidate in available_methods:
+            try:
+                return get_context(candidate)
+            except ValueError:  # pragma: no cover - defensive fallback
+                continue
+
+    if "spawn" in available_methods:
+        return get_context("spawn")
+
+    raise RuntimeError("No suitable multiprocessing context available for sandboxing")
+
+
+def _running_without_main_file() -> bool:
+    main_module = sys.modules.get("__main__")
+    if main_module is None:
+        return False
+    return getattr(main_module, "__file__", None) is None
 
 
 def _apply_limits(limits: SandboxLimits, priority: int) -> None:
