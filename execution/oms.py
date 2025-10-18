@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import time
 from collections import deque
 from dataclasses import dataclass, field, replace
@@ -23,6 +24,7 @@ from .order_ledger import OrderLedger
 
 _DEFAULT_LEDGER_SENTINEL = object()
 DEFAULT_LEDGER_FILENAME = "order-ledger.jsonl"
+LEGACY_DEFAULT_LEDGER_PATH = Path("observability/audit") / DEFAULT_LEDGER_FILENAME
 
 
 @dataclass(slots=True)
@@ -44,6 +46,7 @@ class OMSConfig:
     max_retries: int = 3
     backoff_seconds: float = 0.0
     ledger_path: Path | None = field(default=_DEFAULT_LEDGER_SENTINEL, repr=False)  # type: ignore[assignment]
+    _using_default_ledger_path: bool = field(init=False, repr=False, default=False)
 
     def __post_init__(self) -> None:
         if not isinstance(self.state_path, Path):
@@ -53,15 +56,21 @@ class OMSConfig:
         if self.backoff_seconds < 0.0:
             object.__setattr__(self, "backoff_seconds", 0.0)
         ledger_path = self.ledger_path
-        if ledger_path is _DEFAULT_LEDGER_SENTINEL:
+        using_default = ledger_path is _DEFAULT_LEDGER_SENTINEL
+        if using_default:
             ledger_path = self._default_ledger_path()
         elif ledger_path is not None and not isinstance(ledger_path, Path):
             ledger_path = Path(ledger_path)
         object.__setattr__(self, "ledger_path", ledger_path)
+        object.__setattr__(self, "_using_default_ledger_path", using_default and ledger_path is not None)
 
     def _default_ledger_path(self) -> Path:
         instance_dir = self.state_path.parent / self.state_path.stem
         return instance_dir / DEFAULT_LEDGER_FILENAME
+
+    @staticmethod
+    def _legacy_default_ledger_path() -> Path:
+        return LEGACY_DEFAULT_LEDGER_PATH
 
 
 class OrderManagementSystem:
@@ -89,8 +98,27 @@ class OrderManagementSystem:
         self._pending: Dict[str, Order] = {}
         self._audit = audit_logger or get_execution_audit_logger()
         ledger_path = self.config.ledger_path
+        if ledger_path is not None:
+            ledger_path = self._prepare_ledger_path(ledger_path)
+            object.__setattr__(self.config, "ledger_path", ledger_path)
         self._ledger = OrderLedger(ledger_path) if ledger_path is not None else None
         self._load_state()
+
+    def _prepare_ledger_path(self, ledger_path: Path) -> Path:
+        if not getattr(self.config, "_using_default_ledger_path", False):
+            return ledger_path
+        if ledger_path.exists():
+            return ledger_path
+        legacy_path = self.config._legacy_default_ledger_path()
+        if legacy_path == ledger_path:
+            return ledger_path
+        if legacy_path.exists():
+            try:
+                ledger_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(legacy_path, ledger_path)
+            except OSError:
+                return legacy_path
+        return ledger_path
 
     # ------------------------------------------------------------------
     # Persistence helpers

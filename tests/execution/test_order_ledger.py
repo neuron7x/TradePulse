@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from domain import Order, OrderSide, OrderStatus, OrderType
-from execution.oms import OMSConfig, OrderManagementSystem
+from execution.oms import DEFAULT_LEDGER_FILENAME, OMSConfig, OrderManagementSystem
 from execution.order_ledger import OrderLedger
 
 
@@ -151,3 +151,52 @@ def test_default_ledger_path_scoped_to_instance(tmp_path: Path) -> None:
     expected_ledger = state_dir / "oms-state" / "order-ledger.jsonl"
     assert oms._ledger.path == expected_ledger  # type: ignore[attr-defined]
     assert expected_ledger.parent.is_dir()
+
+
+def test_default_ledger_path_migrates_legacy_file(
+    tmp_path: Path, simple_order: Order, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    legacy_dir = tmp_path / "legacy" / "observability" / "audit"
+    legacy_path = legacy_dir / DEFAULT_LEDGER_FILENAME
+    legacy_dir.mkdir(parents=True)
+    legacy_ledger = OrderLedger(legacy_path)
+
+    order = simple_order
+    order.mark_submitted("legacy-1")
+    order.record_fill(order.quantity, order.price or 100.0)
+    order_dict = order.to_dict()
+    correlation_id = "legacy-correlation"
+
+    legacy_ledger.append(
+        "order_fill_recorded",
+        order=order_dict,
+        correlation_id=correlation_id,
+        state_snapshot={
+            "orders": [order_dict],
+            "queue": [],
+            "processed": {correlation_id: order_dict["order_id"]},
+            "correlations": {order_dict["order_id"]: correlation_id},
+        },
+    )
+
+    monkeypatch.setattr("execution.oms.LEGACY_DEFAULT_LEDGER_PATH", legacy_path)
+
+    state_dir = tmp_path / "instance"
+    state_dir.mkdir()
+    state_path = state_dir / "oms-state.json"
+    config = OMSConfig(state_path=state_path)
+    connector = DummyConnector()
+    risk = DummyRiskController()
+
+    oms = OrderManagementSystem(connector, risk, config)
+
+    assert oms._ledger is not None  # type: ignore[attr-defined]
+    expected_path = state_dir / state_path.stem / DEFAULT_LEDGER_FILENAME
+    assert oms._ledger.path == expected_path  # type: ignore[attr-defined]
+    assert expected_path.exists()
+    assert expected_path.read_text().startswith(legacy_path.read_text())
+
+    assert order.order_id is not None
+    restored = next(iter(oms._orders.values()))  # type: ignore[attr-defined]
+    assert restored.order_id == order.order_id
+    assert restored.status is OrderStatus.FILLED
