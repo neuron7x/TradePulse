@@ -150,9 +150,10 @@ class AllowlistEntry:
             return True
         version = dependency.parsed_version
         if version is None:
-            # When a dependency is unpinned we still honour the allowlist entry
-            # if it does not constrain the version range.
-            return True
+            # Refuse to honour specifier-scoped allowlist entries for unpinned
+            # dependencies so the configured version range is actually
+            # enforced.
+            return False
         return version in self.specifier
 
 
