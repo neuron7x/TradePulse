@@ -11,11 +11,11 @@ from pathlib import Path
 from typing import Sequence
 from uuid import uuid4
 
+import yaml  # type: ignore[import-untyped]
 from packaging.requirements import InvalidRequirement, Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import InvalidVersion, Version
-from packaging.specifiers import SpecifierSet
-import yaml
 
 LOGGER = logging.getLogger(__name__)
 
@@ -164,7 +164,10 @@ class DependencyVerificationReport:
     issues: tuple[VerificationIssue, ...]
 
     def has_failures(self) -> bool:
-        return any(issue.severity in {Severity.ERROR, Severity.CRITICAL} for issue in self.issues)
+        return any(
+            issue.severity in {Severity.ERROR, Severity.CRITICAL}
+            for issue in self.issues
+        )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -181,8 +184,12 @@ def _parse_requirement(line: str, source: Path) -> Dependency:
         raise DependencyError(f"Invalid requirement '{line}' in {source}") from exc
     name = requirement.name
     if not name:
-        raise DependencyError(f"Missing package name in requirement '{line}' from {source}")
-    return Dependency(name=name, raw_requirement=line, source=source, requirement=requirement)
+        raise DependencyError(
+            f"Missing package name in requirement '{line}' from {source}"
+        )
+    return Dependency(
+        name=name, raw_requirement=line, source=source, requirement=requirement
+    )
 
 
 IGNORED_PREFIXES = ("-r ", "--", "http://", "https://", "git+", "svn+", "hg+")
@@ -208,7 +215,9 @@ def load_dependencies(requirement_files: Sequence[Path]) -> list[Dependency]:
 
 def load_denylist(path: Path) -> list[DenylistEntry]:
     if not path.exists():
-        LOGGER.debug("No denylist found at %s; skipping compromised dependency checks.", path)
+        LOGGER.debug(
+            "No denylist found at %s; skipping compromised dependency checks.", path
+        )
         return []
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     raw_entries = data.get("compromised", []) or []
@@ -336,11 +345,15 @@ def build_cyclonedx_sbom(
 
 def write_json_document(document: dict[str, object], destination: Path) -> None:
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    destination.write_text(
+        json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     LOGGER.info("Wrote JSON document to %s", destination)
 
 
-def write_verification_report(report: DependencyVerificationReport, destination: Path) -> None:
+def write_verification_report(
+    report: DependencyVerificationReport, destination: Path
+) -> None:
     write_json_document(report.to_dict(), destination)
 
 

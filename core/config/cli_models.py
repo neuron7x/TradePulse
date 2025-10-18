@@ -119,9 +119,7 @@ class ExperimentConfig(BaseModel):
         normalized = value.upper()
         valid_levels = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
         if normalized not in valid_levels:
-            msg = (
-                "log_level must be one of CRITICAL, ERROR, WARNING, INFO, DEBUG, or NOTSET"
-            )
+            msg = "log_level must be one of CRITICAL, ERROR, WARNING, INFO, DEBUG, or NOTSET"
             raise ValueError(msg)
         return normalized
 
@@ -272,7 +270,9 @@ class FeatureParitySpecConfig(BaseModel):
         try:
             return pd.Timedelta(value)  # type: ignore[arg-type]
         except (ValueError, TypeError) as exc:  # pragma: no cover - defensive
-            raise ValueError("timedelta fields must be pandas-compatible strings") from exc
+            raise ValueError(
+                "timedelta fields must be pandas-compatible strings"
+            ) from exc
 
     @model_validator(mode="after")
     def _validate_columns(self) -> "FeatureParitySpecConfig":

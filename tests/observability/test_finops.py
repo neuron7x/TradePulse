@@ -169,4 +169,3 @@ def test_analyse_costs_and_recommendations() -> None:
     assert any(
         rec for rec in recommendations if "spikes" in rec.message
     ), "Expected spike investigation recommendation"
-

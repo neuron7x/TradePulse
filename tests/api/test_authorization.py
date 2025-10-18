@@ -12,7 +12,9 @@ class TestNormaliseRoles:
         assert _normalise_roles(roles) == ("admin", "operator")
 
     def test_raises_value_error_when_no_valid_roles(self) -> None:
-        with pytest.raises(ValueError, match="At least one non-empty role must be provided"):
+        with pytest.raises(
+            ValueError, match="At least one non-empty role must be provided"
+        ):
             _normalise_roles(["   ", "\t\n"])  # only whitespace entries
 
 

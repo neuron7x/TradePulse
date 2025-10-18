@@ -5,8 +5,8 @@ from __future__ import annotations
 # SPDX-License-Identifier: MIT
 from typing import Iterable
 
-import requests
-from requests.adapters import HTTPAdapter
+import requests  # type: ignore[import-untyped]
+from requests.adapters import HTTPAdapter  # type: ignore[import-untyped]
 from urllib3.util import Retry
 
 _DEFAULT_STATUSES = frozenset({429, 500, 502, 503, 504})

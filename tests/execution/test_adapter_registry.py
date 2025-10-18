@@ -3,11 +3,10 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from typing import Mapping
 
 import pytest
-
-from importlib import import_module
 
 from execution.adapters import (
     AdapterCheckResult,
@@ -20,8 +19,9 @@ from execution.adapters import (
     get_adapter_class,
     load_adapter,
 )
-adapter_plugin_module = import_module("execution.adapters.plugin")
 from execution.connectors import ExecutionConnector
+
+adapter_plugin_module = import_module("execution.adapters.plugin")
 
 
 class _DummyConnector(ExecutionConnector):
@@ -29,10 +29,14 @@ class _DummyConnector(ExecutionConnector):
         super().__init__(sandbox=sandbox)
         self.token = token
 
-    def place_order(self, order, *, idempotency_key: str | None = None):  # pragma: no cover - dummy implementation
+    def place_order(
+        self, order, *, idempotency_key: str | None = None
+    ):  # pragma: no cover - dummy implementation
         raise NotImplementedError
 
-    def cancel_order(self, order_id: str) -> bool:  # pragma: no cover - dummy implementation
+    def cancel_order(
+        self, order_id: str
+    ) -> bool:  # pragma: no cover - dummy implementation
         raise NotImplementedError
 
     def fetch_order(self, order_id: str):  # pragma: no cover - dummy implementation

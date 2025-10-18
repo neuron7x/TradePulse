@@ -8,9 +8,9 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, List, Sequence
+from typing import Iterable, Iterator, Sequence
 
 _COMMON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -109,7 +109,14 @@ class SecretScanner:
                     re.search(pattern, rel_path) for pattern in self._include_patterns
                 ):
                     continue
-                if candidate.suffix in {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".ico"}:
+                if candidate.suffix in {
+                    ".png",
+                    ".jpg",
+                    ".jpeg",
+                    ".gif",
+                    ".bmp",
+                    ".ico",
+                }:
                     continue
                 yield candidate
 
@@ -222,4 +229,3 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     sys.exit(main())
-

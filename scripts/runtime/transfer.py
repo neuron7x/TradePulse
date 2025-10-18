@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlparse
 
-import requests
+import requests  # type: ignore[import-untyped]
 
 from .checksum import verify_checksum
 from .progress import ProgressBar

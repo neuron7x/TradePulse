@@ -56,9 +56,7 @@ class EventSchemaRegistry:
         registry: Dict[str, List[SchemaVersionInfo]],
         subjects: Dict[str, Dict[Version, str]],
         namespaces: Dict[str, Dict[Version, str]],
-        versions: Dict[
-            str, Dict[Version, Dict[SchemaFormat, SchemaVersionInfo]]
-        ],
+        versions: Dict[str, Dict[Version, Dict[SchemaFormat, SchemaVersionInfo]]],
     ):
         self._base_path = base_path
         self._registry = registry

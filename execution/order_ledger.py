@@ -34,7 +34,9 @@ def _coerce(value: Any) -> Any:
 def _canonical_dumps(payload: Mapping[str, Any]) -> str:
     """Return a canonical JSON representation with stable key ordering."""
 
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,4 +231,3 @@ class OrderLedger:
         sequence = int(payload.get("sequence", 0)) + 1
         digest = str(payload.get("digest")) if payload.get("digest") else None
         return max(sequence, 1), digest
-

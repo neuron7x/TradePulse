@@ -205,9 +205,9 @@ def _build_parity_spec(spec_cfg: FeatureParitySpecConfig) -> FeatureParitySpec:
         numeric_tolerance=spec_cfg.numeric_tolerance,
         max_clock_skew=spec_cfg.max_clock_skew,
         allow_schema_evolution=spec_cfg.allow_schema_evolution,
-        value_columns=None
-        if spec_cfg.value_columns is None
-        else tuple(spec_cfg.value_columns),
+        value_columns=(
+            None if spec_cfg.value_columns is None else tuple(spec_cfg.value_columns)
+        ),
     )
 
 
@@ -809,13 +809,9 @@ def _emit_parity_summary(report: FeatureParityReport, *, command: str) -> None:
             f"abs={report.clock_skew_abs}"
         )
     if report.columns_added:
-        click.echo(
-            f"[{command}] • columns_added={', '.join(report.columns_added)}"
-        )
+        click.echo(f"[{command}] • columns_added={', '.join(report.columns_added)}")
     if report.columns_removed:
-        click.echo(
-            f"[{command}] • columns_removed={', '.join(report.columns_removed)}"
-        )
+        click.echo(f"[{command}] • columns_removed={', '.join(report.columns_removed)}")
 
 
 @cli.command()

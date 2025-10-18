@@ -282,7 +282,9 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
         existing_usage = state.risk_exposure_for(request.symbol)
         total_usage = existing_usage
         if state.risk_exposures is not None:
-            total_usage = sum(max(0.0, value) for value in state.risk_exposures.values())
+            total_usage = sum(
+                max(0.0, value) for value in state.risk_exposures.values()
+            )
             residual = max(0.0, 1.0 - (total_usage - max(0.0, existing_usage)))
             risk_fraction = min(risk_fraction, residual)
             notes["portfolio_residual"] = residual
@@ -301,7 +303,9 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
             else:
                 notes["kelly_fraction"] = 0.0
 
-        candidate_fraction = min(risk_fraction, constraints.kelly_fraction_limit) * direction
+        candidate_fraction = (
+            min(risk_fraction, constraints.kelly_fraction_limit) * direction
+        )
         if kelly_fraction is not None:
             kelly_direction = 1 if kelly_fraction >= 0.0 else -1
             if direction != kelly_direction:
@@ -349,8 +353,12 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
         instrument_vol = request.instrument_volatility or 0.0
         if instrument_vol < 0.0:
             instrument_vol = 0.0
-        projected = math.hypot(state.volatility, instrument_vol * abs(candidate_fraction))
-        vol_limit = max(1e-12, constraints.max_portfolio_volatility - constraints.volatility_buffer)
+        projected = math.hypot(
+            state.volatility, instrument_vol * abs(candidate_fraction)
+        )
+        vol_limit = max(
+            1e-12, constraints.max_portfolio_volatility - constraints.volatility_buffer
+        )
         if projected > constraints.max_portfolio_volatility:
             scale = constraints.max_portfolio_volatility / projected
             candidate_fraction *= scale
@@ -379,7 +387,11 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
 
         max_size = constraints.max_order_size
         if request.max_trade_qty is not None:
-            max_size = request.max_trade_qty if max_size is None else min(max_size, request.max_trade_qty)
+            max_size = (
+                request.max_trade_qty
+                if max_size is None
+                else min(max_size, request.max_trade_qty)
+            )
 
         if max_size is not None and abs(order_quantity) > max_size:
             order_quantity = math.copysign(max_size, order_quantity)
@@ -408,6 +420,7 @@ class ConstrainedPositionSizer(RiskAwarePositionSizer):
             return 0.0
         limit = (self._constraints.cppi_multiplier * cushion) / max(state.equity, 1e-12)
         return min(limit, leverage_cap)
+
 
 def position_sizing(
     balance: float,

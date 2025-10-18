@@ -124,7 +124,7 @@ def _load_yaml() -> Any:
     """
 
     try:
-        import yaml  # type: ignore[import-not-found]
+        import yaml  # type: ignore[import-not-found, import-untyped]
     except ModuleNotFoundError as exc:  # pragma: no cover - exercised in minimal envs
         raise RuntimeError(
             "YAML configuration support requires the 'PyYAML' package. "

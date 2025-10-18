@@ -340,9 +340,7 @@ class TickStreamAggregator:
         session_boundaries.append(len(trading_minutes))
 
         selected: list[pd.Timestamp] = []
-        for start_idx, end_idx in zip(
-            session_boundaries[:-1], session_boundaries[1:]
-        ):
+        for start_idx, end_idx in zip(session_boundaries[:-1], session_boundaries[1:]):
             session_minutes = trading_minutes[start_idx:end_idx]
             if session_minutes.empty:
                 continue

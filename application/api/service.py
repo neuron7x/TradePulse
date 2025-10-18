@@ -1055,7 +1055,10 @@ def create_app(
 
     metrics_module = __import__("core.utils.metrics", fromlist=["MetricsCollector"])
     metrics_collector = get_metrics_collector(metrics_registry)
-    if metrics_registry is not None and getattr(metrics_collector, "registry", None) is None:
+    if (
+        metrics_registry is not None
+        and getattr(metrics_collector, "registry", None) is None
+    ):
         refreshed_metrics = metrics_module.MetricsCollector(metrics_registry)
         metrics_collector.__dict__.update(refreshed_metrics.__dict__)
         setattr(metrics_module, "_collector", metrics_collector)
@@ -1106,9 +1109,7 @@ def create_app(
     )
     async def health_check(response: Response) -> HealthResponse:
         overall_start = perf_counter()
-        metrics_collector: MetricsCollector | None = getattr(
-            app.state, "metrics", None
-        )
+        metrics_collector: MetricsCollector | None = getattr(app.state, "metrics", None)
         components: dict[str, ComponentHealth] = {}
 
         risk_manager: RiskManager = app.state.risk_manager
@@ -1257,9 +1258,13 @@ def create_app(
         if metrics_collector and metrics_collector.enabled:
             duration = perf_counter() - overall_start
             metrics_collector.observe_health_check_latency("api.overall", duration)
-            metrics_collector.set_health_check_status("api.overall", severity == "ready")
+            metrics_collector.set_health_check_status(
+                "api.overall", severity == "ready"
+            )
             for name, component in components.items():
-                metrics_collector.set_health_check_status(f"component.{name}", component.healthy)
+                metrics_collector.set_health_check_status(
+                    f"component.{name}", component.healthy
+                )
 
         return health_payload
 

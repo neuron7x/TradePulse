@@ -11,12 +11,12 @@ and the controller keeps rolling aggregates aligned with configured budgets.
 from __future__ import annotations
 
 import asyncio
+import math
+import statistics
 from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-import math
-import statistics
 from typing import (
     Mapping,
     MutableMapping,
@@ -225,9 +225,9 @@ class FinOpsController:
             defaultdict(list)
         )
         self._budgets: MutableMapping[str, Budget] = {}
-        self._budget_ledgers: MutableMapping[
-            str, list[tuple[datetime, float]]
-        ] = defaultdict(list)
+        self._budget_ledgers: MutableMapping[str, list[tuple[datetime, float]]] = (
+            defaultdict(list)
+        )
         self._budget_thresholds: MutableMapping[str, float] = defaultdict(float)
 
     # ------------------------------------------------------------------
@@ -260,7 +260,9 @@ class FinOpsController:
                 continue
             ledger = self._budget_ledgers[budget.name]
             self._insert_ledger_entry(ledger, sample)
-            total_cost, window_start = self._prune_and_sum(ledger, budget, sample.timestamp)
+            total_cost, window_start = self._prune_and_sum(
+                ledger, budget, sample.timestamp
+            )
             alert_events = self._evaluate_budget(
                 budget,
                 total_cost,
@@ -342,7 +344,9 @@ class FinOpsController:
         recommendations: list[OptimizationRecommendation] = []
 
         for resource_id, samples in self._usage_by_resource.items():
-            relevant = self._slice_samples(samples, window_start, as_of, metadata_filter)
+            relevant = self._slice_samples(
+                samples, window_start, as_of, metadata_filter
+            )
             if not relevant:
                 continue
 
@@ -537,8 +541,9 @@ class FinOpsController:
         for sample in samples:
             if sample.timestamp < start or sample.timestamp > end:
                 continue
-            if metadata_filter and not self._sample_matches_scope(sample, metadata_filter):
+            if metadata_filter and not self._sample_matches_scope(
+                sample, metadata_filter
+            ):
                 continue
             result.append(sample)
         return result
-

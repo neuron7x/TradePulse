@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_HALF_UP, localcontext
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import Dict, Mapping
 
 
@@ -78,7 +78,9 @@ class SymbolNormalizer:
             ctx.prec = cls._DECIMAL_PRECISION
             ctx.rounding = ROUND_HALF_UP
             value_decimal = cls._decimal(value)
-            steps = (value_decimal / step_decimal).to_integral_value(rounding=ROUND_HALF_UP)
+            steps = (value_decimal / step_decimal).to_integral_value(
+                rounding=ROUND_HALF_UP
+            )
             return steps * step_decimal
 
     @classmethod

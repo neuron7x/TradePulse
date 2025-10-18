@@ -9,8 +9,8 @@ import pytest
 from core.messaging.schema_registry import (
     EventSchemaRegistry,
     SchemaCompatibilityError,
-    SchemaFormatCoverageError,
     SchemaFormat,
+    SchemaFormatCoverageError,
     _field_name_index,
     _is_nullable,
     _normalise_avro_type,

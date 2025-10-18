@@ -7,6 +7,7 @@ from logging.config import fileConfig
 from pathlib import Path
 
 from alembic import context
+
 from core.config.cli_models import PostgresTLSConfig
 from core.config.postgres import ensure_secure_postgres_uri
 from libs.db import (
@@ -54,7 +55,9 @@ def _tls_from_env() -> PostgresTLSConfig | None:
 def _load_database_settings() -> DatabaseSettings:
     writer_dsn = os.getenv("TRADEPULSE_DB_WRITER_DSN")
     if not writer_dsn:
-        raise RuntimeError("TRADEPULSE_DB_WRITER_DSN must be set for Alembic migrations")
+        raise RuntimeError(
+            "TRADEPULSE_DB_WRITER_DSN must be set for Alembic migrations"
+        )
     ensure_secure_postgres_uri(writer_dsn)
     reader_dsns = _reader_dsns_from_env()
     tls = _tls_from_env()
@@ -98,7 +101,11 @@ def run_migrations_online() -> None:
 
     try:
         with connectable.connect() as connection:
-            context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata,
+                compare_type=True,
+            )
             with context.begin_transaction():
                 context.run_migrations()
     finally:

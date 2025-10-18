@@ -543,7 +543,9 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
                 self._session_manager = session_manager
                 self._owns_session_manager = True
             if self._session_manager is None:
-                raise RuntimeError("session_manager must be provided when repository is None")
+                raise RuntimeError(
+                    "session_manager must be provided when repository is None"
+                )
             repository = KillSwitchStateRepository(
                 self._session_manager,
                 retry_policy=effective_retry,
@@ -570,7 +572,11 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
             return None
         if isinstance(payload, tuple):
             return payload
-        if hasattr(payload, "engaged") and hasattr(payload, "reason") and hasattr(payload, "updated_at"):
+        if (
+            hasattr(payload, "engaged")
+            and hasattr(payload, "reason")
+            and hasattr(payload, "updated_at")
+        ):
             return (
                 bool(getattr(payload, "engaged")),
                 str(getattr(payload, "reason")),
@@ -579,7 +585,9 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
         raise DataQualityError("Unsupported payload type returned by repository")
 
     def _save_payload(self, engaged: bool, reason: str) -> None:
-        self._execute_with_retry(lambda: self._repository.upsert(engaged=bool(engaged), reason=reason))
+        self._execute_with_retry(
+            lambda: self._repository.upsert(engaged=bool(engaged), reason=reason)
+        )
 
     def _execute_with_retry(self, operation: Callable[[], T]) -> T:
         base_logger = getattr(self._logger, "logger", self._logger)
@@ -588,6 +596,7 @@ class PostgresKillSwitchStateStore(BaseKillSwitchStateStore):
             with attempt:
                 return operation()
         raise RuntimeError("Database retry loop exited unexpectedly")
+
 
 class KillSwitch:
     """Global kill-switch toggled on critical failures with optional persistence.

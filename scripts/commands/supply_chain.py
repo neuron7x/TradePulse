@@ -164,7 +164,10 @@ def build_sign_parser(subparsers: _SubParsersAction[object]) -> None:
         "sign-image",
         help="Sign a container image with cosign to guarantee provenance.",
     )
-    sign.add_argument("image", help="Fully-qualified container image reference (e.g., repo/image:tag).")
+    sign.add_argument(
+        "image",
+        help="Fully-qualified container image reference (e.g., repo/image:tag).",
+    )
     sign.add_argument(
         "--key",
         default=None,

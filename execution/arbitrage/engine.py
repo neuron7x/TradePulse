@@ -37,8 +37,7 @@ class ArbitrageOpportunity:
 class QuoteStream(Protocol):
     """Protocol implemented by exchange quote sources."""
 
-    async def stream_quotes(self, symbols: Sequence[str]) -> AsyncIterator[Quote]:
-        ...
+    async def stream_quotes(self, symbols: Sequence[str]) -> AsyncIterator[Quote]: ...
 
 
 class CrossExchangeArbitrageEngine:
@@ -91,7 +90,9 @@ class CrossExchangeArbitrageEngine:
             raise ValueError("symbols must not be empty")
         for symbol in symbols:
             if symbol not in self._pair_config:
-                raise ValueError(f"pair_config missing base/quote definition for {symbol}")
+                raise ValueError(
+                    f"pair_config missing base/quote definition for {symbol}"
+                )
         if self._running.is_set():
             raise RuntimeError("Engine already running")
         self._running.set()
@@ -101,9 +102,7 @@ class CrossExchangeArbitrageEngine:
                 task_group.create_task(
                     self._consume_quotes(exchange_id, provider, symbols)
                 )
-            task_group.create_task(
-                self._process_quotes(symbols, opportunity_callback)
-            )
+            task_group.create_task(self._process_quotes(symbols, opportunity_callback))
         self._running.clear()
 
     async def stop(self) -> None:
@@ -248,8 +247,14 @@ class CrossExchangeArbitrageEngine:
         plan = CapitalTransferPlan(
             transfer_id=f"arb-{opportunity.symbol}-{int(opportunity.generated_at.timestamp())}",
             legs={
-                (opportunity.buy_exchange, self._pair_config[opportunity.symbol][1]): opportunity.notional,
-                (opportunity.sell_exchange, self._pair_config[opportunity.symbol][0]): opportunity.base_size,
+                (
+                    opportunity.buy_exchange,
+                    self._pair_config[opportunity.symbol][1],
+                ): opportunity.notional,
+                (
+                    opportunity.sell_exchange,
+                    self._pair_config[opportunity.symbol][0],
+                ): opportunity.base_size,
             },
             initiated_at=datetime.now(timezone.utc),
             metadata={

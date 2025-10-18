@@ -96,7 +96,9 @@ def test_order_ledger_appends_and_replays(tmp_path: Path, simple_order: Order) -
     assert latest_state["orders"][0]["symbol"] == "BTC-USD"
 
 
-def test_oms_writes_and_recovers_from_order_ledger(tmp_path: Path, simple_order: Order) -> None:
+def test_oms_writes_and_recovers_from_order_ledger(
+    tmp_path: Path, simple_order: Order
+) -> None:
     state_path = tmp_path / "oms-state.json"
     ledger_path = tmp_path / "oms-ledger.jsonl"
     config = OMSConfig(state_path=state_path, ledger_path=ledger_path)

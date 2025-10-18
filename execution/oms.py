@@ -20,7 +20,6 @@ from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError, TransientOrderError
 from .order_ledger import OrderLedger
 
-
 DEFAULT_LEDGER_PATH = Path("observability/audit/order-ledger.jsonl")
 
 
@@ -55,7 +54,9 @@ class OMSConfig:
         if ledger_path is not None and not isinstance(ledger_path, Path):
             ledger_path = Path(ledger_path)
         if ledger_path == DEFAULT_LEDGER_PATH:
-            ledger_path = self.state_path.parent / f"{self.state_path.stem}_ledger.jsonl"
+            ledger_path = (
+                self.state_path.parent / f"{self.state_path.stem}_ledger.jsonl"
+            )
         if ledger_path is not None:
             ledger_path.parent.mkdir(parents=True, exist_ok=True)
         object.__setattr__(self, "ledger_path", ledger_path)
@@ -240,9 +241,7 @@ class OrderManagementSystem:
                     order=order,
                     correlation_id=correlation_id,
                     metadata={
-                        "violations": []
-                        if report is None
-                        else report.violations,
+                        "violations": [] if report is None else report.violations,
                         "error": str(exc),
                     },
                 )

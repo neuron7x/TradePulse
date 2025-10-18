@@ -816,9 +816,7 @@ class MetricsCollector:
         if not self._enabled:
             return
 
-        self.environment_parity_checks.labels(
-            strategy=strategy, status=status
-        ).inc()
+        self.environment_parity_checks.labels(strategy=strategy, status=status).inc()
 
         if not deviations:
             return
