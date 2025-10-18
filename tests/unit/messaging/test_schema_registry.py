@@ -9,6 +9,7 @@ import pytest
 from core.messaging.schema_registry import (
     EventSchemaRegistry,
     SchemaCompatibilityError,
+    SchemaFormatCoverageError,
     SchemaFormat,
     _field_name_index,
     _is_nullable,
@@ -28,6 +29,23 @@ def test_registry_exposes_subject_and_namespace() -> None:
     registry = EventSchemaRegistry.from_directory("schemas/events")
     assert registry.subject("ticks") == "tradepulse.market.ticks.v1_0_0"
     assert registry.namespace("ticks") == "tradepulse.events.marketdata.v1_0_0"
+
+
+def test_format_coverage_requires_declared_formats(tmp_path: Path) -> None:
+    source_dir = Path("schemas/events")
+    target = tmp_path / "events"
+    shutil.copytree(source_dir, target)
+
+    registry_path = target / "registry.json"
+    payload = json.loads(registry_path.read_text(encoding="utf-8"))
+    payload["events"]["ticks"]["versions"][0].pop("json_schema", None)
+    registry_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    registry = EventSchemaRegistry.from_directory(target)
+    with pytest.raises(SchemaFormatCoverageError):
+        registry.validate_format_coverage("ticks")
+    with pytest.raises(SchemaFormatCoverageError):
+        registry.validate_all()
 
 
 def test_backward_compatibility_violation_detected(tmp_path: Path) -> None:

@@ -23,6 +23,10 @@ class SchemaCompatibilityError(RuntimeError):
     """Raised when schema compatibility validation fails."""
 
 
+class SchemaFormatCoverageError(RuntimeError):
+    """Raised when required schema formats are missing for a version."""
+
+
 @dataclass(frozen=True)
 class SchemaVersionInfo:
     """Metadata describing a concrete schema version."""
@@ -52,11 +56,15 @@ class EventSchemaRegistry:
         registry: Dict[str, List[SchemaVersionInfo]],
         subjects: Dict[str, Dict[Version, str]],
         namespaces: Dict[str, Dict[Version, str]],
+        versions: Dict[
+            str, Dict[Version, Dict[SchemaFormat, SchemaVersionInfo]]
+        ],
     ):
         self._base_path = base_path
         self._registry = registry
         self._subjects = subjects
         self._namespaces = namespaces
+        self._versions = versions
 
     @classmethod
     def from_directory(cls, base_path: str | Path) -> "EventSchemaRegistry":
@@ -73,10 +81,14 @@ class EventSchemaRegistry:
         events: Dict[str, List[SchemaVersionInfo]] = {}
         subjects: Dict[str, Dict[Version, str]] = {}
         namespaces: Dict[str, Dict[Version, str]] = {}
+        versions_index: Dict[
+            str, Dict[Version, Dict[SchemaFormat, SchemaVersionInfo]]
+        ] = {}
         for event_type, event_data in payload.get("events", {}).items():
             versions: List[SchemaVersionInfo] = []
             subject_map: Dict[Version, str] = {}
             namespace_map: Dict[Version, str] = {}
+            format_map: Dict[Version, Dict[SchemaFormat, SchemaVersionInfo]] = {}
             for version_info in event_data.get("versions", []):
                 raw_version = version_info["version"]
                 parsed_version = Version(raw_version)
@@ -87,45 +99,59 @@ class EventSchemaRegistry:
                 if namespace:
                     namespace_map[parsed_version] = namespace
                 avro_path = root / version_info[SchemaFormat.AVRO.value]
-                versions.append(
-                    SchemaVersionInfo(
+                version_bucket = format_map.setdefault(parsed_version, {})
+                if SchemaFormat.AVRO in version_bucket:
+                    raise ValueError(
+                        f"Duplicate Avro schema declaration for {event_type} {raw_version}"
+                    )
+                avro_info = SchemaVersionInfo(
+                    version=parsed_version,
+                    version_str=raw_version,
+                    path=avro_path,
+                    format=SchemaFormat.AVRO,
+                    subject=subject,
+                    namespace=namespace,
+                )
+                versions.append(avro_info)
+                version_bucket[SchemaFormat.AVRO] = avro_info
+                if SchemaFormat.JSON.value in version_info:
+                    json_path = root / version_info[SchemaFormat.JSON.value]
+                    if SchemaFormat.JSON in version_bucket:
+                        raise ValueError(
+                            f"Duplicate JSON schema declaration for {event_type} {raw_version}"
+                        )
+                    json_info = SchemaVersionInfo(
                         version=parsed_version,
                         version_str=raw_version,
-                        path=avro_path,
-                        format=SchemaFormat.AVRO,
+                        path=json_path,
+                        format=SchemaFormat.JSON,
                         subject=subject,
                         namespace=namespace,
                     )
-                )
-                if SchemaFormat.JSON.value in version_info:
-                    json_path = root / version_info[SchemaFormat.JSON.value]
-                    versions.append(
-                        SchemaVersionInfo(
-                            version=parsed_version,
-                            version_str=raw_version,
-                            path=json_path,
-                            format=SchemaFormat.JSON,
-                            subject=subject,
-                            namespace=namespace,
-                        )
-                    )
+                    versions.append(json_info)
+                    version_bucket[SchemaFormat.JSON] = json_info
                 if SchemaFormat.PROTOBUF.value in version_info:
-                    versions.append(
-                        SchemaVersionInfo(
-                            version=parsed_version,
-                            version_str=raw_version,
-                            path=(
-                                root / version_info[SchemaFormat.PROTOBUF.value]
-                            ).resolve(),
-                            format=SchemaFormat.PROTOBUF,
-                            subject=subject,
-                            namespace=namespace,
+                    if SchemaFormat.PROTOBUF in version_bucket:
+                        raise ValueError(
+                            f"Duplicate protobuf schema declaration for {event_type} {raw_version}"
                         )
+                    proto_info = SchemaVersionInfo(
+                        version=parsed_version,
+                        version_str=raw_version,
+                        path=(
+                            root / version_info[SchemaFormat.PROTOBUF.value]
+                        ).resolve(),
+                        format=SchemaFormat.PROTOBUF,
+                        subject=subject,
+                        namespace=namespace,
                     )
+                    versions.append(proto_info)
+                    version_bucket[SchemaFormat.PROTOBUF] = proto_info
             events[event_type] = versions
             subjects[event_type] = subject_map
             namespaces[event_type] = namespace_map
-        return cls(root, events, subjects, namespaces)
+            versions_index[event_type] = format_map
+        return cls(root, events, subjects, namespaces, versions_index)
 
     def available_events(self) -> Iterable[str]:
         return self._registry.keys()
@@ -136,12 +162,45 @@ class EventSchemaRegistry:
 
         return self._base_path
 
+    def versions(self, event_type: str) -> List[Version]:
+        """Return all known versions for the requested event type."""
+
+        if event_type not in self._versions:
+            raise KeyError(f"Unknown event type '{event_type}'")
+        return sorted(self._versions[event_type].keys())
+
     def get_versions(
         self, event_type: str, fmt: SchemaFormat
     ) -> List[SchemaVersionInfo]:
         if event_type not in self._registry:
             raise KeyError(f"Unknown event type '{event_type}'")
         return [info for info in self._registry[event_type] if info.format is fmt]
+
+    def get(
+        self,
+        event_type: str,
+        fmt: SchemaFormat,
+        version: str | Version | None = None,
+    ) -> SchemaVersionInfo:
+        """Return the schema metadata for the requested version and format."""
+
+        if version is None:
+            return self.latest(event_type, fmt)
+        if isinstance(version, str):
+            version = Version(version)
+        if event_type not in self._versions:
+            raise KeyError(f"Unknown event type '{event_type}'")
+        event_versions = self._versions[event_type]
+        if version not in event_versions:
+            raise KeyError(
+                f"Version '{version}' not registered for event '{event_type}'"
+            )
+        format_map = event_versions[version]
+        if fmt not in format_map:
+            raise KeyError(
+                f"No {fmt.value} schema registered for version '{version}' of '{event_type}'"
+            )
+        return format_map[fmt]
 
     def latest(self, event_type: str, fmt: SchemaFormat) -> SchemaVersionInfo:
         versions = self.get_versions(event_type, fmt)
@@ -181,6 +240,42 @@ class EventSchemaRegistry:
             )
         return namespace_map[version]
 
+    def validate_format_coverage(
+        self,
+        event_type: str,
+        required_formats: Iterable[SchemaFormat] | None = (
+            SchemaFormat.AVRO,
+            SchemaFormat.JSON,
+        ),
+    ) -> None:
+        """Ensure every version for an event exposes the expected serialization formats."""
+
+        if event_type not in self._versions:
+            raise KeyError(f"Unknown event type '{event_type}'")
+        event_versions = self._versions[event_type]
+        if not event_versions:
+            return
+        expected_formats: set[SchemaFormat] | None = None
+        required_set = set(required_formats or [])
+        for version, format_map in sorted(event_versions.items()):
+            formats = set(format_map.keys())
+            if expected_formats is None:
+                expected_formats = formats
+            elif formats != expected_formats:
+                missing = expected_formats - formats
+                extra = formats - expected_formats
+                raise SchemaFormatCoverageError(
+                    "Format coverage mismatch for "
+                    f"'{event_type}' version '{version}': missing {sorted(m.value for m in missing)}; "
+                    f"unexpected {sorted(fmt.value for fmt in extra)}"
+                )
+            missing_required = required_set - formats
+            if missing_required:
+                raise SchemaFormatCoverageError(
+                    "Required formats missing for "
+                    f"'{event_type}' version '{version}': {sorted(fmt.value for fmt in missing_required)}"
+                )
+
     def validate_backward_and_forward(self, event_type: str) -> None:
         """Ensure all registered versions are backward and forward compatible."""
 
@@ -196,6 +291,7 @@ class EventSchemaRegistry:
 
     def validate_all(self) -> None:
         for event in self.available_events():
+            self.validate_format_coverage(event)
             self.validate_backward_and_forward(event)
 
     def _validate_sequential_backward(self, schemas: List[Mapping[str, Any]]) -> None:
