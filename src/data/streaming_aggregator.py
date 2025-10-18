@@ -333,7 +333,26 @@ class TickStreamAggregator:
             return pd.DatetimeIndex([], tz=UTC, name="timestamp")
 
         stride = max(int(self._frequency / minute), 1)
-        resampled = trading_minutes[::stride]
+        session_boundaries = [0]
+        for idx in range(1, len(trading_minutes)):
+            if trading_minutes[idx] - trading_minutes[idx - 1] > minute:
+                session_boundaries.append(idx)
+        session_boundaries.append(len(trading_minutes))
+
+        selected: list[pd.Timestamp] = []
+        for start_idx, end_idx in zip(
+            session_boundaries[:-1], session_boundaries[1:]
+        ):
+            session_minutes = trading_minutes[start_idx:end_idx]
+            if session_minutes.empty:
+                continue
+            selected.extend(session_minutes[::stride])
+
+        if not selected:
+            return pd.DatetimeIndex([], tz=UTC, name="timestamp")
+
+        resampled = pd.DatetimeIndex(selected)
+        resampled = resampled.sort_values()
         mask = (resampled >= start_ts) & (resampled <= end_ts)
         aligned = resampled[mask]
         aligned = aligned.tz_convert(UTC)
