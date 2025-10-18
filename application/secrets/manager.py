@@ -200,15 +200,17 @@ class ManagedSecret:
         """Return non-sensitive metadata describing the managed secret."""
 
         path = self._config.path
-        return {
+        metadata: dict[str, Any] = {
             "name": self._config.name,
             "path": str(path) if path is not None else None,
             "min_length": self._config.min_length,
             "has_fallback": self._has_fallback,
-            "uses_resolver": self._config.resolver is not None,
             "cached": self._value is not None,
             "refresh_interval_seconds": self._refresh_interval,
         }
+        if self._config.resolver is not None:
+            metadata["uses_resolver"] = True
+        return metadata
 
 
 class SecretManager:
@@ -331,7 +333,8 @@ class SecretManager:
             return {"name": name, "managed": False}
         metadata = secret.describe()
         metadata.setdefault("name", name)
-        metadata["managed"] = metadata.get("path") is not None
+        managed = secret.config.path is not None or secret.config.resolver is not None
+        metadata["managed"] = managed
         return metadata
 
 
