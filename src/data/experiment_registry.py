@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -308,6 +309,30 @@ class ExperimentRegistry:
 
         record = self.get_run(run_id, experiment_name=experiment_name)
         return record.reproducibility_manifest()
+
+    def delete_run(self, run_id: str, *, experiment_name: str) -> None:
+        """Remove a persisted run and clean up empty experiment directories."""
+
+        experiment_name = _validate_path_component(experiment_name, label="Experiment name")
+        run_id = _validate_path_component(run_id, label="Run identifier")
+        run_dir = self._base_dir / experiment_name / run_id
+        run_file = run_dir / "run.json"
+        if not run_file.exists():
+            raise KeyError(
+                f"Run '{run_id}' not found in experiment '{experiment_name}'"
+            )
+
+        shutil.rmtree(run_dir)
+
+        experiment_dir = run_dir.parent
+        if experiment_dir.exists():
+            try:
+                next(experiment_dir.iterdir())
+            except StopIteration:
+                try:
+                    experiment_dir.rmdir()
+                except OSError:
+                    pass
 
     def _path_for_run(self, experiment_name: str, run_id: str) -> Path:
         experiment_name = _validate_path_component(experiment_name, label="Experiment name")

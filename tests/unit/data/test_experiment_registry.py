@@ -159,3 +159,22 @@ def test_get_run_rejects_invalid_run_identifier(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="Run identifier"):
         registry.get_run("../unsafe", experiment_name="secure")
+
+
+def test_delete_run_removes_persisted_state(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path, run_id_factory=lambda: "run-1", fsync=False)
+    record = registry.register_run("alpha", params={"lr": 0.01})
+
+    run_dir = tmp_path / "alpha" / record.run_id
+    assert run_dir.exists()
+
+    registry.delete_run(record.run_id, experiment_name="alpha")
+
+    assert not run_dir.exists()
+    assert registry.list_runs("alpha") == []
+
+    with pytest.raises(KeyError):
+        registry.get_run(record.run_id, experiment_name="alpha")
+
+    with pytest.raises(KeyError):
+        registry.delete_run(record.run_id, experiment_name="alpha")
