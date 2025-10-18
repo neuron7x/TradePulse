@@ -331,9 +331,15 @@ class RegimeDetector:
         upper_triangle = abs_corr.where(np.triu(np.ones(abs_corr.shape), k=1).astype(bool))
         upper_values = upper_triangle.stack()
         if upper_values.empty:
-            mean_abs_corr = 0.0
-        else:
-            mean_abs_corr = float(upper_values.mean())
+            # No pairwise correlations could be computed. Treat this as a
+            # neutral reading rather than assuming the market is decoupled.
+            mean_abs_corr = float("nan")
+            metrics = {
+                "correlation_mean_abs": mean_abs_corr,
+            }
+            return CorrelationRegime.MIXED, metrics
+
+        mean_abs_corr = float(upper_values.mean())
 
         if mean_abs_corr >= self.config.correlation_high_threshold:
             regime = CorrelationRegime.COUPLED
