@@ -5,6 +5,15 @@ from .compliance import ComplianceMonitor, ComplianceReport, ComplianceViolation
 from .connectors import ExecutionConnector, OrderError
 from .live_loop import LiveExecutionLoop, LiveLoopConfig
 from .normalization import NormalizationError, SymbolNormalizer, SymbolSpecification
+from .paper_trading import (
+    DeterministicLatencyModel,
+    LatencyModel,
+    LatencySample,
+    PaperOrderReport,
+    PaperTradingEngine,
+    PnLAnalysis,
+    TelemetryEvent,
+)
 from .oms import OMSConfig, OrderManagementSystem
 from .order_ledger import OrderLedger, OrderLedgerEvent
 from .order_lifecycle import OrderEvent, OrderLifecycle, OrderLifecycleStore
@@ -51,4 +60,11 @@ __all__ = [
     "LimitViolation",
     "OrderRateExceeded",
     "IdempotentRetryExecutor",
+    "LatencySample",
+    "LatencyModel",
+    "DeterministicLatencyModel",
+    "TelemetryEvent",
+    "PaperTradingEngine",
+    "PaperOrderReport",
+    "PnLAnalysis",
 ]
