@@ -14,6 +14,10 @@ teams can reach production readiness without tribal knowledge.
   [`docs/runbook_data_incident.md`](runbook_data_incident.md), while
   [`docs/runbook_live_trading.md`](runbook_live_trading.md) handles live strategy
   escalations.
+- **Regional disasters** – Activate the
+  [`docs/runbook_disaster_recovery.md`](runbook_disaster_recovery.md) plan to
+  promote standby regions, validate RPO/RTO adherence, and maintain regulatory
+  audit trails when a site is impaired or destroyed.
 - **Release gates** – Each deployment must complete the readiness checklist in
   [`reports/release_readiness.md`](../reports/release_readiness.md) alongside the
   production cutover template
