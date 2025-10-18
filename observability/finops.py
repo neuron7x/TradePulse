@@ -14,7 +14,7 @@ import asyncio
 from bisect import bisect_left
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import math
 import statistics
 from typing import (
@@ -220,7 +220,7 @@ class FinOpsController:
         clock: callable[[], datetime] | None = None,
     ) -> None:
         self._alert_sink = alert_sink
-        self._clock = clock or datetime.utcnow
+        self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._usage_by_resource: MutableMapping[str, list[ResourceUsageSample]] = (
             defaultdict(list)
         )
