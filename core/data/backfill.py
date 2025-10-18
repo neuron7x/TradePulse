@@ -71,15 +71,41 @@ class LayerCache:
         self._entries: MutableMapping[CacheKey, CacheEntry] = {}
         self._lock = threading.RLock()
 
-    def put(self, key: CacheKey, frame: pd.DataFrame) -> None:
+    def _normalize_payload(self, frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.Timestamp, pd.Timestamp]:
         if frame.empty:
-            return
+            raise ValueError("Cannot cache empty frame")
         if not isinstance(frame.index, pd.DatetimeIndex):
             raise TypeError("Cache payload must be indexed by pd.DatetimeIndex")
         start = frame.index.min()
         end = frame.index.max()
+        return frame.copy(), start, end
+
+    def put(self, key: CacheKey, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+        normalized, start, end = self._normalize_payload(frame)
         with self._lock:
-            self._entries[key] = CacheEntry(frame=frame.copy(), start=start, end=end)
+            self._entries[key] = CacheEntry(frame=normalized, start=start, end=end)
+
+    def merge(self, key: CacheKey, frame: pd.DataFrame) -> None:
+        if frame.empty:
+            return
+        normalized, start, end = self._normalize_payload(frame)
+        with self._lock:
+            current = self._entries.get(key)
+            if current is None or current.frame.empty:
+                self._entries[key] = CacheEntry(frame=normalized, start=start, end=end)
+                return
+            combined = pd.concat([current.frame, normalized])
+            combined = combined[~combined.index.duplicated(keep="last")]
+            combined = combined.sort_index()
+            combined_start = combined.index.min()
+            combined_end = combined.index.max()
+            self._entries[key] = CacheEntry(
+                frame=combined,
+                start=combined_start,
+                end=combined_end,
+            )
 
     def get(
         self,
@@ -221,14 +247,7 @@ class GapFillPlanner:
     ) -> None:
         if frame.empty:
             return
-        current = self._cache.get(key)
-        if current.empty:
-            self._cache.put(key, frame)
-            return
-        combined = pd.concat([current, frame])
-        combined = combined[~combined.index.duplicated(keep="last")]
-        combined = combined.sort_index()
-        self._cache.put(key, combined)
+        self._cache.merge(key, frame)
 
 
 @dataclass
