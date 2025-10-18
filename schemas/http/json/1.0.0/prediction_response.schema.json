@@ -2,6 +2,12 @@
   "$defs": {
     "PaginationMeta": {
       "description": "Pagination envelope used by collection responses.",
+      "example": {
+        "cursor": null,
+        "limit": 50,
+        "next_cursor": "2025-01-01T00:00:00Z",
+        "returned": 50
+      },
       "properties": {
         "cursor": {
           "anyOf": [
@@ -45,6 +51,14 @@
     },
     "PredictionFilters": {
       "description": "Echoed filter parameters for prediction responses.",
+      "example": {
+        "actions": [
+          "buy"
+        ],
+        "end_at": null,
+        "min_confidence": 0.6,
+        "start_at": "2025-01-01T00:00:00Z"
+      },
       "properties": {
         "actions": {
           "items": {
@@ -97,6 +111,14 @@
     },
     "PredictionSnapshot": {
       "description": "Snapshot of a derived signal at a point in time.",
+      "example": {
+        "score": 0.42,
+        "signal": {
+          "action": "BUY",
+          "confidence": 0.78
+        },
+        "timestamp": "2025-01-01T00:00:30Z"
+      },
       "properties": {
         "score": {
           "title": "Score",
@@ -134,6 +156,43 @@
     }
   },
   "description": "Response representing the generated trading signal.",
+  "examples": [
+    {
+      "filters": {
+        "actions": [
+          "BUY"
+        ],
+        "end_at": null,
+        "min_confidence": 0.6,
+        "start_at": null
+      },
+      "generated_at": "2025-01-01T00:00:30Z",
+      "horizon_seconds": 900,
+      "items": [
+        {
+          "score": 0.42,
+          "signal": {
+            "action": "BUY",
+            "confidence": 0.78
+          },
+          "timestamp": "2025-01-01T00:00:30Z"
+        }
+      ],
+      "pagination": {
+        "cursor": null,
+        "limit": 1,
+        "next_cursor": "2025-01-01T00:00:00Z",
+        "returned": 1
+      },
+      "score": 0.42,
+      "signal": {
+        "action": "BUY",
+        "confidence": 0.78,
+        "rationale": "Composite heuristic weighting MACD trend..."
+      },
+      "symbol": "BTC-USD"
+    }
+  ],
   "properties": {
     "filters": {
       "$ref": "#/$defs/PredictionFilters"
