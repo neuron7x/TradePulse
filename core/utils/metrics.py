@@ -356,6 +356,56 @@ class MetricsCollector:
             registry=registry,
         )
 
+        # Cache warm-up and cold-start metrics
+        self.cache_warmup_duration = Histogram(
+            "tradepulse_cache_warmup_duration_seconds",
+            "Latency of cache warm-up executions",
+            ["cache_name", "strategy"],
+            registry=registry,
+        )
+
+        self.cache_warmup_rows = Gauge(
+            "tradepulse_cache_warmup_rows",
+            "Number of rows materialised during cache warm-up",
+            ["cache_name", "strategy"],
+            registry=registry,
+        )
+
+        self.cache_readiness_status = Gauge(
+            "tradepulse_cache_readiness_status",
+            "Readiness state of managed caches (1=ready, 0=not ready)",
+            ["cache_name"],
+            registry=registry,
+        )
+
+        self.cache_hit_rate = Gauge(
+            "tradepulse_cache_hit_rate",
+            "Rolling hit rate observed for caches",
+            ["cache_name"],
+            registry=registry,
+        )
+
+        self.cache_cold_latency = Histogram(
+            "tradepulse_cache_cold_latency_seconds",
+            "Latency observed when serving cold cache requests",
+            ["cache_name"],
+            registry=registry,
+        )
+
+        self.cache_cold_requests = Counter(
+            "tradepulse_cache_cold_requests_total",
+            "Count of cold cache requests grouped by outcome",
+            ["cache_name", "outcome"],
+            registry=registry,
+        )
+
+        self.cache_degradation_events = Counter(
+            "tradepulse_cache_degradation_events_total",
+            "Number of cache degradation signals emitted grouped by reason",
+            ["cache_name", "reason"],
+            registry=registry,
+        )
+
         self._ingestion_latency_samples: Dict[tuple[str, str], deque[float]] = (
             defaultdict(lambda: deque(maxlen=256))
         )
@@ -920,6 +970,73 @@ class MetricsCollector:
         self.health_check_status.labels(check_name=check_name).set(
             1.0 if healthy else 0.0
         )
+
+    def observe_cache_warmup(
+        self,
+        cache_name: str,
+        strategy: str,
+        duration: float,
+        *,
+        rows: int | None = None,
+    ) -> None:
+        """Record the latency (and optional size) of a cache warm-up run."""
+
+        if not self._enabled:
+            return
+
+        self.cache_warmup_duration.labels(
+            cache_name=cache_name, strategy=strategy
+        ).observe(max(0.0, float(duration)))
+
+        if rows is not None:
+            self.cache_warmup_rows.labels(cache_name=cache_name, strategy=strategy).set(
+                max(0.0, float(rows))
+            )
+
+    def set_cache_readiness(self, cache_name: str, ready: bool) -> None:
+        """Update readiness gauge for a managed cache."""
+
+        if not self._enabled:
+            return
+
+        self.cache_readiness_status.labels(cache_name=cache_name).set(
+            1.0 if ready else 0.0
+        )
+
+    def update_cache_hit_rate(self, cache_name: str, hit_rate: float) -> None:
+        """Observe the current hit rate of a cache."""
+
+        if not self._enabled:
+            return
+
+        bounded = max(0.0, min(1.0, float(hit_rate)))
+        self.cache_hit_rate.labels(cache_name=cache_name).set(bounded)
+
+    def observe_cache_cold_latency(self, cache_name: str, latency: float) -> None:
+        """Record the latency of a cold cache request."""
+
+        if not self._enabled:
+            return
+
+        self.cache_cold_latency.labels(cache_name=cache_name).observe(
+            max(0.0, float(latency))
+        )
+
+    def increment_cache_cold_request(self, cache_name: str, outcome: str) -> None:
+        """Increment counters describing cold cache request outcomes."""
+
+        if not self._enabled:
+            return
+
+        self.cache_cold_requests.labels(cache_name=cache_name, outcome=outcome).inc()
+
+    def record_cache_degradation(self, cache_name: str, reason: str) -> None:
+        """Record an emitted cache degradation signal for observability."""
+
+        if not self._enabled:
+            return
+
+        self.cache_degradation_events.labels(cache_name=cache_name, reason=reason).inc()
 
 
 # Global metrics collector instance
