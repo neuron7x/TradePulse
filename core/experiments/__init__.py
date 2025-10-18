@@ -1,5 +1,10 @@
 """Experiment and model registry utilities for TradePulse."""
 
+from .optuna_search import (
+    HyperparameterSearchResult,
+    OptunaSearchConfig,
+    StrategyHyperparameterSearch,
+)
 from .registry import (
     ArtifactSpec,
     AuditChange,
@@ -14,6 +19,9 @@ __all__ = [
     "AuditChange",
     "AuditDelta",
     "AuditTrail",
+    "HyperparameterSearchResult",
     "ExperimentRun",
     "ModelRegistry",
+    "OptunaSearchConfig",
+    "StrategyHyperparameterSearch",
 ]
