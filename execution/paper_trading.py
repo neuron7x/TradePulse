@@ -141,10 +141,6 @@ class PaperTradingEngine:
         if ideal_price is not None and ideal_price <= 0:
             raise ValueError("ideal_price must be positive")
 
-        executed_quantity = order.quantity if executed_quantity is None else executed_quantity
-        if executed_quantity <= 0 or executed_quantity - order.quantity > 1e-9:
-            raise ValueError("executed_quantity must be in (0, order.quantity]")
-
         now = float(self._clock())
         latency = self._latency_model.sample(order)
         ack_time = now + latency.ack_delay
@@ -163,6 +159,17 @@ class PaperTradingEngine:
         )
 
         placed = self._connector.place_order(order, idempotency_key=idempotency_key)
+
+        remaining_quantity = placed.remaining_quantity
+        if remaining_quantity <= 0:
+            raise ValueError("cannot execute an order with no remaining quantity")
+
+        if executed_quantity is None:
+            executed_quantity = remaining_quantity
+
+        if executed_quantity <= 0 or executed_quantity - remaining_quantity > 1e-9:
+            raise ValueError("executed_quantity must be in (0, remaining_quantity]")
+
         telemetry.append(
             self._record_event(
                 "order.ack",

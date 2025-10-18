@@ -100,6 +100,27 @@ def test_partial_fill_flags_stability_issue() -> None:
     assert "status partially_filled" in report.stability_issues[0]
 
 
+def test_execute_order_defaults_to_normalized_quantity() -> None:
+    connector = _DummyConnector()
+    engine = PaperTradingEngine(
+        connector,
+        latency_model=DeterministicLatencyModel(ack_delay=0.0, fill_delay=0.0),
+        clock=lambda: 0.0,
+    )
+
+    order = _order(quantity=0.0012)
+
+    report = engine.execute_order(
+        order,
+        execution_price=20_000.0,
+    )
+
+    assert report.order.quantity == pytest.approx(0.001)
+    assert report.order.filled_quantity == pytest.approx(0.001)
+    assert report.order.status is OrderStatus.FILLED
+    assert not report.stability_issues
+
+
 @pytest.mark.parametrize(
     "execution_price,executed_quantity",
     [(-1.0, 0.01), (10.0, 0.0), (10.0, 0.02)],
