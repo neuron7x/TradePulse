@@ -20,6 +20,17 @@ from .liquidity_impact import (  # noqa: F401
     LiquiditySnapshot,
     OrderBookLevel,
 )
+from .portfolio_risk import (  # noqa: F401
+    PortfolioRiskMetrics,
+    PortfolioStressReport,
+    PortfolioStressTester,
+    RiskLimitBreach,
+    ScenarioContribution,
+    StressScenario,
+    StressScenarioResult,
+    VolatilityScenario,
+    VolatilityScenarioResult,
+)
 
 __all__ = [
     "EnvironmentParityChecker",
@@ -35,6 +46,15 @@ __all__ = [
     "LiquidityImpactModel",
     "LiquiditySnapshot",
     "OrderBookLevel",
+    "PortfolioRiskMetrics",
+    "PortfolioStressReport",
+    "PortfolioStressTester",
+    "RiskLimitBreach",
+    "ScenarioContribution",
+    "StressScenario",
+    "StressScenarioResult",
+    "VolatilityScenario",
+    "VolatilityScenarioResult",
     "compute_code_digest",
     "compute_parameters_digest",
 ]
