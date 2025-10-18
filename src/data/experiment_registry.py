@@ -45,6 +45,33 @@ def _normalise_metrics(metrics: Mapping[str, Any]) -> dict[str, float]:
     return normalised
 
 
+def _validate_path_component(value: str, *, label: str) -> str:
+    """Ensure *value* is a safe single path component."""
+
+    if not value:
+        msg = f"{label} must not be empty."
+        raise ValueError(msg)
+    candidate = Path(value)
+    if candidate.is_absolute():
+        msg = f"{label} must not be an absolute path."
+        raise ValueError(msg)
+    parts = candidate.parts
+    if len(parts) != 1:
+        msg = f"{label} must not contain path separators."
+        raise ValueError(msg)
+    component = parts[0]
+    if component in {".", ".."}:
+        msg = f"{label} must not reference parent or current directories."
+        raise ValueError(msg)
+    if any(sep and sep in component for sep in (os.sep, os.altsep) if sep):
+        msg = f"{label} must not contain path separators."
+        raise ValueError(msg)
+    if "\\" in component:
+        msg = f"{label} must not contain path separators."
+        raise ValueError(msg)
+    return component
+
+
 class ArtifactRecord(BaseModel):
     """Lightweight descriptor of an artifact created during training or evaluation."""
 
@@ -200,7 +227,8 @@ class ExperimentRegistry:
     ) -> ExperimentRunRecord:
         """Create and persist a new experiment run."""
 
-        run_id = self._run_id_factory()
+        experiment_name = _validate_path_component(experiment_name, label="Experiment name")
+        run_id = _validate_path_component(self._run_id_factory(), label="Run identifier")
         created_at = self._clock()
         artifact_models = [
             artifact
@@ -227,6 +255,7 @@ class ExperimentRegistry:
     def list_runs(self, experiment_name: str) -> list[ExperimentRunRecord]:
         """Return all runs for *experiment_name* ordered by creation time."""
 
+        experiment_name = _validate_path_component(experiment_name, label="Experiment name")
         experiment_dir = self._base_dir / experiment_name
         if not experiment_dir.exists():
             return []
@@ -241,8 +270,10 @@ class ExperimentRegistry:
     def get_run(self, run_id: str, *, experiment_name: str | None = None) -> ExperimentRunRecord:
         """Retrieve a previously registered run."""
 
+        run_id = _validate_path_component(run_id, label="Run identifier")
         candidate_paths: list[Path] = []
         if experiment_name is not None:
+            experiment_name = _validate_path_component(experiment_name, label="Experiment name")
             candidate_paths.append(self._path_for_run(experiment_name, run_id))
         else:
             for experiment_dir in self._base_dir.iterdir():
@@ -279,6 +310,8 @@ class ExperimentRegistry:
         return record.reproducibility_manifest()
 
     def _path_for_run(self, experiment_name: str, run_id: str) -> Path:
+        experiment_name = _validate_path_component(experiment_name, label="Experiment name")
+        run_id = _validate_path_component(run_id, label="Run identifier")
         return self._base_dir / experiment_name / run_id / "run.json"
 
     def _persist_record(self, record: ExperimentRunRecord) -> None:

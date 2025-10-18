@@ -144,3 +144,18 @@ def test_reproducibility_manifest_matches_run(tmp_path: Path) -> None:
     assert manifest["param_hash"] == record.param_hash
     assert manifest["artifacts"][0]["uri"] == "./model.pkl"
     assert manifest["metrics"]["sharpe"] == pytest.approx(1.8)
+
+
+def test_register_run_rejects_path_traversal_inputs(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path, run_id_factory=lambda: "safe", fsync=False)
+
+    with pytest.raises(ValueError, match="Experiment name"):
+        registry.register_run("../malicious")
+
+
+def test_get_run_rejects_invalid_run_identifier(tmp_path: Path) -> None:
+    registry = ExperimentRegistry(tmp_path, run_id_factory=lambda: "safe", fsync=False)
+    registry.register_run("secure")
+
+    with pytest.raises(ValueError, match="Run identifier"):
+        registry.get_run("../unsafe", experiment_name="secure")
