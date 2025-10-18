@@ -60,15 +60,19 @@ Escalation tree: Release Captain → SRE Lead → Director of Engineering → CT
 
 Automation executes in three phases. All runs must succeed before promotion.
 
-1. **Pre-promotion smoke** – Triggered in staging via `make release-smoke`. Runs
-   critical API probes (`tests/e2e/ -m "smoke"`), the deterministic trading harness
-   (`python scripts/smoke_e2e.py`), and schema validation on analytics exports.
-2. **Canary sanity** – After canary traffic is enabled, run `make canary-verify`
-   to execute latency, order throughput, and reconciliation checks. Metrics must
-   remain within SLO ±5% for 30 minutes.
-3. **Post-release guard** – `make production-verify` monitors production
-   dashboards, alert channels, and log anomaly detectors for 60 minutes. PagerDuty
-   incidents automatically pause the pipeline and block further promotion.
+1. **Pre-promotion smoke** – Trigger in staging by running `python
+   scripts/smoke_e2e.py --output-dir reports/release-smoke/<release-id>` and `make
+   test:fast`. These commands execute the deterministic end-to-end harness and the
+   curated pytest fast suite used in CI. Archive the generated artifacts with the
+   release ticket.
+2. **Canary sanity** – After canary traffic is enabled, run `python -m scripts
+   test --pytest-args tests/performance tests/observability` to execute latency,
+   order throughput, and reconciliation checks. Metrics must remain within SLO ±5%
+   for 30 minutes before promotion.
+3. **Post-release guard** – During the first 60 minutes in production, stream
+   telemetry with `kubectl logs -f deployment/tradepulse --since=10m` and watch
+   the dashboards listed below. Any PagerDuty incident automatically pauses the
+   pipeline and blocks further promotion until metrics stabilise.
 
 All automation logs are archived under `s3://tradepulse-release-validation/<release-id>/`.
 
@@ -96,18 +100,19 @@ Initiate rollback when any of the following trigger:
 - Critical KPI deviates >10% from baseline or error budget consumption exceeds
   5% within 30 minutes.
 - Unrecoverable schema or state migration failure detected (apply
-  `make migrate-rollback`).
+  `alembic downgrade -1` from the repository root).
 - Security or compliance breach identified post-release.
 
 **Rollback steps**
 
 1. Engage the rollback bridge (`#release-rollback` channel) and page SRE Lead.
 2. Freeze further changes by disabling continuous deployment workflows.
-3. Execute `make rollback-release RELEASE_ID=<id>` which:
-   - Reverts infrastructure templates via Terraform apply.
-   - Restores last known good container images.
-   - Runs data restore scripts for impacted databases.
-4. Validate health by rerunning `make release-smoke` against the prior release.
+3. Redeploy the previous tag with `kubectl rollout undo deployment/tradepulse
+   --to-revision=<revision>` (or rerun the deployment pipeline with the prior
+   artifact). This reverts the application to the last known good configuration
+   and refreshes the supporting infrastructure state.
+4. Validate health by rerunning `python scripts/smoke_e2e.py` against the prior
+   release and capturing fresh artifacts in the decision log.
 5. Update dashboards and confirm alert recovery. Document root cause in the
    decision log and create an incident ticket if severity ≥ 2.
 
