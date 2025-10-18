@@ -14,3 +14,4 @@ images:
 
 patches:
   - path: patches/deployment-high-availability.yaml
+  - path: patches/hpa-high-throughput.yaml

@@ -101,6 +101,24 @@
     }
   },
   "description": "Payload describing the series to transform into features.",
+  "examples": [
+    {
+      "bars": [
+        {
+          "askVolume": 9.0,
+          "bidVolume": 9.1,
+          "close": 42005.2,
+          "high": 42010.5,
+          "low": 41980.0,
+          "open": 42000.1,
+          "signedVolume": 0.25,
+          "timestamp": "2025-01-01T00:00:00Z",
+          "volume": 18.2
+        }
+      ],
+      "symbol": "BTC-USD"
+    }
+  ],
   "properties": {
     "bars": {
       "description": "Ordered price bars.",
