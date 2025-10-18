@@ -55,6 +55,13 @@ mutation-test:
 	mutmut run --use-coverage
 	mutmut results
 
+.PHONY: sbom supply-chain-verify
+sbom:
+	python -m scripts supply-chain generate-sbom --include-dev --output sbom/cyclonedx-sbom.json
+
+supply-chain-verify:
+	python -m scripts supply-chain verify --include-dev
+
 .PHONY: security-audit
 security-audit:
 	python scripts/dependency_audit.py --requirement requirements.txt --requirement requirements-dev.txt
