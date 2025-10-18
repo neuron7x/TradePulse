@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +15,7 @@ from application.system import (
     TradePulseSystem,
     TradePulseSystemConfig,
 )
-from domain import OrderStatus, Signal, SignalAction
+from domain import Order, OrderSide, OrderStatus, OrderType, Signal, SignalAction
 from execution.connectors import BinanceConnector
 from core.data.models import InstrumentType, PriceTick
 
@@ -72,6 +73,21 @@ class FakeAsyncIngestor:
             "kwargs": dict(kwargs),
         }
         return list(self._snapshot_ticks)
+
+
+class FakeLiveLoop:
+    def __init__(self) -> None:
+        self.last_venue: str | None = None
+        self.last_order: Order | None = None
+        self.last_correlation_id: str | None = None
+
+    def submit_order(
+        self, venue: str, order: Order, *, correlation_id: str
+    ) -> Order:
+        self.last_venue = venue
+        self.last_order = order
+        self.last_correlation_id = correlation_id
+        return order
 
 
 def _build_system(tmp_path: Path) -> TradePulseSystem:
@@ -164,6 +180,55 @@ def test_generate_signals_filters_invalid_scores(tmp_path: Path) -> None:
         SignalAction.SELL,
     }
     assert all(np.isfinite(signal.metadata["score"]) for signal in signals)
+
+
+def test_submit_signal_exit_defaults(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    system = _build_system(tmp_path)
+    fake_loop = FakeLiveLoop()
+    monkeypatch.setattr(system, "ensure_live_loop", lambda: fake_loop)
+
+    timestamp = datetime.fromtimestamp(1_700_000_000, tz=timezone.utc)
+    signal = Signal(
+        symbol="BTCUSDT",
+        action=SignalAction.EXIT,
+        confidence=1.0,
+        timestamp=timestamp,
+    )
+
+    order = system.submit_signal(signal, venue="binance", quantity=0.5)
+
+    assert order.side is OrderSide.SELL
+    assert order.order_type is OrderType.MARKET
+    expected_correlation = f"{signal.symbol}-{int(signal.timestamp.timestamp() * 1e9)}"
+    assert fake_loop.last_correlation_id == expected_correlation
+
+    limit_order = system.submit_signal(
+        signal,
+        venue="binance",
+        quantity=0.75,
+        price=42_000.0,
+    )
+    assert limit_order.order_type is OrderType.LIMIT
+
+    stop_order = system.submit_signal(
+        signal,
+        venue="binance",
+        quantity=0.75,
+        price=42_500.0,
+        order_type="stop",
+    )
+    assert stop_order.order_type is OrderType.STOP
+
+    stop_limit_order = system.submit_signal(
+        signal,
+        venue="binance",
+        quantity=0.75,
+        price=43_000.0,
+        order_type=OrderType.STOP_LIMIT,
+    )
+    assert stop_limit_order.order_type is OrderType.STOP_LIMIT
 
 
 @pytest.mark.asyncio
