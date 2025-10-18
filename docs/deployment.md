@@ -38,6 +38,47 @@ TradePulse loads sensitive credentials exclusively from environment variables or
 3. **Distribution** – Inject credentials during deployment (e.g., Kubernetes secrets, HashiCorp Vault Agent) and expose them as environment variables such as `BINANCE_API_KEY` and `COINBASE_API_SECRET` as documented in [Configuration](configuration.md#exchange-connector-credentials).
 4. **Audit** – Enable secret manager audit trails and configure alerts for unusual access patterns.
 
+## Horizontal Pod Autoscaling
+
+The `tradepulse-api` deployment now ships with a production-grade Horizontal Pod Autoscaler (HPA) defined in
+[`deploy/kustomize/base/hpa.yaml`](../deploy/kustomize/base/hpa.yaml). The controller uses multiple signals to balance
+latency SLOs against compute cost:
+
+- **CPU utilisation**: target 60% average utilisation across pods. This keeps per-core headroom for GC pauses and order routing bursts.
+- **Memory utilisation**: target 70% average utilisation to guard against Python heap growth while avoiding premature scale-out.
+- **Signal-to-fill latency (p95)**: pods metric filtered on `quantile="0.95"` with a 400 ms target. Breaches indicate exchange latency or strategy slowdowns that demand extra workers.
+- **Order queue depth**: external Prometheus metric `tradepulse_orders_queue_depth` with a target value of 80 messages. This prevents cascading backlog when upstream venues throttle.
+
+### Anti-spike behaviour
+
+To prevent thrashing during volatile market windows the HPA enforces aggressive dampening:
+
+- Scale-up requests are stabilised for 60 seconds (45 seconds in staging) with pod and percentage policies to cap surges at +4 pods/min in base and +6 pods/min in production.
+- Scale-down requests are stabilised for five minutes (three minutes in staging) and limited to two pods or 30% per window in base. Production is even more conservative (max three pods or 20% per window) to avoid brown-outs during partial market recoveries.
+- Environment overlays adjust the replica floor/ceiling: staging runs between 2–6 pods for cost control, production between 6–24 to absorb exchange-driven cascades.
+
+### Load and cascade validation
+
+1. **Apply the overlay**:
+   ```bash
+   kubectl apply -k deploy/kustomize/overlays/<environment>
+   ```
+2. **Generate synthetic load** with k6 using the maintained scenario in [`deploy/loadtests/hpa-k6.js`](../deploy/loadtests/hpa-k6.js):
+   ```bash
+   k6 run \
+     --env TRADEPULSE_BASE_URL="http://tradepulse-api.tradepulse-<environment>.svc.cluster.local" \
+     --env TRADEPULSE_LATENCY_SLO_MS=400 \
+     deploy/loadtests/hpa-k6.js
+   ```
+   Run the scenario for at least 15 minutes so that all HPA policies trigger.
+3. **Backlog drill**: follow the procedure in [Queue and Backpressure](queue_and_backpressure.md) to temporarily throttle order consumers and drive `tradepulse_orders_queue_depth` above 80. Observe the queue depth and latency metrics in Grafana.
+4. **Validate scaling**:
+   ```bash
+   kubectl get hpa tradepulse-api --watch
+   ```
+   Confirm replica counts climb smoothly without exceeding policy caps, then decay only after queue depth and latency recover.
+5. **Document results** in the runbook, capturing replica timelines, latency plots, and queue depth recovery to prove resilience under cascading peaks.
+
 The administrative FastAPI surface consumes the `TRADEPULSE_AUDIT_SECRET` via a managed file watcher that honours rotations at runtime. When you mount `TRADEPULSE_AUDIT_SECRET_PATH` (and, optionally, `TRADEPULSE_SIEM_CLIENT_SECRET_PATH`) into the container, the service refreshes the keys according to `TRADEPULSE_SECRET_REFRESH_INTERVAL_SECONDS` without restarts. Ensure your secret manager agent keeps the files up to date and enforces length policies that satisfy the defaults (16+ characters for audit signatures).
 
 ## Configuring the Live Trading Runner
