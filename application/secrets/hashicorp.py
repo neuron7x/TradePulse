@@ -128,7 +128,10 @@ class JWTOIDCAuthenticator:
         if not jwt:
             raise VaultRequestError("JWT provider returned empty token", status_code=401)
         path = f"/v1/auth/{self.mount_path.strip('/')}/login"
-        response = session.post(path, json={"role": self.role, "jwt": jwt})
+        headers: MutableMapping[str, str] | None = None
+        if config.namespace:
+            headers = {"X-Vault-Namespace": config.namespace}
+        response = session.post(path, json={"role": self.role, "jwt": jwt}, headers=headers)
         if response.status_code >= 400:
             payload = _safe_json(response)
             raise VaultRequestError(
