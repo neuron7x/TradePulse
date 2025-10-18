@@ -1254,11 +1254,11 @@ def configure_openapi(app: FastAPI) -> None:
 
         schema["servers"] = [
             {
-                "url": "https://api.tradepulse.example.com/v1",
+                "url": "https://api.tradepulse.example.com",
                 "description": "Production",
             },
             {
-                "url": "https://staging-api.tradepulse.example.com/v1",
+                "url": "https://staging-api.tradepulse.example.com",
                 "description": "Staging",
             },
         ]
