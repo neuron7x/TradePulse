@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
 
 from core.experiments import ArtifactSpec, ModelRegistry
+from core.experiments.registry import _diff_mappings, _normalise_mapping, _values_equal
 
 
 def test_register_run_persists_artifacts_and_metadata(tmp_path: Path) -> None:
@@ -95,6 +97,21 @@ def test_list_experiments_is_sorted(tmp_path: Path) -> None:
     assert registry.list_experiments() == ["a", "b"]
 
 
+def test_model_registry_latest_run_and_tuple_artifact(tmp_path: Path) -> None:
+    registry = ModelRegistry(tmp_path / "registry")
+    artifact = tmp_path / "model.bin"
+    artifact.write_bytes(b"weights")
+    assert registry.latest_run("missing") is None
+    run = registry.register_run(
+        experiment="baseline",
+        parameters={},
+        artifacts=[("checkpoint.bin", artifact)],
+    )
+    latest = registry.latest_run("baseline")
+    assert latest is not None and latest.id == run.id
+    assert run.artifacts[0].name == "checkpoint.bin"
+
+
 def test_artifact_spec_rejects_path_escape_names(tmp_path: Path) -> None:
     artifact = tmp_path / "model.bin"
     artifact.write_text("data")
@@ -110,3 +127,20 @@ def test_artifact_spec_rejects_path_escape_names(tmp_path: Path) -> None:
     spec_absolute = ArtifactSpec(path=artifact, name="/tmp/evil.bin")
     with pytest.raises(ValueError):
         spec_absolute.resolved_name()
+
+
+def test_normalise_mapping_and_diff_helpers() -> None:
+    nested = {
+        "meta": {"path": Path("./model.pt")},
+        "metrics": {"accuracy": 0.9, "updated": datetime(2024, 1, 1, tzinfo=timezone.utc)},
+        "tags": ("a", "b"),
+    }
+    normalised = _normalise_mapping(nested)
+    assert normalised["meta"]["path"].endswith("model.pt")
+    assert normalised["metrics"]["updated"].startswith("2024-01-01")
+    assert normalised["tags"] == ["a", "b"]
+
+    previous = {"metrics": {"accuracy": 0.8}}
+    diff = _diff_mappings(normalised, _normalise_mapping(previous))
+    assert "metrics.accuracy" in {change.key for change in diff.changed}
+    assert _values_equal(0.1 + 0.2, 0.3)

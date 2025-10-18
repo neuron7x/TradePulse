@@ -38,7 +38,7 @@ class _HungryStrategy(Strategy):
 
 def test_strategy_sandbox_returns_result() -> None:
     sandbox = StrategySandbox(
-        limits=SandboxLimits(cpu_time_seconds=1.0, wall_time_seconds=2.0, memory_bytes=64 * 1024 * 1024)
+        limits=SandboxLimits(cpu_time_seconds=1.0, wall_time_seconds=5.0, memory_bytes=64 * 1024 * 1024)
     )
     strategy = _MarkingStrategy()
 

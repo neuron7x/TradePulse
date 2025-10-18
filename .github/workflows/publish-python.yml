@@ -173,7 +173,7 @@ jobs:
 
           sources = [
               Path('requirements.txt'),
-              Path('requirements-dev.txt'),
+              Path('dev.txt'),
           ]
           combined = Path('sbom/combined-requirements.txt')
           combined.parent.mkdir(parents=True, exist_ok=True)

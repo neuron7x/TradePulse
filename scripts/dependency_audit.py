@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Sequence
 
 DEFAULT_REQUIREMENTS = ("requirements.txt",)
-DEFAULT_DEV_REQUIREMENTS = ("requirements-dev.txt",)
+DEFAULT_DEV_REQUIREMENTS = ("dev.txt",)
 
 
 class DependencyAuditError(RuntimeError):
@@ -191,7 +191,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--include-dev",
         action="store_true",
-        help="Also include the default development requirements (requirements-dev.txt).",
+        help="Also include the default development requirements (dev.txt).",
     )
     parser.add_argument(
         "--include-transitive",

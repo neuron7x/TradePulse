@@ -14,7 +14,7 @@ This report documents the comprehensive security audit of all Python dependencie
 ### Key Results
 
 - **Total vulnerabilities found**: 11 distinct CVEs/advisories
-- **Packages updated**: 17 packages across requirements.txt and requirements-dev.txt
+- **Packages updated**: 17 packages across requirements.txt and dev.txt
 - **Critical issues**: 3 (protobuf, setuptools, urllib3)
 - **High severity**: 3 (jinja2, requests, certifi)
 - **All tests passing**: ✅ 139/139 tests
@@ -122,22 +122,11 @@ This report documents the comprehensive security audit of all Python dependencie
 + urllib3>=2.5.0
 ```
 
-### requirements-dev.txt
+### dev.txt
 
-```diff
-+-r requirements.txt
-
-- ruff==0.6.9
-+ ruff==0.14.0
-
-- pytest==8.3.3
-+ pytest==8.4.2
-
-- PyYAML==6.0.3
-
-- protobuf==6.32.1
-+ protobuf==5.29.5
-```
+- Introduced a pip-tools managed lock compiled from `dev.in` and `requirements.in` with hash pinning.
+- Upgraded the linting and testing stack (ruff 0.14.0, pytest 8.4.2) while keeping protobuf pinned to 5.29.5.
+- Bundled pip-tools to enable reproducible dependency refreshes via `scripts/dep_update.sh`.
 
 ---
 
@@ -145,7 +134,7 @@ This report documents the comprehensive security audit of all Python dependencie
 
 ### Installation Test
 ```bash
-pip install -r requirements-dev.txt
+pip install -r dev.txt
 # All packages install successfully
 ```
 
